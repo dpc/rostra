@@ -1,12 +1,30 @@
-[package]
-name = "flakebox-project"
+[workspace]
+members = [
+  "crates/rostra-cli"
+]
+resolver = "2"
+
+[workspace.package]
+name = "rostra"
 version = "0.1.0"
 edition = "2021"
 license = "MIT"
 
-# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+[workspace.metadata]
+name = "rostra"
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
 
-[dependencies]
+[workspace.dependencies]
+anyhow = "1.0.95"
+futures = "0.3.31"
+iroh-net = { version = "0.28.1", features = ["iroh-relay"] }
+pkarr = "2.2.1"
+snafu = { version = "0.8.5", features = ["rust_1_81"] }
+tokio = { version = "1.42.0", features = ["macros"] }
+tracing = "0.1.41"
+tracing-subscriber = { version = "0.3.19", features = ["env-filter"] }
 
 [profile.dev]
 debug = "line-tables-only"

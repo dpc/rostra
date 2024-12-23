@@ -1,0 +1,18 @@
+[package]
+name = "rostra-cli"
+version = { workspace = true }
+edition = { workspace = true }
+license = { workspace = true }
+
+[[bin]]
+name = "rostra-cli"
+
+[dependencies]
+anyhow = { workspace = true }
+futures = { workspace = true }
+iroh-net = { workspace = true }
+pkarr = { workspace = true, features = ["async"] }
+snafu = { workspace = true }
+tokio = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
