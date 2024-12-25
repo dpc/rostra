@@ -3217,6 +3217,46 @@ dependencies = [
  "futures",
  "iroh-net",
  "pkarr",
+ "rostra-client",
+ "rostra-core",
+ "rostra-p2p-api",
+ "snafu",
+ "tokio",
+ "tracing",
+ "tracing-subscriber",
+]
+
+[[package]]
+name = "rostra-client"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "futures",
+ "iroh-net",
+ "pkarr",
+ "rostra-core",
+ "rostra-p2p-api",
+ "snafu",
+ "tokio",
+ "tracing",
+ "tracing-subscriber",
+]
+
+[[package]]
+name = "rostra-core"
+version = "0.1.0"
+dependencies = [
+ "pkarr",
+]
+
+[[package]]
+name = "rostra-p2p-api"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "futures",
+ "iroh-net",
+ "pkarr",
  "snafu",
  "tokio",
  "tracing",

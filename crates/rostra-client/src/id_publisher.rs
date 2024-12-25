@@ -1,35 +1,30 @@
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use iroh_net::ticket::NodeTicket;
 use iroh_net::NodeAddr;
-use pkarr::{dns, Keypair, PkarrClient, SignedPacket};
-use snafu::ResultExt as _;
+use pkarr::{dns, Keypair, SignedPacket};
 use tracing::{debug, info, instrument, warn};
 
-use super::{App, AppResult, PkarrSnafu};
-use crate::AppHandle;
+use crate::{Client, ClientHandle};
 
-pub struct IDPublishingTask {
-    app: AppHandle,
-    client: pkarr::PkarrClientAsync,
+pub struct IdPublisher {
+    app: ClientHandle,
+    client: Arc<pkarr::PkarrClientAsync>,
     keypair: pkarr::Keypair,
 }
 
-impl IDPublishingTask {
-    pub fn new(app: &App, keypair: Keypair) -> AppResult<Self> {
-        let client = PkarrClient::builder()
-            .build()
-            .context(PkarrSnafu)?
-            .as_async();
-
+impl IdPublisher {
+    pub fn new(app: &Client, keypair: Keypair) -> Self {
         info!(pkarr_id = %keypair.public_key(), "Starting ID publishing task" );
-        Ok(Self {
+        Self {
             app: app.handle(),
             keypair,
-            client,
-        })
+            client: app.pkarr_client(),
+        }
     }
 
+    /// Run the thread
     #[instrument(skip(self), ret)]
     pub async fn run(self) {
         let mut interval = tokio::time::interval(Duration::from_secs(60));

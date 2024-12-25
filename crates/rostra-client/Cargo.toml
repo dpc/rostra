@@ -1,23 +1,19 @@
 [package]
-name = "rostra-cli"
+name = "rostra-client"
 
 description = { workspace = true }
 edition = { workspace = true }
 license = { workspace = true }
 version = { workspace = true }
 
-[[bin]]
-name = "rostra-cli"
-
 [dependencies]
 anyhow = { workspace = true }
 futures = { workspace = true }
 iroh-net = { workspace = true }
 pkarr = { workspace = true, features = ["async"] }
-snafu = { workspace = true }
-rostra-core = { workspace = true }
-rostra-client = { workspace = true }
 rostra-p2p-api = { workspace = true }
+rostra-core = { workspace = true, features = ["pkarr"] }
+snafu = { workspace = true }
 tokio = { workspace = true }
 tracing = { workspace = true }
 tracing-subscriber = { workspace = true }

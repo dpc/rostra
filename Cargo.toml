@@ -1,6 +1,9 @@
 [workspace]
 members = [
-  "crates/rostra-cli"
+  "crates/rostra-core",
+  "crates/rostra-cli",
+  "crates/rostra-client",
+  "crates/rostra-p2p-api"
 ]
 resolver = "2"
 
@@ -9,6 +12,7 @@ name = "rostra"
 version = "0.1.0"
 edition = "2021"
 license = "MIT"
+description = "f2fi, p2p social network"
 
 [workspace.metadata]
 name = "rostra"
@@ -18,9 +22,14 @@ license = "MIT"
 
 [workspace.dependencies]
 anyhow = "1.0.95"
+bincode = "2.0.0-rc.3"
 futures = "0.3.31"
 iroh-net = { version = "0.28.1", features = ["iroh-relay"] }
 pkarr = "2.2.1"
+redb-bincode = { version = "0.2.1" }
+rostra-core = { path = "crates/rostra-core" }
+rostra-client = { path = "crates/rostra-client" }
+rostra-p2p-api = { path = "crates/rostra-p2p-api" }
 snafu = { version = "0.8.5", features = ["rust_1_81"] }
 tokio = { version = "1.42.0", features = ["macros"] }
 tracing = "0.1.41"
