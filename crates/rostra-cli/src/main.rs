@@ -1,7 +1,11 @@
+use std::io;
+use std::time::Duration;
+
 use rostra_client::Client;
 use rostra_core::id::RostraId;
-use snafu::ResultExt;
-use tracing::Level;
+use snafu::{FromString, ResultExt, Whatever};
+use tracing::info;
+use tracing_subscriber::EnvFilter;
 
 pub const PROJECT_NAME: &str = "rostra";
 
@@ -10,19 +14,32 @@ type WhateverResult<T> = std::result::Result<T, snafu::Whatever>;
 #[snafu::report]
 #[tokio::main]
 async fn main() -> WhateverResult<()> {
-    tracing_subscriber::fmt().with_max_level(Level::INFO).init();
+    init_logging()?;
 
-    let _client = Client::new()
+    let client = Client::new()
         .await
         .whatever_context("Can't initialize client")?;
 
-    let other_id =
-        RostraId::try_from_pkarr_str("qztjg1q9xmgu4uenfaxz4zx9pbr8dajg8anomcaqptxbqbptdk3y")
-            .whatever_context("Can't parse id")?;
+    loop {
+        let rostra_id = client.rostra_id();
+        match client.resolve_id(rostra_id).await {
+            Ok(data) => {
+                info!(id = %rostra_id, ?data, "ID resolved");
+            }
+            Err(err) => {
+                info!(%err, id = %rostra_id, "Resolution error");
+            }
+        }
+        tokio::time::sleep(Duration::from_secs(15)).await;
+    }
+}
 
-    // app.fetch_data(&other_id).await;
-
-    std::future::pending::<()>().await;
+pub fn init_logging() -> WhateverResult<()> {
+    tracing_subscriber::fmt()
+        .with_writer(io::stderr)
+        .with_env_filter(EnvFilter::from_default_env())
+        .try_init()
+        .map_err(|_| Whatever::without_source("I".to_string()))?;
 
     Ok(())
 }

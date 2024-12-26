@@ -23,8 +23,10 @@ license = "MIT"
 [workspace.dependencies]
 anyhow = "1.0.95"
 bincode = "2.0.0-rc.3"
+data-encoding = "2.6"
 futures = "0.3.31"
 iroh-net = { version = "0.28.1", features = ["iroh-relay"] }
+itertools = "0.13.0"
 pkarr = "2.2.1"
 redb-bincode = { version = "0.2.1" }
 rostra-core = { path = "crates/rostra-core" }

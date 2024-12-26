@@ -1,17 +1,68 @@
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use iroh_net::ticket::NodeTicket;
-use iroh_net::NodeAddr;
+use pkarr::dns::rdata::TXT;
+use pkarr::dns::SimpleDnsError;
 use pkarr::{dns, Keypair, SignedPacket};
-use tracing::{debug, info, instrument, warn};
+use snafu::ResultExt as _;
+use tracing::{debug, info, instrument, trace, warn};
 
-use crate::{Client, ClientHandle};
+use crate::id::{CompactTicket, IdPublishedData};
+use crate::{
+    Client, ClientHandle, DnsSnafu, IdPublishResult, PkarrPacketSnafu, PkarrPublishSnafu,
+    RRECORD_P2P_KEY, RRECORD_TIP_KEY,
+};
+
+const LOG_TARGET: &str = "rostra::client::publisher";
 
 pub struct IdPublisher {
     app: ClientHandle,
     client: Arc<pkarr::PkarrClientAsync>,
     keypair: pkarr::Keypair,
+}
+
+impl IdPublishedData {
+    fn to_signed_packet<'s, 'n, 'txt>(
+        &'s self,
+        keypair: &Keypair,
+        ttl_secs: u32,
+    ) -> IdPublishResult<SignedPacket>
+    where
+        'n: 'txt,
+    {
+        fn make_txt_rrecord<'a>(
+            name: &'a str,
+            val: &'a str,
+            ttl_secs: u32,
+        ) -> Result<dns::ResourceRecord<'a>, SimpleDnsError> {
+            let mut txt = TXT::new();
+            txt.add_string(val)?;
+            Ok(dns::ResourceRecord::new(
+                dns::Name::new(name)?,
+                dns::CLASS::IN,
+                ttl_secs,
+                dns::rdata::RData::TXT(txt),
+            ))
+        }
+
+        let mut packet = dns::Packet::new_reply(0);
+
+        let ticket = self.ticket.as_ref().map(|ticket| ticket.to_string());
+        let tip = self.tip.as_ref().map(|tip| tip.to_string());
+        if let Some(ticket) = ticket.as_deref() {
+            trace!(target: LOG_TARGET, %RRECORD_P2P_KEY, val=%ticket, val_len=ticket.len(), "Publishing rrecord");
+            packet
+                .answers
+                .push(make_txt_rrecord(RRECORD_P2P_KEY, ticket, ttl_secs).context(DnsSnafu)?);
+        }
+        if let Some(tip) = tip.as_deref() {
+            trace!(target: LOG_TARGET, %RRECORD_TIP_KEY, val=%tip, val_len=tip.len(), "Publishing rrecord");
+            packet
+                .answers
+                .push(make_txt_rrecord(RRECORD_TIP_KEY, tip, ttl_secs).context(DnsSnafu)?);
+        }
+        SignedPacket::from_packet(keypair, &packet).context(PkarrPacketSnafu)
+    }
 }
 
 impl IdPublisher {
@@ -31,23 +82,29 @@ impl IdPublisher {
         loop {
             interval.tick().await;
 
-            let addr = {
+            let (addr, tip) = {
                 let Some(app) = self.app.app_ref() else {
                     debug!("App gone, quitting");
                     break;
                 };
-                match app.iroh_address().await {
-                    Ok(addr) => addr,
-                    Err(err) => {
-                        warn!(%err, "No iroh addresses to publish yet");
-                        tokio::time::sleep(Duration::from_secs(1)).await;
-                        continue;
-                    }
-                }
+                (
+                    app.iroh_address()
+                        .await
+                        .inspect_err(|err| {
+                            warn!(%err, "No iroh addresses to publish yet");
+                        })
+                        .ok(),
+                    app.event_tip().await,
+                )
             };
+
+            let ticket = addr.map(CompactTicket::from);
+
+            let id_data = IdPublishedData { ticket, tip };
+
             if let Err(err) = self
                 .publish(
-                    &addr,
+                    id_data,
                     u32::try_from(interval.period().as_secs() * 3 + 1).unwrap_or(u32::MAX),
                 )
                 .await
@@ -57,35 +114,16 @@ impl IdPublisher {
         }
     }
 
-    pub(crate) fn make_pkarr_packet<'a>(
-        keypair: &Keypair,
-        records: impl IntoIterator<Item = (&'a str, &'a str)>,
-        ttl_secs: u32,
-    ) -> pkarr::Result<SignedPacket> {
-        let mut packet = dns::Packet::new_reply(0);
-        for (k, v) in records.into_iter() {
-            packet.answers.push(dns::ResourceRecord::new(
-                dns::Name::new(k).unwrap(),
-                dns::CLASS::IN,
-                ttl_secs,
-                dns::rdata::RData::TXT(v.try_into()?),
-            ));
-        }
-        SignedPacket::from_packet(keypair, &packet)
-    }
-
-    async fn publish(&self, iroh_node_addr: &NodeAddr, ttl_secs: u32) -> pkarr::Result<()> {
+    /// Publish current state
+    async fn publish(&self, data: IdPublishedData, ttl_secs: u32) -> IdPublishResult<()> {
         let instant = Instant::now();
 
-        let node_ticket = NodeTicket::from(iroh_node_addr.clone());
+        let packet = data.to_signed_packet(&self.keypair, ttl_secs)?;
 
-        let packet1 = Self::make_pkarr_packet(
-            &self.keypair,
-            [("iroh", node_ticket.to_string().as_str())],
-            ttl_secs,
-        )?;
-
-        self.client.publish(&packet1).await?;
+        self.client
+            .publish(&packet)
+            .await
+            .context(PkarrPublishSnafu)?;
 
         info!(id = %self.keypair.public_key(), time_ms = instant.elapsed().as_millis(), "Published");
 

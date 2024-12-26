@@ -8,8 +8,10 @@ version = { workspace = true }
 
 [dependencies]
 anyhow = { workspace = true }
+data-encoding = { workspace = true }
 futures = { workspace = true }
 iroh-net = { workspace = true }
+itertools = { workspace = true }
 pkarr = { workspace = true, features = ["async"] }
 rostra-p2p-api = { workspace = true }
 rostra-core = { workspace = true, features = ["pkarr"] }

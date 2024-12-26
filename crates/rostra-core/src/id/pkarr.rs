@@ -1,3 +1,5 @@
+use core::fmt;
+
 use ::pkarr::PublicKey;
 
 use super::{RostraId, RostraIdSecretKey};
@@ -9,16 +11,26 @@ impl RostraId {
     }
 }
 
+impl fmt::Display for RostraId {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        pkarr::PublicKey::from(*self).fmt(f)
+    }
+}
+
 impl From<RostraIdSecretKey> for pkarr::Keypair {
     fn from(key: RostraIdSecretKey) -> Self {
         pkarr::Keypair::from_secret_key(&key.0)
     }
 }
 
-impl TryFrom<RostraId> for pkarr::PublicKey {
-    type Error = pkarr::Error;
+impl From<RostraId> for pkarr::PublicKey {
+    fn from(value: RostraId) -> Self {
+        pkarr::PublicKey::try_from(value.0.as_slice()).expect("RostraId must be always valid")
+    }
+}
 
-    fn try_from(id: RostraId) -> Result<Self, Self::Error> {
-        pkarr::PublicKey::try_from(&id.0)
+impl From<pkarr::PublicKey> for RostraId {
+    fn from(value: pkarr::PublicKey) -> Self {
+        Self(value.to_bytes())
     }
 }

@@ -11,4 +11,5 @@ default = []
 pkarr = [ "dep:pkarr" ]
 
 [dependencies]
+data-encoding = { workspace = true }
 pkarr = { workspace = true, optional = true }
