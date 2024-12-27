@@ -21,6 +21,7 @@ use rostra_core::id::RostraId;
 use rostra_core::ShortEventId;
 use rostra_p2p_api::ROSTRA_P2P_V0_ALPN;
 use snafu::{OptionExt as _, ResultExt, Snafu};
+use tracing::debug;
 
 const RRECORD_P2P_KEY: &str = "rostra-p2p";
 const RRECORD_TIP_KEY: &str = "rostra-tip";
@@ -125,10 +126,11 @@ impl Client {
             .as_async()
             .into();
 
-        let endpoint = Self::make_iroh_endpoint().await?;
-
         let id_keypair = Keypair::random();
         let id = RostraId::from(id_keypair.clone());
+
+        debug!(id = %id.try_fmt(), "Initializing client");
+        let endpoint = Self::make_iroh_endpoint().await?;
 
         let client = Arc::new_cyclic(|app| Self {
             handle: app.clone().into(),

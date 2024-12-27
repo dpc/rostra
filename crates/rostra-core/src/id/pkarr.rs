@@ -1,8 +1,10 @@
 use core::fmt;
+use std::str::FromStr;
 
 use pkarr::{Keypair, PublicKey};
 
 use super::RostraId;
+
 type PkarrResult<T> = std::result::Result<T, ::pkarr::Error>;
 
 impl RostraId {
@@ -12,6 +14,14 @@ impl RostraId {
 
     pub fn try_fmt(self) -> RostraIdTryFmt {
         RostraIdTryFmt(self)
+    }
+}
+
+impl FromStr for RostraId {
+    type Err = pkarr::Error;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        Self::try_from_pkarr_str(s)
     }
 }
 

@@ -3261,12 +3261,14 @@ name = "rostra-cli"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "clap",
  "futures",
  "iroh-net",
  "pkarr",
  "rostra-client",
  "rostra-core",
  "rostra-p2p-api",
+ "serde_json",
  "snafu",
  "tokio",
  "tracing",
@@ -3285,6 +3287,7 @@ dependencies = [
  "pkarr",
  "rostra-core",
  "rostra-p2p-api",
+ "serde",
  "snafu",
  "tokio",
  "tracing",

@@ -14,7 +14,8 @@ iroh-net = { workspace = true }
 itertools = { workspace = true }
 pkarr = { workspace = true, features = ["async"] }
 rostra-p2p-api = { workspace = true }
-rostra-core = { workspace = true, features = ["ed25519-dalek", "pkarr", "bincode"] }
+rostra-core = { workspace = true, features = ["ed25519-dalek", "pkarr", "bincode", "serde"] }
+serde = { workspace = true }
 snafu = { workspace = true }
 tokio = { workspace = true }
 tracing = { workspace = true }
