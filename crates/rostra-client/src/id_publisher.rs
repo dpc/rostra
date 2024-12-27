@@ -50,13 +50,13 @@ impl IdPublishedData {
         let ticket = self.ticket.as_ref().map(|ticket| ticket.to_string());
         let tip = self.tip.as_ref().map(|tip| tip.to_string());
         if let Some(ticket) = ticket.as_deref() {
-            trace!(target: LOG_TARGET, %RRECORD_P2P_KEY, val=%ticket, val_len=ticket.len(), "Publishing rrecord");
+            trace!(target: LOG_TARGET, key=%RRECORD_P2P_KEY, val=%ticket, val_len=ticket.len(), "Publishing rrecord");
             packet
                 .answers
                 .push(make_txt_rrecord(RRECORD_P2P_KEY, ticket, ttl_secs).context(DnsSnafu)?);
         }
         if let Some(tip) = tip.as_deref() {
-            trace!(target: LOG_TARGET, %RRECORD_TIP_KEY, val=%tip, val_len=tip.len(), "Publishing rrecord");
+            trace!(target: LOG_TARGET, key=%RRECORD_TIP_KEY, val=%tip, val_len=tip.len(), "Publishing rrecord");
             packet
                 .answers
                 .push(make_txt_rrecord(RRECORD_TIP_KEY, tip, ttl_secs).context(DnsSnafu)?);

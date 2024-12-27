@@ -22,8 +22,10 @@ license = "MIT"
 
 [workspace.dependencies]
 anyhow = "1.0.95"
-bincode = "2.0.0-rc.3"
+bincode = { version = "2.0.0-rc.3", features = ["derive"] }
+blake3 = "1.5.5"
 data-encoding = "2.6"
+ed25519-dalek = "2.1.1"
 futures = "0.3.31"
 iroh-net = { version = "0.28.1", features = ["iroh-relay"] }
 itertools = "0.13.0"
@@ -32,6 +34,7 @@ redb-bincode = { version = "0.2.1" }
 rostra-core = { path = "crates/rostra-core" }
 rostra-client = { path = "crates/rostra-client" }
 rostra-p2p-api = { path = "crates/rostra-p2p-api" }
+serde = "1.0.216"
 snafu = { version = "0.8.5", features = ["rust_1_81"] }
 tokio = { version = "1.42.0", features = ["macros"] }
 tracing = "0.1.41"

@@ -8,8 +8,11 @@ version = { workspace = true }
 
 [features]
 default = []
-pkarr = [ "dep:pkarr" ]
 
 [dependencies]
+bincode = { workspace = true, optional = true }
+blake3 = { workspace = true }
 data-encoding = { workspace = true }
+ed25519-dalek = { workspace = true, optional = true }
+serde = { workspace = true, optional = true }
 pkarr = { workspace = true, optional = true }

@@ -2,7 +2,6 @@ use std::io;
 use std::time::Duration;
 
 use rostra_client::Client;
-use rostra_core::id::RostraId;
 use snafu::{FromString, ResultExt, Whatever};
 use tracing::info;
 use tracing_subscriber::EnvFilter;
@@ -24,10 +23,10 @@ async fn main() -> WhateverResult<()> {
         let rostra_id = client.rostra_id();
         match client.resolve_id(rostra_id).await {
             Ok(data) => {
-                info!(id = %rostra_id, ?data, "ID resolved");
+                info!(id = %rostra_id.try_fmt(), ?data, "ID resolved");
             }
             Err(err) => {
-                info!(%err, id = %rostra_id, "Resolution error");
+                info!(%err, id = %rostra_id.try_fmt(), "Resolution error");
             }
         }
         tokio::time::sleep(Duration::from_secs(15)).await;

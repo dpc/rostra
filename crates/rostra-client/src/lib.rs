@@ -16,9 +16,9 @@ use iroh_net::{AddrInfo, NodeAddr};
 use itertools::Itertools;
 use pkarr::dns::rdata::RData;
 use pkarr::dns::{Name, SimpleDnsError};
-use pkarr::{dns, Keypair, PkarrClient};
-use rostra_core::event::EventId;
+use pkarr::{Keypair, PkarrClient};
 use rostra_core::id::RostraId;
+use rostra_core::ShortEventId;
 use rostra_p2p_api::ROSTRA_P2P_V0_ALPN;
 use snafu::{OptionExt as _, ResultExt, Snafu};
 
@@ -39,12 +39,14 @@ pub type InitResult<T> = std::result::Result<T, InitError>;
 #[derive(Debug, Snafu)]
 pub enum IdResolveError {
     IdNotFound,
+    InvalidId { source: pkarr::Error },
     RRecord { source: RRecordError },
     MissingTicket,
     MalformedIrohTicket,
     ConnectionError { source: IrohError },
     PkarrResolve { source: pkarr::Error },
 }
+type IdResolveResult<T> = std::result::Result<T, IdResolveError>;
 
 #[derive(Debug, Snafu)]
 pub enum IdPublishError {
@@ -60,8 +62,6 @@ pub enum IdPublishError {
     },
 }
 pub type IdPublishResult<T> = std::result::Result<T, IdPublishError>;
-
-type IdResolveResult<T> = std::result::Result<T, IdResolveError>;
 
 /// Weak handle to [`Client`]
 #[derive(Debug, Clone)]
@@ -128,7 +128,7 @@ impl Client {
         let endpoint = Self::make_iroh_endpoint().await?;
 
         let id_keypair = Keypair::random();
-        let id = RostraId::from(id_keypair.public_key());
+        let id = RostraId::from(id_keypair.clone());
 
         let client = Arc::new_cyclic(|app| Self {
             handle: app.clone().into(),
@@ -226,7 +226,7 @@ impl Client {
         self.endpoint.node_addr().await.map(sanitize_node_addr)
     }
 
-    pub async fn event_tip(&self) -> Option<EventId> {
+    pub async fn event_tip(&self) -> Option<ShortEventId> {
         // TODO
         None
     }
@@ -236,10 +236,11 @@ impl Client {
     }
 
     pub async fn resolve_id(&self, id: RostraId) -> IdResolveResult<IdPublishedData> {
-        let domain = id.to_string();
+        let public_key = pkarr::PublicKey::try_from(id).context(InvalidIdSnafu)?;
+        let domain = public_key.to_string();
         let packet = self
             .pkarr_client
-            .resolve(&id.into())
+            .resolve(&public_key)
             .await
             .context(PkarrResolveSnafu)?
             .context(IdNotFoundSnafu)?;

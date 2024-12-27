@@ -2,7 +2,7 @@ use core::{fmt, str};
 
 use iroh_net::ticket::{NodeTicket, Ticket};
 use iroh_net::NodeAddr;
-use rostra_core::event::EventId;
+use rostra_core::ShortEventId;
 
 use crate::error::BoxedError;
 
@@ -39,5 +39,5 @@ impl From<CompactTicket> for NodeAddr {
 #[derive(Debug, Clone)]
 pub struct IdPublishedData {
     pub ticket: Option<CompactTicket>,
-    pub tip: Option<EventId>,
+    pub tip: Option<ShortEventId>,
 }

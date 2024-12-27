@@ -1,36 +1,46 @@
 use core::fmt;
 
-use ::pkarr::PublicKey;
+use pkarr::{Keypair, PublicKey};
 
-use super::{RostraId, RostraIdSecretKey};
+use super::RostraId;
 type PkarrResult<T> = std::result::Result<T, ::pkarr::Error>;
 
 impl RostraId {
     pub fn try_from_pkarr_str(s: &str) -> PkarrResult<Self> {
         Ok(Self(PublicKey::try_from(s)?.to_bytes()))
     }
+
+    pub fn try_fmt(self) -> RostraIdTryFmt {
+        RostraIdTryFmt(self)
+    }
 }
 
-impl fmt::Display for RostraId {
+pub struct RostraIdTryFmt(RostraId);
+
+impl fmt::Display for RostraIdTryFmt {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        pkarr::PublicKey::from(*self).fmt(f)
+        match PublicKey::try_from(self.0) {
+            Ok(p) => p.fmt(f),
+            Err(_) => f.write_str("invalid-key"),
+        }
+    }
+}
+impl From<Keypair> for RostraId {
+    fn from(keypair: Keypair) -> Self {
+        Self(keypair.public_key().to_bytes())
     }
 }
 
-impl From<RostraIdSecretKey> for pkarr::Keypair {
-    fn from(key: RostraIdSecretKey) -> Self {
-        pkarr::Keypair::from_secret_key(&key.0)
-    }
-}
-
-impl From<RostraId> for pkarr::PublicKey {
-    fn from(value: RostraId) -> Self {
-        pkarr::PublicKey::try_from(value.0.as_slice()).expect("RostraId must be always valid")
-    }
-}
-
-impl From<pkarr::PublicKey> for RostraId {
-    fn from(value: pkarr::PublicKey) -> Self {
+impl From<PublicKey> for RostraId {
+    fn from(value: PublicKey) -> Self {
         Self(value.to_bytes())
+    }
+}
+
+impl TryFrom<RostraId> for PublicKey {
+    type Error = pkarr::Error;
+
+    fn try_from(id: RostraId) -> Result<Self, Self::Error> {
+        PublicKey::try_from(id.as_slice())
     }
 }
