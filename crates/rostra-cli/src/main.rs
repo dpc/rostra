@@ -6,9 +6,12 @@ use std::time::Duration;
 use clap::Parser;
 use cli::Opts;
 use futures::future::pending;
-use rostra_client::{Client, IdResolveError, InitError};
+use rostra_client::{Client, ConnectError, IdResolveError, InitError};
+use rostra_p2p::connection::PingRequest;
+use rostra_p2p::RpcError;
 use snafu::{FromString, ResultExt, Snafu, Whatever};
 use tracing::info;
+use tracing::level_filters::LevelFilter;
 use tracing_subscriber::EnvFilter;
 
 pub const PROJECT_NAME: &str = "rostra";
@@ -19,6 +22,8 @@ type WhateverResult<T> = std::result::Result<T, snafu::Whatever>;
 pub enum CliError {
     Init { source: InitError },
     Resolve { source: IdResolveError },
+    Connect { source: ConnectError },
+    Rpc { source: RpcError },
     Whatever { source: Whatever },
 }
 
@@ -45,7 +50,7 @@ async fn handle_cmd(opts: Opts) -> CliResult<serde_json::Value> {
             cli::DevCmd::ResolveId { id } => {
                 let client = Client::new().await.context(InitSnafu)?;
 
-                let out = client.resolve_id(id).await.context(ResolveSnafu)?;
+                let out = client.resolve_id_data(id).await.context(ResolveSnafu)?;
 
                 Ok(serde_json::to_value(out).expect("Can't fail"))
             }
@@ -54,7 +59,7 @@ async fn handle_cmd(opts: Opts) -> CliResult<serde_json::Value> {
 
                 loop {
                     let rostra_id = client.rostra_id();
-                    match client.resolve_id(rostra_id).await {
+                    match client.resolve_id_data(rostra_id).await {
                         Ok(data) => {
                             info!(id = %rostra_id.try_fmt(), ?data, "ID resolved");
                         }
@@ -64,6 +69,17 @@ async fn handle_cmd(opts: Opts) -> CliResult<serde_json::Value> {
                     }
                     tokio::time::sleep(Duration::from_secs(15)).await;
                 }
+            }
+            cli::DevCmd::Ping { id, seq } => {
+                let client = Client::new().await.context(InitSnafu)?;
+                let connection = client.connect(id).await.context(ConnectSnafu)?;
+
+                let resp = connection
+                    .make_rpc(&PingRequest(seq))
+                    .await
+                    .context(RpcSnafu)?;
+
+                Ok(serde_json::to_value(&resp).expect("Can't fail"))
             }
         },
         cli::OptsCmd::Serve => {
@@ -77,7 +93,11 @@ async fn handle_cmd(opts: Opts) -> CliResult<serde_json::Value> {
 pub fn init_logging() -> WhateverResult<()> {
     tracing_subscriber::fmt()
         .with_writer(io::stderr)
-        .with_env_filter(EnvFilter::from_default_env())
+        .with_env_filter(
+            EnvFilter::builder()
+                .with_default_directive(LevelFilter::INFO.into())
+                .from_env_lossy(),
+        )
         .try_init()
         .map_err(|_| Whatever::without_source("Failed to initialize logging".to_string()))?;
 

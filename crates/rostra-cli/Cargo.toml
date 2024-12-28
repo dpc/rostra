@@ -13,10 +13,11 @@ name = "rostra-cli"
 anyhow = { workspace = true }
 futures = { workspace = true }
 iroh-net = { workspace = true }
-pkarr = { workspace = true, features = ["async"] }
+pkarr = { workspace = true, features = [ "async" ] }
 snafu = { workspace = true }
 rostra-core = { workspace = true }
 rostra-client = { workspace = true }
+rostra-p2p = { workspace = true, features = [ "serde" ] }
 rostra-p2p-api = { workspace = true }
 tokio = { workspace = true }
 tracing = { workspace = true }

@@ -532,9 +532,9 @@ checksum = "7c74b8349d32d297c9134b8c88677813a227df8f779daa29bfc29c183fe3dca6"
 
 [[package]]
 name = "convi"
-version = "0.0.7"
+version = "0.1.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "224cf0d105c40605a6297922765b9d5ecaf0798a3006f29962208457dd2122ec"
+checksum = "6e09d86771e4e04fa7074972538a94795d68a804fe294b5239aca6c399e123a9"
 
 [[package]]
 name = "cordyceps"
@@ -3273,6 +3273,7 @@ dependencies = [
  "pkarr",
  "rostra-client",
  "rostra-core",
+ "rostra-p2p",
  "rostra-p2p-api",
  "serde_json",
  "snafu",
@@ -3286,12 +3287,14 @@ name = "rostra-client"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "bincode",
  "data-encoding",
  "futures",
  "iroh-net",
  "itertools",
  "pkarr",
  "rostra-core",
+ "rostra-p2p",
  "rostra-p2p-api",
  "serde",
  "snafu",
@@ -3323,6 +3326,7 @@ dependencies = [
  "iroh-net",
  "pkarr",
  "rostra-core",
+ "serde",
  "snafu",
  "tokio",
  "tracing",

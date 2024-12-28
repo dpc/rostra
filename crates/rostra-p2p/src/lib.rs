@@ -17,13 +17,11 @@ pub enum RpcError {
     Read {
         source: BoxedError,
     },
-    RequestTooLarge {
+    MessageTooLarge {
         len: u32,
+        limit: u32,
     },
-    ResponseTooLarge {
-        len: u32,
-    },
-    ResponseDecoding {
+    Decoding {
         source: bincode::error::DecodeError,
     },
 }

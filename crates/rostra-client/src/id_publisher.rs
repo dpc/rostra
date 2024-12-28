@@ -5,7 +5,7 @@ use pkarr::dns::rdata::TXT;
 use pkarr::dns::SimpleDnsError;
 use pkarr::{dns, Keypair, SignedPacket};
 use snafu::ResultExt as _;
-use tracing::{debug, info, instrument, trace, warn};
+use tracing::{debug, instrument, trace, warn};
 
 use crate::id::{CompactTicket, IdPublishedData};
 use crate::{
@@ -67,7 +67,7 @@ impl IdPublishedData {
 
 impl IdPublisher {
     pub fn new(app: &Client, keypair: Keypair) -> Self {
-        info!(pkarr_id = %keypair.public_key(), "Starting ID publishing task" );
+        debug!(target: LOG_TARGET, pkarr_id = %keypair.public_key(), "Starting ID publishing task" );
         Self {
             app: app.handle(),
             keypair,
@@ -84,7 +84,7 @@ impl IdPublisher {
 
             let (addr, tip) = {
                 let Some(app) = self.app.app_ref() else {
-                    debug!("App gone, quitting");
+                    debug!(target: LOG_TARGET, "Client gone, quitting");
                     break;
                 };
                 (
@@ -125,7 +125,7 @@ impl IdPublisher {
             .await
             .context(PkarrPublishSnafu)?;
 
-        info!(id = %self.keypair.public_key(), time_ms = instant.elapsed().as_millis(), "Published");
+        debug!(target: LOG_TARGET, id = %self.keypair.public_key(), time_ms = instant.elapsed().as_millis(), "Published");
 
         Ok(())
     }

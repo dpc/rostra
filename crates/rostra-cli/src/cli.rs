@@ -27,6 +27,13 @@ pub enum OptsCmd {
 
 #[derive(Debug, Subcommand)]
 pub enum DevCmd {
-    ResolveId { id: RostraId },
+    ResolveId {
+        id: RostraId,
+    },
+    Ping {
+        id: RostraId,
+        #[clap(long, default_value = "0")]
+        seq: u64,
+    },
     Test,
 }

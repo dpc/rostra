@@ -1,5 +1,6 @@
 pub mod error;
 mod id_publisher;
+mod request_handler;
 
 pub mod id;
 
@@ -9,24 +10,24 @@ use std::ops;
 use std::str::FromStr;
 use std::sync::{Arc, Weak};
 
-use connection::Connection;
 use error::{IrohError, IrohResult};
-use id::IdPublishedData;
+use id::{CompactTicket, IdPublishedData};
 use id_publisher::IdPublisher;
 use iroh_net::{AddrInfo, NodeAddr};
 use itertools::Itertools;
 use pkarr::dns::rdata::RData;
 use pkarr::dns::{Name, SimpleDnsError};
 use pkarr::{Keypair, PkarrClient};
+use request_handler::RequestHandler;
 use rostra_core::id::RostraId;
 use rostra_core::ShortEventId;
+use rostra_p2p::connection::Connection;
 use rostra_p2p_api::ROSTRA_P2P_V0_ALPN;
 use snafu::{OptionExt as _, ResultExt, Snafu};
 use tracing::debug;
 
 const RRECORD_P2P_KEY: &str = "rostra-p2p";
 const RRECORD_TIP_KEY: &str = "rostra-tip";
-const LOG_TARGET: &str = "rostra::client";
 
 #[derive(Debug, Snafu)]
 pub enum InitError {
@@ -65,12 +66,12 @@ pub enum IdPublishError {
 pub type IdPublishResult<T> = std::result::Result<T, IdPublishError>;
 
 #[derive(Debug, Snafu)]
-pub enum P2PConnectError {
+pub enum ConnectError {
     Resolve { source: IdResolveError },
     PeerUnavailable,
     ConnectIroh { source: IrohError },
 }
-pub type P2PConnectResult<T> = std::result::Result<T, P2PConnectError>;
+pub type ConnectResult<T> = std::result::Result<T, ConnectError>;
 
 /// Weak handle to [`Client`]
 #[derive(Debug, Clone)]
@@ -131,7 +132,7 @@ impl Client {
         let id_keypair = Keypair::random();
         let id = RostraId::from(id_keypair.clone());
 
-        debug!(id = %id.try_fmt(), "Initializing client");
+        debug!(id = %id.try_fmt(), "Rostra Client");
 
         let pkarr_client = PkarrClient::builder()
             .build()
@@ -149,6 +150,8 @@ impl Client {
             id,
         });
 
+        client.start_request_handler();
+
         client.start_id_publisher();
 
         Ok(client)
@@ -158,8 +161,8 @@ impl Client {
         self.id
     }
 
-    pub async fn connect(&self, id: RostraId) -> P2PConnectResult<Connection> {
-        let conn_data = self.resolve_id(id).await.context(ResolveSnafu)?;
+    pub async fn connect(&self, id: RostraId) -> ConnectResult<Connection> {
+        let conn_data = self.resolve_id_data(id).await.context(ResolveSnafu)?;
 
         let ticket = conn_data.ticket.context(PeerUnavailableSnafu)?;
 
@@ -178,6 +181,7 @@ impl Client {
         let secret_key = SecretKey::generate();
         let ep = Endpoint::builder()
             .secret_key(secret_key)
+            .alpns(vec![ROSTRA_P2P_V0_ALPN.to_vec()])
             // We rely entirely on tickets publicshed by our own publisher
             // for every RostraID via Pkarr, so we don't need discovery
             // .discovery(Box::new(discovery))
@@ -189,6 +193,10 @@ impl Client {
 
     fn start_id_publisher(&self) {
         tokio::spawn(IdPublisher::new(self, self.id_keypair.clone()).run());
+    }
+
+    fn start_request_handler(&self) {
+        tokio::spawn(RequestHandler::new(self, self.endpoint.clone()).run());
     }
 
     pub(crate) async fn iroh_address(&self) -> IrohResult<NodeAddr> {
@@ -254,7 +262,7 @@ impl Client {
         self.handle.clone()
     }
 
-    pub async fn resolve_id(&self, id: RostraId) -> IdResolveResult<IdPublishedData> {
+    pub async fn resolve_id_data(&self, id: RostraId) -> IdResolveResult<IdPublishedData> {
         let public_key = pkarr::PublicKey::try_from(id).context(InvalidIdSnafu)?;
         let domain = public_key.to_string();
         let packet = self
@@ -270,8 +278,15 @@ impl Client {
         Ok(IdPublishedData { ticket, tip })
     }
 
+    pub async fn resolve_id_ticket(&self, id: RostraId) -> IdResolveResult<CompactTicket> {
+        self.resolve_id_data(id)
+            .await?
+            .ticket
+            .context(MissingTicketSnafu)
+    }
+
     pub async fn fetch_data(&self, id: RostraId) -> IdResolveResult<String> {
-        let data = self.resolve_id(id).await?;
+        let data = self.resolve_id_data(id).await?;
 
         let ticket = data.ticket.context(MissingTicketSnafu)?;
         let _connection = self
