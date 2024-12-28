@@ -34,6 +34,8 @@ pub enum DevCmd {
         id: RostraId,
         #[clap(long, default_value = "0")]
         seq: u64,
+        #[clap(long, default_value = "1")]
+        count: u64,
     },
     Test,
 }

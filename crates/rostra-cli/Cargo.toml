@@ -12,6 +12,7 @@ name = "rostra-cli"
 [dependencies]
 anyhow = { workspace = true }
 futures = { workspace = true }
+futures-util = { workspace = true }
 iroh-net = { workspace = true }
 pkarr = { workspace = true, features = [ "async" ] }
 snafu = { workspace = true }
@@ -19,6 +20,7 @@ rostra-core = { workspace = true }
 rostra-client = { workspace = true }
 rostra-p2p = { workspace = true, features = [ "serde" ] }
 rostra-p2p-api = { workspace = true }
+rostra-util-error = { workspace = true }
 tokio = { workspace = true }
 tracing = { workspace = true }
 tracing-subscriber = { workspace = true }

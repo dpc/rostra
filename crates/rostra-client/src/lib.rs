@@ -11,6 +11,7 @@ use std::str::FromStr;
 use std::sync::{Arc, Weak};
 
 use error::{IrohError, IrohResult};
+use futures::future::{self, Either};
 use id::{CompactTicket, IdPublishedData};
 use id_publisher::IdPublisher;
 use iroh_net::{AddrInfo, NodeAddr};
@@ -28,6 +29,7 @@ use tracing::debug;
 
 const RRECORD_P2P_KEY: &str = "rostra-p2p";
 const RRECORD_TIP_KEY: &str = "rostra-tip";
+const LOG_TARGET: &str = "rostra::client";
 
 #[derive(Debug, Snafu)]
 pub enum InitError {
@@ -97,7 +99,7 @@ impl From<Weak<Client>> for ClientHandle {
 ///
 /// It contains a phantom reference, to avoid attempts of
 /// storing it anywhere.
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct ClientRef<'r> {
     pub(crate) app: Arc<Client>,
     pub(crate) r: PhantomData<&'r ()>,
@@ -111,12 +113,12 @@ impl<'r> ops::Deref for ClientRef<'r> {
     }
 }
 
-#[derive(Debug)]
 pub struct Client {
     /// Weak self-reference that can be given out to components
     pub(crate) handle: ClientHandle,
 
     pkarr_client: Arc<pkarr::PkarrClientAsync>,
+    pkarr_client_relay: Arc<pkarr::PkarrRelayClientAsync>,
 
     /// Our main identity (pkarr/ed25519_dalek keypair)
     id_keypair: pkarr::Keypair,
@@ -140,6 +142,14 @@ impl Client {
             .as_async()
             .into();
 
+        let pkarr_client_relay = pkarr::PkarrRelayClient::new(pkarr::RelaySettings {
+            relays: vec!["https://dns.iroh.link/pkarr".to_string()],
+            ..pkarr::RelaySettings::default()
+        })
+        .expect("Has a relay")
+        .as_async()
+        .into();
+
         let endpoint = Self::make_iroh_endpoint().await?;
 
         let client = Arc::new_cyclic(|app| Self {
@@ -147,12 +157,47 @@ impl Client {
             id_keypair,
             endpoint,
             pkarr_client,
+            pkarr_client_relay,
             id,
         });
 
         client.start_request_handler();
 
         client.start_id_publisher();
+
+        Ok(client)
+    }
+
+    pub async fn new_client_only() -> InitResult<Arc<Self>> {
+        let id_keypair = Keypair::random();
+        let id = RostraId::from(id_keypair.clone());
+
+        debug!(id = %id.try_fmt(), "Rostra Client");
+
+        let pkarr_client = PkarrClient::builder()
+            .build()
+            .context(InitPkarrClientSnafu)?
+            .as_async()
+            .into();
+
+        let pkarr_client_relay = pkarr::PkarrRelayClient::new(pkarr::RelaySettings {
+            relays: vec!["https://dns.iroh.link/pkarr".to_string()],
+            ..pkarr::RelaySettings::default()
+        })
+        .expect("Has a relay")
+        .as_async()
+        .into();
+
+        let endpoint = Self::make_iroh_endpoint().await?;
+
+        let client = Arc::new_cyclic(|app| Self {
+            handle: app.clone().into(),
+            id_keypair,
+            endpoint,
+            pkarr_client,
+            pkarr_client_relay,
+            id,
+        });
 
         Ok(client)
     }
@@ -265,15 +310,18 @@ impl Client {
     pub async fn resolve_id_data(&self, id: RostraId) -> IdResolveResult<IdPublishedData> {
         let public_key = pkarr::PublicKey::try_from(id).context(InvalidIdSnafu)?;
         let domain = public_key.to_string();
-        let packet = self
-            .pkarr_client
-            .resolve(&public_key)
-            .await
-            .context(PkarrResolveSnafu)?
-            .context(IdNotFoundSnafu)?;
+        let packet = take_first_ok_some(
+            self.pkarr_client.resolve(&public_key),
+            self.pkarr_client_relay.resolve(&public_key),
+        )
+        .await
+        .context(PkarrResolveSnafu)?
+        .context(IdNotFoundSnafu)?;
 
         let ticket = get_rrecord_typed(&packet, &domain, RRECORD_P2P_KEY).context(RRecordSnafu)?;
         let tip = get_rrecord_typed(&packet, &domain, RRECORD_TIP_KEY).context(RRecordSnafu)?;
+
+        debug!(target: LOG_TARGET, id = %id.try_fmt(), ticket = ?ticket, tip = ?tip, "Resolved Id");
 
         Ok(IdPublishedData { ticket, tip })
     }
@@ -300,6 +348,10 @@ impl Client {
 
     pub(crate) fn pkarr_client(&self) -> Arc<pkarr::PkarrClientAsync> {
         self.pkarr_client.clone()
+    }
+
+    fn pkarr_client_relay(&self) -> Arc<pkarr::PkarrRelayClientAsync> {
+        self.pkarr_client_relay.clone()
     }
 }
 
@@ -356,4 +408,46 @@ fn get_rrecord(
         .next()
         .context(MissingValueSnafu)?;
     Ok(Some(v))
+}
+
+// Generic function that takes two futures and returns the first Ok result
+#[allow(dead_code)]
+async fn take_first_ok<T, E, F1, F2>(fut1: F1, fut2: F2) -> Result<T, E>
+where
+    F1: future::Future<Output = Result<T, E>>,
+    F2: future::Future<Output = Result<T, E>>,
+{
+    let fut1 = Box::pin(fut1);
+    let fut2 = Box::pin(fut2);
+
+    match future::select(fut1, fut2).await {
+        Either::Left((ok @ Ok(_), _)) => ok,
+        Either::Left((Err(_), fut2)) => fut2.await,
+        Either::Right((ok @ Ok(_), _)) => ok,
+        Either::Right((Err(_), fut1)) => fut1.await,
+    }
+}
+
+async fn take_first_ok_some<T, E, F1, F2>(fut1: F1, fut2: F2) -> Result<Option<T>, E>
+where
+    F1: future::Future<Output = Result<Option<T>, E>>,
+    F2: future::Future<Output = Result<Option<T>, E>>,
+{
+    let fut1 = Box::pin(fut1);
+    let fut2 = Box::pin(fut2);
+
+    match future::select(fut1, fut2).await {
+        Either::Left((ok @ Ok(Some(_)), _)) => ok,
+        Either::Left((_ok @ Ok(None), fut2)) => {
+            // TODO: reconsider?
+            fut2.await
+        }
+        Either::Left((Err(_), fut2)) => fut2.await,
+        Either::Right((ok @ Ok(Some(_)), _)) => ok,
+        Either::Right((_ok @ Ok(None), fut1)) => {
+            // TODO: reconsider
+            fut1.await
+        }
+        Either::Right((Err(_), fut1)) => fut1.await,
+    }
 }

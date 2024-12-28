@@ -18,6 +18,7 @@ const LOG_TARGET: &str = "rostra::client::publisher";
 pub struct IdPublisher {
     app: ClientHandle,
     client: Arc<pkarr::PkarrClientAsync>,
+    client_relay: Arc<pkarr::PkarrRelayClientAsync>,
     keypair: pkarr::Keypair,
 }
 
@@ -72,6 +73,7 @@ impl IdPublisher {
             app: app.handle(),
             keypair,
             client: app.pkarr_client(),
+            client_relay: app.pkarr_client_relay(),
         }
     }
 
@@ -109,23 +111,40 @@ impl IdPublisher {
                 )
                 .await
             {
-                warn!(%err, "Failed to publish to pkarr");
+                warn!(%err, "Failed to publish to pkarr relay");
             }
         }
     }
 
     /// Publish current state
     async fn publish(&self, data: IdPublishedData, ttl_secs: u32) -> IdPublishResult<()> {
+        debug!(
+            target: LOG_TARGET,
+            id = %self.keypair.public_key(),
+            ticket = ?data.ticket,
+            tip = ?data.tip,
+            "Publishing RostraId"
+        );
         let instant = Instant::now();
 
         let packet = data.to_signed_packet(&self.keypair, ttl_secs)?;
 
-        self.client
-            .publish(&packet)
-            .await
-            .context(PkarrPublishSnafu)?;
+        let (res, res_relay) = tokio::join!(
+            self.client.publish(&packet),
+            self.client_relay.publish(&packet)
+        );
 
-        debug!(target: LOG_TARGET, id = %self.keypair.public_key(), time_ms = instant.elapsed().as_millis(), "Published");
+        // TODO: report both?
+        if res_relay.is_err() && res.is_err() {
+            res_relay.context(PkarrPublishSnafu)?;
+        }
+
+        debug!(
+            target: LOG_TARGET,
+            id = %self.keypair.public_key(),
+            time_ms = instant.elapsed().as_millis(),
+            "Published RostraId"
+        );
 
         Ok(())
     }

@@ -4,7 +4,8 @@ members = [
   "crates/rostra-cli",
   "crates/rostra-client",
   "crates/rostra-p2p",
-  "crates/rostra-p2p-api"
+  "crates/rostra-p2p-api",
+  "crates/rostra-util-error",
 ]
 resolver = "2"
 
@@ -30,6 +31,7 @@ convi = { version = "0.1.1" , features = [ "min_target_pointer_width_32" ] }
 data-encoding = "2.6"
 ed25519-dalek = "2.1.1"
 futures = "0.3.31"
+futures-util = "*"
 iroh-net = { version = "0.28.1", features = ["iroh-relay"] }
 itertools = "0.13.0"
 pkarr = "2.2.1"
@@ -38,6 +40,7 @@ rostra-core = { path = "crates/rostra-core" }
 rostra-client = { path = "crates/rostra-client" }
 rostra-p2p = { path = "crates/rostra-p2p" }
 rostra-p2p-api = { path = "crates/rostra-p2p-api" }
+rostra-util-error = { path = "crates/rostra-util-error" }
 serde = "1.0.216"
 serde_json = "1.0.134"
 snafu = { version = "0.8.5", features = ["rust_1_81"] }

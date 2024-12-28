@@ -7,14 +7,17 @@ use clap::Parser;
 use cli::Opts;
 use futures::future::pending;
 use rostra_client::{Client, ConnectError, IdResolveError, InitError};
-use rostra_p2p::connection::PingRequest;
+use rostra_p2p::connection::{PingRequest, PingResponse};
 use rostra_p2p::RpcError;
+use rostra_util_error::FmtCompact as _;
 use snafu::{FromString, ResultExt, Snafu, Whatever};
+use tokio::time::Instant;
 use tracing::info;
 use tracing::level_filters::LevelFilter;
 use tracing_subscriber::EnvFilter;
 
 pub const PROJECT_NAME: &str = "rostra";
+pub const LOG_TARGET: &str = "rostra::cli";
 
 type WhateverResult<T> = std::result::Result<T, snafu::Whatever>;
 
@@ -70,14 +73,40 @@ async fn handle_cmd(opts: Opts) -> CliResult<serde_json::Value> {
                     tokio::time::sleep(Duration::from_secs(15)).await;
                 }
             }
-            cli::DevCmd::Ping { id, seq } => {
-                let client = Client::new().await.context(InitSnafu)?;
-                let connection = client.connect(id).await.context(ConnectSnafu)?;
+            cli::DevCmd::Ping { id, mut seq, count } => {
+                async fn ping(
+                    client: &Client,
+                    id: rostra_core::id::RostraId,
+                    seq: u64,
+                ) -> CliResult<PingResponse> {
+                    let connection = client.connect(id).await.context(ConnectSnafu)?;
+                    connection
+                        .make_rpc(&PingRequest(seq))
+                        .await
+                        .context(RpcSnafu)
+                }
+                let client = Client::new_client_only().await.context(InitSnafu)?;
 
-                let resp = connection
-                    .make_rpc(&PingRequest(seq))
-                    .await
-                    .context(RpcSnafu)?;
+                let mut resp = None;
+
+                for _ in 0..count {
+                    let start = Instant::now();
+
+                    let resp_res = ping(&client, id, seq).await;
+
+                    let rtt = start.elapsed();
+                    match resp_res {
+                        Ok(ok) => {
+                            info!(target: LOG_TARGET, elapsed_ms = rtt.as_millis(), seq=%serde_json::to_string(&ok).expect("Can't fail"), "Response");
+                            resp = Some(ok);
+                        }
+                        Err(err) => {
+                            info!(target: LOG_TARGET, elapsed_ms = rtt.as_millis(), %seq, err=%err.fmt_compact(), "Error");
+                        }
+                    }
+
+                    seq = seq.wrapping_add(1);
+                }
 
                 Ok(serde_json::to_value(&resp).expect("Can't fail"))
             }

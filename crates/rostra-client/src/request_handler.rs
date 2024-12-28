@@ -4,7 +4,8 @@ use rostra_p2p::connection::{
     Connection, PingRequest, PingResponse, RpcId, RpcIdKnown, RpcMessage as _, MAX_REQUEST_SIZE,
 };
 use rostra_p2p::RpcError;
-use snafu::{OptionExt as _, Report, ResultExt as _, Snafu};
+use rostra_util_error::FmtCompact as _;
+use snafu::{OptionExt as _, ResultExt as _, Snafu};
 use tracing::{debug, info, instrument};
 
 use crate::{Client, ClientHandle};
@@ -59,8 +60,14 @@ impl RequestHandler {
         }
     }
     pub async fn handle_incoming(incoming: Incoming) {
+        let peer_addr = incoming.remote_address();
         if let Err(err) = Self::handle_incoming_try(incoming).await {
-            info!(target: LOG_TARGET, err=%Report::from_error(err), "Error handling incoming connection");
+            match err {
+                IncomingConnectionError::Connection { source: _ } => { /* normal, ignore */ }
+                _ => {
+                    debug!(target: LOG_TARGET, err=%err.fmt_compact(), %peer_addr, "Error handling incoming connection");
+                }
+            }
         }
     }
     pub async fn handle_incoming_try(incoming: Incoming) -> IncomingConnectionResult<()> {

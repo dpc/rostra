@@ -3269,12 +3269,14 @@ dependencies = [
  "anyhow",
  "clap",
  "futures",
+ "futures-util",
  "iroh-net",
  "pkarr",
  "rostra-client",
  "rostra-core",
  "rostra-p2p",
  "rostra-p2p-api",
+ "rostra-util-error",
  "serde_json",
  "snafu",
  "tokio",
@@ -3296,6 +3298,7 @@ dependencies = [
  "rostra-core",
  "rostra-p2p",
  "rostra-p2p-api",
+ "rostra-util-error",
  "serde",
  "snafu",
  "tokio",
@@ -3346,6 +3349,10 @@ dependencies = [
  "tracing",
  "tracing-subscriber",
 ]
+
+[[package]]
+name = "rostra-util-error"
+version = "0.1.0"
 
 [[package]]
 name = "rsa"
