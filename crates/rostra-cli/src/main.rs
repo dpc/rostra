@@ -73,6 +73,7 @@ async fn handle_cmd(opts: Opts) -> CliResult<serde_json::Value> {
         }
     }
 }
+
 pub fn init_logging() -> WhateverResult<()> {
     tracing_subscriber::fmt()
         .with_writer(io::stderr)

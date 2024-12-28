@@ -3,6 +3,7 @@ members = [
   "crates/rostra-core",
   "crates/rostra-cli",
   "crates/rostra-client",
+  "crates/rostra-p2p",
   "crates/rostra-p2p-api"
 ]
 resolver = "2"
@@ -25,6 +26,7 @@ anyhow = "1.0.95"
 bincode = { version = "2.0.0-rc.3", features = ["derive"] }
 blake3 = "1.5.5"
 clap = { version = "4.5.23", features = ["derive", "env"] }
+convi = { version = "0.0.7" , features = [ "min_target_pointer_width_32" ] }
 data-encoding = "2.6"
 ed25519-dalek = "2.1.1"
 futures = "0.3.31"

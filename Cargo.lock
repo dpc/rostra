@@ -531,6 +531,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7c74b8349d32d297c9134b8c88677813a227df8f779daa29bfc29c183fe3dca6"
 
 [[package]]
+name = "convi"
+version = "0.0.7"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "224cf0d105c40605a6297922765b9d5ecaf0798a3006f29962208457dd2122ec"
+
+[[package]]
 name = "cordyceps"
 version = "0.3.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3304,6 +3310,23 @@ dependencies = [
  "ed25519-dalek",
  "pkarr",
  "serde",
+]
+
+[[package]]
+name = "rostra-p2p"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "bincode",
+ "convi",
+ "futures",
+ "iroh-net",
+ "pkarr",
+ "rostra-core",
+ "snafu",
+ "tokio",
+ "tracing",
+ "tracing-subscriber",
 ]
 
 [[package]]

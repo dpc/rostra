@@ -9,6 +9,7 @@ use std::ops;
 use std::str::FromStr;
 use std::sync::{Arc, Weak};
 
+use connection::Connection;
 use error::{IrohError, IrohResult};
 use id::IdPublishedData;
 use id_publisher::IdPublisher;
@@ -29,11 +30,10 @@ const LOG_TARGET: &str = "rostra::client";
 
 #[derive(Debug, Snafu)]
 pub enum InitError {
-    // Iroh { source: IrohError },
     #[snafu(display("Pkarr Client initialization error"))]
-    PkarrClient { source: pkarr::Error },
+    InitPkarrClient { source: pkarr::Error },
     #[snafu(display("Iroh Client initialization error"))]
-    IrohClient { source: IrohError },
+    InitIrohClient { source: IrohError },
 }
 pub type InitResult<T> = std::result::Result<T, InitError>;
 
@@ -63,6 +63,14 @@ pub enum IdPublishError {
     },
 }
 pub type IdPublishResult<T> = std::result::Result<T, IdPublishError>;
+
+#[derive(Debug, Snafu)]
+pub enum P2PConnectError {
+    Resolve { source: IdResolveError },
+    PeerUnavailable,
+    ConnectIroh { source: IrohError },
+}
+pub type P2PConnectResult<T> = std::result::Result<T, P2PConnectError>;
 
 /// Weak handle to [`Client`]
 #[derive(Debug, Clone)]
@@ -120,16 +128,17 @@ pub struct Client {
 
 impl Client {
     pub async fn new() -> InitResult<Arc<Self>> {
-        let pkarr_client = PkarrClient::builder()
-            .build()
-            .context(PkarrClientSnafu)?
-            .as_async()
-            .into();
-
         let id_keypair = Keypair::random();
         let id = RostraId::from(id_keypair.clone());
 
         debug!(id = %id.try_fmt(), "Initializing client");
+
+        let pkarr_client = PkarrClient::builder()
+            .build()
+            .context(InitPkarrClientSnafu)?
+            .as_async()
+            .into();
+
         let endpoint = Self::make_iroh_endpoint().await?;
 
         let client = Arc::new_cyclic(|app| Self {
@@ -149,24 +158,32 @@ impl Client {
         self.id
     }
 
+    pub async fn connect(&self, id: RostraId) -> P2PConnectResult<Connection> {
+        let conn_data = self.resolve_id(id).await.context(ResolveSnafu)?;
+
+        let ticket = conn_data.ticket.context(PeerUnavailableSnafu)?;
+
+        Ok(self
+            .endpoint
+            .connect(ticket, ROSTRA_P2P_V0_ALPN)
+            .await
+            .context(ConnectIrohSnafu)?
+            .into())
+    }
+
     pub(crate) async fn make_iroh_endpoint() -> InitResult<iroh_net::Endpoint> {
-        use iroh_net::discovery::dns::DnsDiscovery;
-        use iroh_net::discovery::pkarr::PkarrPublisher;
-        use iroh_net::discovery::ConcurrentDiscovery;
         use iroh_net::key::SecretKey;
         use iroh_net::Endpoint;
 
         let secret_key = SecretKey::generate();
-        let discovery = ConcurrentDiscovery::from_services(vec![
-            Box::new(PkarrPublisher::n0_dns(secret_key.clone())),
-            Box::new(DnsDiscovery::n0_dns()),
-        ]);
         let ep = Endpoint::builder()
             .secret_key(secret_key)
-            .discovery(Box::new(discovery))
+            // We rely entirely on tickets publicshed by our own publisher
+            // for every RostraID via Pkarr, so we don't need discovery
+            // .discovery(Box::new(discovery))
             .bind()
             .await
-            .context(IrohClientSnafu)?;
+            .context(InitIrohClientSnafu)?;
         Ok(ep)
     }
 

@@ -1,0 +1,20 @@
+[package]
+name = "rostra-p2p"
+
+description = { workspace = true }
+edition = { workspace = true }
+license = { workspace = true }
+version = { workspace = true }
+
+[dependencies]
+anyhow = { workspace = true }
+bincode = { workspace = true }
+convi = { workspace = true }
+futures = { workspace = true }
+iroh-net = { workspace = true }
+pkarr = { workspace = true, features = ["async"] }
+rostra-core = { workspace = true, features = ["bincode"] }
+snafu = { workspace = true }
+tokio = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
