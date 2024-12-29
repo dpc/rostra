@@ -3203,6 +3203,26 @@ dependencies = [
 ]
 
 [[package]]
+name = "redb"
+version = "2.3.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a7c2a94325f9c5826b17c42af11067230f503747f870117a28180e85696e21ba"
+dependencies = [
+ "libc",
+]
+
+[[package]]
+name = "redb-bincode"
+version = "0.2.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "84892c8ece1ba85708a157dc32312ae10583e6e17c7955f39564473fabcab62c"
+dependencies = [
+ "bincode",
+ "redb",
+ "thiserror 1.0.69",
+]
+
+[[package]]
 name = "redox_syscall"
 version = "0.5.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3372,10 +3392,13 @@ dependencies = [
  "iroh-net",
  "itertools",
  "pkarr",
+ "redb",
+ "redb-bincode",
  "rostra-core",
  "rostra-p2p",
  "rostra-p2p-api",
  "rostra-util-error",
+ "rostra-util-fmt",
  "serde",
  "snafu",
  "tokio",
@@ -3406,6 +3429,7 @@ dependencies = [
  "iroh-net",
  "pkarr",
  "rostra-core",
+ "rostra-util-error",
  "serde",
  "snafu",
  "tokio",
@@ -3429,6 +3453,10 @@ dependencies = [
 
 [[package]]
 name = "rostra-util-error"
+version = "0.1.0"
+
+[[package]]
+name = "rostra-util-fmt"
 version = "0.1.0"
 
 [[package]]

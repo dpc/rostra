@@ -79,3 +79,11 @@ impl_base32_str!(ShortEventId);
 
 define_array_type_public!(struct ContentHash, 32);
 impl_base32_str!(ContentHash);
+
+/// Length of a message, encoded in a fixed-size way
+///
+/// In a couple of places it of the protocol it's important
+/// that a 32-bit length field is encoded as fixed-size.
+#[cfg_attr(feature = "serde", derive(::serde::Serialize, ::serde::Deserialize))]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct MsgLen(pub u32);

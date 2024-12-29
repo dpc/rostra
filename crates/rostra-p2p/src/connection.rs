@@ -2,6 +2,7 @@ use bincode::{Decode, Encode};
 use convi::{CastInto, ExpectFrom};
 use iroh_net::endpoint::{RecvStream, SendStream};
 use rostra_core::bincode::STD_BINCODE_CONFIG;
+use rostra_core::MsgLen;
 use snafu::ResultExt as _;
 
 use crate::{
@@ -21,27 +22,6 @@ pub const MAX_RESPONSE_SIZE: u32 = 32 * 1024 * 1024;
 impl From<iroh_net::endpoint::Connection> for Connection {
     fn from(iroh_conn: iroh_net::endpoint::Connection) -> Self {
         Self(iroh_conn)
-    }
-}
-
-#[derive(Debug, Clone, Copy)]
-pub struct MsgLen(u32);
-
-impl bincode::Encode for MsgLen {
-    fn encode<E: bincode::enc::Encoder>(
-        &self,
-        encoder: &mut E,
-    ) -> core::result::Result<(), bincode::error::EncodeError> {
-        bincode::Encode::encode(&self.0.to_be_bytes(), encoder)?;
-        Ok(())
-    }
-}
-
-impl bincode::Decode for MsgLen {
-    fn decode<D: bincode::de::Decoder>(
-        decoder: &mut D,
-    ) -> core::result::Result<Self, bincode::error::DecodeError> {
-        Ok(Self(u32::from_be_bytes(bincode::Decode::decode(decoder)?)))
     }
 }
 

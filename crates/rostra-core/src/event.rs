@@ -3,14 +3,17 @@ mod ed25519;
 
 use std::collections::BTreeSet;
 
-use crate::id::RostraId;
-use crate::{ContentHash, ShortEventId};
+use crate::id::{RostraId, ShortRostraId};
+use crate::{ContentHash, MsgLen, ShortEventId};
 
 /// An even (header)
 ///
 /// Intentionally crafted to be:
 ///
-/// * version + flags + kind = 32
+/// * version + flags + kind = 1 + 1 + 2 = 4
+/// * content_len = 4
+/// * padding = 8
+/// * author = 16
 /// * parent * 2 = 16 * 2 = 32
 /// * content_hash = 32
 ///
@@ -45,6 +48,13 @@ pub struct Event {
 
     /// The meaning and interpretation of the content from `content_hash`.
     pub kind: EventKind,
+
+    pub content_len: MsgLen,
+
+    /// Unused, reserved for future use
+    pub padding: [u8; 8],
+
+    pub author: ShortRostraId,
 
     /// Previous EventId, to form a close to a chain (actually DAG).
     ///

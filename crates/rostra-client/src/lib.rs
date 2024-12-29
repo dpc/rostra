@@ -1,3 +1,4 @@
+mod db;
 pub mod error;
 mod id_publisher;
 mod request_handler;
@@ -10,6 +11,7 @@ use std::ops;
 use std::str::FromStr;
 use std::sync::{Arc, Weak};
 
+use db::Database;
 use error::{IrohError, IrohResult};
 use futures::future::{self, Either};
 use id::{CompactTicket, IdPublishedData};
@@ -24,11 +26,12 @@ use rostra_core::id::RostraId;
 use rostra_core::ShortEventId;
 use rostra_p2p::connection::Connection;
 use rostra_p2p_api::ROSTRA_P2P_V0_ALPN;
+use rostra_util_fmt::AsFmtOption as _;
 use snafu::{OptionExt as _, ResultExt, Snafu};
 use tracing::debug;
 
 const RRECORD_P2P_KEY: &str = "rostra-p2p";
-const RRECORD_TIP_KEY: &str = "rostra-tip";
+const RRECORD_HEAD_KEY: &str = "rostra-head";
 const LOG_TARGET: &str = "rostra::client";
 
 #[derive(Debug, Snafu)]
@@ -115,7 +118,7 @@ impl<'r> ops::Deref for ClientRef<'r> {
 
 pub struct Client {
     /// Weak self-reference that can be given out to components
-    pub(crate) handle: ClientHandle,
+    handle: ClientHandle,
 
     pkarr_client: Arc<pkarr::PkarrClientAsync>,
     pkarr_client_relay: Arc<pkarr::PkarrRelayClientAsync>,
@@ -124,6 +127,8 @@ pub struct Client {
     id_keypair: pkarr::Keypair,
 
     id: RostraId,
+
+    db: Option<Database>,
 
     /// Our iroh-net endpoint
     endpoint: iroh_net::Endpoint,
@@ -135,6 +140,7 @@ impl Client {
     pub async fn new(
         #[builder(default = true)] start_request_handler: bool,
         #[builder(default = true)] start_id_publisher: bool,
+        db: Option<Database>,
     ) -> InitResult<Arc<Self>> {
         let id_keypair = Keypair::random();
         let id = RostraId::from(id_keypair.clone());
@@ -163,6 +169,7 @@ impl Client {
             endpoint,
             pkarr_client,
             pkarr_client_relay,
+            db,
             id,
         });
 
@@ -273,7 +280,7 @@ impl Client {
         self.endpoint.node_addr().await.map(sanitize_node_addr)
     }
 
-    pub async fn event_tip(&self) -> Option<ShortEventId> {
+    pub async fn events_head(&self) -> Option<ShortEventId> {
         // TODO
         None
     }
@@ -294,11 +301,17 @@ impl Client {
         .context(IdNotFoundSnafu)?;
 
         let ticket = get_rrecord_typed(&packet, &domain, RRECORD_P2P_KEY).context(RRecordSnafu)?;
-        let tip = get_rrecord_typed(&packet, &domain, RRECORD_TIP_KEY).context(RRecordSnafu)?;
+        let head = get_rrecord_typed(&packet, &domain, RRECORD_HEAD_KEY).context(RRecordSnafu)?;
 
-        debug!(target: LOG_TARGET, id = %id.try_fmt(), ticket = ?ticket, tip = ?tip, "Resolved Id");
+        debug!(
+            target: LOG_TARGET,
+            id = %id.try_fmt(),
+            ticket = %ticket.fmt_option(),
+            head=%head.fmt_option(),
+            "Resolved Id"
+        );
 
-        Ok(IdPublishedData { ticket, tip })
+        Ok(IdPublishedData { ticket, head })
     }
 
     pub async fn resolve_id_ticket(&self, id: RostraId) -> IdResolveResult<CompactTicket> {

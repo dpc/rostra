@@ -6,6 +6,7 @@ members = [
   "crates/rostra-p2p",
   "crates/rostra-p2p-api",
   "crates/rostra-util-error",
+  "crates/rostra-util-fmt",
 ]
 resolver = "2"
 
@@ -42,6 +43,7 @@ rostra-client = { path = "crates/rostra-client" }
 rostra-p2p = { path = "crates/rostra-p2p" }
 rostra-p2p-api = { path = "crates/rostra-p2p-api" }
 rostra-util-error = { path = "crates/rostra-util-error" }
+rostra-util-fmt = { path = "crates/rostra-util-fmt" }
 serde = "1.0.216"
 serde_json = "1.0.134"
 snafu = { version = "0.8.5", features = ["rust_1_81"] }

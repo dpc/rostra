@@ -3,9 +3,8 @@ use core::{fmt, str};
 use iroh_net::ticket::{NodeTicket, Ticket};
 use iroh_net::NodeAddr;
 use rostra_core::ShortEventId;
+use rostra_util_error::BoxedError;
 use serde::{Deserialize, Serialize};
-
-use crate::error::BoxedError;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CompactTicket(pub NodeTicket);
@@ -40,5 +39,5 @@ impl From<CompactTicket> for NodeAddr {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct IdPublishedData {
     pub ticket: Option<CompactTicket>,
-    pub tip: Option<ShortEventId>,
+    pub head: Option<ShortEventId>,
 }

@@ -10,7 +10,7 @@ use tracing::{debug, instrument, trace, warn};
 use crate::id::{CompactTicket, IdPublishedData};
 use crate::{
     Client, ClientHandle, DnsSnafu, IdPublishResult, PkarrPacketSnafu, PkarrPublishSnafu,
-    RRECORD_P2P_KEY, RRECORD_TIP_KEY,
+    RRECORD_HEAD_KEY, RRECORD_P2P_KEY,
 };
 
 const LOG_TARGET: &str = "rostra::client::publisher";
@@ -49,18 +49,18 @@ impl IdPublishedData {
         let mut packet = dns::Packet::new_reply(0);
 
         let ticket = self.ticket.as_ref().map(|ticket| ticket.to_string());
-        let tip = self.tip.as_ref().map(|tip| tip.to_string());
+        let head = self.head.as_ref().map(|head| head.to_string());
         if let Some(ticket) = ticket.as_deref() {
             trace!(target: LOG_TARGET, key=%RRECORD_P2P_KEY, val=%ticket, val_len=ticket.len(), "Publishing rrecord");
             packet
                 .answers
                 .push(make_txt_rrecord(RRECORD_P2P_KEY, ticket, ttl_secs).context(DnsSnafu)?);
         }
-        if let Some(tip) = tip.as_deref() {
-            trace!(target: LOG_TARGET, key=%RRECORD_TIP_KEY, val=%tip, val_len=tip.len(), "Publishing rrecord");
+        if let Some(head) = head.as_deref() {
+            trace!(target: LOG_TARGET, key=%RRECORD_HEAD_KEY, val=%head, val_len=head.len(), "Publishing rrecord");
             packet
                 .answers
-                .push(make_txt_rrecord(RRECORD_TIP_KEY, tip, ttl_secs).context(DnsSnafu)?);
+                .push(make_txt_rrecord(RRECORD_HEAD_KEY, head, ttl_secs).context(DnsSnafu)?);
         }
         SignedPacket::from_packet(keypair, &packet).context(PkarrPacketSnafu)
     }
@@ -84,7 +84,7 @@ impl IdPublisher {
         loop {
             interval.tick().await;
 
-            let (addr, tip) = {
+            let (addr, head) = {
                 let Some(app) = self.app.app_ref() else {
                     debug!(target: LOG_TARGET, "Client gone, quitting");
                     break;
@@ -96,13 +96,13 @@ impl IdPublisher {
                             warn!(%err, "No iroh addresses to publish yet");
                         })
                         .ok(),
-                    app.event_tip().await,
+                    app.events_head().await,
                 )
             };
 
             let ticket = addr.map(CompactTicket::from);
 
-            let id_data = IdPublishedData { ticket, tip };
+            let id_data = IdPublishedData { ticket, head };
 
             if let Err(err) = self
                 .publish(
@@ -122,7 +122,7 @@ impl IdPublisher {
             target: LOG_TARGET,
             id = %self.keypair.public_key(),
             ticket = ?data.ticket,
-            tip = ?data.tip,
+            head = ?data.head,
             "Publishing RostraId"
         );
         let instant = Instant::now();

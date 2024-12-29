@@ -14,6 +14,7 @@ futures = { workspace = true }
 iroh-net = { workspace = true }
 pkarr = { workspace = true, features = ["async"] }
 rostra-core = { workspace = true, features = ["bincode"] }
+rostra-util-error = { workspace = true }
 serde = { workspace = true, optional = true }
 snafu = { workspace = true }
 tokio = { workspace = true }
