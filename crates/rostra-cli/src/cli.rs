@@ -36,6 +36,8 @@ pub enum DevCmd {
         seq: u64,
         #[clap(long, default_value = "1")]
         count: u64,
+        #[clap(long)]
+        connect_once: bool,
     },
     Test,
 }

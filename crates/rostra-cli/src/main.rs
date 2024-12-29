@@ -7,7 +7,7 @@ use clap::Parser;
 use cli::Opts;
 use futures::future::pending;
 use rostra_client::{Client, ConnectError, IdResolveError, InitError};
-use rostra_p2p::connection::{PingRequest, PingResponse};
+use rostra_p2p::connection::{Connection, PingRequest, PingResponse};
 use rostra_p2p::RpcError;
 use rostra_util_error::FmtCompact as _;
 use snafu::{FromString, ResultExt, Snafu, Whatever};
@@ -73,35 +73,53 @@ async fn handle_cmd(opts: Opts) -> CliResult<serde_json::Value> {
                     tokio::time::sleep(Duration::from_secs(15)).await;
                 }
             }
-            cli::DevCmd::Ping { id, mut seq, count } => {
+            cli::DevCmd::Ping {
+                id,
+                mut seq,
+                count,
+                connect_once,
+            } => {
                 async fn ping(
                     client: &Client,
+                    connection: Option<&Connection>,
                     id: rostra_core::id::RostraId,
                     seq: u64,
                 ) -> CliResult<PingResponse> {
-                    let connection = client.connect(id).await.context(ConnectSnafu)?;
-                    connection
-                        .make_rpc(&PingRequest(seq))
-                        .await
-                        .context(RpcSnafu)
+                    if let Some(connection) = connection {
+                        connection
+                            .make_rpc(&PingRequest(seq))
+                            .await
+                            .context(RpcSnafu)
+                    } else {
+                        let connection = client.connect(id).await.context(ConnectSnafu)?;
+                        connection
+                            .make_rpc(&PingRequest(seq))
+                            .await
+                            .context(RpcSnafu)
+                    }
                 }
                 let client = Client::new_client_only().await.context(InitSnafu)?;
+                let connection = if connect_once {
+                    Some(client.connect(id).await.context(ConnectSnafu)?)
+                } else {
+                    None
+                };
 
                 let mut resp = None;
 
                 for _ in 0..count {
                     let start = Instant::now();
 
-                    let resp_res = ping(&client, id, seq).await;
+                    let resp_res = ping(&client, connection.as_ref(), id, seq).await;
 
                     let rtt = start.elapsed();
                     match resp_res {
                         Ok(ok) => {
-                            info!(target: LOG_TARGET, elapsed_ms = rtt.as_millis(), seq=%serde_json::to_string(&ok).expect("Can't fail"), "Response");
+                            info!(target: LOG_TARGET, elapsed_us = rtt.as_micros(), seq=%serde_json::to_string(&ok).expect("Can't fail"), "Response");
                             resp = Some(ok);
                         }
                         Err(err) => {
-                            info!(target: LOG_TARGET, elapsed_ms = rtt.as_millis(), %seq, err=%err.fmt_compact(), "Error");
+                            info!(target: LOG_TARGET, elapsed_us = rtt.as_micros(), %seq, err=%err.fmt_compact(), "Error");
                         }
                     }
 
