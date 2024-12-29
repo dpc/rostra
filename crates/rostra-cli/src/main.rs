@@ -51,14 +51,14 @@ async fn handle_cmd(opts: Opts) -> CliResult<serde_json::Value> {
     match opts.cmd {
         cli::OptsCmd::Dev(cmd) => match cmd {
             cli::DevCmd::ResolveId { id } => {
-                let client = Client::new().await.context(InitSnafu)?;
+                let client = Client::builder().build().await.context(InitSnafu)?;
 
                 let out = client.resolve_id_data(id).await.context(ResolveSnafu)?;
 
                 Ok(serde_json::to_value(out).expect("Can't fail"))
             }
             cli::DevCmd::Test => {
-                let client = Client::new().await.context(InitSnafu)?;
+                let client = Client::builder().build().await.context(InitSnafu)?;
 
                 loop {
                     let rostra_id = client.rostra_id();
@@ -98,7 +98,12 @@ async fn handle_cmd(opts: Opts) -> CliResult<serde_json::Value> {
                             .context(RpcSnafu)
                     }
                 }
-                let client = Client::new_client_only().await.context(InitSnafu)?;
+                let client = Client::builder()
+                    .start_request_handler(false)
+                    .start_id_publisher(false)
+                    .build()
+                    .await
+                    .context(InitSnafu)?;
                 let connection = if connect_once {
                     Some(client.connect(id).await.context(ConnectSnafu)?)
                 } else {
@@ -115,11 +120,11 @@ async fn handle_cmd(opts: Opts) -> CliResult<serde_json::Value> {
                     let rtt = start.elapsed();
                     match resp_res {
                         Ok(ok) => {
-                            info!(target: LOG_TARGET, elapsed_us = rtt.as_micros(), seq=%serde_json::to_string(&ok).expect("Can't fail"), "Response");
+                            info!(target: LOG_TARGET, elapsed_usecs = rtt.as_micros(), seq=%serde_json::to_string(&ok).expect("Can't fail"), "Response");
                             resp = Some(ok);
                         }
                         Err(err) => {
-                            info!(target: LOG_TARGET, elapsed_us = rtt.as_micros(), %seq, err=%err.fmt_compact(), "Error");
+                            info!(target: LOG_TARGET, elapsed_usecs = rtt.as_micros(), %seq, err=%err.fmt_compact(), "Error");
                         }
                     }
 
@@ -130,7 +135,7 @@ async fn handle_cmd(opts: Opts) -> CliResult<serde_json::Value> {
             }
         },
         cli::OptsCmd::Serve => {
-            let _client = Client::new().await.context(InitSnafu)?;
+            let _client = Client::builder().build().await.context(InitSnafu)?;
 
             pending().await
         }

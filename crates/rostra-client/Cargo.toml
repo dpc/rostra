@@ -9,6 +9,7 @@ version = { workspace = true }
 [dependencies]
 anyhow = { workspace = true }
 bincode = { workspace = true }
+bon = { workspace = true }
 data-encoding = { workspace = true }
 futures = { workspace = true }
 iroh-net = { workspace = true }

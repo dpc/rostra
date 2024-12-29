@@ -129,8 +129,13 @@ pub struct Client {
     endpoint: iroh_net::Endpoint,
 }
 
+#[bon::bon]
 impl Client {
-    pub async fn new() -> InitResult<Arc<Self>> {
+    #[builder(finish_fn(name = "build"))]
+    pub async fn new(
+        #[builder(default = true)] start_request_handler: bool,
+        #[builder(default = true)] start_id_publisher: bool,
+    ) -> InitResult<Arc<Self>> {
         let id_keypair = Keypair::random();
         let id = RostraId::from(id_keypair.clone());
 
@@ -161,43 +166,13 @@ impl Client {
             id,
         });
 
-        client.start_request_handler();
+        if start_request_handler {
+            client.start_request_handler();
+        }
 
-        client.start_id_publisher();
-
-        Ok(client)
-    }
-
-    pub async fn new_client_only() -> InitResult<Arc<Self>> {
-        let id_keypair = Keypair::random();
-        let id = RostraId::from(id_keypair.clone());
-
-        debug!(id = %id.try_fmt(), "Rostra Client");
-
-        let pkarr_client = PkarrClient::builder()
-            .build()
-            .context(InitPkarrClientSnafu)?
-            .as_async()
-            .into();
-
-        let pkarr_client_relay = pkarr::PkarrRelayClient::new(pkarr::RelaySettings {
-            relays: vec!["https://dns.iroh.link/pkarr".to_string()],
-            ..pkarr::RelaySettings::default()
-        })
-        .expect("Has a relay")
-        .as_async()
-        .into();
-
-        let endpoint = Self::make_iroh_endpoint().await?;
-
-        let client = Arc::new_cyclic(|app| Self {
-            handle: app.clone().into(),
-            id_keypair,
-            endpoint,
-            pkarr_client,
-            pkarr_client_relay,
-            id,
-        });
+        if start_id_publisher {
+            client.start_id_publisher();
+        }
 
         Ok(client)
     }
