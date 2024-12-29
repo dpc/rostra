@@ -1,10 +1,16 @@
 #[cfg(feature = "ed25519-dalek")]
 mod ed25519;
 
+#[cfg(feature = "ed25519-dalek")]
+mod dalek;
+
+#[cfg(feature = "serde")]
+mod serde;
+
 use std::collections::BTreeSet;
 
 use crate::id::{RostraId, ShortRostraId};
-use crate::{ContentHash, MsgLen, ShortEventId};
+use crate::{define_array_type_no_serde, ContentHash, MsgLen, ShortEventId};
 
 /// An even (header)
 ///
@@ -18,8 +24,8 @@ use crate::{ContentHash, MsgLen, ShortEventId};
 /// * content_hash = 32
 ///
 /// * signature = 64
-#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-#[cfg_attr(feature = "bincode", derive(bincode::Encode, bincode::Decode))]
+#[cfg_attr(feature = "serde", derive(::serde::Serialize, ::serde::Deserialize))]
+#[cfg_attr(feature = "bincode", derive(::bincode::Encode, ::bincode::Decode))]
 #[derive(Copy, Clone, PartialEq, Eq, Hash, Debug)]
 pub struct Event {
     /// Simple version counter to allow upgrades of [`Event`] format in the
@@ -94,9 +100,10 @@ pub struct Event {
 }
 
 pub type Keypair = (); // TODO
-pub type Signature = (); // TODO
 
-#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+define_array_type_no_serde!(struct EventSignature, 64);
+
+#[cfg_attr(feature = "serde", derive(::serde::Serialize, ::serde::Deserialize))]
 #[cfg_attr(feature = "bincode", derive(bincode::Encode, bincode::Decode))]
 #[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
 pub enum EventKind {
@@ -110,7 +117,7 @@ pub enum EventKind {
     SocialAttachment = 0x14,
 }
 
-#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "serde", derive(::serde::Serialize, ::serde::Deserialize))]
 #[cfg_attr(feature = "bincode", derive(bincode::Encode, bincode::Decode))]
 #[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
 pub struct ContentSocialPost {
@@ -120,7 +127,7 @@ pub struct ContentSocialPost {
     pub djot_content: String,
 }
 
-#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "serde", derive(::serde::Serialize, ::serde::Deserialize))]
 #[cfg_attr(feature = "bincode", derive(bincode::Encode, bincode::Decode))]
 #[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
 pub struct ContentSocialLike {
@@ -131,7 +138,7 @@ pub struct ContentSocialLike {
     pub event_id: ShortEventId,
 }
 
-#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "serde", derive(::serde::Serialize, ::serde::Deserialize))]
 #[cfg_attr(feature = "bincode", derive(bincode::Encode, bincode::Decode))]
 #[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
 pub struct ContentSocialRepost {

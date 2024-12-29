@@ -5,3 +5,8 @@ use rostra_core::id::RestRostraId;
 pub struct IdRecord {
     pub id_rest: RestRostraId,
 }
+
+#[derive(Debug, Encode, Decode, Clone, Copy)]
+pub struct IdFollowingRecord {
+    something: bool,
+}

@@ -1,17 +1,18 @@
 #[cfg(feature = "bincode")]
 pub mod bincode;
 pub mod event;
+/// Version of [`define_array_type`] that does not derive Serde
+///
+/// Because some types can't serde. :/
 pub mod id;
 
 #[macro_export]
-macro_rules! define_array_type {
+macro_rules! define_array_type_no_serde {
     (
         $(#[$outer:meta])*
         struct $t:tt, $n:literal
     ) => {
-
         $(#[$outer])*
-        #[cfg_attr(feature = "serde", derive(::serde::Serialize, ::serde::Deserialize))]
         #[cfg_attr(feature = "bincode", derive(::bincode::Encode, ::bincode::Decode))]
         #[derive(Copy, Clone, Hash, Debug)]
         pub struct $t([u8; $n]);
@@ -25,12 +26,27 @@ macro_rules! define_array_type {
 }
 
 #[macro_export]
+macro_rules! define_array_type {
+    (
+        $(#[$outer:meta])*
+        struct $t:tt, $n:literal
+    ) => {
+        $crate::define_array_type_no_serde!(
+            #[cfg_attr(feature = "serde", derive(::serde::Serialize, ::serde::Deserialize))]
+            $(#[$outer])*
+            struct $t, $n
+        );
+
+    }
+}
+
+#[macro_export]
 macro_rules! define_array_type_public {
     (
         $(#[$outer:meta])*
         struct $t:tt, $n:literal
     ) => {
-        define_array_type!(
+        $crate::define_array_type!(
             #[derive(PartialOrd, Ord, PartialEq, Eq)]
             $(#[$outer])*
             struct $t, $n

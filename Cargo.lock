@@ -3214,8 +3214,7 @@ dependencies = [
 [[package]]
 name = "redb-bincode"
 version = "0.2.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "84892c8ece1ba85708a157dc32312ae10583e6e17c7955f39564473fabcab62c"
+source = "git+https://github.com/dpc/redb-bincode?rev=740ccad228281c2e4e180e99600b1723731590cd#740ccad228281c2e4e180e99600b1723731590cd"
 dependencies = [
  "bincode",
  "redb",

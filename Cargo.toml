@@ -72,3 +72,6 @@ debug = false
 debug = false
 [profile.release.build-override]
 debug = false
+
+[patch.crates-io]
+redb-bincode = { git = "https://github.com/dpc/redb-bincode", rev = "740ccad228281c2e4e180e99600b1723731590cd" }

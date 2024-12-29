@@ -1,5 +1,5 @@
 use bincode::{Decode, Encode};
-use rostra_core::event::Event;
+use rostra_core::event::{Event, EventSignature};
 
 #[derive(Debug, Encode, Decode, Clone)]
 pub enum ContentState {
@@ -11,5 +11,6 @@ pub enum ContentState {
 #[derive(Debug, Encode, Decode, Clone)]
 pub struct EventRecord {
     pub event: Event,
+    pub signature: EventSignature,
     pub content: ContentState,
 }
