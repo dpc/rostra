@@ -11,6 +11,7 @@ name = "rostra-cli"
 
 [dependencies]
 anyhow = { workspace = true }
+directories = { workspace = true }
 futures = { workspace = true }
 futures-util = { workspace = true }
 iroh-net = { workspace = true }

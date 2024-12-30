@@ -2,6 +2,7 @@ use bincode::{Decode, Encode};
 use convi::{CastInto, ExpectFrom};
 use iroh_net::endpoint::{RecvStream, SendStream};
 use rostra_core::bincode::STD_BINCODE_CONFIG;
+use rostra_core::event::{Event, EventSignature};
 use rostra_core::MsgLen;
 use snafu::ResultExt as _;
 
@@ -81,6 +82,7 @@ impl From<RpcIdKnown> for RpcId {
 #[non_exhaustive]
 pub enum RpcIdKnown {
     Ping = 0,
+    FeedEvent = 1,
 }
 
 impl RpcIdKnown {
@@ -114,25 +116,69 @@ pub trait RpcMessage: bincode::Encode + bincode::Decode {
 pub trait RpcRequest: RpcMessage {}
 pub trait RpcResponse: RpcMessage {}
 
-#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-#[derive(Encode, Decode)]
-pub struct PingRequest(pub u64);
+// #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+// #[derive(Encode, Decode)]
+// pub struct PingRequest(pub u64);
 
-#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-#[derive(Encode, Decode)]
-pub struct PingResponse(pub u64);
+// #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+// #[derive(Encode, Decode)]
+// pub struct PingResponse(pub u64);
 
-impl RpcRequest for PingRequest {}
-impl RpcMessage for PingRequest {}
+// impl RpcRequest for PingRequest {}
+// impl RpcMessage for PingRequest {}
 
-impl RpcResponse for PingResponse {}
-impl RpcMessage for PingResponse {}
+// impl RpcResponse for PingResponse {}
+// impl RpcMessage for PingResponse {}
 
-impl Rpc for PingRequest {
-    const RPC_ID: RpcId = RpcIdKnown::Ping.const_into();
+// impl Rpc for PingRequest {
+//     const RPC_ID: RpcId = RpcIdKnown::Ping.const_into();
 
-    type Response = PingResponse;
+//     type Response = PingResponse;
+// }
+
+macro_rules! define_rpc {
+    ($id:ident, $req:ident, $req_body:item, $resp:ident, $resp_body:item) => {
+
+        #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+        #[derive(Encode, Decode)]
+        $req_body
+
+        #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+        #[derive(Encode, Decode)]
+        $resp_body
+
+        impl RpcRequest for $req {}
+        impl RpcMessage for $req {}
+
+        impl RpcResponse for $resp {}
+        impl RpcMessage for $resp {}
+
+        impl Rpc for $req {
+            const RPC_ID: RpcId = RpcIdKnown::$id.const_into();
+
+            type Response = $resp;
+        }
+    }
 }
+
+define_rpc!(
+    Ping,
+    PingRequest,
+    pub struct PingRequest(pub u64);,
+    PingResponse,
+    pub struct PingResponse(pub u64);
+);
+
+define_rpc!(
+    FeedEvent,
+    FeedEventRequest,
+    pub struct FeedEventRequest {
+        pub event: Event,
+        pub sig: EventSignature,
+    },
+    FeedEventResponse,
+    pub struct FeedEventResponse(());
+);
 
 fn rpc_request_to_bytes<R>(v: &R) -> Vec<u8>
 where

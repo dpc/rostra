@@ -4,6 +4,7 @@ use std::time::{Duration, Instant};
 use pkarr::dns::rdata::TXT;
 use pkarr::dns::SimpleDnsError;
 use pkarr::{dns, Keypair, SignedPacket};
+use rostra_core::id::RostraIdSecretKey;
 use snafu::ResultExt as _;
 use tracing::{debug, instrument, trace, warn};
 
@@ -67,11 +68,11 @@ impl IdPublishedData {
 }
 
 impl IdPublisher {
-    pub fn new(app: &Client, keypair: Keypair) -> Self {
-        debug!(target: LOG_TARGET, pkarr_id = %keypair.public_key(), "Starting ID publishing task" );
+    pub fn new(app: &Client, id_secret: RostraIdSecretKey) -> Self {
+        debug!(target: LOG_TARGET, pkarr_id = %id_secret.id(), "Starting ID publishing task" );
         Self {
             app: app.handle(),
-            keypair,
+            keypair: id_secret.into(),
             client: app.pkarr_client(),
             client_relay: app.pkarr_client_relay(),
         }

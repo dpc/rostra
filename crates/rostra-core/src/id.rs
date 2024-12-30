@@ -1,4 +1,4 @@
-use crate::{define_array_type, define_array_type_public};
+use crate::{define_array_type_public, define_array_type_public_no_serde};
 
 #[cfg(feature = "ed25519-dalek")]
 mod ed25519;
@@ -6,7 +6,17 @@ mod ed25519;
 #[cfg(feature = "pkarr")]
 mod pkarr;
 
-define_array_type_public!(struct RostraId, 32);
+#[cfg(feature = "serde")]
+mod serde;
+
+define_array_type_public_no_serde!(struct RostraId, 32);
+
+impl From<RostraId> for ShortRostraId {
+    fn from(id: RostraId) -> Self {
+        id.split().0
+    }
+}
+
 define_array_type_public!(struct ShortRostraId, 16);
 define_array_type_public!(struct RestRostraId, 16);
 
@@ -23,4 +33,7 @@ impl RostraId {
     }
 }
 
-define_array_type!(struct RostraIdSecretKey, 32);
+define_array_type_public_no_serde!(struct RostraIdSecretKey, 32);
+
+#[derive(Debug)]
+pub struct RostraIdSecretKeyError(String);

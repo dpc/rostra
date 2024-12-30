@@ -1,3 +1,5 @@
+use std::path::PathBuf;
+
 use clap::{Args, Parser, Subcommand};
 use rostra_core::id::RostraId;
 
@@ -14,15 +16,24 @@ pub struct Opts {
 #[derive(Debug, Args)]
 pub struct GlobalOpts {
     #[arg(long)]
-    pub test: bool,
+    pub test_delme: bool,
 }
 
 #[derive(Debug, Subcommand)]
 pub enum OptsCmd {
+    GenId,
     Serve,
 
     #[command(subcommand)]
     Dev(DevCmd),
+
+    Post {
+        #[clap(long)]
+        body: String,
+
+        #[clap(long)]
+        secret_file: PathBuf,
+    },
 }
 
 #[derive(Debug, Subcommand)]

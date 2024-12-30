@@ -54,6 +54,20 @@ macro_rules! define_array_type_public {
     }
 }
 
+#[macro_export]
+macro_rules! define_array_type_public_no_serde {
+    (
+        $(#[$outer:meta])*
+        struct $t:tt, $n:literal
+    ) => {
+        $crate::define_array_type_no_serde!(
+            #[derive(PartialOrd, Ord, PartialEq, Eq)]
+            $(#[$outer])*
+            struct $t, $n
+        );
+    }
+}
+
 macro_rules! impl_base32_str {
     (
         $t:tt
@@ -79,8 +93,36 @@ macro_rules! impl_base32_str {
     };
 }
 
+#[macro_export]
+macro_rules! impl_zero_default {
+    ($name:tt) => {
+        impl Default for $name {
+            fn default() -> Self {
+                Self([0; 16])
+            }
+        }
+    };
+}
+
 define_array_type_public!(
-    /// [`EventId`] is short (16B) because it is always used in a context of an existing
+    struct EventId, 32
+);
+impl_base32_str!(EventId);
+
+impl From<blake3::Hash> for EventId {
+    fn from(value: blake3::Hash) -> Self {
+        Self(value.as_bytes()[..32].try_into().expect("Must be 32 bytes"))
+    }
+}
+
+impl From<EventId> for [u8; 32] {
+    fn from(value: EventId) -> Self {
+        value.0
+    }
+}
+
+define_array_type_public!(
+    /// [`ShortEventId`] is short (16B) because it is always used in a context of an existing
     /// [`id::RostraId`] so even though client might potentially grind collisions
     /// (64-bits of resistance) it really gains them nothing.
     ///
@@ -92,9 +134,22 @@ define_array_type_public!(
     struct ShortEventId, 16
 );
 impl_base32_str!(ShortEventId);
+impl_zero_default!(ShortEventId);
 
 define_array_type_public!(struct ContentHash, 32);
 impl_base32_str!(ContentHash);
+
+impl From<blake3::Hash> for ContentHash {
+    fn from(value: blake3::Hash) -> Self {
+        Self(value.as_bytes()[..32].try_into().expect("Must be 32 bytes"))
+    }
+}
+
+impl From<ContentHash> for [u8; 32] {
+    fn from(value: ContentHash) -> Self {
+        value.0
+    }
+}
 
 /// Length of a message, encoded in a fixed-size way
 ///
@@ -103,3 +158,15 @@ impl_base32_str!(ContentHash);
 #[cfg_attr(feature = "serde", derive(::serde::Serialize, ::serde::Deserialize))]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct MsgLen(pub u32);
+
+impl From<u32> for MsgLen {
+    fn from(value: u32) -> Self {
+        Self(value)
+    }
+}
+
+impl From<MsgLen> for u32 {
+    fn from(value: MsgLen) -> Self {
+        value.0
+    }
+}

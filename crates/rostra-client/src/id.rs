@@ -6,7 +6,7 @@ use rostra_core::ShortEventId;
 use rostra_util_error::BoxedError;
 use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct CompactTicket(pub NodeTicket);
 
 impl fmt::Display for CompactTicket {
@@ -40,4 +40,10 @@ impl From<CompactTicket> for NodeAddr {
 pub struct IdPublishedData {
     pub ticket: Option<CompactTicket>,
     pub head: Option<ShortEventId>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct IdResolvedData {
+    pub published: IdPublishedData,
+    pub timestamp: u64,
 }

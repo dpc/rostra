@@ -6,7 +6,10 @@ use std::time::Duration;
 use clap::Parser;
 use cli::Opts;
 use futures::future::pending;
-use rostra_client::{Client, ConnectError, IdResolveError, InitError};
+use rostra_client::{
+    Client, ConnectError, IdResolveError, IdSecretReadError, InitError, PostError,
+};
+use rostra_core::id::RostraIdSecretKey;
 use rostra_p2p::connection::{Connection, PingRequest, PingResponse};
 use rostra_p2p::RpcError;
 use rostra_util_error::FmtCompact as _;
@@ -23,11 +26,28 @@ type WhateverResult<T> = std::result::Result<T, snafu::Whatever>;
 
 #[derive(Debug, Snafu)]
 pub enum CliError {
-    Init { source: InitError },
-    Resolve { source: IdResolveError },
-    Connect { source: ConnectError },
-    Rpc { source: RpcError },
-    Whatever { source: Whatever },
+    Init {
+        source: InitError,
+    },
+    Resolve {
+        source: IdResolveError,
+    },
+    Connect {
+        source: ConnectError,
+    },
+    Rpc {
+        source: RpcError,
+    },
+    Secret {
+        source: IdSecretReadError,
+    },
+    #[snafu(transparent)]
+    Post {
+        source: PostError,
+    },
+    Whatever {
+        source: Whatever,
+    },
 }
 
 pub type CliResult<T> = std::result::Result<T, CliError>;
@@ -40,7 +60,7 @@ async fn main() -> CliResult<()> {
     let opts = Opts::parse();
     match handle_cmd(opts).await {
         Ok(v) => {
-            println!("{}", serde_json::to_string(&v).expect("Can't fail"));
+            println!("{}", serde_json::to_string_pretty(&v).expect("Can't fail"));
             Ok(())
         }
         Err(err) => Err(err),
@@ -138,6 +158,31 @@ async fn handle_cmd(opts: Opts) -> CliResult<serde_json::Value> {
             let _client = Client::builder().build().await.context(InitSnafu)?;
 
             pending().await
+        }
+        cli::OptsCmd::GenId => {
+            let secret = RostraIdSecretKey::generate();
+            let id = secret.id();
+
+            Ok(serde_json::to_value(&serde_json::json!({
+                "id": id,
+                "secret": secret,
+            }))
+            .expect("Can't fail"))
+        }
+        cli::OptsCmd::Post { body, secret_file } => {
+            let id_secret = Client::read_id_secret(&secret_file)
+                .await
+                .context(SecretSnafu)?;
+
+            let client = Client::builder()
+                .id_secret(id_secret)
+                .build()
+                .await
+                .context(InitSnafu)?;
+
+            client.post(&body).await?;
+
+            Ok(serde_json::Value::Bool(true))
         }
     }
 }

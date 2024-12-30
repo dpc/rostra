@@ -7,27 +7,33 @@ pub mod id;
 
 use std::marker::PhantomData;
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
-use std::ops;
+use std::path::Path;
 use std::str::FromStr;
 use std::sync::{Arc, Weak};
+use std::time::Duration;
+use std::{io, ops};
 
+use backon::Retryable as _;
 use db::Database;
 use error::{IrohError, IrohResult};
 use futures::future::{self, Either};
-use id::{CompactTicket, IdPublishedData};
+use id::{CompactTicket, IdPublishedData, IdResolvedData};
 use id_publisher::IdPublisher;
 use iroh_net::{AddrInfo, NodeAddr};
 use itertools::Itertools;
 use pkarr::dns::rdata::RData;
 use pkarr::dns::{Name, SimpleDnsError};
-use pkarr::{Keypair, PkarrClient};
+use pkarr::PkarrClient;
 use request_handler::RequestHandler;
-use rostra_core::id::RostraId;
+use rostra_core::event::{Event, EventKind};
+use rostra_core::id::{RostraId, RostraIdSecretKey, RostraIdSecretKeyError};
 use rostra_core::ShortEventId;
 use rostra_p2p::connection::Connection;
 use rostra_p2p_api::ROSTRA_P2P_V0_ALPN;
+use rostra_util_error::FmtCompact as _;
 use rostra_util_fmt::AsFmtOption as _;
 use snafu::{OptionExt as _, ResultExt, Snafu};
+use tokio::time::Instant;
 use tracing::debug;
 
 const RRECORD_P2P_KEY: &str = "rostra-p2p";
@@ -45,12 +51,11 @@ pub type InitResult<T> = std::result::Result<T, InitError>;
 
 #[derive(Debug, Snafu)]
 pub enum IdResolveError {
-    IdNotFound,
+    NotFound,
     InvalidId { source: pkarr::Error },
     RRecord { source: RRecordError },
     MissingTicket,
     MalformedIrohTicket,
-    ConnectionError { source: IrohError },
     PkarrResolve { source: pkarr::Error },
 }
 type IdResolveResult<T> = std::result::Result<T, IdResolveError>;
@@ -77,6 +82,20 @@ pub enum ConnectError {
     ConnectIroh { source: IrohError },
 }
 pub type ConnectResult<T> = std::result::Result<T, ConnectError>;
+
+#[derive(Debug, Snafu)]
+pub enum IdSecretReadError {
+    Io { source: io::Error },
+    Parsing { source: RostraIdSecretKeyError },
+}
+pub type IdSecretReadResult<T> = std::result::Result<T, IdSecretReadError>;
+
+#[derive(Debug, Snafu)]
+pub enum PostError {
+    #[snafu(transparent)]
+    Resolve { source: IdResolveError },
+}
+pub type PostResult<T> = std::result::Result<T, PostError>;
 
 /// Weak handle to [`Client`]
 #[derive(Debug, Clone)]
@@ -124,9 +143,8 @@ pub struct Client {
     pkarr_client_relay: Arc<pkarr::PkarrRelayClientAsync>,
 
     /// Our main identity (pkarr/ed25519_dalek keypair)
-    id_keypair: pkarr::Keypair,
-
     id: RostraId,
+    id_secret: RostraIdSecretKey,
 
     db: Option<Database>,
 
@@ -138,12 +156,13 @@ pub struct Client {
 impl Client {
     #[builder(finish_fn(name = "build"))]
     pub async fn new(
+        id_secret: Option<RostraIdSecretKey>,
         #[builder(default = true)] start_request_handler: bool,
         #[builder(default = true)] start_id_publisher: bool,
         db: Option<Database>,
     ) -> InitResult<Arc<Self>> {
-        let id_keypair = Keypair::random();
-        let id = RostraId::from(id_keypair.clone());
+        let id_secret = id_secret.unwrap_or_else(|| RostraIdSecretKey::generate());
+        let id = id_secret.id();
 
         debug!(id = %id.try_fmt(), "Rostra Client");
 
@@ -165,7 +184,7 @@ impl Client {
 
         let client = Arc::new_cyclic(|app| Self {
             handle: app.clone().into(),
-            id_keypair,
+            id_secret,
             endpoint,
             pkarr_client,
             pkarr_client_relay,
@@ -189,10 +208,17 @@ impl Client {
     }
 
     pub async fn connect(&self, id: RostraId) -> ConnectResult<Connection> {
-        let conn_data = self.resolve_id_data(id).await.context(ResolveSnafu)?;
+        let ticket = self.resolve_id_ticket(id).await.context(ResolveSnafu)?;
 
-        let ticket = conn_data.ticket.context(PeerUnavailableSnafu)?;
+        Ok(self
+            .endpoint
+            .connect(ticket, ROSTRA_P2P_V0_ALPN)
+            .await
+            .context(ConnectIrohSnafu)?
+            .into())
+    }
 
+    pub async fn connect_ticket(&self, ticket: CompactTicket) -> ConnectResult<Connection> {
         Ok(self
             .endpoint
             .connect(ticket, ROSTRA_P2P_V0_ALPN)
@@ -219,7 +245,7 @@ impl Client {
     }
 
     fn start_id_publisher(&self) {
-        tokio::spawn(IdPublisher::new(self, self.id_keypair.clone()).run());
+        tokio::spawn(IdPublisher::new(self, self.id_secret.clone()).run());
     }
 
     fn start_request_handler(&self) {
@@ -289,7 +315,7 @@ impl Client {
         self.handle.clone()
     }
 
-    pub async fn resolve_id_data(&self, id: RostraId) -> IdResolveResult<IdPublishedData> {
+    pub async fn resolve_id_data(&self, id: RostraId) -> IdResolveResult<IdResolvedData> {
         let public_key = pkarr::PublicKey::try_from(id).context(InvalidIdSnafu)?;
         let domain = public_key.to_string();
         let packet = take_first_ok_some(
@@ -298,8 +324,9 @@ impl Client {
         )
         .await
         .context(PkarrResolveSnafu)?
-        .context(IdNotFoundSnafu)?;
+        .context(NotFoundSnafu)?;
 
+        let timestamp = packet.timestamp();
         let ticket = get_rrecord_typed(&packet, &domain, RRECORD_P2P_KEY).context(RRecordSnafu)?;
         let head = get_rrecord_typed(&packet, &domain, RRECORD_HEAD_KEY).context(RRecordSnafu)?;
 
@@ -311,28 +338,32 @@ impl Client {
             "Resolved Id"
         );
 
-        Ok(IdPublishedData { ticket, head })
+        Ok(IdResolvedData {
+            published: IdPublishedData { ticket, head },
+            timestamp,
+        })
     }
 
     pub async fn resolve_id_ticket(&self, id: RostraId) -> IdResolveResult<CompactTicket> {
         self.resolve_id_data(id)
             .await?
+            .published
             .ticket
             .context(MissingTicketSnafu)
     }
 
-    pub async fn fetch_data(&self, id: RostraId) -> IdResolveResult<String> {
-        let data = self.resolve_id_data(id).await?;
+    // pub async fn fetch_data(&self, id: RostraId) -> IdResolveResult<String> {
+    //     let data = self.resolve_id_data(id).await?;
 
-        let ticket = data.ticket.context(MissingTicketSnafu)?;
-        let _connection = self
-            .endpoint
-            .connect(ticket, ROSTRA_P2P_V0_ALPN)
-            .await
-            .context(ConnectionSnafu)?;
+    //     let ticket = data.published.ticket.context(MissingTicketSnafu)?;
+    //     let _connection = self
+    //         .endpoint
+    //         .connect(ticket, ROSTRA_P2P_V0_ALPN)
+    //         .await
+    //         .context(ConnectionSnafu)?;
 
-        todo!()
-    }
+    //     todo!()
+    // }
 
     pub(crate) fn pkarr_client(&self) -> Arc<pkarr::PkarrClientAsync> {
         self.pkarr_client.clone()
@@ -340,6 +371,77 @@ impl Client {
 
     fn pkarr_client_relay(&self) -> Arc<pkarr::PkarrRelayClientAsync> {
         self.pkarr_client_relay.clone()
+    }
+
+    pub async fn read_id_secret(path: &Path) -> IdSecretReadResult<RostraIdSecretKey> {
+        let content = tokio::fs::read_to_string(path).await.context(IoSnafu)?;
+        RostraIdSecretKey::from_str(&content).context(ParsingSnafu)
+    }
+
+    pub async fn check_published_id_state(&self) -> IdResolveResult<IdResolvedData> {
+        (|| async { self.resolve_id_data(self.id).await })
+            .retry(
+                backon::FibonacciBuilder::default()
+                    .with_jitter()
+                    .without_max_times(),
+            )
+            .when(|e|
+                // Retry only problems with doing the query itself
+                 matches!(e, IdResolveError::PkarrResolve { .. }))
+            .notify(|e, _| debug!(target: LOG_TARGET, err = %e.fmt_compact(), "Could not determine the state of published id"))
+            .await
+    }
+
+    pub async fn post(&self, body: &str) -> PostResult<()> {
+        const ACTIVE_RESERVATION_TIMEOUT: Duration = Duration::from_secs(120);
+        let mut known_head = None;
+        let mut active_reservation: Option<(CompactTicket, Instant)> = None;
+        let mut event: Option<Event> = None;
+
+        'try_connect_to_active: loop {
+            let published_id_data = self.check_published_id_state().await;
+
+            match published_id_data {
+                Ok(published_id_data) => {
+                    known_head = published_id_data.published.head.or(known_head);
+
+                    let Some(ticket) = published_id_data.published.ticket else {
+                        break 'try_connect_to_active;
+                    };
+
+                    if let Some((active_ticket, start)) = active_reservation.as_ref() {
+                        if active_ticket == &ticket {
+                            if ACTIVE_RESERVATION_TIMEOUT < start.elapsed() {
+                                debug!(target: LOG_TARGET, "Reservation stale");
+                                break 'try_connect_to_active;
+                            }
+                        } else {
+                            active_reservation = Some((ticket.clone(), Instant::now()));
+                        }
+                    } else {
+                        active_reservation = Some((ticket.clone(), Instant::now()));
+                    }
+
+                    let Ok(conn) = self.connect_ticket(ticket).await else {
+                        continue;
+                    };
+
+                    event = Some(event.unwrap_or_else(|| {
+                        Event::builder()
+                            .author(self.id)
+                            .kind(EventKind::SocialPost)
+                            .content(body.as_bytes())
+                            .build()
+                    }));
+
+                    todo!();
+                    // conn.send_event().await;
+                }
+                Err(_) => todo!(),
+            }
+        }
+
+        Ok(())
     }
 }
 

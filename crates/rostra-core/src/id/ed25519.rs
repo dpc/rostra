@@ -1,6 +1,19 @@
 use ed25519_dalek::{SigningKey, VerifyingKey};
+use rand::rngs::OsRng;
 
 use super::{RostraId, RostraIdSecretKey};
+use crate::event::EventSignature;
+
+impl RostraIdSecretKey {
+    pub fn generate() -> Self {
+        let mut csprng = OsRng;
+        SigningKey::generate(&mut csprng).into()
+    }
+
+    pub fn id(self) -> RostraId {
+        SigningKey::from(self).verifying_key().into()
+    }
+}
 
 impl From<RostraId> for VerifyingKey {
     fn from(value: RostraId) -> Self {
@@ -17,5 +30,11 @@ impl From<VerifyingKey> for RostraId {
 impl From<RostraIdSecretKey> for SigningKey {
     fn from(key: RostraIdSecretKey) -> Self {
         SigningKey::from(key.0)
+    }
+}
+
+impl From<SigningKey> for RostraIdSecretKey {
+    fn from(value: SigningKey) -> Self {
+        Self(value.to_bytes())
     }
 }

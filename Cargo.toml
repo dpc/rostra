@@ -25,18 +25,24 @@ license = "MIT"
 
 [workspace.dependencies]
 anyhow = "1.0.95"
+backon = "1.3.0"
+bao-tree = "0.13"
 bincode = { version = "2.0.0-rc.3", features = ["derive"] }
 blake3 = "1.5.5"
 bon = "3.3.0"
+bip39 = "2.0.0"
 clap = { version = "4.5.23", features = ["derive", "env"] }
 convi = { version = "0.1.1" , features = [ "min_target_pointer_width_32" ] }
 data-encoding = "2.6"
+directories = "5"
 ed25519-dalek = "2.1.1"
 futures = "0.3.31"
 futures-util = "*"
 iroh-net = { version = "0.28.1", features = ["iroh-relay"] }
+iroh-io = "0.6.0"
 itertools = "0.13.0"
 pkarr = "2.2.1"
+rand = "0.8"
 redb-bincode = { version = "0.2.1" }
 rostra-core = { path = "crates/rostra-core" }
 rostra-client = { path = "crates/rostra-client" }
@@ -50,6 +56,7 @@ snafu = { version = "0.8.5", features = ["rust_1_81"] }
 tokio = { version = "1.42.0", features = ["macros"] }
 tracing = "0.1.41"
 tracing-subscriber = { version = "0.3.19", features = ["env-filter"] }
+z32 = "1.1.1"
 
 [profile.dev]
 debug = "line-tables-only"

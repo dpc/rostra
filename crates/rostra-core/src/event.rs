@@ -9,8 +9,11 @@ mod serde;
 
 use std::collections::BTreeSet;
 
+use convi::ExpectInto as _;
+
+use crate::bincode::STD_BINCODE_CONFIG;
 use crate::id::{RostraId, ShortRostraId};
-use crate::{define_array_type_no_serde, ContentHash, MsgLen, ShortEventId};
+use crate::{define_array_type_no_serde, ContentHash, EventId, MsgLen, ShortEventId};
 
 /// An even (header)
 ///
@@ -97,6 +100,46 @@ pub struct Event {
 
     /// Blake3 hash of the content, usually returned
     pub content_hash: ContentHash,
+}
+
+#[bon::bon]
+impl Event {
+    #[builder]
+    pub fn new(
+        author: impl Into<ShortRostraId>,
+        replace: Option<ShortEventId>,
+        kind: EventKind,
+        parent_prev: Option<ShortEventId>,
+        parent_aux: Option<ShortEventId>,
+        content: &[u8],
+    ) -> Self {
+        if replace.is_some() && parent_aux.is_some() {
+            panic!("Can't set both both replace and parent_aux");
+        }
+
+        let replace = replace.map(Into::into);
+        let parent_prev = parent_prev.map(Into::into);
+        let parent_aux = parent_aux.map(Into::into);
+
+        Self {
+            version: 0,
+            flags: if replace.is_some() { 1 } else { 0 },
+            kind,
+            content_len: MsgLen(content.len().expect_into()),
+            padding: [0; 8],
+            author: author.into(),
+            parent_prev: parent_prev.unwrap_or_default(),
+            parent_aux: parent_aux.or(replace).unwrap_or_default(),
+            content_hash: blake3::hash(&content).into(),
+        }
+    }
+
+    #[cfg(feature = "bincode")]
+    pub fn compute_id(&self) -> EventId {
+        let encoded =
+            bincode::encode_to_vec(self, STD_BINCODE_CONFIG).expect("Can't fail encoding");
+        blake3::hash(&encoded).into()
+    }
 }
 
 pub type Keypair = (); // TODO

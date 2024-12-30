@@ -8,11 +8,16 @@ version = { workspace = true }
 
 [dependencies]
 anyhow = { workspace = true }
+backon = { workspace = true }
 bincode = { workspace = true }
+bao-tree = { workspace = true }
+convi = { workspace = true }
 bon = { workspace = true }
 data-encoding = { workspace = true }
+ed25519-dalek = { workspace = true }
 futures = { workspace = true }
 iroh-net = { workspace = true }
+iroh-io = { workspace = true }
 itertools = { workspace = true }
 pkarr = { workspace = true, features = ["async", "relay"] }
 redb = "2.3.0"
