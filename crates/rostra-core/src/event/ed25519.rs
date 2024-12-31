@@ -1,7 +1,7 @@
 use ed25519_dalek::ed25519::signature::SignerMut as _;
 use ed25519_dalek::{SignatureError, VerifyingKey};
 
-use super::{Event, EventSignature};
+use super::{Event, EventSignature, SignedEvent};
 use crate::bincode::STD_BINCODE_CONFIG;
 use crate::id::{RostraId, RostraIdSecretKey};
 
@@ -13,6 +13,11 @@ impl Event {
         ed25519_dalek::SigningKey::from(secret_key)
             .sign(&encoded)
             .into()
+    }
+
+    pub fn signed_by(self, secret_key: RostraIdSecretKey) -> SignedEvent {
+        let sig = self.sign_by(secret_key);
+        SignedEvent { event: self, sig }
     }
 
     pub fn verified_signed_by(

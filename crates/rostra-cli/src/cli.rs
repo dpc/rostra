@@ -22,7 +22,10 @@ pub struct GlobalOpts {
 #[derive(Debug, Subcommand)]
 pub enum OptsCmd {
     GenId,
-    Serve,
+    Serve {
+        #[clap(long)]
+        secret_file: Option<PathBuf>,
+    },
 
     #[command(subcommand)]
     Dev(DevCmd),

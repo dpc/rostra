@@ -121,6 +121,12 @@ impl From<EventId> for [u8; 32] {
     }
 }
 
+impl From<EventId> for ShortEventId {
+    fn from(value: EventId) -> Self {
+        Self(value.0[..16].try_into().expect("Must be 16 bytes"))
+    }
+}
+
 define_array_type_public!(
     /// [`ShortEventId`] is short (16B) because it is always used in a context of an existing
     /// [`id::RostraId`] so even though client might potentially grind collisions
@@ -148,6 +154,12 @@ impl From<blake3::Hash> for ContentHash {
 impl From<ContentHash> for [u8; 32] {
     fn from(value: ContentHash) -> Self {
         value.0
+    }
+}
+
+impl From<ContentHash> for blake3::Hash {
+    fn from(value: ContentHash) -> Self {
+        blake3::Hash::from_bytes(value.0)
     }
 }
 

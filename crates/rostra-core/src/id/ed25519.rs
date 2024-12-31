@@ -2,7 +2,6 @@ use ed25519_dalek::{SigningKey, VerifyingKey};
 use rand::rngs::OsRng;
 
 use super::{RostraId, RostraIdSecretKey};
-use crate::event::EventSignature;
 
 impl RostraIdSecretKey {
     pub fn generate() -> Self {

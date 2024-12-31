@@ -24,5 +24,12 @@ pub enum RpcError {
     Decoding {
         source: bincode::error::DecodeError,
     },
+    Trailer {
+        source: BoxedError,
+    },
+    /// Other side responded with rpc failure
+    Failed {
+        return_code: u8,
+    },
 }
 type RpcResult<T> = std::result::Result<T, RpcError>;

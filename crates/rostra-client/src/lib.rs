@@ -14,27 +14,34 @@ use std::time::Duration;
 use std::{io, ops};
 
 use backon::Retryable as _;
-use db::Database;
+use bao_tree::io::fsm::encode_ranges_validated;
+use bao_tree::io::outboard::EmptyOutboard;
+use bao_tree::io::round_up_to_chunks;
+use bao_tree::{blake3, BaoTree, BlockSize, ByteRanges};
+use convi::ExpectInto as _;
+use db::{Database, DbResult};
 use error::{IrohError, IrohResult};
 use futures::future::{self, Either};
 use id::{CompactTicket, IdPublishedData, IdResolvedData};
 use id_publisher::IdPublisher;
+use iroh_io::TokioStreamWriter;
 use iroh_net::{AddrInfo, NodeAddr};
 use itertools::Itertools;
 use pkarr::dns::rdata::RData;
 use pkarr::dns::{Name, SimpleDnsError};
 use pkarr::PkarrClient;
 use request_handler::RequestHandler;
-use rostra_core::event::{Event, EventKind};
+use rostra_core::event::{Event, EventContent, EventKind, SignedEvent};
 use rostra_core::id::{RostraId, RostraIdSecretKey, RostraIdSecretKeyError};
 use rostra_core::ShortEventId;
-use rostra_p2p::connection::Connection;
+use rostra_p2p::connection::{Connection, FeedEventRequest, FeedEventResponse};
+use rostra_p2p::RpcError;
 use rostra_p2p_api::ROSTRA_P2P_V0_ALPN;
 use rostra_util_error::FmtCompact as _;
 use rostra_util_fmt::AsFmtOption as _;
 use snafu::{OptionExt as _, ResultExt, Snafu};
 use tokio::time::Instant;
-use tracing::debug;
+use tracing::{debug, info};
 
 const RRECORD_P2P_KEY: &str = "rostra-p2p";
 const RRECORD_HEAD_KEY: &str = "rostra-head";
@@ -93,7 +100,12 @@ pub type IdSecretReadResult<T> = std::result::Result<T, IdSecretReadError>;
 #[derive(Debug, Snafu)]
 pub enum PostError {
     #[snafu(transparent)]
-    Resolve { source: IdResolveError },
+    Resolve {
+        source: IdResolveError,
+    },
+    Encode {
+        source: bao_tree::io::EncodeError,
+    },
 }
 pub type PostResult<T> = std::result::Result<T, PostError>;
 
@@ -202,7 +214,9 @@ impl Client {
 
         Ok(client)
     }
+}
 
+impl Client {
     pub fn rostra_id(&self) -> RostraId {
         self.id
     }
@@ -373,6 +387,35 @@ impl Client {
         self.pkarr_client_relay.clone()
     }
 
+    async fn does_have_event(&self, _event_id: rostra_core::EventId) -> bool {
+        // TODO: check
+        false
+    }
+
+    pub async fn store_event(
+        &self,
+        _event_id: impl Into<ShortEventId>,
+        event: Event,
+        content: EventContent,
+    ) -> DbResult<()> {
+        // TODO: store
+        info!(target: LOG_TARGET, ?event, ?content, "Pretending to store");
+        Ok(())
+    }
+
+    pub async fn store_event_too_large(
+        &self,
+        _event_id: impl Into<ShortEventId>,
+        _event: Event,
+    ) -> DbResult<()> {
+        unimplemented!()
+    }
+
+    fn event_size_limit(&self) -> u32 {
+        // TODO: take from db or something
+        16 * 1024 * 1024
+    }
+
     pub async fn read_id_secret(path: &Path) -> IdSecretReadResult<RostraIdSecretKey> {
         let content = tokio::fs::read_to_string(path).await.context(IoSnafu)?;
         RostraIdSecretKey::from_str(&content).context(ParsingSnafu)
@@ -392,11 +435,11 @@ impl Client {
             .await
     }
 
-    pub async fn post(&self, body: &str) -> PostResult<()> {
+    pub async fn post(&self, body: String) -> PostResult<()> {
         const ACTIVE_RESERVATION_TIMEOUT: Duration = Duration::from_secs(120);
         let mut known_head = None;
         let mut active_reservation: Option<(CompactTicket, Instant)> = None;
-        let mut event: Option<Event> = None;
+        let mut signed_event: Option<SignedEvent> = None;
 
         'try_connect_to_active: loop {
             let published_id_data = self.check_published_id_state().await;
@@ -404,8 +447,8 @@ impl Client {
             match published_id_data {
                 Ok(published_id_data) => {
                     known_head = published_id_data.published.head.or(known_head);
-
                     let Some(ticket) = published_id_data.published.ticket else {
+                        debug!(target: LOG_TARGET, "Not ticket to join this instance");
                         break 'try_connect_to_active;
                     };
 
@@ -422,20 +465,72 @@ impl Client {
                         active_reservation = Some((ticket.clone(), Instant::now()));
                     }
 
-                    let Ok(conn) = self.connect_ticket(ticket).await else {
+                    let Ok(conn) = self.connect_ticket(ticket).await.inspect_err(|err| {
+                        debug!(target: LOG_TARGET, err = %err.fmt_compact(), "Failed to connect to active instance");
+                    }) else {
                         continue;
                     };
 
-                    event = Some(event.unwrap_or_else(|| {
+                    signed_event = Some(signed_event.unwrap_or_else(|| {
                         Event::builder()
                             .author(self.id)
                             .kind(EventKind::SocialPost)
                             .content(body.as_bytes())
                             .build()
+                            .signed_by(self.id_secret)
                     }));
 
-                    todo!();
-                    // conn.send_event().await;
+                    let signed_event = signed_event.expect("Must be set by now");
+                    match conn
+                        .make_rpc_with_trailer(&FeedEventRequest(signed_event), |send| {
+                            let body = body.clone();
+                            Box::pin(async move {
+                                /// Use a block size of 16 KiB, a good default
+                                /// for most cases
+                                const BLOCK_SIZE: BlockSize = BlockSize::from_chunk_log(4);
+
+                                let mut ob = EmptyOutboard {
+                                    tree: BaoTree::new(
+                                        u32::from(signed_event.event.content_len).into(),
+                                        BLOCK_SIZE,
+                                    ),
+                                    root: blake3::Hash::from_bytes(
+                                        signed_event.event.content_hash.into(),
+                                    ),
+                                };
+
+                                // Encode the first 100000 bytes of the file
+                                let ranges =
+                                    ByteRanges::from(0u64..body.as_bytes().len().expect_into());
+                                let ranges = round_up_to_chunks(&ranges);
+                                encode_ranges_validated(
+                                    body.as_bytes(),
+                                    &mut ob,
+                                    &ranges,
+                                    TokioStreamWriter(send),
+                                )
+                                .await
+                                .boxed()?;
+
+                                Ok(())
+                            })
+                        })
+                        .await
+                    {
+                        Ok(_) => {
+                            debug!(target: LOG_TARGET, "Published");
+                            return Ok(());
+                        }
+                        Err(RpcError::Failed {
+                            return_code: FeedEventResponse::RETURN_CODE_ALREADY_HAVE,
+                        }) => {
+                            debug!(target: LOG_TARGET, "Already published");
+                            return Ok(());
+                        }
+                        Err(err) => {
+                            debug!(target: LOG_TARGET, err = %err.fmt_compact(), "Could not upload to active instance");
+                        }
+                    }
                 }
                 Err(_) => todo!(),
             }

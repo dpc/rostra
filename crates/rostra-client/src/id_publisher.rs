@@ -81,7 +81,7 @@ impl IdPublisher {
     /// Run the thread
     #[instrument(skip(self), ret)]
     pub async fn run(self) {
-        let mut interval = tokio::time::interval(Duration::from_secs(60));
+        let mut interval = tokio::time::interval(Duration::from_secs(30));
         loop {
             interval.tick().await;
 

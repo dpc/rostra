@@ -9,14 +9,15 @@ use iroh_net::endpoint::Incoming;
 use iroh_net::Endpoint;
 use rostra_core::id::RostraId;
 use rostra_p2p::connection::{
-    Connection, FeedEventRequest, PingRequest, PingResponse, RpcId, RpcIdKnown, RpcMessage as _,
-    MAX_REQUEST_SIZE,
+    Connection, FeedEventRequest, FeedEventResponse, PingRequest, PingResponse, RpcId,
+    RpcMessage as _, MAX_REQUEST_SIZE,
 };
 use rostra_p2p::RpcError;
 use rostra_util_error::FmtCompact as _;
-use snafu::{ensure, OptionExt as _, ResultExt as _, Snafu};
+use snafu::{OptionExt as _, ResultExt as _, Snafu};
 use tracing::{debug, info, instrument};
 
+use crate::db::DbError;
 use crate::{Client, ClientHandle};
 
 const LOG_TARGET: &str = "rostra::client::req_handler";
@@ -26,6 +27,7 @@ pub enum IncomingConnectionError {
     Connection {
         source: iroh_net::endpoint::ConnectionError,
     },
+    #[snafu(transparent)]
     Rpc {
         source: RpcError,
     },
@@ -35,11 +37,17 @@ pub enum IncomingConnectionError {
     DecodingBao {
         source: bao_tree::io::DecodeError,
     },
+    #[snafu(transparent)]
+    Db {
+        source: DbError,
+    },
     // TODO: more details
     InvalidRequest,
     InvalidSignature {
         source: ed25519_dalek::SignatureError,
     },
+    Exiting,
+    #[snafu(display("Unknown RPC ID: {id}"))]
     UnknownRpcId {
         id: RpcId,
     },
@@ -49,28 +57,23 @@ pub type IncomingConnectionResult<T> = std::result::Result<T, IncomingConnection
 pub struct RequestHandler {
     app: ClientHandle,
     endpoint: Endpoint,
-    inner: Arc<RequestHandlerInner>,
-}
-pub struct RequestHandlerInner {
     our_id: RostraId,
 }
 
 impl RequestHandler {
-    pub fn new(app: &Client, endpoint: Endpoint) -> Self {
+    pub fn new(app: &Client, endpoint: Endpoint) -> Arc<Self> {
         info!(pkarr_id = %app.rostra_id().try_fmt(), "Starting request handler task");
         Self {
             app: app.handle(),
             endpoint,
-            inner: RequestHandlerInner {
-                our_id: app.rostra_id(),
-            }
-            .into(),
+            our_id: app.rostra_id(),
         }
+        .into()
     }
 
     /// Run the thread
     #[instrument(skip(self), ret)]
-    pub async fn run(self) {
+    pub async fn run(self: Arc<Self>) {
         loop {
             if self.app.app_ref().is_none() {
                 debug!(target: LOG_TARGET, "Client gone, quitting");
@@ -81,13 +84,9 @@ impl RequestHandler {
                 return;
             };
 
-            let inner = self.inner.clone();
-            tokio::spawn(inner.handle_incoming(incoming));
+            tokio::spawn(self.clone().handle_incoming(incoming));
         }
     }
-}
-
-impl RequestHandlerInner {
     pub async fn handle_incoming(self: Arc<Self>, incoming: Incoming) {
         let peer_addr = incoming.remote_address();
         if let Err(err) = self.handle_incoming_try(incoming).await {
@@ -108,67 +107,102 @@ impl RequestHandlerInner {
 
         loop {
             let (send, mut recv) = conn.accept_bi().await.context(ConnectionSnafu)?;
-            let (id, content) = Connection::read_request_raw(&mut recv)
-                .await
-                .context(RpcSnafu)?;
+            let (id, req_msg) = Connection::read_request_raw(&mut recv).await?;
 
-            match id.to_known().context(UnknownRpcIdSnafu { id })? {
-                RpcIdKnown::Ping => {
-                    handle_ping_request(content, send).await?;
+            match id {
+                RpcId::PING => {
+                    self.handle_ping_request(req_msg, send).await?;
                 }
-                RpcIdKnown::FeedEvent => {
-                    handle_feed_event(self.our_id.into(), content, send, recv).await?;
+                RpcId::FEED_EVENT => {
+                    self.handle_feed_event(req_msg, send, recv).await?;
                 }
                 _ => return UnknownRpcIdSnafu { id }.fail(),
             }
         }
     }
-}
 
-async fn handle_ping_request(
-    content: Vec<u8>,
-    mut send: iroh_net::endpoint::SendStream,
-) -> Result<(), IncomingConnectionError> {
-    let req = PingRequest::decode_whole::<MAX_REQUEST_SIZE>(&content).context(DecodingSnafu)?;
-    Connection::write_message(&mut send, &PingResponse(req.0))
+    async fn handle_ping_request(
+        &self,
+        req_msg: Vec<u8>,
+        mut send: iroh_net::endpoint::SendStream,
+    ) -> Result<(), IncomingConnectionError> {
+        let req = PingRequest::decode_whole::<MAX_REQUEST_SIZE>(&req_msg).context(DecodingSnafu)?;
+        Connection::write_success_return_code(&mut send).await?;
+        Connection::write_message(&mut send, &PingResponse(req.0)).await?;
+        Ok(())
+    }
+
+    async fn handle_feed_event(
+        &self,
+        req_msg: Vec<u8>,
+        mut send: iroh_net::endpoint::SendStream,
+        mut read: iroh_net::endpoint::RecvStream,
+    ) -> Result<(), IncomingConnectionError> {
+        let FeedEventRequest(rostra_core::event::SignedEvent { event, sig }) =
+            FeedEventRequest::decode_whole::<MAX_REQUEST_SIZE>(&req_msg).context(DecodingSnafu)?;
+
+        let our_id = self.our_id;
+
+        if event.author != our_id.into() {
+            Connection::write_return_code(&mut send, FeedEventResponse::RETURN_CODE_ID_MISMATCH)
+                .await?;
+            return InvalidRequestSnafu.fail();
+        }
+        let event_id = event.compute_id();
+        event
+            .verified_signed_by(sig, our_id)
+            .context(InvalidSignatureSnafu)?;
+
+        {
+            let app = self.app.app_ref().context(ExitingSnafu)?;
+
+            if app.event_size_limit() < u32::from(event.content_len) {
+                app.store_event_too_large(event_id, event).await?;
+                Connection::write_return_code(
+                    &mut send,
+                    FeedEventResponse::RETURN_CODE_ALREADY_HAVE,
+                )
+                .await?;
+            }
+
+            if app.does_have_event(event_id).await {
+                Connection::write_return_code(
+                    &mut send,
+                    FeedEventResponse::RETURN_CODE_ALREADY_HAVE,
+                )
+                .await?;
+                return Ok(());
+            }
+        }
+        Connection::write_success_return_code(&mut send).await?;
+        Connection::write_message(&mut send, &FeedEventResponse).await?;
+
+        const BLOCK_SIZE: BlockSize = BlockSize::from_chunk_log(4);
+        let content_len: u32 = event.content_len.into();
+        let ranges = ByteRanges::from(0..content_len.into());
+        let chunk_ranges = round_up_to_chunks(&ranges);
+        let mut decoded = Vec::with_capacity(content_len.cast_into());
+        let mut ob = EmptyOutboard {
+            tree: BaoTree::new(content_len.into(), BLOCK_SIZE),
+            root: bao_tree::blake3::Hash::from_bytes(event.content_hash.into()),
+        };
+        bao_tree::io::fsm::decode_ranges(
+            TokioStreamReader(&mut read),
+            chunk_ranges,
+            &mut decoded,
+            &mut ob,
+        )
         .await
-        .context(RpcSnafu)?;
-    Ok(())
-}
+        .context(DecodingBaoSnafu)?;
 
-async fn handle_feed_event(
-    our_id: RostraId,
-    content: Vec<u8>,
-    mut send: iroh_net::endpoint::SendStream,
-    mut read: iroh_net::endpoint::RecvStream,
-) -> Result<(), IncomingConnectionError> {
-    let FeedEventRequest { event, sig } =
-        FeedEventRequest::decode_whole::<MAX_REQUEST_SIZE>(&content).context(DecodingSnafu)?;
+        {
+            let app = self.app.app_ref().context(ExitingSnafu)?;
 
-    ensure!(event.author != our_id.into(), InvalidRequestSnafu);
-    event
-        .verified_signed_by(sig, our_id)
-        .context(InvalidSignatureSnafu)?;
-    // TODO: verify signature, etc.
+            app.store_event(event_id, event, decoded.into()).await?;
+        }
 
-    const BLOCK_SIZE: BlockSize = BlockSize::from_chunk_log(4);
-    let content_len: u32 = event.content_len.into();
-    let ranges = ByteRanges::from(0..content_len.into());
-    let chunk_ranges = round_up_to_chunks(&ranges);
-    let mut decoded = Vec::with_capacity(content_len.cast_into());
-    let mut ob = EmptyOutboard {
-        tree: BaoTree::new(content_len.into(), BLOCK_SIZE),
-        root: bao_tree::blake3::Hash::from_bytes(event.content_hash.into()),
-    };
-    bao_tree::io::fsm::decode_ranges(
-        TokioStreamReader(&mut read),
-        chunk_ranges,
-        &mut decoded,
-        &mut ob,
-    )
-    .await
-    .context(DecodingBaoSnafu)?;
+        Connection::write_success_return_code(&mut send).await?;
 
-    // write somewhere
-    todo!("send some bytes to ack?")
+        Ok(())
+    }
 }

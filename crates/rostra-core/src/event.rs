@@ -142,7 +142,28 @@ impl Event {
     }
 }
 
-pub type Keypair = (); // TODO
+#[derive(Clone, Debug)]
+pub struct EventContent(Vec<u8>);
+
+impl From<Vec<u8>> for EventContent {
+    fn from(value: Vec<u8>) -> Self {
+        EventContent(value)
+    }
+}
+
+impl AsRef<[u8]> for EventContent {
+    fn as_ref(&self) -> &[u8] {
+        &self.0
+    }
+}
+
+#[cfg_attr(feature = "serde", derive(::serde::Serialize, ::serde::Deserialize))]
+#[cfg_attr(feature = "bincode", derive(::bincode::Encode, ::bincode::Decode))]
+#[derive(Copy, Clone)]
+pub struct SignedEvent {
+    pub event: Event,
+    pub sig: EventSignature,
+}
 
 define_array_type_no_serde!(struct EventSignature, 64);
 

@@ -154,8 +154,21 @@ async fn handle_cmd(opts: Opts) -> CliResult<serde_json::Value> {
                 Ok(serde_json::to_value(&resp).expect("Can't fail"))
             }
         },
-        cli::OptsCmd::Serve => {
-            let _client = Client::builder().build().await.context(InitSnafu)?;
+        cli::OptsCmd::Serve { secret_file } => {
+            let secret_id = if let Some(secret_file) = secret_file {
+                Some(
+                    Client::read_id_secret(&secret_file)
+                        .await
+                        .context(SecretSnafu)?,
+                )
+            } else {
+                None
+            };
+            let _client = Client::builder()
+                .maybe_id_secret(secret_id)
+                .build()
+                .await
+                .context(InitSnafu)?;
 
             pending().await
         }
@@ -176,11 +189,13 @@ async fn handle_cmd(opts: Opts) -> CliResult<serde_json::Value> {
 
             let client = Client::builder()
                 .id_secret(id_secret)
+                .start_request_handler(false)
+                .start_id_publisher(false)
                 .build()
                 .await
                 .context(InitSnafu)?;
 
-            client.post(&body).await?;
+            client.post(body).await?;
 
             Ok(serde_json::Value::Bool(true))
         }

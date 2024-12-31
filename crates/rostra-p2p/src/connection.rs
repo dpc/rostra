@@ -1,13 +1,19 @@
+use std::fmt;
+use std::future::Future;
+use std::pin::Pin;
+
 use bincode::{Decode, Encode};
 use convi::{CastInto, ExpectFrom};
 use iroh_net::endpoint::{RecvStream, SendStream};
 use rostra_core::bincode::STD_BINCODE_CONFIG;
-use rostra_core::event::{Event, EventSignature};
+use rostra_core::event::SignedEvent;
 use rostra_core::MsgLen;
+use rostra_util_error::BoxedErrorResult;
 use snafu::ResultExt as _;
 
 use crate::{
-    ConnectionSnafu, DecodingSnafu, MessageTooLargeSnafu, ReadSnafu, RpcResult, WriteSnafu,
+    ConnectionSnafu, DecodingSnafu, FailedSnafu, MessageTooLargeSnafu, ReadSnafu, RpcResult,
+    TrailerSnafu, WriteSnafu,
 };
 
 pub struct Connection(iroh_net::endpoint::Connection);
@@ -15,7 +21,7 @@ pub struct Connection(iroh_net::endpoint::Connection);
 /// Max request message size
 ///
 /// Requests are smaller, because they are initiated by an unknown side
-pub const MAX_REQUEST_SIZE: u32 = 16 * 1024;
+pub const MAX_REQUEST_SIZE: u32 = 4 * 1024;
 
 /// Max response message size
 pub const MAX_RESPONSE_SIZE: u32 = 32 * 1024 * 1024;
@@ -26,7 +32,7 @@ impl From<iroh_net::endpoint::Connection> for Connection {
     }
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub struct RpcId(u16);
 
 impl bincode::Encode for RpcId {
@@ -47,16 +53,17 @@ impl bincode::Decode for RpcId {
     }
 }
 
-impl RpcId {
-    const fn const_from(value: u16) -> Self {
-        Self(value)
+impl fmt::Display for RpcId {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        self.0.fmt(f)
     }
+}
 
-    pub fn to_known(self) -> Option<RpcIdKnown> {
-        Some(match self.0 {
-            0 => RpcIdKnown::Ping,
-            _ => return None,
-        })
+impl RpcId {
+    pub const PING: Self = Self(0);
+    pub const FEED_EVENT: Self = Self(1);
+    pub const fn const_from(value: u16) -> Self {
+        Self(value)
     }
 }
 
@@ -69,25 +76,6 @@ impl From<u16> for RpcId {
 impl From<RpcId> for u16 {
     fn from(value: RpcId) -> Self {
         value.0
-    }
-}
-
-impl From<RpcIdKnown> for RpcId {
-    fn from(value: RpcIdKnown) -> Self {
-        (value as u16).into()
-    }
-}
-
-#[repr(u16)]
-#[non_exhaustive]
-pub enum RpcIdKnown {
-    Ping = 0,
-    FeedEvent = 1,
-}
-
-impl RpcIdKnown {
-    const fn const_into(self) -> RpcId {
-        RpcId::const_from(self as u16)
     }
 }
 
@@ -116,28 +104,8 @@ pub trait RpcMessage: bincode::Encode + bincode::Decode {
 pub trait RpcRequest: RpcMessage {}
 pub trait RpcResponse: RpcMessage {}
 
-// #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-// #[derive(Encode, Decode)]
-// pub struct PingRequest(pub u64);
-
-// #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-// #[derive(Encode, Decode)]
-// pub struct PingResponse(pub u64);
-
-// impl RpcRequest for PingRequest {}
-// impl RpcMessage for PingRequest {}
-
-// impl RpcResponse for PingResponse {}
-// impl RpcMessage for PingResponse {}
-
-// impl Rpc for PingRequest {
-//     const RPC_ID: RpcId = RpcIdKnown::Ping.const_into();
-
-//     type Response = PingResponse;
-// }
-
 macro_rules! define_rpc {
-    ($id:ident, $req:ident, $req_body:item, $resp:ident, $resp_body:item) => {
+    ($id:expr, $req:ident, $req_body:item, $resp:ident, $resp_body:item) => {
 
         #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
         #[derive(Encode, Decode)]
@@ -154,7 +122,7 @@ macro_rules! define_rpc {
         impl RpcMessage for $resp {}
 
         impl Rpc for $req {
-            const RPC_ID: RpcId = RpcIdKnown::$id.const_into();
+            const RPC_ID: RpcId = $id;
 
             type Response = $resp;
         }
@@ -162,7 +130,7 @@ macro_rules! define_rpc {
 }
 
 define_rpc!(
-    Ping,
+    RpcId::PING,
     PingRequest,
     pub struct PingRequest(pub u64);,
     PingResponse,
@@ -170,15 +138,18 @@ define_rpc!(
 );
 
 define_rpc!(
-    FeedEvent,
+    RpcId::FEED_EVENT,
     FeedEventRequest,
-    pub struct FeedEventRequest {
-        pub event: Event,
-        pub sig: EventSignature,
-    },
+    pub struct FeedEventRequest(pub SignedEvent);,
     FeedEventResponse,
-    pub struct FeedEventResponse(());
+    pub struct FeedEventResponse;
 );
+
+impl FeedEventResponse {
+    pub const RETURN_CODE_ALREADY_HAVE: u8 = 1;
+    pub const RETURN_CODE_ID_MISMATCH: u8 = 2;
+    pub const RETURN_CODE_TOO_LARGE: u8 = 3;
+}
 
 fn rpc_request_to_bytes<R>(v: &R) -> Vec<u8>
 where
@@ -220,7 +191,40 @@ impl Connection {
 
         Self::write_rpc_request(&mut send, request).await?;
 
+        Self::read_success_error_code(&mut recv).await?;
+
         Self::read_message::<MAX_RESPONSE_SIZE, _>(&mut recv).await
+    }
+
+    /// Send an RPC that has "trailer data"
+    ///
+    /// The sequence:
+    ///
+    /// * request body
+    /// * read response
+    /// * send trailed data
+    /// * read response
+    pub async fn make_rpc_with_trailer<R: Rpc, F>(
+        &self,
+        request: &R,
+        trailer_f: F,
+    ) -> RpcResult<<R as Rpc>::Response>
+    where
+        F: for<'s> Fn(
+            &'s mut SendStream,
+        ) -> Pin<Box<dyn Future<Output = BoxedErrorResult<()>> + 's>>,
+    {
+        let (mut send, mut recv) = self.0.open_bi().await.context(ConnectionSnafu)?;
+
+        Self::write_rpc_request(&mut send, request).await?;
+
+        Self::read_success_error_code(&mut recv).await?;
+
+        let resp = Self::read_message::<MAX_RESPONSE_SIZE, _>(&mut recv).await;
+
+        (trailer_f)(&mut send).await.context(TrailerSnafu)?;
+
+        resp
     }
 
     pub async fn write_rpc_request<R: Rpc>(send: &mut SendStream, rpc: &R) -> RpcResult<()> {
@@ -229,6 +233,28 @@ impl Connection {
             .context(WriteSnafu)?;
 
         Ok(())
+    }
+
+    pub async fn read_success_error_code(recv: &mut RecvStream) -> RpcResult<u8> {
+        let mut res = [0u8; 1];
+        recv.read_exact(&mut res).await.boxed().context(ReadSnafu)?;
+
+        if res[0] != 0 {
+            return FailedSnafu {
+                return_code: res[0],
+            }
+            .fail();
+        }
+
+        Ok(res[0])
+    }
+
+    pub async fn write_success_return_code(send: &mut SendStream) -> RpcResult<()> {
+        send.write_all(&[0u8]).await.context(WriteSnafu)
+    }
+
+    pub async fn write_return_code(send: &mut SendStream, code: impl Into<u8>) -> RpcResult<()> {
+        send.write_all(&[code.into()]).await.context(WriteSnafu)
     }
 
     pub async fn read_message<const LIMIT: u32, V: RpcMessage>(
