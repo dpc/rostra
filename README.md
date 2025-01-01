@@ -60,7 +60,7 @@ marked as "deleted" in the new events.
 An Event also contains up to two hashes to existing events, forming a mostly-chain-like
 DAG, that allows interested users/nodes to track and replicate whole or part of the history.
 The DAG is also a way to allow multiple nodes to share the same identity
-without synchronization issues as divering histories can be simply merged.
+without synchronization issues as diverging histories can simply be merged.
 
 To understand the inner workings in more details, here are some POIs (might go stale over time):
 
