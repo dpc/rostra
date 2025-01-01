@@ -76,7 +76,7 @@ To understand the inner workings in more details, here are some POIs (might go s
 ## Compared with
 
 Let's be honest. The single biggest reason Rostra exist is: I didn't design any of the alternatives,
-so they works differently to how I think it p2p social network should work. :D
+so they work differently to how I think it p2p social network should work. :D
 
 ### Nostr
 
@@ -85,8 +85,8 @@ Rostra largely draws inspiration from Nostr, and in my mind is "Nostr done right
 Similarities:
 
 * Conceptually simple. That's my favourite part of Nostr.
-* Name. I swear I asked Claude.ia to come with Roman terms related to public discourse first,
-  and then turned out there's one that is oddly similar, so I ran with it.
+* Name. I swear I asked Claude.ia to come up with Roman terms related to public discourse first,
+  and only then turned out there's one that is oddly similar, so I ran with it for LOLs.
 
 Differences:
 
