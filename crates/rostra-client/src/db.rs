@@ -9,11 +9,11 @@ use rostra_core::id::{RostraId, ShortRostraId};
 use rostra_core::ShortEventId;
 use rostra_util_error::BoxedError;
 use snafu::{Location, ResultExt as _, Snafu};
+use tables::events::EventsMissingRecord;
 use tables::ids::{IdFollowingRecord, IdRecord};
 use tables::{
-    ContentState, EventRecord, EventsHeadsTableValue, EventsMissingTableValue, TABLE_DB_VER,
-    TABLE_EVENTS, TABLE_EVENTS_HEADS, TABLE_EVENTS_MISSING, TABLE_IDS, TABLE_IDS_FOLLOWING,
-    TABLE_SELF,
+    ContentState, EventRecord, EventsHeadsTableValue, TABLE_DB_VER, TABLE_EVENTS,
+    TABLE_EVENTS_HEADS, TABLE_EVENTS_MISSING, TABLE_IDS, TABLE_IDS_FOLLOWING, TABLE_SELF,
 };
 use tokio::task::JoinError;
 use tracing::{debug, info, instrument};
@@ -200,7 +200,7 @@ impl Database {
             content,
         }: &VerifiedEvent,
         events_table: &mut Table<ShortEventId, EventRecord>,
-        events_missing_table: &mut Table<(ShortRostraId, ShortEventId), EventsMissingTableValue>,
+        events_missing_table: &mut Table<(ShortRostraId, ShortEventId), EventsMissingRecord>,
         events_heads_table: &mut Table<(ShortRostraId, ShortEventId), EventsHeadsTableValue>,
     ) -> DbResult<()> {
         let author = event.author;
@@ -221,21 +221,41 @@ impl Database {
             return Ok(());
         }
 
-        if events_missing_table
+        let deleted = if let Some(prev_missing) = events_missing_table
             .remove(&(short_author, event_id))?
-            .is_none()
+            .map(|g| g.value())
         {
+            // if the missing was marked as deleted, we'll record it in the newly added
+            // event
+            prev_missing.deleted
+        } else {
             // since nothing was expecting this event yet, it must be a "head"
             events_heads_table.insert(&(short_author, event_id), &EventsHeadsTableValue)?;
+
+            None
         };
 
-        for prev_id in [event.parent_prev, event.parent_aux] {
+        for (prev_id, is_aux) in [(event.parent_prev, false), (event.parent_aux, true)] {
             if prev_id == ShortEventId::ZERO {
                 continue;
             }
-            if events_table.get(&prev_id)?.is_none() {
+
+            let prev_event = events_table.get(&prev_id)?.map(|r| r.value());
+            if let Some(mut prev_event) = prev_event {
+                if event.is_delete_aux_set() && is_aux {
+                    // mark as deleted by the current event
+                    prev_event.deleted = Some(event_id);
+                    events_table.insert(&prev_id, &prev_event)?;
+                }
+            } else {
                 // we do not have this parent yet, so we mark it as missing
-                events_missing_table.insert(&(short_author, prev_id), &EventsMissingTableValue)?;
+                events_missing_table.insert(
+                    &(short_author, prev_id),
+                    &EventsMissingRecord {
+                        // potentially mark that the missing event was already deleted
+                        deleted: (event.is_delete_aux_set() && is_aux).then_some(event_id),
+                    },
+                )?;
             }
             // if the event was considered a "head", it shouldn't as it has a child
             events_heads_table.remove(&(short_author, prev_id))?;
@@ -248,6 +268,7 @@ impl Database {
                     event: *event,
                     sig: *sig,
                 },
+                deleted,
                 content: ContentState::from(content.to_owned()),
             },
         )?;
@@ -257,10 +278,7 @@ impl Database {
 
     pub fn get_missing_events_tx(
         author: impl Into<ShortRostraId>,
-        events_missing_table: &impl ReadableTable<
-            (ShortRostraId, ShortEventId),
-            EventsMissingTableValue,
-        >,
+        events_missing_table: &impl ReadableTable<(ShortRostraId, ShortEventId), EventsMissingRecord>,
     ) -> DbResult<Vec<ShortEventId>> {
         let author = author.into();
         Ok(events_missing_table

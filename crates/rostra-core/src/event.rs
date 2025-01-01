@@ -43,16 +43,12 @@ pub struct Event {
 
     /// Bit flags
     ///
-    /// Bit `0` - replace/cancel event - All well-behaved nodes
+    /// Bit `0` - delete previous event - All well-behaved nodes
     /// should consider the event from `parent_aux` deleted, and
     /// delete its content from their storage and record the id of
     /// this event (one that deleted it) instead. The p2p and other
     /// protocols should accommodate such missing events as a core
-    /// feature of the protocol and no longer return new data. If
-    /// the `content_hash` is non-zero, the new event logically
-    /// replaces the old event, but exact meaning of it depends
-    /// on the `kind` of both events and is out of scope of the
-    /// core event handling, and more of a UX consideration.
+    /// feature of the protocol and no longer store or return content data.
     ///
     /// All other bits MUST be 0 when producing headers, but might
     /// gain meaning in the future, so should still be accepted and
@@ -104,6 +100,11 @@ pub struct Event {
 
     /// Blake3 hash of the content, usually returned
     pub content_hash: ContentHash,
+}
+impl Event {
+    pub fn is_delete_aux_set(&self) -> bool {
+        self.flags & 1 != 0
+    }
 }
 
 #[bon::bon]
