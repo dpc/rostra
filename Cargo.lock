@@ -3655,6 +3655,7 @@ dependencies = [
  "pkarr",
  "rand",
  "serde",
+ "snafu",
  "z32",
 ]
 

@@ -8,8 +8,9 @@ version = { workspace = true }
 
 [features]
 default = []
-ed25519-dalek = [ "dep:ed25519-dalek", "dep:rand" ]
-serde = [ "dep:serde", "dep:z32", "dep:bip39" ]
+bincode = [ "dep:bincode", "dep:snafu" ]
+ed25519-dalek = [ "dep:ed25519-dalek", "dep:rand", "dep:snafu"  ]
+serde = [ "dep:serde", "dep:z32", "dep:bip39"]
 
 [dependencies]
 bincode = { workspace = true, optional = true }
@@ -21,5 +22,6 @@ data-encoding = { workspace = true }
 ed25519-dalek = { workspace = true, optional = true }
 rand = { workspace = true, optional = true }
 serde = { workspace = true, optional = true }
+snafu = { workspace = true, optional = true }
 pkarr = { workspace = true, optional = true }
 z32 = { workspace = true, optional = true }

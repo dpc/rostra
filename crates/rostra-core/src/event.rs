@@ -4,12 +4,19 @@ mod ed25519;
 #[cfg(feature = "serde")]
 mod serde;
 
+#[cfg(feature = "bincode")]
+mod bincode;
+
+#[cfg(all(feature = "ed25519-dalek", feature = "bincode"))]
+mod verified_event;
 use std::collections::BTreeSet;
 
 use convi::ExpectInto as _;
+#[cfg(all(feature = "ed25519-dalek", feature = "bincode"))]
+pub use verified_event::*;
 
 use crate::bincode::STD_BINCODE_CONFIG;
-use crate::id::{RostraId, ShortRostraId};
+use crate::id::RostraId;
 use crate::{define_array_type_no_serde, ContentHash, EventId, MsgLen, ShortEventId};
 
 /// An even (header)
@@ -18,8 +25,8 @@ use crate::{define_array_type_no_serde, ContentHash, EventId, MsgLen, ShortEvent
 ///
 /// * version + flags + kind = 1 + 1 + 2 = 4
 /// * content_len = 4
-/// * padding = 8
-/// * author = 16
+/// * padding = 24
+/// * author = 32
 /// * parent * 2 = 16 * 2 = 32
 /// * content_hash = 32
 ///
@@ -57,10 +64,10 @@ pub struct Event {
 
     pub content_len: MsgLen,
 
-    /// Unused, reserved for future use
-    pub padding: [u8; 8],
+    /// Unused, reserved for future use, timestamp maybe? (8B)
+    pub padding: [u8; 24],
 
-    pub author: ShortRostraId,
+    pub author: RostraId,
 
     /// Previous EventId, to form a close to a chain (actually DAG).
     ///
@@ -103,12 +110,12 @@ pub struct Event {
 impl Event {
     #[builder]
     pub fn new(
-        author: impl Into<ShortRostraId>,
+        author: RostraId,
         replace: Option<ShortEventId>,
         kind: EventKind,
         parent_prev: Option<ShortEventId>,
         parent_aux: Option<ShortEventId>,
-        content: &[u8],
+        content: EventContent,
     ) -> Self {
         if replace.is_some() && parent_aux.is_some() {
             panic!("Can't set both both replace and parent_aux");
@@ -123,18 +130,18 @@ impl Event {
             flags: if replace.is_some() { 1 } else { 0 },
             kind,
             content_len: MsgLen(content.len().expect_into()),
-            padding: [0; 8],
-            author: author.into(),
+            padding: [0; 24],
+            author,
             parent_prev: parent_prev.unwrap_or_default(),
             parent_aux: parent_aux.or(replace).unwrap_or_default(),
-            content_hash: blake3::hash(&content).into(),
+            content_hash: content.compute_content_hash(),
         }
     }
 
     #[cfg(feature = "bincode")]
     pub fn compute_id(&self) -> EventId {
         let encoded =
-            bincode::encode_to_vec(self, STD_BINCODE_CONFIG).expect("Can't fail encoding");
+            ::bincode::encode_to_vec(self, STD_BINCODE_CONFIG).expect("Can't fail encoding");
         blake3::hash(&encoded).into()
     }
 
@@ -147,6 +154,12 @@ impl Event {
 #[derive(Clone, Debug)]
 #[cfg_attr(feature = "bincode", derive(::bincode::Encode, ::bincode::Decode))]
 pub struct EventContent(Vec<u8>);
+
+impl EventContent {
+    pub fn len(&self) -> usize {
+        self.0.len()
+    }
+}
 
 impl From<Vec<u8>> for EventContent {
     fn from(value: Vec<u8>) -> Self {
@@ -179,7 +192,7 @@ impl SignedEvent {
 define_array_type_no_serde!(struct EventSignature, 64);
 
 #[cfg_attr(feature = "serde", derive(::serde::Serialize, ::serde::Deserialize))]
-#[cfg_attr(feature = "bincode", derive(bincode::Encode, bincode::Decode))]
+#[cfg_attr(feature = "bincode", derive(::bincode::Encode, ::bincode::Decode))]
 #[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
 pub enum EventKind {
     /// Unspecified binary data
@@ -193,7 +206,7 @@ pub enum EventKind {
 }
 
 #[cfg_attr(feature = "serde", derive(::serde::Serialize, ::serde::Deserialize))]
-#[cfg_attr(feature = "bincode", derive(bincode::Encode, bincode::Decode))]
+#[cfg_attr(feature = "bincode", derive(::bincode::Encode, ::bincode::Decode))]
 #[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
 pub struct ContentSocialPost {
     /// List of sub-personas this post belongs to
@@ -203,7 +216,7 @@ pub struct ContentSocialPost {
 }
 
 #[cfg_attr(feature = "serde", derive(::serde::Serialize, ::serde::Deserialize))]
-#[cfg_attr(feature = "bincode", derive(bincode::Encode, bincode::Decode))]
+#[cfg_attr(feature = "bincode", derive(::bincode::Encode, ::bincode::Decode))]
 #[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
 pub struct ContentSocialLike {
     /// List of sub-personas this post belongs to
@@ -214,7 +227,7 @@ pub struct ContentSocialLike {
 }
 
 #[cfg_attr(feature = "serde", derive(::serde::Serialize, ::serde::Deserialize))]
-#[cfg_attr(feature = "bincode", derive(bincode::Encode, bincode::Decode))]
+#[cfg_attr(feature = "bincode", derive(::bincode::Encode, ::bincode::Decode))]
 #[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
 pub struct ContentSocialRepost {
     /// List of sub-personas this post belongs to

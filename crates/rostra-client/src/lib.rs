@@ -476,7 +476,7 @@ impl Client {
                         Event::builder()
                             .author(self.id)
                             .kind(EventKind::SocialPost)
-                            .content(body.as_bytes())
+                            .content(body.as_bytes().to_owned().into())
                             .build()
                             .signed_by(self.id_secret)
                     }));

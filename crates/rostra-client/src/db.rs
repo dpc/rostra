@@ -4,7 +4,7 @@ mod tables;
 use std::path::PathBuf;
 
 use redb_bincode::{ReadTransaction, ReadableTable, Table, WriteTransaction};
-use rostra_core::event::{EventContent, SignedEvent};
+use rostra_core::event::{SignedEvent, VerifiedEvent};
 use rostra_core::id::{RostraId, ShortRostraId};
 use rostra_core::ShortEventId;
 use rostra_util_error::BoxedError;
@@ -193,52 +193,62 @@ impl Database {
     }
 
     pub fn insert_event_tx(
-        event_id: impl Into<ShortEventId>,
-        event: SignedEvent,
-        content: EventContent,
+        VerifiedEvent {
+            event_id,
+            event,
+            sig,
+            content,
+        }: &VerifiedEvent,
         events_table: &mut Table<ShortEventId, EventRecord>,
         events_missing_table: &mut Table<(ShortRostraId, ShortEventId), EventsMissingTableValue>,
         events_heads_table: &mut Table<(ShortRostraId, ShortEventId), EventsHeadsTableValue>,
     ) -> DbResult<()> {
-        let event_id = event_id.into();
-        let author = event.event.author;
-
-        debug_assert_eq!(event_id, event.event.compute_id().into());
+        let author = event.author;
+        let event_id = ShortEventId::from(*event_id);
+        let short_author = ShortRostraId::from(author);
 
         let existing = events_table.get(&event_id)?.map(|g| g.value());
         if let Some(mut existing) = existing {
             match existing.content {
                 ContentState::Deleted | ContentState::Present(_) => {}
                 ContentState::Missing => {
-                    existing.content = ContentState::Present(content);
-                    events_table.insert(&event_id, &existing)?;
+                    if let Some(content) = content {
+                        existing.content = ContentState::Present(content.to_owned());
+                        events_table.insert(&event_id, &existing)?;
+                    }
                 }
             }
             return Ok(());
         }
 
-        if events_missing_table.remove(&(author, event_id))?.is_none() {
+        if events_missing_table
+            .remove(&(short_author, event_id))?
+            .is_none()
+        {
             // since nothing was expecting this event yet, it must be a "head"
-            events_heads_table.insert(&(author, event_id), &EventsHeadsTableValue)?;
+            events_heads_table.insert(&(short_author, event_id), &EventsHeadsTableValue)?;
         };
 
-        for prev_id in [event.event.parent_prev, event.event.parent_aux] {
+        for prev_id in [event.parent_prev, event.parent_aux] {
             if prev_id == ShortEventId::ZERO {
                 continue;
             }
             if events_table.get(&prev_id)?.is_none() {
                 // we do not have this parent yet, so we mark it as missing
-                events_missing_table.insert(&(author, prev_id), &EventsMissingTableValue)?;
+                events_missing_table.insert(&(short_author, prev_id), &EventsMissingTableValue)?;
             }
             // if the event was considered a "head", it shouldn't as it has a child
-            events_heads_table.remove(&(author, prev_id))?;
+            events_heads_table.remove(&(short_author, prev_id))?;
         }
 
         events_table.insert(
             &event_id,
             &EventRecord {
-                event,
-                content: ContentState::Present(content),
+                event: SignedEvent {
+                    event: *event,
+                    sig: *sig,
+                },
+                content: ContentState::from(content.to_owned()),
             },
         )?;
 
