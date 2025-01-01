@@ -32,7 +32,7 @@ blake3 = "1.5.5"
 bon = "3.3.0"
 bip39 = "2.0.0"
 clap = { version = "4.5.23", features = ["derive", "env"] }
-convi = { version = "0.1.1" , features = [ "min_target_pointer_width_32" ] }
+convi = { version = "0.1.1", features = ["min_target_pointer_width_32"] }
 data-encoding = "2.6"
 directories = "5"
 ed25519-dalek = "2.1.1"
@@ -42,6 +42,9 @@ iroh-net = { version = "0.28.1", features = ["iroh-relay"] }
 iroh-io = "0.6.0"
 itertools = "0.13.0"
 pkarr = "2.2.1"
+proptest = "1.6.0"
+tempfile = "3.14.0"
+test-log = { version = "0.2.16", features = ["trace"] }
 rand = "0.8"
 redb-bincode = { version = "0.2.1" }
 rostra-core = { path = "crates/rostra-core" }
@@ -81,4 +84,4 @@ debug = false
 debug = false
 
 [patch.crates-io]
-redb-bincode = { git = "https://github.com/dpc/redb-bincode", rev = "740ccad228281c2e4e180e99600b1723731590cd" }
+redb-bincode = { git = "https://github.com/dpc/redb-bincode", rev = "fbd5644ef11d598fb896ff3dea34a7e66804c717" }

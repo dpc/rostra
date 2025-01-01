@@ -142,6 +142,11 @@ define_array_type_public!(
 impl_base32_str!(ShortEventId);
 impl_zero_default!(ShortEventId);
 
+impl ShortEventId {
+    pub const ZERO: Self = Self([0u8; 16]);
+    pub const MAX: Self = Self([0xffu8; 16]);
+}
+
 define_array_type_public!(struct ContentHash, 32);
 impl_base32_str!(ContentHash);
 

@@ -158,6 +158,7 @@ pub struct Client {
     id: RostraId,
     id_secret: RostraIdSecretKey,
 
+    #[allow(dead_code)]
     db: Option<Database>,
 
     /// Our iroh-net endpoint

@@ -24,7 +24,12 @@ redb = "2.3.0"
 redb-bincode = "0.2.1"
 rostra-p2p = { workspace = true }
 rostra-p2p-api = { workspace = true }
-rostra-core = { workspace = true, features = ["ed25519-dalek", "pkarr", "bincode", "serde"] }
+rostra-core = { workspace = true, features = [
+  "ed25519-dalek",
+  "pkarr",
+  "bincode",
+  "serde",
+] }
 rostra-util-error = { workspace = true }
 rostra-util-fmt = { workspace = true }
 serde = { workspace = true }
@@ -32,3 +37,7 @@ snafu = { workspace = true }
 tokio = { workspace = true }
 tracing = { workspace = true }
 tracing-subscriber = { workspace = true }
+
+[dev-dependencies]
+tempfile = { workspace = true }
+test-log = { workspace = true, features = ["trace"] }

@@ -1,9 +1,6 @@
 #[cfg(feature = "ed25519-dalek")]
 mod ed25519;
 
-#[cfg(feature = "ed25519-dalek")]
-mod dalek;
-
 #[cfg(feature = "serde")]
 mod serde;
 
@@ -140,9 +137,15 @@ impl Event {
             bincode::encode_to_vec(self, STD_BINCODE_CONFIG).expect("Can't fail encoding");
         blake3::hash(&encoded).into()
     }
+
+    #[cfg(feature = "bincode")]
+    pub fn compute_short_id(&self) -> ShortEventId {
+        self.compute_id().into()
+    }
 }
 
 #[derive(Clone, Debug)]
+#[cfg_attr(feature = "bincode", derive(::bincode::Encode, ::bincode::Decode))]
 pub struct EventContent(Vec<u8>);
 
 impl From<Vec<u8>> for EventContent {
@@ -159,12 +162,20 @@ impl AsRef<[u8]> for EventContent {
 
 #[cfg_attr(feature = "serde", derive(::serde::Serialize, ::serde::Deserialize))]
 #[cfg_attr(feature = "bincode", derive(::bincode::Encode, ::bincode::Decode))]
-#[derive(Copy, Clone)]
+#[derive(Copy, Clone, Debug)]
 pub struct SignedEvent {
     pub event: Event,
     pub sig: EventSignature,
 }
 
+impl SignedEvent {
+    pub fn compute_id(&self) -> EventId {
+        self.event.compute_id()
+    }
+    pub fn compute_short_id(&self) -> ShortEventId {
+        self.event.compute_id().into()
+    }
+}
 define_array_type_no_serde!(struct EventSignature, 64);
 
 #[cfg_attr(feature = "serde", derive(::serde::Serialize, ::serde::Deserialize))]

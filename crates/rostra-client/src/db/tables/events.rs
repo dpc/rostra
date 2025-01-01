@@ -1,16 +1,15 @@
 use bincode::{Decode, Encode};
-use rostra_core::event::{Event, EventSignature};
+use rostra_core::event::{EventContent, SignedEvent};
 
 #[derive(Debug, Encode, Decode, Clone)]
 pub enum ContentState {
     Missing,
-    Present(Vec<u8>),
+    Present(EventContent),
     Deleted,
 }
 
 #[derive(Debug, Encode, Decode, Clone)]
 pub struct EventRecord {
-    pub event: Event,
-    pub signature: EventSignature,
+    pub event: SignedEvent,
     pub content: ContentState,
 }
