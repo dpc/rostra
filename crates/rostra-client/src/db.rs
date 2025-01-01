@@ -235,7 +235,15 @@ impl Database {
             None
         };
 
-        for (prev_id, is_aux) in [(event.parent_prev, false), (event.parent_aux, true)] {
+        // When both parents point at same thing, process only one: one that can
+        // be responsible for deletion.
+        let prev_ids = if event.parent_aux == event.parent_prev {
+            vec![(event.parent_aux, true)]
+        } else {
+            vec![(event.parent_aux, true), (event.parent_prev, false)]
+        };
+
+        for (prev_id, is_aux) in prev_ids {
             if prev_id == ShortEventId::ZERO {
                 continue;
             }

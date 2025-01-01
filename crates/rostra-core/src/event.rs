@@ -56,8 +56,14 @@ pub struct Event {
     pub flags: u8,
 
     /// The meaning and interpretation of the content from `content_hash`.
+    ///
+    /// This allows clients to filter and download data that they need.
     pub kind: EventKind,
 
+    /// Content length
+    ///
+    /// Committing to it here, allows clients with storage requirements
+    /// to skip data simply too large to bother with.
     pub content_len: MsgLen,
 
     /// Unused, reserved for future use, timestamp maybe? (8B)
@@ -65,7 +71,7 @@ pub struct Event {
 
     pub author: RostraId,
 
-    /// Previous EventId, to form a close to a chain (actually DAG).
+    /// Previous EventId, to form a kind-of-a-chain (actually DAG).
     ///
     /// It is supposed to be the *latest* `EventID` known to the client
     /// to allow traversing events (almost) in order.
@@ -86,10 +92,11 @@ pub struct Event {
     /// into one DAG. Also, by pointing at some much older `EventID`
     /// it allows fetching older events, without traversing
     /// the DAG/chain one by one, potentially suffering latency
-    /// of getting the data serially and
+    /// of getting the data serially.
     ///
     /// Well behaved clients should try to make it point somewhat
-    /// older event, to help it act as a skiplist.
+    /// older event, to help it act as a skiplist. A random event
+    /// might be easy to implement.
     ///
     /// `EventID::ZERO` means "None", and is valid, e.g. in
     /// cases where the client does not maintain any history and
@@ -98,7 +105,7 @@ pub struct Event {
     /// It is also OK if `parent_aux == parent_prev`.
     pub parent_aux: ShortEventId,
 
-    /// Blake3 hash of the content, usually returned
+    /// Blake3 hash of the content
     pub content_hash: ContentHash,
 }
 impl Event {
