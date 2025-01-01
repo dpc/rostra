@@ -72,3 +72,37 @@ To understand the inner workings in more details, here are some POIs (might go s
 * Figure out general idea and architecture (mostly done)
 * Implement data model, p2p rpc, replication, etc.
 * Implement a built-in UX (web-server, using htmx).
+
+## Compared with
+
+Let's be honest. The single biggest reason Rostra exist is: I didn't design any of the alternatives,
+so they works differently to how I think it p2p social network should work. :D
+
+### Nostr
+
+Rostra largely draws inspiration from Nostr, and in my mind is "Nostr done right".
+
+Similarities:
+
+* Conceptually simple. That's my favourite part of Nostr.
+* Name. I swear I asked Claude.ia to come with Roman terms related to public discourse first,
+  and then turned out there's one that is oddly similar, so I ran with it.
+
+Differences:
+
+* The lower layers of the implementation are more comlicated. It's 2025, I can
+  take p2p connectivity, distributed DNS, binary serialization as dependencies, rip
+  the benefits with minimal effort and focus on the simplicity of the relevant design.
+* Actually P2P. DHTs and P2P work just fine in BitTorrent for 2 decades already.
+* Abandons JS, embraces Rust and Unix tech. Optimizing for JS-integration is not
+  the most important goal, especially as it sacorifices actually being P2P.
+* Optimizes for performanced and resource usage.
+
+
+### BlueSky
+
+Differences:
+
+* Simpler. One person design.
+* Doesn't bring centralized tech like DNS in.
+* Self-hosted-first.
