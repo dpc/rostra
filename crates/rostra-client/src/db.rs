@@ -251,8 +251,10 @@ impl Database {
             let prev_event = events_table.get(&prev_id)?.map(|r| r.value());
             if let Some(mut prev_event) = prev_event {
                 if event.is_delete_aux_set() && is_aux {
-                    // mark as deleted by the current event
-                    prev_event.deleted = Some(event_id);
+                    // keep the existing deleted mark if there, otherwise mark as deleted by the
+                    // current event
+                    prev_event.deleted = prev_event.deleted.or(Some(event_id));
+                    prev_event.content = ContentState::Deleted;
                     events_table.insert(&prev_id, &prev_event)?;
                 }
             } else {
@@ -277,7 +279,11 @@ impl Database {
                     sig: *sig,
                 },
                 deleted,
-                content: ContentState::from(content.to_owned()),
+                content: if deleted.is_some() {
+                    ContentState::Deleted
+                } else {
+                    ContentState::from(content.to_owned())
+                },
             },
         )?;
 
@@ -304,6 +310,13 @@ impl Database {
             .range((author, ShortEventId::ZERO)..=(author, ShortEventId::MAX))?
             .map(|r| r.map(|(k, _v)| k.value().1))
             .collect::<Result<Vec<_>, _>>()?)
+    }
+
+    pub fn get_event(
+        event: impl Into<ShortEventId>,
+        events_table: &impl ReadableTable<ShortEventId, EventRecord>,
+    ) -> DbResult<Option<EventRecord>> {
+        Ok(events_table.get(&event.into())?.map(|r| r.value()))
     }
 }
 

@@ -7,7 +7,7 @@ use snafu::ResultExt as _;
 use tempfile::{tempdir, TempDir};
 use tracing::info;
 
-use crate::db::tables::{TABLE_EVENTS, TABLE_EVENTS_HEADS, TABLE_EVENTS_MISSING};
+use crate::db::tables::{ContentState, TABLE_EVENTS, TABLE_EVENTS_HEADS, TABLE_EVENTS_MISSING};
 use crate::db::Database;
 
 async fn temp_db() -> BoxedErrorResult<(TempDir, super::Database)> {
@@ -93,6 +93,103 @@ async fn test_store_event() -> BoxedErrorResult<()> {
                 let heads = Database::get_heads_events_tx(author, &events_heads_table)?;
                 heads.iter().for_each(|head| info!(%head, "Head"));
                 assert_eq!(heads, heads_expect);
+            }
+        }
+        Ok(())
+    })
+    .await?;
+
+    Ok(())
+}
+
+fn build_test_event_2(
+    id_secret: RostraIdSecretKey,
+    parent: impl Into<Option<EventId>>,
+    delete: impl Into<Option<EventId>>,
+) -> VerifiedEvent {
+    let parent = parent.into();
+    let delete = delete.into();
+
+    let content = EventContent::from(vec![]);
+    let event = Event::builder()
+        .author(id_secret.id())
+        .kind(SocialPost)
+        .maybe_parent_prev(parent.map(Into::into))
+        .maybe_delete(delete.map(Into::into))
+        .content(content.clone())
+        .build();
+
+    let signed_event = event.signed_by(id_secret);
+
+    VerifiedEvent::verify_signed(signed_event, content).expect("Valid event")
+}
+
+#[test_log::test(tokio::test(flavor = "multi_thread"))]
+async fn test_store_deleted_event() -> BoxedErrorResult<()> {
+    let (_dir, db) = temp_db().await?;
+
+    let id_secret = RostraIdSecretKey::generate();
+
+    let event_a = build_test_event_2(id_secret, None, None);
+    let event_a_id = event_a.event_id;
+    let event_b = build_test_event_2(id_secret, event_a.event_id, event_a_id);
+    let event_b_id = event_b.event_id;
+    let event_c = build_test_event_2(id_secret, event_b.event_id, event_a_id);
+    let event_c_id = event_c.event_id;
+    let event_d = build_test_event_2(id_secret, event_c.event_id, event_b_id);
+    let event_d_id = event_d.event_id;
+
+    db.write_with(|tx| {
+        let mut events_table = tx.open_table(&TABLE_EVENTS).boxed()?;
+        let mut events_missing_table = tx.open_table(&TABLE_EVENTS_MISSING).boxed()?;
+        let mut events_heads_table = tx.open_table(&TABLE_EVENTS_HEADS).boxed()?;
+
+        for (event, expected_states) in [
+            (event_a, [Some(None), None, None, None]),
+            (
+                event_c,
+                [Some(Some(event_c_id.into())), None, Some(None), None],
+            ),
+            (
+                event_d,
+                [Some(Some(event_c_id.into())), None, Some(None), Some(None)],
+            ),
+            (
+                event_b,
+                [
+                    Some(Some(event_c_id.into())),
+                    Some(Some(event_d_id.into())),
+                    Some(None),
+                    Some(None),
+                ],
+            ),
+        ] {
+            // verify idempotency, just for for the sake of it
+            for _ in 0..2 {
+                info!(event_id = %event.event_id, "Inserting");
+                Database::insert_event_tx(
+                    &event,
+                    &mut events_table,
+                    &mut events_missing_table,
+                    &mut events_heads_table,
+                )?;
+
+                for (event_id, expected_state) in [event_a_id, event_b_id, event_c_id, event_d_id]
+                    .into_iter()
+                    .zip(expected_states)
+                {
+                    info!(event_id = %event_id, "Checking");
+                    let state = Database::get_event(event_id, &events_table)?.map(|record| {
+                        info!(event_id = %event_id, ?record.content, "State");
+                        assert_eq!(
+                            record.deleted.is_some(),
+                            matches!(record.content, ContentState::Deleted)
+                        );
+                        record.deleted
+                    });
+
+                    assert_eq!(state, expected_state);
+                }
             }
         }
         Ok(())

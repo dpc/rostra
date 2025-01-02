@@ -1,3 +1,4 @@
+use convi::CastInto as _;
 use ed25519_dalek::SignatureError;
 use snafu::{ResultExt as _, Snafu};
 
@@ -10,7 +11,8 @@ use crate::EventId;
 ///
 /// * `event_id` matches
 /// * `sig` valid for `event.author`
-/// * if `content` is `Some`, matches `event.content_hash`
+/// * if `content` is `Some`, matches `event.content_hash` and
+///   `event.content_len`
 #[derive(Clone, Debug)]
 pub struct VerifiedEvent {
     pub event_id: EventId,
@@ -46,7 +48,12 @@ impl VerifiedEvent {
         let content: Option<_> = content.into();
 
         if let Some(content) = content.as_ref() {
-            if content.compute_content_hash() != event.content_hash {}
+            if content.len() != u32::from(event.content_len).cast_into() {
+                return ContentMismatchSnafu.fail();
+            }
+            if content.compute_content_hash() != event.content_hash {
+                return ContentMismatchSnafu.fail();
+            }
         }
 
         Ok(Self {

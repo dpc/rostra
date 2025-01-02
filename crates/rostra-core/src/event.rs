@@ -119,17 +119,17 @@ impl Event {
     #[builder]
     pub fn new(
         author: RostraId,
-        replace: Option<ShortEventId>,
+        delete: Option<ShortEventId>,
         kind: EventKind,
         parent_prev: Option<ShortEventId>,
         parent_aux: Option<ShortEventId>,
         content: EventContent,
     ) -> Self {
-        if replace.is_some() && parent_aux.is_some() {
-            panic!("Can't set both both replace and parent_aux");
+        if delete.is_some() && parent_aux.is_some() {
+            panic!("Can't set both both delete and parent_aux");
         }
 
-        let replace = replace.map(Into::into);
+        let replace = delete.map(Into::into);
         let parent_prev = parent_prev.map(Into::into);
         let parent_aux = parent_aux.map(Into::into);
 
