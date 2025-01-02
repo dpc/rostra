@@ -187,3 +187,19 @@ impl From<MsgLen> for u32 {
         value.0
     }
 }
+/// Timestatmp encoded in fixed-sized way
+#[cfg_attr(feature = "serde", derive(::serde::Serialize, ::serde::Deserialize))]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct Timestamp(pub u64);
+
+impl From<u64> for Timestamp {
+    fn from(value: u64) -> Self {
+        Self(value)
+    }
+}
+
+impl From<Timestamp> for u64 {
+    fn from(value: Timestamp) -> Self {
+        value.0
+    }
+}

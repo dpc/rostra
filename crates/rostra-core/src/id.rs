@@ -11,6 +11,10 @@ mod serde;
 
 define_array_type_public_no_serde!(struct RostraId, 32);
 
+impl RostraId {
+    pub const ZERO: Self = Self([0u8; 32]);
+    pub const MAX: Self = Self([0xffu8; 32]);
+}
 impl From<RostraId> for ShortRostraId {
     fn from(id: RostraId) -> Self {
         id.split().0
@@ -19,6 +23,11 @@ impl From<RostraId> for ShortRostraId {
 
 define_array_type_public!(struct ShortRostraId, 16);
 define_array_type_public!(struct RestRostraId, 16);
+
+impl ShortRostraId {
+    pub const ZERO: Self = Self([0u8; 16]);
+    pub const MAX: Self = Self([0xffu8; 16]);
+}
 
 impl RostraId {
     pub fn split(self) -> (ShortRostraId, RestRostraId) {

@@ -1,6 +1,6 @@
 use bincode::config;
 
-use crate::MsgLen;
+use crate::{MsgLen, Timestamp};
 
 pub const STANDARD_LIMIT_16M: usize = 0x1_0000_0000;
 pub const STD_BINCODE_CONFIG: config::Configuration<
@@ -35,5 +35,31 @@ impl bincode::Decode for MsgLen {
         decoder: &mut D,
     ) -> core::result::Result<Self, bincode::error::DecodeError> {
         Ok(Self(u32::from_be_bytes(bincode::Decode::decode(decoder)?)))
+    }
+}
+
+impl bincode::Encode for Timestamp {
+    fn encode<E: bincode::enc::Encoder>(
+        &self,
+        encoder: &mut E,
+    ) -> core::result::Result<(), bincode::error::EncodeError> {
+        bincode::Encode::encode(&self.0.to_be_bytes(), encoder)?;
+        Ok(())
+    }
+}
+
+impl<'de> bincode::BorrowDecode<'de> for Timestamp {
+    fn borrow_decode<D: bincode::de::BorrowDecoder<'de>>(
+        decoder: &mut D,
+    ) -> Result<Self, bincode::error::DecodeError> {
+        Ok(Self(u64::from_be_bytes(bincode::Decode::decode(decoder)?)))
+    }
+}
+
+impl bincode::Decode for Timestamp {
+    fn decode<D: bincode::de::Decoder>(
+        decoder: &mut D,
+    ) -> core::result::Result<Self, bincode::error::DecodeError> {
+        Ok(Self(u64::from_be_bytes(bincode::Decode::decode(decoder)?)))
     }
 }

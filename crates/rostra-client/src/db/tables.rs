@@ -1,9 +1,10 @@
 use bincode::{Decode, Encode};
 use events::EventsMissingRecord;
 pub use events::{ContentState, EventRecord};
-pub use ids::{IdFollowingRecord, IdRecord};
+use ids::IdsFolloweesTsRecord;
+pub use ids::{IdRecord, IdsFolloweesRecord};
 use redb_bincode::TableDefinition;
-use rostra_core::id::ShortRostraId;
+use rostra_core::id::{RostraId, ShortRostraId};
 use rostra_core::ShortEventId;
 
 pub(crate) mod events;
@@ -13,10 +14,16 @@ pub const TABLE_DB_VER: TableDefinition<'_, (), u64> = TableDefinition::new("db-
 
 pub const TABLE_SELF: TableDefinition<'_, (), ShortRostraId> = TableDefinition::new("self");
 
+/// Basically `short_id` -> `full_id`, plus maybe more data in the future about
+/// the id
 pub const TABLE_IDS: TableDefinition<'_, ShortRostraId, IdRecord> = TableDefinition::new("ids");
 
-pub const TABLE_IDS_FOLLOWING: TableDefinition<'_, ShortRostraId, IdFollowingRecord> =
-    TableDefinition::new("ids-social-following");
+/// Table with `who` -> `whom` following
+pub const TABLE_IDS_FOLLOWEES: TableDefinition<'_, (ShortRostraId, RostraId), IdsFolloweesRecord> =
+    TableDefinition::new("ids-followees");
+
+pub const TABLE_IDS_FOLLOWEES_TS: TableDefinition<'_, ShortRostraId, IdsFolloweesTsRecord> =
+    TableDefinition::new("ids-followees-ts");
 
 pub const TABLE_EVENTS: TableDefinition<'_, ShortEventId, EventRecord> =
     TableDefinition::new("events");

@@ -15,7 +15,7 @@ pub struct EventRecord {
     // Notably: we only store one ShortEventId somewhat opportunistically
     // If multiple events pointed at the same parent event to be deleted,
     // we might return any.
-    pub deleted: Option<ShortEventId>,
+    pub deleted_by: Option<ShortEventId>,
     pub content: ContentState,
 }
 

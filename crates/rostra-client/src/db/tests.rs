@@ -182,10 +182,10 @@ async fn test_store_deleted_event() -> BoxedErrorResult<()> {
                     let state = Database::get_event(event_id, &events_table)?.map(|record| {
                         info!(event_id = %event_id, ?record.content, "State");
                         assert_eq!(
-                            record.deleted.is_some(),
+                            record.deleted_by.is_some(),
                             matches!(record.content, ContentState::Deleted)
                         );
-                        record.deleted
+                        record.deleted_by
                     });
 
                     assert_eq!(state, expected_state);

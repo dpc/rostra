@@ -10,6 +10,7 @@ mod bincode;
 #[cfg(all(feature = "ed25519-dalek", feature = "bincode"))]
 mod verified_event;
 use std::collections::BTreeSet;
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use convi::ExpectInto as _;
 #[cfg(all(feature = "ed25519-dalek", feature = "bincode"))]
@@ -17,7 +18,7 @@ pub use verified_event::*;
 
 use crate::bincode::STD_BINCODE_CONFIG;
 use crate::id::RostraId;
-use crate::{define_array_type_no_serde, ContentHash, EventId, MsgLen, ShortEventId};
+use crate::{define_array_type_no_serde, ContentHash, EventId, MsgLen, ShortEventId, Timestamp};
 
 /// An even (header)
 ///
@@ -25,7 +26,8 @@ use crate::{define_array_type_no_serde, ContentHash, EventId, MsgLen, ShortEvent
 ///
 /// * version + flags + kind = 1 + 1 + 2 = 4
 /// * content_len = 4
-/// * padding = 24
+/// * timestamp = 8
+/// * padding = 16
 /// * author = 32
 /// * parent * 2 = 16 * 2 = 32
 /// * content_hash = 32
@@ -66,9 +68,13 @@ pub struct Event {
     /// to skip data simply too large to bother with.
     pub content_len: MsgLen,
 
-    /// Unused, reserved for future use, timestamp maybe? (8B)
-    pub padding: [u8; 24],
+    /// Timestamp of the message
+    pub timestamp: Timestamp,
 
+    /// Unused, reserved for future use, timestamp maybe? (8B)
+    pub padding: [u8; 16],
+
+    /// Public id of the creator of the message
     pub author: RostraId,
 
     /// Previous EventId, to form a kind-of-a-chain (actually DAG).
@@ -123,6 +129,7 @@ impl Event {
         kind: EventKind,
         parent_prev: Option<ShortEventId>,
         parent_aux: Option<ShortEventId>,
+        timestamp: Option<SystemTime>,
         content: EventContent,
     ) -> Self {
         if delete.is_some() && parent_aux.is_some() {
@@ -133,12 +140,19 @@ impl Event {
         let parent_prev = parent_prev.map(Into::into);
         let parent_aux = parent_aux.map(Into::into);
 
+        let timestamp = timestamp
+            .unwrap_or_else(|| SystemTime::now())
+            .duration_since(UNIX_EPOCH)
+            .expect("Dates before Unix epoch are unsupported")
+            .as_secs();
+
         Self {
             version: 0,
             flags: if replace.is_some() { 1 } else { 0 },
             kind,
             content_len: MsgLen(content.len().expect_into()),
-            padding: [0; 24],
+            padding: [0; 16],
+            timestamp: timestamp.into(),
             author,
             parent_prev: parent_prev.unwrap_or_default(),
             parent_aux: parent_aux.or(replace).unwrap_or_default(),
@@ -203,8 +217,13 @@ define_array_type_no_serde!(struct EventSignature, 64);
 #[cfg_attr(feature = "bincode", derive(::bincode::Encode, ::bincode::Decode))]
 #[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
 pub enum EventKind {
+    /// No real content
+    Null = 0x00,
     /// Unspecified binary data
-    Raw = 0x00,
+    Raw = 0x01,
+    /// Update of identities being followed
+    FolloweesUpdate = 0x02,
+
     /// Social Post, backbone of the social network
     SocialPost = 0x10,
     SocialLike = 0x11,
@@ -216,9 +235,17 @@ pub enum EventKind {
 #[cfg_attr(feature = "serde", derive(::serde::Serialize, ::serde::Deserialize))]
 #[cfg_attr(feature = "bincode", derive(::bincode::Encode, ::bincode::Decode))]
 #[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
+pub struct FolloweesUpdate {
+    /// id + "persona" to assign to
+    pub followees: Vec<(RostraId, String)>,
+}
+
+#[cfg_attr(feature = "serde", derive(::serde::Serialize, ::serde::Deserialize))]
+#[cfg_attr(feature = "bincode", derive(::bincode::Encode, ::bincode::Decode))]
+#[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
 pub struct ContentSocialPost {
     /// List of sub-personas this post belongs to
-    pub personas: BTreeSet<String>,
+    pub persona: String,
     pub timestamp: u32,
     pub djot_content: String,
 }

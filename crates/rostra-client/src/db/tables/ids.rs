@@ -6,7 +6,12 @@ pub struct IdRecord {
     pub id_rest: RestRostraId,
 }
 
+#[derive(Debug, Encode, Decode, Clone)]
+pub struct IdsFolloweesRecord {
+    pub persona: String,
+}
+
 #[derive(Debug, Encode, Decode, Clone, Copy)]
-pub struct IdFollowingRecord {
-    something: bool,
+pub struct IdsFolloweesTsRecord {
+    pub ts: u64,
 }
