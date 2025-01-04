@@ -165,16 +165,16 @@ impl Database {
         Self::from(create).init().await
     }
 
-    pub async fn read_following(&self, id: ShortRostraId) -> DbResult<Vec<(RostraId, String)>> {
+    pub async fn read_followees(&self, id: ShortRostraId) -> DbResult<Vec<(RostraId, String)>> {
         self.read_with(|tx| {
             let ids_following_table = tx.open_table(&TABLE_IDS_FOLLOWEES).context(TableSnafu)?;
 
-            Self::read_following_tx(id, &ids_following_table)
+            Self::read_followees_tx(id, &ids_following_table)
         })
         .await
     }
 
-    pub fn read_following_tx(
+    pub fn read_followees_tx(
         id: ShortRostraId,
         ids_following_table: &impl ReadableTable<(ShortRostraId, RostraId), IdsFolloweesRecord>,
     ) -> DbResult<Vec<(RostraId, String)>> {
@@ -316,7 +316,7 @@ impl Database {
         ts: Timestamp,
         followees: Vec<(RostraId, String)>,
         ids_folowees_ts_table: &mut Table<ShortRostraId, IdsFolloweesTsRecord>,
-        ids_folowees_table: &mut Table<(ShortRostraId, ShortRostraId), IdsFolloweesRecord>,
+        ids_folowees_table: &mut Table<(ShortRostraId, RostraId), IdsFolloweesRecord>,
     ) -> DbResult<bool> {
         if ids_folowees_ts_table
             .get(&author)?
@@ -326,9 +326,13 @@ impl Database {
         }
 
         ids_folowees_table.retain_in(
-            (author, ShortRostraId::ZERO)..=(author, ShortRostraId::MAX),
-            |(k, v)| false,
+            (author, RostraId::ZERO)..=(author, RostraId::MAX),
+            |_k, _v| false,
         )?;
+
+        for (followee_id, persona) in followees {
+            ids_folowees_table.insert(&(author, followee_id), &IdsFolloweesRecord { persona })?;
+        }
 
         return Ok(true);
     }

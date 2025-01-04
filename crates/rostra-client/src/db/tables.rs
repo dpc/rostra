@@ -32,7 +32,7 @@ pub const TABLE_EVENTS_MISSING: TableDefinition<
     '_,
     (ShortRostraId, ShortEventId),
     EventsMissingRecord,
-> = TableDefinition::new("events_missing");
+> = TableDefinition::new("events-missing");
 
 #[derive(Decode, Encode, Debug)]
 pub struct EventsHeadsTableValue;
@@ -41,4 +41,4 @@ pub const TABLE_EVENTS_HEADS: TableDefinition<
     '_,
     (ShortRostraId, ShortEventId),
     EventsHeadsTableValue,
-> = TableDefinition::new("events_heads");
+> = TableDefinition::new("events-heads");

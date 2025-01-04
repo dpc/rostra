@@ -84,4 +84,4 @@ debug = false
 debug = false
 
 [patch.crates-io]
-redb-bincode = { git = "https://github.com/dpc/redb-bincode", rev = "fbd5644ef11d598fb896ff3dea34a7e66804c717" }
+redb-bincode = { git = "https://github.com/dpc/redb-bincode", rev = "cfedc8963a480f22be988ff6651e1d9777566b14" }

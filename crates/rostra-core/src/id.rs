@@ -15,6 +15,7 @@ impl RostraId {
     pub const ZERO: Self = Self([0u8; 32]);
     pub const MAX: Self = Self([0xffu8; 32]);
 }
+
 impl From<RostraId> for ShortRostraId {
     fn from(id: RostraId) -> Self {
         id.split().0

@@ -8,16 +8,14 @@ use rostra_core::id::RostraIdSecretKey;
 use snafu::ResultExt as _;
 use tracing::{debug, instrument, trace, warn};
 
+use crate::client::Client;
+use crate::error::{DnsSnafu, IdPublishResult, PkarrPacketSnafu, PkarrPublishSnafu};
 use crate::id::{CompactTicket, IdPublishedData};
-use crate::{
-    Client, ClientHandle, DnsSnafu, IdPublishResult, PkarrPacketSnafu, PkarrPublishSnafu,
-    RRECORD_HEAD_KEY, RRECORD_P2P_KEY,
-};
-
+use crate::{RRECORD_HEAD_KEY, RRECORD_P2P_KEY};
 const LOG_TARGET: &str = "rostra::client::publisher";
 
 pub struct IdPublisher {
-    app: ClientHandle,
+    app: crate::client::ClientHandle,
     client: Arc<pkarr::PkarrClientAsync>,
     client_relay: Arc<pkarr::PkarrRelayClientAsync>,
     keypair: pkarr::Keypair,

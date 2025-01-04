@@ -17,8 +17,9 @@ use rostra_util_error::FmtCompact as _;
 use snafu::{OptionExt as _, ResultExt as _, Snafu};
 use tracing::{debug, info, instrument};
 
+use crate::client::Client;
 use crate::db::DbError;
-use crate::{Client, ClientHandle};
+use crate::ClientHandle;
 
 const LOG_TARGET: &str = "rostra::client::req_handler";
 
@@ -55,7 +56,7 @@ pub enum IncomingConnectionError {
 pub type IncomingConnectionResult<T> = std::result::Result<T, IncomingConnectionError>;
 
 pub struct RequestHandler {
-    app: ClientHandle,
+    client: ClientHandle,
     endpoint: Endpoint,
     our_id: RostraId,
 }
@@ -64,7 +65,7 @@ impl RequestHandler {
     pub fn new(app: &Client, endpoint: Endpoint) -> Arc<Self> {
         info!(pkarr_id = %app.rostra_id().try_fmt(), "Starting request handler task");
         Self {
-            app: app.handle(),
+            client: app.handle(),
             endpoint,
             our_id: app.rostra_id(),
         }
@@ -75,7 +76,7 @@ impl RequestHandler {
     #[instrument(skip(self), ret)]
     pub async fn run(self: Arc<Self>) {
         loop {
-            if self.app.app_ref().is_none() {
+            if self.client.app_ref().is_none() {
                 debug!(target: LOG_TARGET, "Client gone, quitting");
                 break;
             };
@@ -154,7 +155,7 @@ impl RequestHandler {
             .context(InvalidSignatureSnafu)?;
 
         {
-            let app = self.app.app_ref().context(ExitingSnafu)?;
+            let app = self.client.app_ref().context(ExitingSnafu)?;
 
             if app.event_size_limit() < u32::from(event.content_len) {
                 app.store_event_too_large(event_id, event).await?;
@@ -196,7 +197,7 @@ impl RequestHandler {
         .context(DecodingBaoSnafu)?;
 
         {
-            let app = self.app.app_ref().context(ExitingSnafu)?;
+            let app = self.client.app_ref().context(ExitingSnafu)?;
 
             app.store_event(event_id, event, decoded.into()).await?;
         }

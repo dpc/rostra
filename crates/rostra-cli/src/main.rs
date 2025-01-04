@@ -6,9 +6,8 @@ use std::time::Duration;
 use clap::Parser;
 use cli::Opts;
 use futures::future::pending;
-use rostra_client::{
-    Client, ConnectError, IdResolveError, IdSecretReadError, InitError, PostError,
-};
+use rostra_client::error::{ConnectError, IdResolveError, IdSecretReadError, InitError, PostError};
+use rostra_client::Client;
 use rostra_core::id::RostraIdSecretKey;
 use rostra_p2p::connection::{Connection, PingRequest, PingResponse};
 use rostra_p2p::RpcError;
@@ -26,28 +25,20 @@ type WhateverResult<T> = std::result::Result<T, snafu::Whatever>;
 
 #[derive(Debug, Snafu)]
 pub enum CliError {
-    Init {
-        source: InitError,
-    },
-    Resolve {
-        source: IdResolveError,
-    },
-    Connect {
-        source: ConnectError,
-    },
-    Rpc {
-        source: RpcError,
-    },
-    Secret {
-        source: IdSecretReadError,
-    },
+    #[snafu(display("Initialization error: {source}"))]
+    Init { source: InitError },
+    #[snafu(display("ID resolution error: {source}"))]
+    Resolve { source: IdResolveError },
+    #[snafu(display("Connection error: {source}"))]
+    Connect { source: ConnectError },
+    #[snafu(display("RPC error: {source}"))]
+    Rpc { source: RpcError },
+    #[snafu(display("Secret read error: {source}"))]
+    Secret { source: IdSecretReadError },
     #[snafu(transparent)]
-    Post {
-        source: PostError,
-    },
-    Whatever {
-        source: Whatever,
-    },
+    Post { source: PostError },
+    #[snafu(display("Miscellaneous error: {source}"))]
+    Whatever { source: Whatever },
 }
 
 pub type CliResult<T> = std::result::Result<T, CliError>;
