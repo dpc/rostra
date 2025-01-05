@@ -87,19 +87,6 @@ impl<'de> serde::de::Deserialize<'de> for RostraIdSecretKey {
         }
     }
 }
-
-impl std::error::Error for RostraIdSecretKeyError {}
-
-impl fmt::Display for RostraIdSecretKeyError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(&self.0)
-    }
-}
-impl From<String> for RostraIdSecretKeyError {
-    fn from(value: String) -> Self {
-        Self(value)
-    }
-}
 impl FromStr for RostraIdSecretKey {
     type Err = RostraIdSecretKeyError;
 

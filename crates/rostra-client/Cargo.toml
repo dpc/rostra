@@ -29,6 +29,7 @@ rostra-core = { workspace = true, features = [
   "pkarr",
   "bincode",
   "serde",
+  "rand",
 ] }
 rostra-util-error = { workspace = true }
 rostra-util-fmt = { workspace = true }

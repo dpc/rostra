@@ -10,15 +10,12 @@ mod bincode;
 #[cfg(all(feature = "ed25519-dalek", feature = "bincode"))]
 mod verified_event;
 use std::collections::BTreeSet;
-use std::time::{SystemTime, UNIX_EPOCH};
 
-use convi::ExpectInto as _;
 #[cfg(all(feature = "ed25519-dalek", feature = "bincode"))]
 pub use verified_event::*;
 
-use crate::bincode::STD_BINCODE_CONFIG;
 use crate::id::RostraId;
-use crate::{define_array_type_no_serde, ContentHash, EventId, MsgLen, ShortEventId, Timestamp};
+use crate::{define_array_type_no_serde, ContentHash, MsgLen, ShortEventId, Timestamp};
 
 /// An even (header)
 ///
@@ -114,62 +111,10 @@ pub struct Event {
     /// Blake3 hash of the content
     pub content_hash: ContentHash,
 }
+
 impl Event {
-    pub fn is_delete_aux_set(&self) -> bool {
+    pub fn is_delete_parent_aux_set(&self) -> bool {
         self.flags & 1 != 0
-    }
-}
-
-#[bon::bon]
-impl Event {
-    #[builder]
-    pub fn new(
-        author: RostraId,
-        delete: Option<ShortEventId>,
-        kind: EventKind,
-        parent_prev: Option<ShortEventId>,
-        parent_aux: Option<ShortEventId>,
-        timestamp: Option<SystemTime>,
-        content: EventContent,
-    ) -> Self {
-        if delete.is_some() && parent_aux.is_some() {
-            panic!("Can't set both both delete and parent_aux");
-        }
-
-        let replace = delete.map(Into::into);
-        let parent_prev = parent_prev.map(Into::into);
-        let parent_aux = parent_aux.map(Into::into);
-
-        let timestamp = timestamp
-            .unwrap_or_else(|| SystemTime::now())
-            .duration_since(UNIX_EPOCH)
-            .expect("Dates before Unix epoch are unsupported")
-            .as_secs();
-
-        Self {
-            version: 0,
-            flags: if replace.is_some() { 1 } else { 0 },
-            kind,
-            content_len: MsgLen(content.len().expect_into()),
-            padding: [0; 16],
-            timestamp: timestamp.into(),
-            author,
-            parent_prev: parent_prev.unwrap_or_default(),
-            parent_aux: parent_aux.or(replace).unwrap_or_default(),
-            content_hash: content.compute_content_hash(),
-        }
-    }
-
-    #[cfg(feature = "bincode")]
-    pub fn compute_id(&self) -> EventId {
-        let encoded =
-            ::bincode::encode_to_vec(self, STD_BINCODE_CONFIG).expect("Can't fail encoding");
-        blake3::hash(&encoded).into()
-    }
-
-    #[cfg(feature = "bincode")]
-    pub fn compute_short_id(&self) -> ShortEventId {
-        self.compute_id().into()
     }
 }
 
@@ -203,14 +148,6 @@ pub struct SignedEvent {
     pub sig: EventSignature,
 }
 
-impl SignedEvent {
-    pub fn compute_id(&self) -> EventId {
-        self.event.compute_id()
-    }
-    pub fn compute_short_id(&self) -> ShortEventId {
-        self.event.compute_id().into()
-    }
-}
 define_array_type_no_serde!(struct EventSignature, 64);
 
 #[cfg_attr(feature = "serde", derive(::serde::Serialize, ::serde::Deserialize))]

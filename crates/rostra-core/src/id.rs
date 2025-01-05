@@ -1,3 +1,5 @@
+use snafu::Snafu;
+
 use crate::{define_array_type_public, define_array_type_public_no_serde};
 
 #[cfg(feature = "ed25519-dalek")]
@@ -45,5 +47,20 @@ impl RostraId {
 
 define_array_type_public_no_serde!(struct RostraIdSecretKey, 32);
 
-#[derive(Debug)]
-pub struct RostraIdSecretKeyError(String);
+#[derive(Debug, Snafu)]
+#[snafu(display("SecretKey error: {msg}"))]
+pub struct RostraIdSecretKeyError {
+    msg: String,
+}
+
+impl AsRef<str> for RostraIdSecretKeyError {
+    fn as_ref(&self) -> &str {
+        self.msg.as_str()
+    }
+}
+
+impl From<String> for RostraIdSecretKeyError {
+    fn from(msg: String) -> Self {
+        Self { msg }
+    }
+}

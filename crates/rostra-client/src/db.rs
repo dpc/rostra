@@ -242,7 +242,7 @@ impl Database {
 
             let prev_event = events_table.get(&prev_id)?.map(|r| r.value());
             if let Some(mut prev_event) = prev_event {
-                if event.is_delete_aux_set() && is_aux {
+                if event.is_delete_parent_aux_set() && is_aux {
                     // keep the existing deleted mark if there, otherwise mark as deleted by the
                     // current event
                     prev_event.deleted_by = prev_event.deleted_by.or(Some(event_id));
@@ -255,7 +255,7 @@ impl Database {
                     &(short_author, prev_id),
                     &EventsMissingRecord {
                         // potentially mark that the missing event was already deleted
-                        deleted: (event.is_delete_aux_set() && is_aux).then_some(event_id),
+                        deleted: (event.is_delete_parent_aux_set() && is_aux).then_some(event_id),
                     },
                 )?;
             }

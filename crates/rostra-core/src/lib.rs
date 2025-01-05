@@ -1,6 +1,10 @@
 #[cfg(feature = "bincode")]
 pub mod bincode;
 pub mod event;
+
+#[cfg(feature = "rand")]
+pub mod rand;
+
 /// Version of [`define_array_type`] that does not derive Serde
 ///
 /// Because some types can't serde. :/
