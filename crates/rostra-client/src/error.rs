@@ -4,6 +4,8 @@ use pkarr::dns::SimpleDnsError;
 use rostra_core::id::RostraIdSecretKeyError;
 use snafu::Snafu;
 
+use crate::db::DbError;
+
 /// Meh alias
 pub type IrohError = anyhow::Error;
 pub type IrohResult<T> = anyhow::Result<T>;
@@ -15,6 +17,8 @@ pub enum InitError {
     InitPkarrClient { source: pkarr::Error },
     #[snafu(display("Iroh Client initialization error"))]
     InitIrohClient { source: IrohError },
+    #[snafu(transparent)]
+    Db { source: DbError },
 }
 
 pub type InitResult<T> = std::result::Result<T, InitError>;

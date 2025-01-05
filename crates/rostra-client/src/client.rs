@@ -25,6 +25,7 @@ use rostra_p2p_api::ROSTRA_P2P_V0_ALPN;
 use rostra_util_error::FmtCompact as _;
 use rostra_util_fmt::AsFmtOption as _;
 use snafu::{OptionExt as _, ResultExt as _};
+use tokio::sync::watch;
 use tokio::time::Instant;
 use tracing::{debug, info};
 
@@ -39,8 +40,20 @@ use crate::error::{
 use crate::id::{CompactTicket, IdPublishedData, IdResolvedData};
 use crate::id_publisher::IdPublisher;
 use crate::request_handler::RequestHandler;
+use crate::storage::Storage;
 use crate::LOG_TARGET;
 
+#[derive(Debug)]
+pub enum ClientMode {
+    Full(Database),
+    Light,
+}
+
+impl ClientMode {
+    pub fn is_full(&self) -> bool {
+        matches!(self, Self::Full(_))
+    }
+}
 /// Weak handle to [`Client`]
 #[derive(Debug, Clone)]
 pub struct ClientHandle(Weak<Client>);
@@ -90,8 +103,7 @@ pub struct Client {
     pub(crate) id: RostraId,
     pub(crate) id_secret: RostraIdSecretKey,
 
-    #[allow(dead_code)]
-    pub(crate) db: Option<Database>,
+    storage: Option<Storage>,
 
     /// Our iroh-net endpoint
     pub(crate) endpoint: iroh_net::Endpoint,
@@ -104,12 +116,24 @@ impl Client {
         id_secret: Option<RostraIdSecretKey>,
         #[builder(default = true)] start_request_handler: bool,
         #[builder(default = true)] start_id_publisher: bool,
-        db: Option<Database>,
+
+        #[builder(default = ClientMode::Light)] // Default to light
+        mode: ClientMode,
     ) -> InitResult<Arc<Self>> {
         let id_secret = id_secret.unwrap_or_else(|| RostraIdSecretKey::generate());
         let id = id_secret.id();
 
         debug!(id = %id.try_fmt(), "Rostra Client");
+
+        let is_mode_full = mode.is_full();
+
+        let storage = match mode {
+            ClientMode::Full(db) => {
+                let storage = Storage::new(db, id).await?;
+                Some(storage)
+            }
+            ClientMode::Light => None,
+        };
 
         let pkarr_client = PkarrClient::builder()
             .build()
@@ -133,7 +157,7 @@ impl Client {
             endpoint,
             pkarr_client,
             pkarr_client_relay,
-            db,
+            storage,
             id,
         });
 
@@ -143,6 +167,10 @@ impl Client {
 
         if start_id_publisher {
             client.start_id_publisher();
+        }
+
+        if is_mode_full {
+            client.start_followee_checker();
         }
 
         Ok(client)
@@ -197,6 +225,10 @@ impl Client {
 
     pub(crate) fn start_request_handler(&self) {
         tokio::spawn(RequestHandler::new(self, self.endpoint.clone()).run());
+    }
+
+    pub(crate) fn start_followee_checker(&self) {
+        tokio::spawn(crate::followee_checker::FolloweeChecker::new(self).run());
     }
 
     pub(crate) async fn iroh_address(&self) -> IrohResult<NodeAddr> {
@@ -471,5 +503,11 @@ impl Client {
         }
 
         Ok(())
+    }
+
+    pub(crate) fn watch_self_followee_list(&self) -> Option<watch::Receiver<Vec<RostraId>>> {
+        self.storage
+            .as_ref()
+            .map(|storage| storage.watch_self_followee_list())
     }
 }

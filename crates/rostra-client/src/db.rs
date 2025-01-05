@@ -315,23 +315,23 @@ impl Database {
         author: ShortRostraId,
         ts: Timestamp,
         followees: Vec<(RostraId, String)>,
-        ids_folowees_ts_table: &mut Table<ShortRostraId, IdsFolloweesTsRecord>,
-        ids_folowees_table: &mut Table<(ShortRostraId, RostraId), IdsFolloweesRecord>,
+        ids_followees_ts_table: &mut Table<ShortRostraId, IdsFolloweesTsRecord>,
+        ids_followees_table: &mut Table<(ShortRostraId, RostraId), IdsFolloweesRecord>,
     ) -> DbResult<bool> {
-        if ids_folowees_ts_table
+        if ids_followees_ts_table
             .get(&author)?
             .is_some_and(|existing| u64::from(ts) <= existing.value().ts)
         {
             return Ok(false);
         }
 
-        ids_folowees_table.retain_in(
+        ids_followees_table.retain_in(
             (author, RostraId::ZERO)..=(author, RostraId::MAX),
             |_k, _v| false,
         )?;
 
         for (followee_id, persona) in followees {
-            ids_folowees_table.insert(&(author, followee_id), &IdsFolloweesRecord { persona })?;
+            ids_followees_table.insert(&(author, followee_id), &IdsFolloweesRecord { persona })?;
         }
 
         return Ok(true);
