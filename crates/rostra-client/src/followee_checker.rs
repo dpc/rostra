@@ -32,5 +32,26 @@ impl FolloweeChecker {
     }
 }
 
-// implement rest of the function, AI!
-fn fibonacci
+/// Calculates the nth Fibonacci number
+///
+/// # Arguments
+/// * `n` - The index of the Fibonacci number to calculate
+///
+/// # Returns
+/// The nth Fibonacci number
+pub fn fibonacci(n: u64) -> u64 {
+    match n {
+        0 => 0,
+        1 => 1,
+        _ => {
+            let mut a = 0;
+            let mut b = 1;
+            for _ in 2..=n {
+                let c = a + b;
+                a = b;
+                b = c;
+            }
+            b
+        }
+    }
+}
