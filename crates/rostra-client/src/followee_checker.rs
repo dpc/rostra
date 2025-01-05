@@ -31,3 +31,6 @@ impl FolloweeChecker {
         }
     }
 }
+
+// implement rest of the function, AI!
+fn fibonacci
