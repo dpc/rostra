@@ -236,9 +236,9 @@ impl Database {
         };
 
         for (prev_id, is_aux) in prev_ids {
-            if prev_id == ShortEventId::ZERO {
+            let Some(prev_id) = prev_id.into() else {
                 continue;
-            }
+            };
 
             let prev_event = events_table.get(&prev_id)?.map(|r| r.value());
             if let Some(mut prev_event) = prev_event {

@@ -26,3 +26,8 @@ serde = { workspace = true, optional = true }
 snafu = { workspace = true }
 pkarr = { workspace = true, optional = true }
 z32 = { workspace = true, optional = true }
+
+[dev-dependencies]
+test-log = { workspace = true, features = ["trace"] }
+serde_json = { workspace = true }
+tracing = { workspace = true }

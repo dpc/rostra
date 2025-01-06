@@ -3655,7 +3655,10 @@ dependencies = [
  "pkarr",
  "rand",
  "serde",
+ "serde_json",
  "snafu",
+ "test-log",
+ "tracing",
  "z32",
 ]
 

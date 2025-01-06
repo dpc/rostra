@@ -1,4 +1,4 @@
-use convi::CastInto as _;
+use convi::CastFrom;
 use ed25519_dalek::SignatureError;
 use snafu::{ResultExt as _, Snafu};
 
@@ -48,7 +48,7 @@ impl VerifiedEvent {
         let content: Option<_> = content.into();
 
         if let Some(content) = content.as_ref() {
-            if content.len() != u32::from(event.content_len).cast_into() {
+            if content.len() != usize::cast_from(u32::from(event.content_len)) {
                 return ContentMismatchSnafu.fail();
             }
             if content.compute_content_hash() != event.content_hash {

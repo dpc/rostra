@@ -19,7 +19,7 @@ impl Event {
     pub fn new(
         author: RostraId,
         delete: Option<ShortEventId>,
-        kind: EventKind,
+        kind: impl Into<EventKind>,
         parent_prev: Option<ShortEventId>,
         parent_aux: Option<ShortEventId>,
         timestamp: Option<SystemTime>,
@@ -42,7 +42,7 @@ impl Event {
         Self {
             version: 0,
             flags: if replace.is_some() { 1 } else { 0 },
-            kind,
+            kind: kind.into(),
             content_len: MsgLen(content.len().expect_into()),
             padding: [0; 16],
             timestamp: timestamp.into(),
@@ -72,3 +72,6 @@ impl SignedEvent {
         self.event.compute_id().into()
     }
 }
+
+#[cfg(test)]
+mod tests;

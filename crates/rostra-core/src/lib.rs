@@ -207,3 +207,23 @@ impl From<Timestamp> for u64 {
         value.0
     }
 }
+
+#[cfg_attr(feature = "serde", derive(::serde::Serialize, ::serde::Deserialize))]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
+pub struct NullableShortEventId(Option<ShortEventId>);
+
+impl From<ShortEventId> for NullableShortEventId {
+    fn from(value: ShortEventId) -> Self {
+        if value == ShortEventId::ZERO {
+            Self(None)
+        } else {
+            Self(Some(value))
+        }
+    }
+}
+
+impl From<NullableShortEventId> for Option<ShortEventId> {
+    fn from(value: NullableShortEventId) -> Self {
+        value.0
+    }
+}

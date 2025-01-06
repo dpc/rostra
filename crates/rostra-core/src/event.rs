@@ -15,7 +15,9 @@ use std::collections::BTreeSet;
 pub use verified_event::*;
 
 use crate::id::RostraId;
-use crate::{define_array_type_no_serde, ContentHash, MsgLen, ShortEventId, Timestamp};
+use crate::{
+    define_array_type_no_serde, ContentHash, MsgLen, NullableShortEventId, ShortEventId, Timestamp,
+};
 
 /// An even (header)
 ///
@@ -83,7 +85,7 @@ pub struct Event {
     /// no parent (first event ever), or the node that produced the event
     /// was not capable of knowing it. In such a case it is a job
     /// of the "active" node to connect it to the chain/DAG.
-    pub parent_prev: ShortEventId,
+    pub parent_prev: NullableShortEventId,
 
     /// Auxiliary parent
     ///
@@ -106,7 +108,7 @@ pub struct Event {
     /// relies on forwarding signed events to "active" node.
     ///
     /// It is also OK if `parent_aux == parent_prev`.
-    pub parent_aux: ShortEventId,
+    pub parent_aux: NullableShortEventId,
 
     /// Blake3 hash of the content
     pub content_hash: ContentHash,
@@ -142,18 +144,43 @@ impl AsRef<[u8]> for EventContent {
 
 #[cfg_attr(feature = "serde", derive(::serde::Serialize, ::serde::Deserialize))]
 #[cfg_attr(feature = "bincode", derive(::bincode::Encode, ::bincode::Decode))]
-#[derive(Copy, Clone, Debug)]
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
 pub struct SignedEvent {
     pub event: Event,
     pub sig: EventSignature,
 }
 
-define_array_type_no_serde!(struct EventSignature, 64);
+define_array_type_no_serde!(
+    #[derive(PartialEq, Eq)]
+    struct EventSignature,
+    64
+);
 
+#[cfg_attr(feature = "bincode", derive(::bincode::Encode, ::bincode::Decode))]
+#[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
+pub struct EventKind([u8; 2]);
+
+impl From<u16> for EventKind {
+    fn from(value: u16) -> Self {
+        Self(value.to_be_bytes())
+    }
+}
+
+impl From<EventKind> for u16 {
+    fn from(value: EventKind) -> Self {
+        u16::from_be_bytes(value.0)
+    }
+}
+
+impl From<EventKindKnown> for EventKind {
+    fn from(value: EventKindKnown) -> Self {
+        (value as u16).into()
+    }
+}
 #[cfg_attr(feature = "serde", derive(::serde::Serialize, ::serde::Deserialize))]
 #[cfg_attr(feature = "bincode", derive(::bincode::Encode, ::bincode::Decode))]
 #[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
-pub enum EventKind {
+pub enum EventKindKnown {
     /// No real content
     Null = 0x00,
     /// Unspecified binary data

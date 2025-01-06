@@ -1,4 +1,4 @@
-use rostra_core::event::EventKind::SocialPost;
+use rostra_core::event::EventKindKnown::SocialPost;
 use rostra_core::event::{Event, EventContent, VerifiedEvent};
 use rostra_core::id::RostraIdSecretKey;
 use rostra_core::EventId;

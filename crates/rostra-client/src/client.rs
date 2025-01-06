@@ -16,7 +16,7 @@ use iroh_io::TokioStreamWriter;
 use iroh_net::{AddrInfo, NodeAddr};
 use itertools::Itertools as _;
 use pkarr::PkarrClient;
-use rostra_core::event::{Event, EventContent, EventKind, SignedEvent};
+use rostra_core::event::{Event, EventContent, EventKindKnown, SignedEvent};
 use rostra_core::id::{RostraId, RostraIdSecretKey};
 use rostra_core::ShortEventId;
 use rostra_p2p::connection::{Connection, FeedEventRequest, FeedEventResponse};
@@ -452,7 +452,7 @@ impl Client {
                     signed_event = Some(signed_event.unwrap_or_else(|| {
                         Event::builder()
                             .author(self.id)
-                            .kind(EventKind::SocialPost)
+                            .kind(EventKindKnown::SocialPost)
                             .content(body.as_bytes().to_owned().into())
                             .build()
                             .signed_by(self.id_secret)
