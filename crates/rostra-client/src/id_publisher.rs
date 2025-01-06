@@ -16,8 +16,8 @@ const LOG_TARGET: &str = "rostra::client::publisher";
 
 pub struct IdPublisher {
     app: crate::client::ClientHandle,
-    client: Arc<pkarr::PkarrClientAsync>,
-    client_relay: Arc<pkarr::PkarrRelayClientAsync>,
+    pkarr_client: Arc<pkarr::PkarrClientAsync>,
+    pkarr_client_relay: Arc<pkarr::PkarrRelayClientAsync>,
     keypair: pkarr::Keypair,
 }
 
@@ -71,8 +71,8 @@ impl IdPublisher {
         Self {
             app: app.handle(),
             keypair: id_secret.into(),
-            client: app.pkarr_client(),
-            client_relay: app.pkarr_client_relay(),
+            pkarr_client: app.pkarr_client(),
+            pkarr_client_relay: app.pkarr_client_relay(),
         }
     }
 
@@ -129,8 +129,8 @@ impl IdPublisher {
         let packet = data.to_signed_packet(&self.keypair, ttl_secs)?;
 
         let (res, res_relay) = tokio::join!(
-            self.client.publish(&packet),
-            self.client_relay.publish(&packet)
+            self.pkarr_client.publish(&packet),
+            self.pkarr_client_relay.publish(&packet)
         );
 
         // TODO: report both?

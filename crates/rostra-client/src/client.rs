@@ -106,7 +106,14 @@ pub struct Client {
     storage: Option<Storage>,
 
     /// Our iroh-net endpoint
+    ///
+    /// Each time new random-seed generated one, (optionally) published via
+    /// Pkarr under main `RostraId` identity.
     pub(crate) endpoint: iroh_net::Endpoint,
+
+    /// A watch-channel that can be used to notify some tasks manually to check
+    /// for updates again
+    check_for_updates_tx: watch::Sender<()>,
 }
 
 #[bon::bon]
@@ -150,15 +157,17 @@ impl Client {
         .into();
 
         let endpoint = Self::make_iroh_endpoint().await?;
+        let (check_for_updates_tx, _) = watch::channel(());
 
-        let client = Arc::new_cyclic(|app| Self {
-            handle: app.clone().into(),
+        let client = Arc::new_cyclic(|client| Self {
+            handle: client.clone().into(),
             id_secret,
             endpoint,
             pkarr_client,
             pkarr_client_relay,
             storage,
             id,
+            check_for_updates_tx,
         });
 
         if start_request_handler {
@@ -171,6 +180,7 @@ impl Client {
 
         if is_mode_full {
             client.start_followee_checker();
+            client.start_followee_head_checker();
         }
 
         Ok(client)
@@ -229,6 +239,9 @@ impl Client {
 
     pub(crate) fn start_followee_checker(&self) {
         tokio::spawn(crate::followee_checker::FolloweeChecker::new(self).run());
+    }
+    pub(crate) fn start_followee_head_checker(&self) {
+        tokio::spawn(crate::followee_head_checker::FolloweeHeadChecker::new(self).run());
     }
 
     pub(crate) async fn iroh_address(&self) -> IrohResult<NodeAddr> {
@@ -505,9 +518,13 @@ impl Client {
         Ok(())
     }
 
-    pub(crate) fn watch_self_followee_list(&self) -> Option<watch::Receiver<Vec<RostraId>>> {
+    pub(crate) fn self_followees_list_subscribe(&self) -> Option<watch::Receiver<Vec<RostraId>>> {
         self.storage
             .as_ref()
-            .map(|storage| storage.watch_self_followee_list())
+            .map(|storage| storage.self_followees_list_subscribe())
+    }
+
+    pub(crate) fn check_for_updates_tx_subscribe(&self) -> watch::Receiver<()> {
+        self.check_for_updates_tx.subscribe()
     }
 }

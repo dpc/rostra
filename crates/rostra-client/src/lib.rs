@@ -1,6 +1,7 @@
 mod db;
 pub mod error;
 mod followee_checker;
+mod followee_head_checker;
 mod id_publisher;
 mod request_handler;
 mod storage;

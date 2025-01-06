@@ -23,7 +23,7 @@ impl Storage {
         })
     }
 
-    pub fn watch_self_followee_list(&self) -> watch::Receiver<Vec<RostraId>> {
+    pub fn self_followees_list_subscribe(&self) -> watch::Receiver<Vec<RostraId>> {
         self.self_followee_list_updated.subscribe()
     }
 }
