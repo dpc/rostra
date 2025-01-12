@@ -8,7 +8,7 @@ use tempfile::{tempdir, TempDir};
 use tracing::info;
 
 use crate::db::tables::{ContentState, TABLE_EVENTS, TABLE_EVENTS_HEADS, TABLE_EVENTS_MISSING};
-use crate::db::Database;
+use crate::db::{Database, TABLE_EVENTS_CONTENT};
 
 async fn temp_db() -> BoxedErrorResult<(TempDir, super::Database)> {
     let dir = tempdir()?;
@@ -26,8 +26,9 @@ fn build_test_event(
     let parent = parent.into();
 
     let content = EventContent::from(vec![]);
+    let author = id_secret.id();
     let event = Event::builder()
-        .author(id_secret.id())
+        .author(author)
         .kind(SocialPost)
         .maybe_parent_prev(parent.map(Into::into))
         .content(content.clone())
@@ -35,7 +36,7 @@ fn build_test_event(
 
     let signed_event = event.signed_by(id_secret);
 
-    VerifiedEvent::verify_signed(signed_event, content).expect("Valid event")
+    VerifiedEvent::verify_signed(author, signed_event).expect("Valid event")
 }
 
 #[test_log::test(tokio::test(flavor = "multi_thread"))]
@@ -56,6 +57,7 @@ async fn test_store_event() -> BoxedErrorResult<()> {
 
     db.write_with(|tx| {
         let mut events_table = tx.open_table(&TABLE_EVENTS).boxed()?;
+        let mut events_content_table = tx.open_table(&TABLE_EVENTS_CONTENT).boxed()?;
         let mut events_missing_table = tx.open_table(&TABLE_EVENTS_MISSING).boxed()?;
         let mut events_heads_table = tx.open_table(&TABLE_EVENTS_HEADS).boxed()?;
 
@@ -78,6 +80,7 @@ async fn test_store_event() -> BoxedErrorResult<()> {
                 Database::insert_event_tx(
                     &event,
                     &mut events_table,
+                    &mut events_content_table,
                     &mut events_missing_table,
                     &mut events_heads_table,
                 )?;
@@ -111,8 +114,9 @@ fn build_test_event_2(
     let delete = delete.into();
 
     let content = EventContent::from(vec![]);
+    let author = id_secret.id();
     let event = Event::builder()
-        .author(id_secret.id())
+        .author(author)
         .kind(SocialPost)
         .maybe_parent_prev(parent.map(Into::into))
         .maybe_delete(delete.map(Into::into))
@@ -121,7 +125,7 @@ fn build_test_event_2(
 
     let signed_event = event.signed_by(id_secret);
 
-    VerifiedEvent::verify_signed(signed_event, content).expect("Valid event")
+    VerifiedEvent::verify_signed(author, signed_event).expect("Valid event")
 }
 
 #[test_log::test(tokio::test(flavor = "multi_thread"))]
@@ -141,6 +145,7 @@ async fn test_store_deleted_event() -> BoxedErrorResult<()> {
 
     db.write_with(|tx| {
         let mut events_table = tx.open_table(&TABLE_EVENTS).boxed()?;
+        let mut events_content_table = tx.open_table(&TABLE_EVENTS_CONTENT).boxed()?;
         let mut events_missing_table = tx.open_table(&TABLE_EVENTS_MISSING).boxed()?;
         let mut events_heads_table = tx.open_table(&TABLE_EVENTS_HEADS).boxed()?;
 
@@ -170,6 +175,7 @@ async fn test_store_deleted_event() -> BoxedErrorResult<()> {
                 Database::insert_event_tx(
                     &event,
                     &mut events_table,
+                    &mut events_content_table,
                     &mut events_missing_table,
                     &mut events_heads_table,
                 )?;
@@ -179,13 +185,17 @@ async fn test_store_deleted_event() -> BoxedErrorResult<()> {
                     .zip(expected_states)
                 {
                     info!(event_id = %event_id, "Checking");
-                    let state = Database::get_event(event_id, &events_table)?.map(|record| {
-                        info!(event_id = %event_id, ?record.content, "State");
-                        assert_eq!(
-                            record.deleted_by.is_some(),
-                            matches!(record.content, ContentState::Deleted)
-                        );
-                        record.deleted_by
+                    let state = Database::get_event_tx(event_id, &events_table)?.map(|_record| {
+                        let content =
+                            Database::get_event_content_tx(event_id, &events_content_table)
+                                .expect("no db errors");
+                        info!(event_id = %event_id, ?content, "State");
+
+                        match content {
+                            Some(ContentState::Deleted { deleted_by }) => Some(deleted_by),
+                            Some(_) => None,
+                            None => None,
+                        }
                     });
 
                     assert_eq!(state, expected_state);

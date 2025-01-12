@@ -191,6 +191,7 @@ impl From<MsgLen> for u32 {
         value.0
     }
 }
+
 /// Timestatmp encoded in fixed-sized way
 #[cfg_attr(feature = "serde", derive(::serde::Serialize, ::serde::Deserialize))]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]

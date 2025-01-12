@@ -4,6 +4,7 @@ pub use events::{ContentState, EventRecord};
 use ids::IdsFolloweesTsRecord;
 pub use ids::{IdRecord, IdsFolloweesRecord};
 use redb_bincode::TableDefinition;
+use rostra_core::event::EventContent;
 use rostra_core::id::{RostraId, ShortRostraId};
 use rostra_core::ShortEventId;
 
@@ -27,6 +28,9 @@ pub const TABLE_IDS_FOLLOWEES_TS: TableDefinition<'_, ShortRostraId, IdsFollowee
 
 pub const TABLE_EVENTS: TableDefinition<'_, ShortEventId, EventRecord> =
     TableDefinition::new("events");
+
+pub const TABLE_EVENTS_CONTENT: TableDefinition<'_, ShortEventId, ContentState> =
+    TableDefinition::new("events-content");
 
 pub const TABLE_EVENTS_MISSING: TableDefinition<
     '_,

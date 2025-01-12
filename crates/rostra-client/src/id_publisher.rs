@@ -84,7 +84,7 @@ impl IdPublisher {
             interval.tick().await;
 
             let (addr, head) = {
-                let Some(app) = self.app.app_ref() else {
+                let Some(app) = self.app.app_ref_opt() else {
                     debug!(target: LOG_TARGET, "Client gone, quitting");
                     break;
                 };

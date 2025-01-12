@@ -1,4 +1,4 @@
-mod db;
+pub(crate) mod db;
 pub mod error;
 mod followee_checker;
 mod followee_head_checker;

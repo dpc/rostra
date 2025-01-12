@@ -45,7 +45,8 @@ proptest = "1.6.0"
 tempfile = "3.14.0"
 test-log = { version = "0.2.16", features = ["trace"] }
 rand = "0.8"
-redb-bincode = { version = "0.2.1" }
+redb = "2.3.0"
+redb-bincode = "0.2.1"
 rostra-core = { path = "crates/rostra-core" }
 rostra-client = { path = "crates/rostra-client" }
 rostra-p2p = { path = "crates/rostra-p2p" }
@@ -83,4 +84,4 @@ debug = false
 debug = false
 
 [patch.crates-io]
-redb-bincode = { git = "https://github.com/dpc/redb-bincode", rev = "cfedc8963a480f22be988ff6651e1d9777566b14" }
+redb-bincode = { git = "https://github.com/dpc/redb-bincode", rev = "8cf72f6f07b91f6ebc1351a96b35f35c438e3966" }

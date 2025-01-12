@@ -2,7 +2,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use convi::ExpectInto as _;
 
-use super::{Event, EventContent, EventKind, SignedEvent};
+use super::{Event, EventContent, EventContentData, EventKind, SignedEvent};
 use crate::bincode::STD_BINCODE_CONFIG;
 use crate::id::RostraId;
 use crate::{ContentHash, EventId, MsgLen, ShortEventId};
@@ -70,6 +70,16 @@ impl SignedEvent {
     }
     pub fn compute_short_id(&self) -> ShortEventId {
         self.event.compute_id().into()
+    }
+}
+
+impl<'a, 'de: 'a> bincode::BorrowDecode<'de> for &'a EventContentData {
+    fn borrow_decode<D: bincode::de::BorrowDecoder<'de>>(
+        decoder: &mut D,
+    ) -> Result<Self, bincode::error::DecodeError> {
+        let bytes_ref: &[u8] = bincode::BorrowDecode::borrow_decode(decoder)?;
+        let ptr = &*bytes_ref as *const [u8] as *const EventContentData;
+        Ok(unsafe { &*ptr })
     }
 }
 

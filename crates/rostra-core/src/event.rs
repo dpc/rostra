@@ -9,6 +9,7 @@ mod bincode;
 
 #[cfg(all(feature = "ed25519-dalek", feature = "bincode"))]
 mod verified_event;
+use std::borrow::Borrow;
 use std::collections::BTreeSet;
 
 #[cfg(all(feature = "ed25519-dalek", feature = "bincode"))]
@@ -117,6 +118,28 @@ pub struct Event {
 impl Event {
     pub fn is_delete_parent_aux_set(&self) -> bool {
         self.flags & 1 != 0
+    }
+}
+
+#[derive(Debug)]
+#[cfg_attr(feature = "bincode", derive(::bincode::Encode))]
+#[repr(transparent)]
+pub struct EventContentData([u8]);
+
+impl ToOwned for EventContentData {
+    type Owned = EventContent;
+
+    fn to_owned(&self) -> Self::Owned {
+        EventContent(self.0.to_vec())
+    }
+}
+
+impl Borrow<EventContentData> for EventContent {
+    fn borrow<'s>(&'s self) -> &'s EventContentData {
+        // Use unsafe code to change type of referent.
+        // Safety: `EventContentRef` is a `repr(transparent)` wrapper around `[u8]`.
+        let ptr = &*self.0 as *const [u8] as *const EventContentData;
+        unsafe { &*ptr }
     }
 }
 

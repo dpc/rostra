@@ -10,3 +10,4 @@ version = { workspace = true }
 default = []
 
 [dependencies]
+snafu = { workspace = true }

@@ -3,7 +3,8 @@ use ed25519_dalek::SignatureError;
 use snafu::{ResultExt as _, Snafu};
 
 use super::{Event, EventContent, EventSignature, SignedEvent};
-use crate::EventId;
+use crate::id::RostraId;
+use crate::{EventId, ShortEventId};
 
 /// An event with all the external invariants verified
 ///
@@ -18,11 +19,19 @@ pub struct VerifiedEvent {
     pub event_id: EventId,
     pub event: Event,
     pub sig: EventSignature,
-    pub content: Option<EventContent>,
+}
+
+#[derive(Clone, Debug)]
+pub struct VerifiedEventContent {
+    pub event_id: EventId,
+    pub event: Event,
+    pub sig: EventSignature,
+    pub content: EventContent,
 }
 
 #[derive(Debug, Snafu)]
 pub enum VerifiedEventError {
+    AuthorMismatch,
     SignatureInvalid { source: SignatureError },
     ContentMismatch,
     EventIdMismatch,
@@ -31,13 +40,18 @@ pub enum VerifiedEventError {
 pub type VerifiedEventResult<T> = Result<T, VerifiedEventError>;
 
 impl VerifiedEvent {
-    pub fn verify(
-        event_id: EventId,
+    pub fn verify_received(
+        author: RostraId,
+        event_id: impl Into<ShortEventId>,
         event: Event,
         sig: EventSignature,
-        content: impl Into<Option<EventContent>>,
     ) -> VerifiedEventResult<Self> {
-        if event.compute_id() != event_id {
+        if author != event.author {
+            return AuthorMismatchSnafu.fail();
+        }
+        let short_event_id: ShortEventId = event_id.into();
+        let event_id = event.compute_id();
+        if ShortEventId::from(event_id) != short_event_id {
             return EventIdMismatchSnafu.fail();
         }
 
@@ -45,15 +59,35 @@ impl VerifiedEvent {
             .verified_signed_by(sig, event.author)
             .context(SignatureInvalidSnafu)?;
 
-        let content: Option<_> = content.into();
+        Ok(Self {
+            event_id,
+            event,
+            sig,
+        })
+    }
 
-        if let Some(content) = content.as_ref() {
-            if content.len() != usize::cast_from(u32::from(event.content_len)) {
-                return ContentMismatchSnafu.fail();
-            }
-            if content.compute_content_hash() != event.content_hash {
-                return ContentMismatchSnafu.fail();
-            }
+    pub fn verify_signed(
+        author: RostraId,
+        SignedEvent { event, sig }: SignedEvent,
+    ) -> VerifiedEventResult<Self> {
+        Self::verify_received(author, event.compute_id(), event, sig)
+    }
+}
+
+impl VerifiedEventContent {
+    pub fn verify(
+        VerifiedEvent {
+            event_id,
+            event,
+            sig,
+        }: VerifiedEvent,
+        content: EventContent,
+    ) -> VerifiedEventResult<Self> {
+        if content.len() != usize::cast_from(u32::from(event.content_len)) {
+            return ContentMismatchSnafu.fail();
+        }
+        if content.compute_content_hash() != event.content_hash {
+            return ContentMismatchSnafu.fail();
         }
 
         Ok(Self {
@@ -62,12 +96,5 @@ impl VerifiedEvent {
             sig,
             content,
         })
-    }
-
-    pub fn verify_signed(
-        SignedEvent { event, sig }: SignedEvent,
-        content: impl Into<Option<EventContent>>,
-    ) -> VerifiedEventResult<Self> {
-        Self::verify(event.compute_id(), event, sig, content)
     }
 }

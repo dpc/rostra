@@ -7,8 +7,9 @@ use convi::{CastInto, ExpectFrom};
 use iroh_net::endpoint::{RecvStream, SendStream};
 use rostra_core::bincode::STD_BINCODE_CONFIG;
 use rostra_core::event::SignedEvent;
-use rostra_core::MsgLen;
-use rostra_util_error::BoxedErrorResult;
+use rostra_core::id::RostraId;
+use rostra_core::{MsgLen, ShortEventId};
+use rostra_util_error::{BoxedErrorResult, WhateverResult};
 use snafu::ResultExt as _;
 
 use crate::{
@@ -62,6 +63,8 @@ impl fmt::Display for RpcId {
 impl RpcId {
     pub const PING: Self = Self(0);
     pub const FEED_EVENT: Self = Self(1);
+    pub const GET_EVENT: Self = Self(2);
+    pub const GET_EVENT_CONTENT: Self = Self(3);
     pub const fn const_from(value: u16) -> Self {
         Self(value)
     }
@@ -108,11 +111,11 @@ macro_rules! define_rpc {
     ($id:expr, $req:ident, $req_body:item, $resp:ident, $resp_body:item) => {
 
         #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-        #[derive(Encode, Decode)]
+        #[derive(Encode, Decode, Clone, Debug)]
         $req_body
 
         #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-        #[derive(Encode, Decode)]
+        #[derive(Encode, Decode, Clone, Debug)]
         $resp_body
 
         impl RpcRequest for $req {}
@@ -143,6 +146,26 @@ define_rpc!(
     pub struct FeedEventRequest(pub SignedEvent);,
     FeedEventResponse,
     pub struct FeedEventResponse;
+);
+
+define_rpc!(
+    RpcId::GET_EVENT,
+    GetEventRequest,
+    pub struct GetEventRequest(pub ShortEventId);,
+    GetEventResponse,
+    pub struct GetEventResponse(pub Option<SignedEvent>);
+);
+
+impl GetEventRequest {
+    pub const NOT_FOUND: u8 = 1;
+}
+
+define_rpc!(
+    RpcId::GET_EVENT_CONTENT,
+    GetEventContentRequest,
+    pub struct GetEventContentRequest(pub ShortEventId);,
+    GetEventContentResponse,
+    pub struct GetEventContentResponse(pub Option<SignedEvent>);
 );
 
 impl FeedEventResponse {
@@ -201,18 +224,17 @@ impl Connection {
     /// The sequence:
     ///
     /// * request body
+    /// * read success
     /// * read response
-    /// * send trailed data
+    /// * send extra data
     /// * read response
-    pub async fn make_rpc_with_trailer<R: Rpc, F>(
+    pub async fn make_rpc_with_extra_data_send<R: Rpc, F>(
         &self,
         request: &R,
-        trailer_f: F,
+        extra_data_f: F,
     ) -> RpcResult<<R as Rpc>::Response>
     where
-        F: for<'s> Fn(
-            &'s mut SendStream,
-        ) -> Pin<Box<dyn Future<Output = BoxedErrorResult<()>> + 's>>,
+        F: for<'s> Fn(&'s mut SendStream) -> Pin<Box<dyn Future<Output = WhateverResult<()>> + 's>>,
     {
         let (mut send, mut recv) = self.0.open_bi().await.context(ConnectionSnafu)?;
 
@@ -222,9 +244,36 @@ impl Connection {
 
         let resp = Self::read_message::<MAX_RESPONSE_SIZE, _>(&mut recv).await;
 
-        (trailer_f)(&mut send).await.context(TrailerSnafu)?;
+        (extra_data_f)(&mut send).await.context(TrailerSnafu)?;
 
         resp
+    }
+
+    pub async fn make_rpc_with_extra_data_recv<R: Rpc, F, T>(
+        &self,
+        request: &R,
+        extra_data_f: F,
+    ) -> RpcResult<(<R as Rpc>::Response, T)>
+    where
+        F: for<'s> Fn(
+            &'s mut RecvStream,
+            &<R as Rpc>::Response,
+        )
+            -> Pin<Box<dyn Future<Output = WhateverResult<T>> + 's + Send + Sync>>,
+    {
+        let (mut send, mut recv) = self.0.open_bi().await.context(ConnectionSnafu)?;
+
+        Self::write_rpc_request(&mut send, request).await?;
+
+        Self::read_success_error_code(&mut recv).await?;
+
+        let resp = Self::read_message::<MAX_RESPONSE_SIZE, _>(&mut recv).await?;
+
+        let extra = (extra_data_f)(&mut recv, &resp)
+            .await
+            .context(TrailerSnafu)?;
+
+        Ok((resp, extra))
     }
 
     pub async fn write_rpc_request<R: Rpc>(send: &mut SendStream, rpc: &R) -> RpcResult<()> {

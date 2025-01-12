@@ -2,7 +2,7 @@ pub mod connection;
 pub mod error;
 
 use rostra_util_error::BoxedError;
-use snafu::Snafu;
+use snafu::{Snafu, Whatever};
 
 pub const ROSTRA_P2P_V0_ALPN: &[u8] = b"rostra-p2p-v0";
 
@@ -25,7 +25,7 @@ pub enum RpcError {
         source: bincode::error::DecodeError,
     },
     Trailer {
-        source: BoxedError,
+        source: Whatever,
     },
     /// Other side responded with rpc failure
     Failed {

@@ -1,23 +1,23 @@
 mod models;
 mod tables;
 
+use std::borrow::{Borrow as _, Cow};
 use std::path::PathBuf;
 
+use events::ContentStateRef;
 use redb_bincode::{ReadTransaction, ReadableTable, Table, WriteTransaction};
-use rostra_core::event::{SignedEvent, VerifiedEvent};
+use rostra_core::event::{SignedEvent, VerifiedEvent, VerifiedEventContent};
 use rostra_core::id::{RostraId, ShortRostraId};
 use rostra_core::{ShortEventId, Timestamp};
 use rostra_util_error::BoxedError;
 use snafu::{Location, ResultExt as _, Snafu};
 use tables::events::EventsMissingRecord;
 use tables::ids::{IdsFolloweesRecord, IdsFolloweesTsRecord};
-use tables::{
-    ContentState, EventRecord, EventsHeadsTableValue, TABLE_DB_VER, TABLE_EVENTS,
-    TABLE_EVENTS_HEADS, TABLE_EVENTS_MISSING, TABLE_IDS, TABLE_IDS_FOLLOWEES,
-    TABLE_IDS_FOLLOWEES_TS, TABLE_SELF,
-};
+use tables::{ContentState, EventRecord, EventsHeadsTableValue};
 use tokio::task::JoinError;
 use tracing::{debug, info, instrument};
+
+pub use self::tables::*;
 
 const LOG_TARGET: &str = "rostra::client::db";
 
@@ -28,6 +28,7 @@ pub enum DbError {
         #[snafu(implicit)]
         location: Location,
     },
+    #[snafu(transparent)]
     Table {
         source: redb::TableError,
         #[snafu(implicit)]
@@ -77,16 +78,15 @@ impl Database {
 
     async fn init(self) -> DbResult<Self> {
         self.write_with(|dbtx| {
-            dbtx.open_table(&TABLE_DB_VER).context(TableSnafu)?;
-            dbtx.open_table(&TABLE_EVENTS).context(TableSnafu)?;
-            dbtx.open_table(&TABLE_SELF).context(TableSnafu)?;
-            dbtx.open_table(&TABLE_IDS).context(TableSnafu)?;
-            dbtx.open_table(&TABLE_IDS_FOLLOWEES).context(TableSnafu)?;
-            dbtx.open_table(&TABLE_IDS_FOLLOWEES_TS)
-                .context(TableSnafu)?;
-            dbtx.open_table(&TABLE_EVENTS).context(TableSnafu)?;
-            dbtx.open_table(&TABLE_EVENTS_MISSING).context(TableSnafu)?;
-            dbtx.open_table(&TABLE_EVENTS_HEADS).context(TableSnafu)?;
+            dbtx.open_table(&TABLE_DB_VER)?;
+            dbtx.open_table(&TABLE_EVENTS)?;
+            dbtx.open_table(&TABLE_SELF)?;
+            dbtx.open_table(&TABLE_IDS)?;
+            dbtx.open_table(&TABLE_IDS_FOLLOWEES)?;
+            dbtx.open_table(&TABLE_IDS_FOLLOWEES_TS)?;
+            dbtx.open_table(&TABLE_EVENTS)?;
+            dbtx.open_table(&TABLE_EVENTS_MISSING)?;
+            dbtx.open_table(&TABLE_EVENTS_HEADS)?;
 
             Self::handle_db_ver_migrations(dbtx)?;
 
@@ -98,7 +98,7 @@ impl Database {
     }
 
     fn handle_db_ver_migrations(dbtx: &WriteTransaction) -> DbResult<()> {
-        let mut table_db_ver = dbtx.open_table(&TABLE_DB_VER).context(TableSnafu)?;
+        let mut table_db_ver = dbtx.open_table(&TABLE_DB_VER)?;
 
         let Some(cur_db_ver) = table_db_ver.first()?.map(|g| g.1.value()) else {
             info!(target: LOG_TARGET, "Initializing empty database");
@@ -167,7 +167,7 @@ impl Database {
 
     pub async fn read_followees(&self, id: ShortRostraId) -> DbResult<Vec<(RostraId, String)>> {
         self.read_with(|tx| {
-            let ids_following_table = tx.open_table(&TABLE_IDS_FOLLOWEES).context(TableSnafu)?;
+            let ids_following_table = tx.open_table(&TABLE_IDS_FOLLOWEES)?;
 
             Self::read_followees_tx(id, &ids_following_table)
         })
@@ -184,47 +184,43 @@ impl Database {
             .collect::<Result<Vec<_>, _>>()?)
     }
 
+    /// Insert an event and do all the accounting for it
+    ///
+    /// Return `true`
     pub fn insert_event_tx(
         VerifiedEvent {
             event_id,
             event,
             sig,
-            content,
         }: &VerifiedEvent,
         events_table: &mut Table<ShortEventId, EventRecord>,
+        events_content_table: &mut Table<ShortEventId, ContentState>,
         events_missing_table: &mut Table<(ShortRostraId, ShortEventId), EventsMissingRecord>,
         events_heads_table: &mut Table<(ShortRostraId, ShortEventId), EventsHeadsTableValue>,
-    ) -> DbResult<()> {
+    ) -> DbResult<EventState> {
         let author = event.author;
         let event_id = ShortEventId::from(*event_id);
         let short_author = ShortRostraId::from(author);
 
-        let existing = events_table.get(&event_id)?.map(|g| g.value());
-        if let Some(mut existing) = existing {
-            match existing.content {
-                ContentState::Deleted | ContentState::Present(_) => {}
-                ContentState::Missing => {
-                    if let Some(content) = content {
-                        existing.content = ContentState::Present(content.to_owned());
-                        events_table.insert(&event_id, &existing)?;
-                    }
-                }
-            }
-            return Ok(());
+        if events_table.get(&event_id)?.is_some() {
+            return Ok(EventState::AlreadyPresent);
         }
 
-        let deleted = if let Some(prev_missing) = events_missing_table
+        let state = if let Some(prev_missing) = events_missing_table
             .remove(&(short_author, event_id))?
             .map(|g| g.value())
         {
-            // if the missing was marked as deleted, we'll record it in the newly added
-            // event
-            prev_missing.deleted
+            // if the missing was marked as deleted, we'll record it
+            if let Some(deleted_by) = prev_missing.deleted_by {
+                events_content_table.insert(&event_id, &ContentState::Deleted { deleted_by });
+                EventState::InsertedDeleted
+            } else {
+                EventState::Inserted
+            }
         } else {
             // since nothing was expecting this event yet, it must be a "head"
             events_heads_table.insert(&(short_author, event_id), &EventsHeadsTableValue)?;
-
-            None
+            EventState::Inserted
         };
 
         // When both parents point at same thing, process only one: one that can
@@ -243,11 +239,12 @@ impl Database {
             let prev_event = events_table.get(&prev_id)?.map(|r| r.value());
             if let Some(mut prev_event) = prev_event {
                 if event.is_delete_parent_aux_set() && is_aux {
-                    // keep the existing deleted mark if there, otherwise mark as deleted by the
-                    // current event
-                    prev_event.deleted_by = prev_event.deleted_by.or(Some(event_id));
-                    prev_event.content = ContentState::Deleted;
-                    events_table.insert(&prev_id, &prev_event)?;
+                    events_content_table.insert(
+                        &prev_id,
+                        &ContentState::Deleted {
+                            deleted_by: event_id,
+                        },
+                    );
                 }
             } else {
                 // we do not have this parent yet, so we mark it as missing
@@ -255,7 +252,8 @@ impl Database {
                     &(short_author, prev_id),
                     &EventsMissingRecord {
                         // potentially mark that the missing event was already deleted
-                        deleted: (event.is_delete_parent_aux_set() && is_aux).then_some(event_id),
+                        deleted_by: (event.is_delete_parent_aux_set() && is_aux)
+                            .then_some(event_id),
                     },
                 )?;
             }
@@ -270,16 +268,58 @@ impl Database {
                     event: *event,
                     sig: *sig,
                 },
-                deleted_by: deleted,
-                content: if deleted.is_some() {
-                    ContentState::Deleted
-                } else {
-                    ContentState::from(content.to_owned())
-                },
             },
         )?;
 
-        Ok(())
+        Ok(state)
+    }
+
+    pub fn insert_event_content_tx<'t, 'e>(
+        VerifiedEventContent {
+            event_id, content, ..
+        }: &'e VerifiedEventContent,
+        events_content_table: &'t mut Table<ShortEventId, ContentState>,
+    ) -> DbResult<bool> {
+        let event_id = ShortEventId::from(*event_id);
+        if let Some(existing_content) = events_content_table.get(&event_id)?.map(|g| g.value()) {
+            match existing_content {
+                ContentState::Deleted { .. } => {
+                    return Ok(false);
+                }
+                ContentState::Present(_) => {
+                    return Ok(true);
+                }
+                ContentState::Pruned => {}
+            }
+        }
+
+        let borrow = content.borrow();
+        let borrowed: Cow<'_, rostra_core::event::EventContentData> = Cow::Borrowed(borrow);
+        events_content_table.insert(&event_id, &ContentStateRef::Present(borrowed));
+
+        Ok(true)
+    }
+
+    pub fn prune_event_content_tx(
+        event_id: impl Into<ShortEventId>,
+        events_content_table: &mut Table<ShortEventId, ContentState>,
+    ) -> DbResult<bool> {
+        let event_id = event_id.into();
+        if let Some(existing_content) = events_content_table.get(&event_id)?.map(|g| g.value()) {
+            match existing_content {
+                ContentState::Deleted { .. } => {
+                    return Ok(false);
+                }
+                ContentState::Pruned => {
+                    return Ok(true);
+                }
+                ContentState::Present(_) => {}
+            }
+        }
+
+        events_content_table.insert(&event_id, &ContentState::Pruned);
+
+        Ok(true)
     }
 
     pub fn get_missing_events_tx(
@@ -304,11 +344,25 @@ impl Database {
             .collect::<Result<Vec<_>, _>>()?)
     }
 
-    pub fn get_event(
+    pub fn get_event_tx(
         event: impl Into<ShortEventId>,
         events_table: &impl ReadableTable<ShortEventId, EventRecord>,
     ) -> DbResult<Option<EventRecord>> {
         Ok(events_table.get(&event.into())?.map(|r| r.value()))
+    }
+
+    pub fn get_event_content_tx(
+        event: impl Into<ShortEventId>,
+        events_content_table: &impl ReadableTable<ShortEventId, ContentState>,
+    ) -> DbResult<Option<ContentState>> {
+        Ok(events_content_table.get(&event.into())?.map(|r| r.value()))
+    }
+
+    pub fn has_event_tx(
+        event: impl Into<ShortEventId>,
+        events_table: &impl ReadableTable<ShortEventId, EventRecord>,
+    ) -> DbResult<bool> {
+        Ok(events_table.get(&event.into())?.is_some())
     }
 
     pub fn insert_followee_update(
@@ -338,5 +392,10 @@ impl Database {
     }
 }
 
+pub enum EventState {
+    AlreadyPresent,
+    InsertedDeleted,
+    Inserted,
+}
 #[cfg(test)]
 mod tests;

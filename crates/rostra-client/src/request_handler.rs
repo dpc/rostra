@@ -9,8 +9,8 @@ use iroh_net::endpoint::Incoming;
 use iroh_net::Endpoint;
 use rostra_core::id::RostraId;
 use rostra_p2p::connection::{
-    Connection, FeedEventRequest, FeedEventResponse, PingRequest, PingResponse, RpcId,
-    RpcMessage as _, MAX_REQUEST_SIZE,
+    Connection, FeedEventRequest, FeedEventResponse, GetEventRequest, PingRequest, PingResponse,
+    RpcId, RpcMessage as _, MAX_REQUEST_SIZE,
 };
 use rostra_p2p::RpcError;
 use rostra_util_error::FmtCompact as _;
@@ -19,7 +19,7 @@ use tracing::{debug, info, instrument};
 
 use crate::client::Client;
 use crate::db::DbError;
-use crate::ClientHandle;
+use crate::{ClientHandle, ClientRefError, ClientStorageError};
 
 const LOG_TARGET: &str = "rostra::client::req_handler";
 
@@ -52,6 +52,14 @@ pub enum IncomingConnectionError {
     UnknownRpcId {
         id: RpcId,
     },
+    #[snafu(transparent)]
+    ClientStorage {
+        source: ClientStorageError,
+    },
+    #[snafu(transparent)]
+    ClientRefError {
+        source: ClientRefError,
+    },
 }
 pub type IncomingConnectionResult<T> = std::result::Result<T, IncomingConnectionError>;
 
@@ -76,7 +84,7 @@ impl RequestHandler {
     #[instrument(skip(self), ret)]
     pub async fn run(self: Arc<Self>) {
         loop {
-            if self.client.app_ref().is_none() {
+            if self.client.app_ref_opt().is_none() {
                 debug!(target: LOG_TARGET, "Client gone, quitting");
                 break;
             };
@@ -117,6 +125,9 @@ impl RequestHandler {
                 RpcId::FEED_EVENT => {
                     self.handle_feed_event(req_msg, send, recv).await?;
                 }
+                RpcId::GET_EVENT => {
+                    self.handle_get_event(req_msg, send, recv).await?;
+                }
                 _ => return UnknownRpcIdSnafu { id }.fail(),
             }
         }
@@ -155,7 +166,7 @@ impl RequestHandler {
             .context(InvalidSignatureSnafu)?;
 
         {
-            let app = self.client.app_ref().context(ExitingSnafu)?;
+            let app = self.client.app_ref_opt().context(ExitingSnafu)?;
 
             if app.event_size_limit() < u32::from(event.content_len) {
                 app.store_event_too_large(event_id, event).await?;
@@ -197,7 +208,7 @@ impl RequestHandler {
         .context(DecodingBaoSnafu)?;
 
         {
-            let app = self.client.app_ref().context(ExitingSnafu)?;
+            let app = self.client.app_ref_opt().context(ExitingSnafu)?;
 
             app.store_event(event_id, event, decoded.into()).await?;
         }
@@ -205,5 +216,28 @@ impl RequestHandler {
         Connection::write_success_return_code(&mut send).await?;
 
         Ok(())
+    }
+
+    async fn handle_get_event(
+        &self,
+        req_msg: Vec<u8>,
+        mut send: iroh_net::endpoint::SendStream,
+        mut read: iroh_net::endpoint::RecvStream,
+    ) -> Result<(), IncomingConnectionError> {
+        let GetEventRequest(event_id) =
+            GetEventRequest::decode_whole::<MAX_REQUEST_SIZE>(&req_msg).context(DecodingSnafu)?;
+
+        let client = self.client.app_ref()?;
+        let storage = client.storage()?;
+
+        let event = storage.get_event(event_id).await;
+
+        if event.is_some() {
+            Connection::write_success_return_code(&mut send).await?;
+        } else {
+            Connection::write_return_code(&mut send, GetEventRequest::NOT_FOUND).await?;
+        }
+
+        todo!();
     }
 }

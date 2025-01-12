@@ -1,10 +1,10 @@
 use std::marker::PhantomData;
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
-use std::ops;
 use std::path::Path;
 use std::str::FromStr as _;
 use std::sync::{Arc, Weak};
 use std::time::Duration;
+use std::{ops, result};
 
 use backon::Retryable as _;
 use bao_tree::io::fsm::encode_ranges_validated;
@@ -24,7 +24,7 @@ use rostra_p2p::RpcError;
 use rostra_p2p_api::ROSTRA_P2P_V0_ALPN;
 use rostra_util_error::FmtCompact as _;
 use rostra_util_fmt::AsFmtOption as _;
-use snafu::{OptionExt as _, ResultExt as _};
+use snafu::{OptionExt as _, ResultExt as _, Snafu};
 use tokio::sync::watch;
 use tokio::time::Instant;
 use tracing::{debug, info};
@@ -43,6 +43,11 @@ use crate::request_handler::RequestHandler;
 use crate::storage::Storage;
 use crate::LOG_TARGET;
 
+#[derive(Debug, Snafu)]
+pub struct ClientRefError;
+
+pub type ClientRefResult<T> = Result<T, ClientRefError>;
+
 #[derive(Debug)]
 pub enum ClientMode {
     Full(Database),
@@ -59,10 +64,17 @@ impl ClientMode {
 pub struct ClientHandle(Weak<Client>);
 
 impl ClientHandle {
-    pub fn app_ref(&self) -> Option<ClientRef<'_>> {
-        let app = self.0.upgrade()?;
+    pub fn app_ref_opt(&self) -> Option<ClientRef<'_>> {
+        let client = self.0.upgrade()?;
         Some(ClientRef {
-            app,
+            client,
+            r: PhantomData,
+        })
+    }
+    pub fn app_ref(&self) -> ClientRefResult<ClientRef<'_>> {
+        let client = self.0.upgrade().context(ClientRefSnafu)?;
+        Ok(ClientRef {
+            client,
             r: PhantomData,
         })
     }
@@ -80,7 +92,7 @@ impl From<Weak<Client>> for ClientHandle {
 /// storing it anywhere.
 #[derive(Clone)]
 pub struct ClientRef<'r> {
-    pub(crate) app: Arc<Client>,
+    pub(crate) client: Arc<Client>,
     pub(crate) r: PhantomData<&'r ()>,
 }
 
@@ -88,7 +100,7 @@ impl<'r> ops::Deref for ClientRef<'r> {
     type Target = Client;
 
     fn deref(&self) -> &Self::Target {
-        &self.app
+        &self.client
     }
 }
 
@@ -103,7 +115,7 @@ pub struct Client {
     pub(crate) id: RostraId,
     pub(crate) id_secret: RostraIdSecretKey,
 
-    storage: Option<Storage>,
+    storage: Option<Arc<Storage>>,
 
     /// Our iroh-net endpoint
     ///
@@ -115,6 +127,12 @@ pub struct Client {
     /// for updates again
     check_for_updates_tx: watch::Sender<()>,
 }
+
+#[derive(Debug, Snafu)]
+#[snafu(display("Client storage not available"))]
+pub struct ClientStorageError;
+
+pub type ClientStorageResult<T> = result::Result<T, ClientStorageError>;
 
 #[bon::bon]
 impl Client {
@@ -165,7 +183,7 @@ impl Client {
             endpoint,
             pkarr_client,
             pkarr_client_relay,
-            storage,
+            storage: storage.map(Into::into),
             id,
             check_for_updates_tx,
         });
@@ -344,19 +362,6 @@ impl Client {
             .context(MissingTicketSnafu)
     }
 
-    // pub async fn fetch_data(&self, id: RostraId) -> IdResolveResult<String> {
-    //     let data = self.resolve_id_data(id).await?;
-
-    //     let ticket = data.published.ticket.context(MissingTicketSnafu)?;
-    //     let _connection = self
-    //         .endpoint
-    //         .connect(ticket, ROSTRA_P2P_V0_ALPN)
-    //         .await
-    //         .context(ConnectionSnafu)?;
-
-    //     todo!()
-    // }
-
     pub(crate) fn pkarr_client(&self) -> Arc<pkarr::PkarrClientAsync> {
         self.pkarr_client.clone()
     }
@@ -460,7 +465,7 @@ impl Client {
 
                     let signed_event = signed_event.expect("Must be set by now");
                     match conn
-                        .make_rpc_with_trailer(&FeedEventRequest(signed_event), |send| {
+                        .make_rpc_with_extra_data_send(&FeedEventRequest(signed_event), |send| {
                             let body = body.clone();
                             Box::pin(async move {
                                 /// Use a block size of 16 KiB, a good default
@@ -489,7 +494,7 @@ impl Client {
                                     TokioStreamWriter(send),
                                 )
                                 .await
-                                .boxed()?;
+                                .whatever_context("Failed to encode ranges")?;
 
                                 Ok(())
                             })
@@ -518,13 +523,21 @@ impl Client {
         Ok(())
     }
 
-    pub(crate) fn self_followees_list_subscribe(&self) -> Option<watch::Receiver<Vec<RostraId>>> {
+    pub fn self_followees_list_subscribe(&self) -> Option<watch::Receiver<Vec<RostraId>>> {
         self.storage
             .as_ref()
             .map(|storage| storage.self_followees_list_subscribe())
     }
 
-    pub(crate) fn check_for_updates_tx_subscribe(&self) -> watch::Receiver<()> {
+    pub fn check_for_updates_tx_subscribe(&self) -> watch::Receiver<()> {
         self.check_for_updates_tx.subscribe()
+    }
+
+    pub fn storage_opt(&self) -> Option<Arc<Storage>> {
+        self.storage.clone()
+    }
+
+    pub fn storage(&self) -> ClientStorageResult<Arc<Storage>> {
+        self.storage.clone().context(ClientStorageSnafu)
     }
 }
