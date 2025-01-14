@@ -83,5 +83,15 @@ impl<'a, 'de: 'a> bincode::BorrowDecode<'de> for &'a EventContentData {
     }
 }
 
+impl EventContent {
+    pub fn decode<T>(&self) -> Result<T, ::bincode::error::DecodeError>
+    where
+        T: ::bincode::Decode,
+    {
+        let res = ::bincode::decode_from_slice(&self.0, STD_BINCODE_CONFIG)?;
+        Ok(res.0)
+    }
+}
+
 #[cfg(test)]
 mod tests;

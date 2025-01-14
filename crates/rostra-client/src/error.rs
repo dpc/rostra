@@ -2,7 +2,7 @@ use std::io;
 
 use pkarr::dns::SimpleDnsError;
 use rostra_core::id::RostraIdSecretKeyError;
-use snafu::Snafu;
+use snafu::{Snafu, Whatever};
 
 use crate::db::DbError;
 
@@ -78,7 +78,7 @@ pub enum PostError {
     #[snafu(transparent)]
     Resolve { source: IdResolveError },
     #[snafu(display("Encoding error: {source}"))]
-    Encode { source: bao_tree::io::EncodeError },
+    Encode { source: Whatever },
 }
 
 pub type PostResult<T> = std::result::Result<T, PostError>;

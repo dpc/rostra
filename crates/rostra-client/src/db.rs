@@ -197,68 +197,77 @@ impl Database {
         events_content_table: &mut Table<ShortEventId, ContentState>,
         events_missing_table: &mut Table<(ShortRostraId, ShortEventId), EventsMissingRecord>,
         events_heads_table: &mut Table<(ShortRostraId, ShortEventId), EventsHeadsTableValue>,
-    ) -> DbResult<EventState> {
+    ) -> DbResult<InsertEventOutcome> {
         let author = event.author;
         let event_id = ShortEventId::from(*event_id);
         let short_author = ShortRostraId::from(author);
 
         if events_table.get(&event_id)?.is_some() {
-            return Ok(EventState::AlreadyPresent);
+            return Ok(InsertEventOutcome::AlreadyPresent);
         }
 
-        let state = if let Some(prev_missing) = events_missing_table
+        let (was_missing, is_deleted) = if let Some(prev_missing) = events_missing_table
             .remove(&(short_author, event_id))?
             .map(|g| g.value())
         {
             // if the missing was marked as deleted, we'll record it
-            if let Some(deleted_by) = prev_missing.deleted_by {
-                events_content_table.insert(&event_id, &ContentState::Deleted { deleted_by });
-                EventState::InsertedDeleted
-            } else {
-                EventState::Inserted
-            }
+            (
+                true,
+                if let Some(deleted_by) = prev_missing.deleted_by {
+                    events_content_table
+                        .insert(&event_id, &ContentState::Deleted { deleted_by })?;
+                    true
+                } else {
+                    false
+                },
+            )
         } else {
             // since nothing was expecting this event yet, it must be a "head"
             events_heads_table.insert(&(short_author, event_id), &EventsHeadsTableValue)?;
-            EventState::Inserted
+            (false, false)
         };
 
         // When both parents point at same thing, process only one: one that can
         // be responsible for deletion.
-        let prev_ids = if event.parent_aux == event.parent_prev {
+        let parent_ids = if event.parent_aux == event.parent_prev {
             vec![(event.parent_aux, true)]
         } else {
             vec![(event.parent_aux, true), (event.parent_prev, false)]
         };
 
-        for (prev_id, is_aux) in prev_ids {
-            let Some(prev_id) = prev_id.into() else {
+        let mut deleted_parent = None;
+        let mut missing_parents = vec![];
+
+        for (parent_id, parent_is_aux) in parent_ids {
+            let Some(parent_id) = parent_id.into() else {
                 continue;
             };
 
-            let prev_event = events_table.get(&prev_id)?.map(|r| r.value());
-            if let Some(mut prev_event) = prev_event {
-                if event.is_delete_parent_aux_set() && is_aux {
+            let parent_event = events_table.get(&parent_id)?.map(|r| r.value());
+            if let Some(_parent_event) = parent_event {
+                if event.is_delete_parent_aux_content_set() && parent_is_aux {
+                    deleted_parent = Some(parent_id);
                     events_content_table.insert(
-                        &prev_id,
+                        &parent_id,
                         &ContentState::Deleted {
                             deleted_by: event_id,
                         },
-                    );
+                    )?;
                 }
             } else {
                 // we do not have this parent yet, so we mark it as missing
                 events_missing_table.insert(
-                    &(short_author, prev_id),
+                    &(short_author, parent_id),
                     &EventsMissingRecord {
                         // potentially mark that the missing event was already deleted
-                        deleted_by: (event.is_delete_parent_aux_set() && is_aux)
+                        deleted_by: (event.is_delete_parent_aux_content_set() && parent_is_aux)
                             .then_some(event_id),
                     },
                 )?;
+                missing_parents.push(parent_id);
             }
             // if the event was considered a "head", it shouldn't as it has a child
-            events_heads_table.remove(&(short_author, prev_id))?;
+            events_heads_table.remove(&(short_author, parent_id))?;
         }
 
         events_table.insert(
@@ -271,7 +280,12 @@ impl Database {
             },
         )?;
 
-        Ok(state)
+        Ok(InsertEventOutcome::Inserted {
+            was_missing,
+            is_deleted,
+            deleted_parent_content: deleted_parent,
+            missing_parents,
+        })
     }
 
     pub fn insert_event_content_tx<'t, 'e>(
@@ -295,7 +309,7 @@ impl Database {
 
         let borrow = content.borrow();
         let borrowed: Cow<'_, rostra_core::event::EventContentData> = Cow::Borrowed(borrow);
-        events_content_table.insert(&event_id, &ContentStateRef::Present(borrowed));
+        events_content_table.insert(&event_id, &ContentStateRef::Present(borrowed))?;
 
         Ok(true)
     }
@@ -317,7 +331,7 @@ impl Database {
             }
         }
 
-        events_content_table.insert(&event_id, &ContentState::Pruned);
+        events_content_table.insert(&event_id, &ContentState::Pruned)?;
 
         Ok(true)
     }
@@ -351,18 +365,24 @@ impl Database {
         Ok(events_table.get(&event.into())?.map(|r| r.value()))
     }
 
+    pub fn has_event_tx(
+        event: impl Into<ShortEventId>,
+        events_table: &impl ReadableTable<ShortEventId, EventRecord>,
+    ) -> DbResult<bool> {
+        Ok(events_table.get(&event.into())?.is_some())
+    }
+
     pub fn get_event_content_tx(
         event: impl Into<ShortEventId>,
         events_content_table: &impl ReadableTable<ShortEventId, ContentState>,
     ) -> DbResult<Option<ContentState>> {
         Ok(events_content_table.get(&event.into())?.map(|r| r.value()))
     }
-
-    pub fn has_event_tx(
+    pub fn has_event_content_tx(
         event: impl Into<ShortEventId>,
-        events_table: &impl ReadableTable<ShortEventId, EventRecord>,
+        events_content_table: &impl ReadableTable<ShortEventId, ContentState>,
     ) -> DbResult<bool> {
-        Ok(events_table.get(&event.into())?.is_some())
+        Ok(events_content_table.get(&event.into())?.is_some())
     }
 
     pub fn insert_followee_update(
@@ -392,10 +412,30 @@ impl Database {
     }
 }
 
-pub enum EventState {
+pub enum InsertEventOutcome {
+    /// An event already existed, so it changed nothing
     AlreadyPresent,
-    InsertedDeleted,
-    Inserted,
+    Inserted {
+        /// An event already had a parent reporting its existence.
+        ///
+        /// This also implies that the event is not considered a "head event"
+        /// anymore.
+        was_missing: bool,
+        /// This event was already marked as deleted by some processed children
+        /// event
+        is_deleted: bool,
+        /// An existing parent event had its content marked as deleted.
+        ///
+        /// Note, if the parent event was marked for deletion, but it was not
+        /// processed yet, this will not be set, and instead `is_deleted` will
+        /// be set to true, when the deleted parent is processed.
+        deleted_parent_content: Option<ShortEventId>,
+
+        /// Ids of parents storage was not aware of yet, so they are now marked
+        /// as "missing"
+        missing_parents: Vec<ShortEventId>,
+    },
 }
+
 #[cfg(test)]
 mod tests;

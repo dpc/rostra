@@ -8,9 +8,11 @@ version = { workspace = true }
 
 [dependencies]
 anyhow = { workspace = true }
+bao-tree = { workspace = true }
 bincode = { workspace = true }
 convi = { workspace = true }
 futures = { workspace = true }
+iroh-io = { workspace = true }
 iroh-net = { workspace = true }
 pkarr = { workspace = true, features = ["async"] }
 rostra-core = { workspace = true, features = ["bincode"] }

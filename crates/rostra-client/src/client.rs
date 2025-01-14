@@ -7,12 +7,6 @@ use std::time::Duration;
 use std::{ops, result};
 
 use backon::Retryable as _;
-use bao_tree::io::fsm::encode_ranges_validated;
-use bao_tree::io::outboard::EmptyOutboard;
-use bao_tree::io::round_up_to_chunks;
-use bao_tree::{blake3, BaoTree, BlockSize, ByteRanges};
-use convi::ExpectInto as _;
-use iroh_io::TokioStreamWriter;
 use iroh_net::{AddrInfo, NodeAddr};
 use itertools::Itertools as _;
 use pkarr::PkarrClient;
@@ -468,34 +462,12 @@ impl Client {
                         .make_rpc_with_extra_data_send(&FeedEventRequest(signed_event), |send| {
                             let body = body.clone();
                             Box::pin(async move {
-                                /// Use a block size of 16 KiB, a good default
-                                /// for most cases
-                                pub(crate) const BLOCK_SIZE: BlockSize =
-                                    BlockSize::from_chunk_log(4);
-
-                                let mut ob = EmptyOutboard {
-                                    tree: BaoTree::new(
-                                        u32::from(signed_event.event.content_len).into(),
-                                        BLOCK_SIZE,
-                                    ),
-                                    root: blake3::Hash::from_bytes(
-                                        signed_event.event.content_hash.into(),
-                                    ),
-                                };
-
-                                // Encode the first 100000 bytes of the file
-                                let ranges =
-                                    ByteRanges::from(0u64..body.as_bytes().len().expect_into());
-                                let ranges = round_up_to_chunks(&ranges);
-                                encode_ranges_validated(
+                                Connection::write_bao_content(
+                                    send,
                                     body.as_bytes(),
-                                    &mut ob,
-                                    &ranges,
-                                    TokioStreamWriter(send),
+                                    signed_event.event.content_hash,
                                 )
-                                .await
-                                .whatever_context("Failed to encode ranges")?;
-
+                                .await?;
                                 Ok(())
                             })
                         })

@@ -1,16 +1,12 @@
 use std::sync::Arc;
 
-use bao_tree::io::outboard::EmptyOutboard;
-use bao_tree::io::round_up_to_chunks;
-use bao_tree::{BaoTree, BlockSize, ByteRanges};
-use convi::CastInto as _;
-use iroh_io::TokioStreamReader;
 use iroh_net::endpoint::Incoming;
 use iroh_net::Endpoint;
 use rostra_core::id::RostraId;
 use rostra_p2p::connection::{
-    Connection, FeedEventRequest, FeedEventResponse, GetEventRequest, PingRequest, PingResponse,
-    RpcId, RpcMessage as _, MAX_REQUEST_SIZE,
+    Connection, FeedEventRequest, FeedEventResponse, GetEventContentRequest,
+    GetEventContentResponse, GetEventRequest, GetEventResponse, PingRequest, PingResponse, RpcId,
+    RpcMessage as _, MAX_REQUEST_SIZE,
 };
 use rostra_p2p::RpcError;
 use rostra_util_error::FmtCompact as _;
@@ -34,9 +30,6 @@ pub enum IncomingConnectionError {
     },
     Decoding {
         source: bincode::error::DecodeError,
-    },
-    DecodingBao {
-        source: bao_tree::io::DecodeError,
     },
     #[snafu(transparent)]
     Db {
@@ -128,6 +121,9 @@ impl RequestHandler {
                 RpcId::GET_EVENT => {
                     self.handle_get_event(req_msg, send, recv).await?;
                 }
+                RpcId::GET_EVENT_CONTENT => {
+                    self.handle_get_event_content(req_msg, send, recv).await?;
+                }
                 _ => return UnknownRpcIdSnafu { id }.fail(),
             }
         }
@@ -189,23 +185,9 @@ impl RequestHandler {
         Connection::write_success_return_code(&mut send).await?;
         Connection::write_message(&mut send, &FeedEventResponse).await?;
 
-        const BLOCK_SIZE: BlockSize = BlockSize::from_chunk_log(4);
-        let content_len: u32 = event.content_len.into();
-        let ranges = ByteRanges::from(0..content_len.into());
-        let chunk_ranges = round_up_to_chunks(&ranges);
-        let mut decoded = Vec::with_capacity(content_len.cast_into());
-        let mut ob = EmptyOutboard {
-            tree: BaoTree::new(content_len.into(), BLOCK_SIZE),
-            root: bao_tree::blake3::Hash::from_bytes(event.content_hash.into()),
-        };
-        bao_tree::io::fsm::decode_ranges(
-            TokioStreamReader(&mut read),
-            chunk_ranges,
-            &mut decoded,
-            &mut ob,
-        )
-        .await
-        .context(DecodingBaoSnafu)?;
+        let decoded =
+            Connection::read_bao_content(&mut read, event.content_len.into(), event.content_hash)
+                .await?;
 
         {
             let app = self.client.app_ref_opt().context(ExitingSnafu)?;
@@ -222,7 +204,7 @@ impl RequestHandler {
         &self,
         req_msg: Vec<u8>,
         mut send: iroh_net::endpoint::SendStream,
-        mut read: iroh_net::endpoint::RecvStream,
+        _read: iroh_net::endpoint::RecvStream,
     ) -> Result<(), IncomingConnectionError> {
         let GetEventRequest(event_id) =
             GetEventRequest::decode_whole::<MAX_REQUEST_SIZE>(&req_msg).context(DecodingSnafu)?;
@@ -232,12 +214,45 @@ impl RequestHandler {
 
         let event = storage.get_event(event_id).await;
 
-        if event.is_some() {
-            Connection::write_success_return_code(&mut send).await?;
-        } else {
-            Connection::write_return_code(&mut send, GetEventRequest::NOT_FOUND).await?;
+        Connection::write_success_return_code(&mut send).await?;
+
+        Connection::write_message(&mut send, &GetEventResponse(event.map(|e| e.event))).await?;
+
+        Ok(())
+    }
+
+    async fn handle_get_event_content(
+        &self,
+        req_msg: Vec<u8>,
+        mut send: iroh_net::endpoint::SendStream,
+        _read: iroh_net::endpoint::RecvStream,
+    ) -> Result<(), IncomingConnectionError> {
+        let GetEventContentRequest(event_id) =
+            GetEventContentRequest::decode_whole::<MAX_REQUEST_SIZE>(&req_msg)
+                .context(DecodingSnafu)?;
+
+        let client = self.client.app_ref()?;
+        let storage = client.storage()?;
+
+        let content = storage.get_event_content(event_id).await;
+
+        Connection::write_success_return_code(&mut send).await?;
+
+        Connection::write_message(&mut send, &GetEventContentResponse(content.is_some())).await?;
+
+        if let Some(content) = content {
+            let event = storage
+                .get_event(event_id)
+                .await
+                .expect("Must have event if we have content");
+            Connection::write_bao_content(
+                &mut send,
+                &content.as_ref(),
+                event.event.event.content_hash,
+            )
+            .await?;
         }
 
-        todo!();
+        Ok(())
     }
 }

@@ -4,7 +4,6 @@ pub use events::{ContentState, EventRecord};
 use ids::IdsFolloweesTsRecord;
 pub use ids::{IdRecord, IdsFolloweesRecord};
 use redb_bincode::TableDefinition;
-use rostra_core::event::EventContent;
 use rostra_core::id::{RostraId, ShortRostraId};
 use rostra_core::ShortEventId;
 

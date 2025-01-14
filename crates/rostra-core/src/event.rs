@@ -116,8 +116,10 @@ pub struct Event {
 }
 
 impl Event {
-    pub fn is_delete_parent_aux_set(&self) -> bool {
-        self.flags & 1 != 0
+    pub const DELETE_PARENT_AUX_CONTENT_FLAG: u8 = 1;
+
+    pub fn is_delete_parent_aux_content_set(&self) -> bool {
+        self.flags & Self::DELETE_PARENT_AUX_CONTENT_FLAG != 0
     }
 }
 
@@ -167,6 +169,11 @@ impl AsRef<[u8]> for EventContent {
 
 #[cfg_attr(feature = "serde", derive(::serde::Serialize, ::serde::Deserialize))]
 #[cfg_attr(feature = "bincode", derive(::bincode::Encode, ::bincode::Decode))]
+#[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
+pub struct PersonaId(u32);
+
+#[cfg_attr(feature = "serde", derive(::serde::Serialize, ::serde::Deserialize))]
+#[cfg_attr(feature = "bincode", derive(::bincode::Encode, ::bincode::Decode))]
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 pub struct SignedEvent {
     pub event: Event,
@@ -208,23 +215,35 @@ pub enum EventKindKnown {
     Null = 0x00,
     /// Unspecified binary data
     Raw = 0x01,
-    /// Update of identities being followed
-    FolloweesUpdate = 0x02,
+
+    /// Control: Start following identity
+    Follow = 0x10,
+    /// Control: Stop following identity
+    Unfollow = 0x11,
+    /// Control: Persona update
+    PersonaUpdate = 0x12,
 
     /// Social Post, backbone of the social network
-    SocialPost = 0x10,
-    SocialLike = 0x11,
-    SocialRepost = 0x12,
-    SocialComment = 0x13,
-    SocialAttachment = 0x14,
+    SocialPost = 0x20,
+    SocialLike = 0x21,
+    SocialRepost = 0x22,
+    SocialComment = 0x23,
+    SocialAttachment = 0x24,
 }
 
 #[cfg_attr(feature = "serde", derive(::serde::Serialize, ::serde::Deserialize))]
 #[cfg_attr(feature = "bincode", derive(::bincode::Encode, ::bincode::Decode))]
 #[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
-pub struct FolloweesUpdate {
-    /// id + "persona" to assign to
-    pub followees: Vec<(RostraId, String)>,
+pub struct ContentFollow {
+    pub followee: RostraId,
+    pub persona_id: PersonaId,
+}
+
+#[cfg_attr(feature = "serde", derive(::serde::Serialize, ::serde::Deserialize))]
+#[cfg_attr(feature = "bincode", derive(::bincode::Encode, ::bincode::Decode))]
+#[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
+pub struct ContentUnfollow {
+    pub followee: RostraId,
 }
 
 #[cfg_attr(feature = "serde", derive(::serde::Serialize, ::serde::Deserialize))]

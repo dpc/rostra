@@ -3614,7 +3614,6 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "backon",
- "bao-tree",
  "bincode",
  "bon",
  "convi",
@@ -3667,9 +3666,11 @@ name = "rostra-p2p"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "bao-tree",
  "bincode",
  "convi",
  "futures",
+ "iroh-io",
  "iroh-net",
  "pkarr",
  "rostra-core",

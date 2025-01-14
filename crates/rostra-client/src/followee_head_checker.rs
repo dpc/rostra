@@ -2,15 +2,15 @@ use std::collections::BinaryHeap;
 use std::sync::Arc;
 use std::time::Duration;
 
-use rostra_core::event::{SignedEvent, VerifiedEvent};
+use rostra_core::event::{VerifiedEvent, VerifiedEventContent};
 use rostra_core::id::RostraId;
 use rostra_core::ShortEventId;
-use rostra_p2p::connection::GetEventRequest;
-use rostra_util_error::{BoxedErrorResult, FmtCompact, WhateverResult};
-use snafu::{whatever, ResultExt as _, Whatever};
+use rostra_util_error::{FmtCompact, WhateverResult};
+use snafu::{whatever, ResultExt as _};
 use tracing::{debug, info, instrument};
 
 use crate::client::Client;
+use crate::db::InsertEventOutcome;
 use crate::storage::Storage;
 use crate::ClientRef;
 const LOG_TARGET: &str = "rostra::client::head_checker";
@@ -129,34 +129,45 @@ impl FolloweeHeadChecker {
             .await
             .whatever_context("Failed to connect")?;
 
-        while let Some((_, event_id)) = events.pop() {
+        while let Some((depth, event_id)) = events.pop() {
             let event = conn
-                .make_rpc(&GetEventRequest(event_id))
+                .get_event(event_id)
                 .await
                 .whatever_context("Failed to query peer")?;
 
-            let Some(event) = event.0 else {
+            let Some(event) = event else {
                 continue;
             };
             let event = VerifiedEvent::verify_received(id, event_id, event.event, event.sig)
                 .whatever_context("Invalid event received")?;
 
-            storage.process_event(&event).await;
+            let (insert_outcome, process_state) = storage.process_event(&event).await;
 
-            let (event, signed_event) = conn
-                .make_rpc_with_extra_data_recv(&GetEventRequest(event_id), |recv, resp| {
-                    let resp = resp.to_owned();
-                    Box::pin(async move {
-                        resp.0
-                            .map(|SignedEvent { event, sig }| {
-                                VerifiedEvent::verify_received(id, event_id, event, sig)
-                                    .whatever_context("Invalid event received")
-                            })
-                            .transpose()
-                    })
-                })
-                .await
-                .whatever_context("Rpc failed")?;
+            if let InsertEventOutcome::Inserted {
+                missing_parents, ..
+            } = insert_outcome
+            {
+                for missing in missing_parents {
+                    events.push((depth + 1, missing));
+                }
+            }
+
+            if storage.wants_content(event_id, process_state).await {
+                let content = conn
+                    .get_event_content(
+                        event_id,
+                        event.event.content_len.into(),
+                        event.event.content_hash,
+                    )
+                    .await
+                    .whatever_context("Failed to download peer data")?;
+
+                if let Some(content) = content {
+                    let verified_content = VerifiedEventContent::verify(event, content)
+                        .expect("Bao transfer should guarantee correct content was received");
+                    storage.process_event_content(&verified_content).await;
+                }
+            }
         }
 
         Ok(())

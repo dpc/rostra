@@ -1,23 +1,24 @@
-use rostra_core::event::{SignedEvent, VerifiedEvent};
+use rostra_core::event::{
+    ContentFollow, ContentUnfollow, EventContent, EventKind, EventKindKnown, VerifiedEvent,
+    VerifiedEventContent,
+};
 use rostra_core::id::RostraId;
 use rostra_core::ShortEventId;
 use tokio::sync::watch;
+use tracing::debug;
 
-use crate::db::{Database, DbResult, EventState, TABLE_EVENTS_HEADS, TABLE_EVENTS_MISSING};
+use crate::db::{Database, DbResult, InsertEventOutcome, TABLE_EVENTS_HEADS, TABLE_EVENTS_MISSING};
 
 pub struct Storage {
     db: Database,
     self_followee_list_updated: watch::Sender<Vec<RostraId>>,
 }
 
-pub enum EventContentState {
-    Missing,
-    Present,
-    Pruned,
-    Deleted,
-}
+pub const LOG_TARGET: &str = "rostra::storage";
 
 impl Storage {
+    const MAX_CONTENT_LEN: u32 = 1_000_000u32;
+
     pub async fn new(db: Database, self_id: RostraId) -> DbResult<Self> {
         let self_followees = db
             .read_followees(self_id.into())
@@ -63,7 +64,31 @@ impl Storage {
             .expect("Database panic")
     }
 
-    pub async fn process_event(&self, event: &VerifiedEvent) -> ProcessEventOutcome {
+    pub async fn get_event_content(
+        &self,
+        event_id: impl Into<ShortEventId>,
+    ) -> Option<EventContent> {
+        let event_id = event_id.into();
+        self.db
+            .read_with(|tx| {
+                let events_content_table = tx.open_table(&crate::db::TABLE_EVENTS_CONTENT)?;
+                Ok(
+                    Database::get_event_content_tx(event_id, &events_content_table)?.and_then(
+                        |content_state| match content_state {
+                            crate::db::events::ContentStateRef::Present(b) => Some(b.into_owned()),
+                            crate::db::events::ContentStateRef::Deleted { .. }
+                            | crate::db::events::ContentStateRef::Pruned => None,
+                        },
+                    ),
+                )
+            })
+            .await
+            .expect("Database panic")
+    }
+    pub async fn process_event(
+        &self,
+        event: &VerifiedEvent,
+    ) -> (InsertEventOutcome, ProcessEventState) {
         self.db
             .write_with(|tx| {
                 let mut events_table = tx.open_table(&crate::db::TABLE_EVENTS)?;
@@ -71,7 +96,7 @@ impl Storage {
                 let mut events_missing_table = tx.open_table(&TABLE_EVENTS_MISSING)?;
                 let mut events_heads_table = tx.open_table(&TABLE_EVENTS_HEADS)?;
 
-                let event_state = Database::insert_event_tx(
+                let insert_event_outcome = Database::insert_event_tx(
                     event,
                     &mut events_table,
                     &mut events_content_table,
@@ -79,25 +104,127 @@ impl Storage {
                     &mut events_heads_table,
                 )?;
 
-                Ok(if 1_000_000u32 < u32::from(event.event.content_len) {
+                let process_event_content_state = if Self::MAX_CONTENT_LEN
+                    < u32::from(event.event.content_len)
+                {
                     Database::prune_event_content_tx(event.event_id, &mut events_content_table)?;
 
-                    ProcessEventOutcome::DoesnotNeedContent
+                    ProcessEventState::Pruned
                 } else {
-                    match event_state {
-                        EventState::AlreadyPresent => ProcessEventOutcome::MaybeNeedsContent,
-                        EventState::InsertedDeleted => ProcessEventOutcome::DoesnotNeedContent,
-                        EventState::Inserted => ProcessEventOutcome::NeedsContent,
+                    match insert_event_outcome {
+                        InsertEventOutcome::AlreadyPresent => ProcessEventState::Existing,
+                        InsertEventOutcome::Inserted { is_deleted, .. } => {
+                            if is_deleted {
+                                ProcessEventState::Deleted
+                            } else {
+                                // If the event was not there, and it wasn't deleted
+                                // it definitely does not have content yet.
+                                ProcessEventState::New
+                            }
+                        }
                     }
-                })
+                };
+                Ok((insert_event_outcome, process_event_content_state))
+            })
+            .await
+            .expect("Storage error")
+    }
+
+    /// Process event content
+    ///
+    /// Note: Must only be called for an event that was already processed
+    pub async fn process_event_content(&self, event_content: &VerifiedEventContent) {
+        self.db
+            .write_with(|tx| {
+                let events_table = tx.open_table(&crate::db::TABLE_EVENTS)?;
+                let mut events_content_table = tx.open_table(&crate::db::TABLE_EVENTS_CONTENT)?;
+
+                debug_assert!(Database::has_event_tx(
+                    event_content.event_id,
+                    &events_table
+                )?);
+
+                let content_added = if u32::from(event_content.event.content_len)
+                    > Self::MAX_CONTENT_LEN
+                {
+                    Database::insert_event_content_tx(&event_content, &mut events_content_table)?
+                } else {
+                    false
+                };
+
+                if content_added {
+                    if event_content.event.kind == EventKindKnown::Follow.into() {
+                        match event_content.content.decode::<ContentFollow>() {
+                            Ok(follow_content) => {
+                                Database::insert_follow_tx(event_content.event.author, follow_content)?;
+                            },
+                            Err(err) => {
+                                debug!(target: LOG_TARGET, "Ignoring malformed ContentFollow payload");
+                            },
+                        }
+                    } else if event_content.event.kind == EventKindKnown::Unfollow.into() {
+                        match event_content.content.decode::<ContentUnfollow>() {
+                            Ok(unfollow_content) => {
+                                Database::insert_follow_tx(event_content.event.author, unfollow_content)?;
+                            },
+                            Err(err) => {
+                                debug!(target: LOG_TARGET, "Ignoring malformed ContentUnfollow payload");
+                            },
+                        }
+                    }
+                }
+                Ok(())
+            })
+            .await
+            .expect("Storage error")
+    }
+
+    pub async fn wants_content(
+        &self,
+        event_id: impl Into<ShortEventId>,
+        process_state: ProcessEventState,
+    ) -> bool {
+        match process_state.wants_content() {
+            ContentWantState::DoesNotWant => {
+                return false;
+            }
+            ContentWantState::Wants => {
+                return true;
+            }
+            ContentWantState::MaybeWants => {}
+        }
+
+        self.db
+            .read_with(|tx| {
+                let events_content_table = tx.open_table(&crate::db::TABLE_EVENTS_CONTENT)?;
+
+                Database::has_event_content_tx(event_id.into(), &events_content_table)
             })
             .await
             .expect("Storage error")
     }
 }
 
-enum ProcessEventOutcome {
-    NeedsContent,
-    MaybeNeedsContent,
-    DoesnotNeedContent,
+pub enum ProcessEventState {
+    New,
+    Existing,
+    Pruned,
+    Deleted,
+}
+
+pub enum ContentWantState {
+    Wants,
+    MaybeWants,
+    DoesNotWant,
+}
+
+impl ProcessEventState {
+    pub fn wants_content(self) -> ContentWantState {
+        match self {
+            ProcessEventState::New => ContentWantState::Wants,
+            ProcessEventState::Existing => ContentWantState::MaybeWants,
+            ProcessEventState::Pruned => ContentWantState::DoesNotWant,
+            ProcessEventState::Deleted => ContentWantState::DoesNotWant,
+        }
+    }
 }

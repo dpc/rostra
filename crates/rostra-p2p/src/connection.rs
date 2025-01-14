@@ -2,19 +2,23 @@ use std::fmt;
 use std::future::Future;
 use std::pin::Pin;
 
+use bao_tree::io::fsm::encode_ranges_validated;
+use bao_tree::io::outboard::EmptyOutboard;
+use bao_tree::io::round_up_to_chunks;
+use bao_tree::{blake3, BaoTree, BlockSize, ByteRanges};
 use bincode::{Decode, Encode};
 use convi::{CastInto, ExpectFrom};
+use iroh_io::{TokioStreamReader, TokioStreamWriter};
 use iroh_net::endpoint::{RecvStream, SendStream};
 use rostra_core::bincode::STD_BINCODE_CONFIG;
-use rostra_core::event::SignedEvent;
-use rostra_core::id::RostraId;
-use rostra_core::{MsgLen, ShortEventId};
-use rostra_util_error::{BoxedErrorResult, WhateverResult};
-use snafu::ResultExt as _;
+use rostra_core::event::{EventContent, SignedEvent};
+use rostra_core::{ContentHash, MsgLen, ShortEventId};
+use rostra_util_error::BoxedErrorResult;
+use snafu::{OptionExt as _, ResultExt as _};
 
 use crate::{
-    ConnectionSnafu, DecodingSnafu, FailedSnafu, MessageTooLargeSnafu, ReadSnafu, RpcResult,
-    TrailerSnafu, WriteSnafu,
+    ConnectionSnafu, DecodingBaoSnafu, DecodingSnafu, EncodingBaoSnafu, FailedSnafu,
+    MessageTooLargeSnafu, ReadSnafu, RpcResult, TrailerSnafu, WriteSnafu,
 };
 
 pub struct Connection(iroh_net::endpoint::Connection);
@@ -165,7 +169,7 @@ define_rpc!(
     GetEventContentRequest,
     pub struct GetEventContentRequest(pub ShortEventId);,
     GetEventContentResponse,
-    pub struct GetEventContentResponse(pub Option<SignedEvent>);
+    pub struct GetEventContentResponse(pub bool);
 );
 
 impl FeedEventResponse {
@@ -234,7 +238,10 @@ impl Connection {
         extra_data_f: F,
     ) -> RpcResult<<R as Rpc>::Response>
     where
-        F: for<'s> Fn(&'s mut SendStream) -> Pin<Box<dyn Future<Output = WhateverResult<()>> + 's>>,
+        F: for<'s> Fn(
+            &'s mut SendStream,
+        )
+            -> Pin<Box<dyn Future<Output = BoxedErrorResult<()>> + 's + Send + Sync>>,
     {
         let (mut send, mut recv) = self.0.open_bi().await.context(ConnectionSnafu)?;
 
@@ -259,7 +266,7 @@ impl Connection {
             &'s mut RecvStream,
             &<R as Rpc>::Response,
         )
-            -> Pin<Box<dyn Future<Output = WhateverResult<T>> + 's + Send + Sync>>,
+            -> Pin<Box<dyn Future<Output = BoxedErrorResult<T>> + 's + Send + Sync>>,
     {
         let (mut send, mut recv) = self.0.open_bi().await.context(ConnectionSnafu)?;
 
@@ -371,5 +378,101 @@ impl Connection {
         let req = Self::read_message_raw::<MAX_REQUEST_SIZE>(recv).await?;
 
         Ok((id, req))
+    }
+
+    pub async fn write_bao_content(
+        send: &mut SendStream,
+        bytes: &[u8],
+        hash: ContentHash,
+    ) -> RpcResult<()> {
+        let bytes_len = u32::try_from(bytes.len())
+            .ok()
+            .context(MessageTooLargeSnafu {
+                len: u32::MAX,
+                limit: u32::MAX,
+            })?;
+        /// Use a block size of 16 KiB, a good default
+        /// for most cases
+        pub(crate) const BLOCK_SIZE: BlockSize = BlockSize::from_chunk_log(4);
+
+        let mut ob = EmptyOutboard {
+            tree: BaoTree::new(bytes_len.into(), BLOCK_SIZE),
+            root: blake3::Hash::from_bytes(hash.into()),
+        };
+
+        // Encode the first 100000 bytes of the file
+        let ranges = ByteRanges::from(0u64..bytes_len.into());
+        let ranges = round_up_to_chunks(&ranges);
+        encode_ranges_validated(
+            &mut bytes.as_ref(),
+            &mut ob,
+            &ranges,
+            TokioStreamWriter(send),
+        )
+        .await
+        .context(EncodingBaoSnafu)?;
+
+        Ok(())
+    }
+
+    pub async fn read_bao_content(
+        read: &mut RecvStream,
+        len: u32,
+        hash: ContentHash,
+    ) -> RpcResult<Vec<u8>> {
+        const BLOCK_SIZE: BlockSize = BlockSize::from_chunk_log(4);
+        let ranges = ByteRanges::from(0u64..len.into());
+        let chunk_ranges = round_up_to_chunks(&ranges);
+        let mut decoded = Vec::with_capacity(len.cast_into());
+        let mut ob = EmptyOutboard {
+            tree: bao_tree::BaoTree::new(len.into(), BLOCK_SIZE),
+            root: blake3::Hash::from_bytes(hash.into()),
+        };
+        bao_tree::io::fsm::decode_ranges(
+            TokioStreamReader(read),
+            chunk_ranges,
+            &mut decoded,
+            &mut ob,
+        )
+        .await
+        .context(DecodingBaoSnafu)?;
+
+        Ok(decoded)
+    }
+}
+
+impl Connection {
+    pub async fn get_event(
+        &self,
+        event_id: impl Into<ShortEventId>,
+    ) -> RpcResult<Option<SignedEvent>> {
+        let event = self.make_rpc(&GetEventRequest(event_id.into())).await?;
+
+        Ok(event.0)
+    }
+
+    pub async fn get_event_content(
+        &self,
+        event_id: impl Into<ShortEventId>,
+        len: u32,
+        hash: ContentHash,
+    ) -> RpcResult<Option<EventContent>> {
+        let event_id = event_id.into();
+
+        let (_resp, content) = self
+            .make_rpc_with_extra_data_recv(&GetEventContentRequest(event_id), |recv, resp| {
+                let resp = resp.to_owned();
+                Box::pin(async move {
+                    if resp.0 {
+                        Ok(Some(EventContent::from(
+                            Connection::read_bao_content(recv, len, hash).await?,
+                        )))
+                    } else {
+                        Ok(None)
+                    }
+                })
+            })
+            .await?;
+        Ok(content)
     }
 }

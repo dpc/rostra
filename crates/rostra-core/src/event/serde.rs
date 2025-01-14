@@ -1,4 +1,4 @@
-use super::{EventKind, EventSignature};
+use super::{EventContent, EventKind, EventSignature};
 
 impl serde::Serialize for EventSignature {
     fn serialize<S>(&self, ser: S) -> Result<S::Ok, S::Error>
@@ -39,6 +39,39 @@ impl<'de> serde::de::Deserialize<'de> for EventSignature {
         }
     }
 }
+
+impl serde::Serialize for EventContent {
+    fn serialize<S>(&self, ser: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        if ser.is_human_readable() {
+            ser.serialize_str(&data_encoding::HEXLOWER.encode(&self.0))
+        } else {
+            ser.serialize_bytes(&self.0)
+        }
+    }
+}
+
+impl<'de> serde::de::Deserialize<'de> for EventContent {
+    fn deserialize<D>(de: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        if de.is_human_readable() {
+            let hex_str = String::deserialize(de)?;
+            let bytes = data_encoding::HEXLOWER
+                .decode(hex_str.as_bytes())
+                .map_err(serde::de::Error::custom)?;
+
+            Ok(EventContent(bytes.try_into().expect("Just checked length")))
+        } else {
+            let bytes = Vec::<u8>::deserialize(de)?;
+            Ok(EventContent(bytes.try_into().expect("Just checked len")))
+        }
+    }
+}
+
 impl serde::Serialize for EventKind {
     fn serialize<S>(&self, ser: S) -> Result<S::Ok, S::Error>
     where
