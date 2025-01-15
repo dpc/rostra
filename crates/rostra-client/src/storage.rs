@@ -1,9 +1,10 @@
 use rostra_core::event::{
-    ContentFollow, ContentUnfollow, EventContent, EventKind, EventKindKnown, VerifiedEvent,
+    ContentFollow, ContentUnfollow, EventContent, EventKindKnown, VerifiedEvent,
     VerifiedEventContent,
 };
 use rostra_core::id::RostraId;
 use rostra_core::ShortEventId;
+use rostra_util_error::FmtCompact as _;
 use tokio::sync::watch;
 use tracing::debug;
 
@@ -155,20 +156,22 @@ impl Storage {
                 if content_added {
                     if event_content.event.kind == EventKindKnown::Follow.into() {
                         match event_content.content.decode::<ContentFollow>() {
-                            Ok(follow_content) => {
-                                Database::insert_follow_tx(event_content.event.author, follow_content)?;
+                            Ok(_follow_content) => {
+                                // Database::insert_follow_tx(event_content.event.author, follow_content)?;
+                                todo!();
                             },
                             Err(err) => {
-                                debug!(target: LOG_TARGET, "Ignoring malformed ContentFollow payload");
+                                debug!(target: LOG_TARGET, err = %err.fmt_compact(), "Ignoring malformed ContentFollow payload");
                             },
                         }
                     } else if event_content.event.kind == EventKindKnown::Unfollow.into() {
                         match event_content.content.decode::<ContentUnfollow>() {
-                            Ok(unfollow_content) => {
-                                Database::insert_follow_tx(event_content.event.author, unfollow_content)?;
+                            Ok(_unfollow_content) => {
+                                // Database::insert_follow_tx(event_content.event.author, unfollow_content)?;
+                                todo!()
                             },
                             Err(err) => {
-                                debug!(target: LOG_TARGET, "Ignoring malformed ContentUnfollow payload");
+                                debug!(target: LOG_TARGET, err = %err.fmt_compact(), "Ignoring malformed ContentUnfollow payload");
                             },
                         }
                     }
