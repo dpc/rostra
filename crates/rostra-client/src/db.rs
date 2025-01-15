@@ -5,14 +5,17 @@ use std::borrow::{Borrow as _, Cow};
 use std::path::PathBuf;
 
 use events::ContentStateRef;
+use ids::{IdsFollowersRecord, IdsUnfollowedRecord};
 use redb_bincode::{ReadTransaction, ReadableTable, Table, WriteTransaction};
-use rostra_core::event::{SignedEvent, VerifiedEvent, VerifiedEventContent};
+use rostra_core::event::{
+    ContentFollow, ContentUnfollow, SignedEvent, VerifiedEvent, VerifiedEventContent,
+};
 use rostra_core::id::{RostraId, ShortRostraId};
 use rostra_core::{ShortEventId, Timestamp};
 use rostra_util_error::BoxedError;
 use snafu::{Location, ResultExt as _, Snafu};
 use tables::events::EventsMissingRecord;
-use tables::ids::{IdsFolloweesRecord, IdsFolloweesTsRecord};
+use tables::ids::IdsFolloweesRecord;
 use tables::{ContentState, EventRecord, EventsHeadsTableValue};
 use tokio::task::JoinError;
 use tracing::{debug, info, instrument};
@@ -82,8 +85,10 @@ impl Database {
             dbtx.open_table(&TABLE_EVENTS)?;
             dbtx.open_table(&TABLE_SELF)?;
             dbtx.open_table(&TABLE_IDS)?;
-            dbtx.open_table(&TABLE_IDS_FOLLOWEES)?;
-            dbtx.open_table(&TABLE_IDS_FOLLOWEES_TS)?;
+            dbtx.open_table(&TABLE_ID_FOLLOWEES)?;
+            dbtx.open_table(&TABLE_ID_FOLLOWERS)?;
+            dbtx.open_table(&TABLE_ID_UNFOLLOWED)?;
+            dbtx.open_table(&TABLE_ID_PERSONAS)?;
             dbtx.open_table(&TABLE_EVENTS)?;
             dbtx.open_table(&TABLE_EVENTS_MISSING)?;
             dbtx.open_table(&TABLE_EVENTS_HEADS)?;
@@ -165,25 +170,49 @@ impl Database {
         Self::from(create).init().await
     }
 
-    pub async fn read_followees(&self, id: ShortRostraId) -> DbResult<Vec<(RostraId, String)>> {
+    pub async fn read_followees(
+        &self,
+        id: RostraId,
+    ) -> DbResult<Vec<(RostraId, IdsFolloweesRecord)>> {
         self.read_with(|tx| {
-            let ids_following_table = tx.open_table(&TABLE_IDS_FOLLOWEES)?;
+            let ids_followees_table = tx.open_table(&TABLE_ID_FOLLOWEES)?;
 
-            Self::read_followees_tx(id, &ids_following_table)
+            Self::read_followees_tx(id, &ids_followees_table)
+        })
+        .await
+    }
+
+    pub async fn read_followers(
+        &self,
+        id: RostraId,
+    ) -> DbResult<Vec<(RostraId, IdsFollowersRecord)>> {
+        self.read_with(|tx| {
+            let ids_followers_table = tx.open_table(&TABLE_ID_FOLLOWERS)?;
+
+            Self::read_followers_tx(id, &ids_followers_table)
         })
         .await
     }
 
     pub fn read_followees_tx(
-        id: ShortRostraId,
-        ids_following_table: &impl ReadableTable<(ShortRostraId, RostraId), IdsFolloweesRecord>,
-    ) -> DbResult<Vec<(RostraId, String)>> {
-        Ok(ids_following_table
+        id: RostraId,
+        ids_followees_table: &impl ReadableTable<(RostraId, RostraId), IdsFolloweesRecord>,
+    ) -> DbResult<Vec<(RostraId, IdsFolloweesRecord)>> {
+        Ok(ids_followees_table
             .range((id, RostraId::ZERO)..=(id, RostraId::MAX))?
-            .map(|res| res.map(|(k, v)| (k.value().1, v.value().persona)))
+            .map(|res| res.map(|(k, v)| (k.value().1, v.value())))
             .collect::<Result<Vec<_>, _>>()?)
     }
 
+    pub fn read_followers_tx(
+        id: RostraId,
+        ids_followers_table: &impl ReadableTable<(RostraId, RostraId), IdsFollowersRecord>,
+    ) -> DbResult<Vec<(RostraId, IdsFollowersRecord)>> {
+        Ok(ids_followers_table
+            .range((id, RostraId::ZERO)..=(id, RostraId::MAX))?
+            .map(|res| res.map(|(k, v)| (k.value().1, v.value())))
+            .collect::<Result<Vec<_>, _>>()?)
+    }
     /// Insert an event and do all the accounting for it
     ///
     /// Return `true`
@@ -386,28 +415,67 @@ impl Database {
         Ok(events_content_table.get(&event.into())?.is_some())
     }
 
-    pub fn insert_followee_update(
-        author: ShortRostraId,
-        ts: Timestamp,
-        followees: Vec<(RostraId, String)>,
-        ids_followees_ts_table: &mut Table<ShortRostraId, IdsFolloweesTsRecord>,
-        ids_followees_table: &mut Table<(ShortRostraId, RostraId), IdsFolloweesRecord>,
+    pub(crate) fn insert_follow_tx(
+        author: RostraId,
+        timestamp: Timestamp,
+        ContentFollow {
+            followee,
+            persona_id: persona,
+        }: ContentFollow,
+
+        followees_table: &mut Table<(RostraId, RostraId), IdsFolloweesRecord>,
+        followers_table: &mut Table<(RostraId, RostraId), IdsFollowersRecord>,
+        unfollowed_table: &mut Table<(RostraId, RostraId), IdsUnfollowedRecord>,
     ) -> DbResult<bool> {
-        if ids_followees_ts_table
-            .get(&author)?
-            .is_some_and(|existing| u64::from(ts) <= existing.value().ts)
-        {
-            return Ok(false);
+        let db_key = (author, followee);
+        if let Some(followees) = followees_table.get(&db_key)?.map(|v| v.value()) {
+            if timestamp <= followees.ts {
+                return Ok(false);
+            }
+        }
+        if let Some(unfollowed) = unfollowed_table.get(&db_key)?.map(|v| v.value()) {
+            if timestamp <= unfollowed.ts {
+                return Ok(false);
+            }
         }
 
-        ids_followees_table.retain_in(
-            (author, RostraId::ZERO)..=(author, RostraId::MAX),
-            |_k, _v| false,
+        unfollowed_table.remove(&db_key)?;
+        followees_table.insert(
+            &db_key,
+            &IdsFolloweesRecord {
+                ts: timestamp,
+                persona,
+            },
         )?;
+        followers_table.insert(&(followee, author), &IdsFollowersRecord {})?;
 
-        for (followee_id, persona) in followees {
-            ids_followees_table.insert(&(author, followee_id), &IdsFolloweesRecord { persona })?;
+        Ok(true)
+    }
+
+    pub(crate) fn insert_unfollow_tx(
+        author: RostraId,
+        timestamp: Timestamp,
+        ContentUnfollow { followee }: ContentUnfollow,
+
+        followees_table: &mut Table<(RostraId, RostraId), IdsFolloweesRecord>,
+        followers_table: &mut Table<(RostraId, RostraId), IdsFollowersRecord>,
+        unfollowed_table: &mut Table<(RostraId, RostraId), IdsUnfollowedRecord>,
+    ) -> DbResult<bool> {
+        let db_key = (author, followee);
+        if let Some(followees) = followees_table.get(&db_key)?.map(|v| v.value()) {
+            if timestamp <= followees.ts {
+                return Ok(false);
+            }
         }
+        if let Some(unfollowed) = unfollowed_table.get(&db_key)?.map(|v| v.value()) {
+            if timestamp <= unfollowed.ts {
+                return Ok(false);
+            }
+        }
+
+        followees_table.remove(&db_key)?;
+        followers_table.remove(&(followee, author))?;
+        unfollowed_table.insert(&db_key, &IdsUnfollowedRecord { ts: timestamp })?;
 
         Ok(true)
     }

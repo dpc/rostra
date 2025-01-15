@@ -195,6 +195,22 @@ impl From<MsgLen> for u32 {
 /// Timestatmp encoded in fixed-sized way
 #[cfg_attr(feature = "serde", derive(::serde::Serialize, ::serde::Deserialize))]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct TimestampFixed(pub u64);
+
+impl From<u64> for TimestampFixed {
+    fn from(value: u64) -> Self {
+        Self(value)
+    }
+}
+
+impl From<TimestampFixed> for u64 {
+    fn from(value: TimestampFixed) -> Self {
+        value.0
+    }
+}
+
+#[derive(Copy, Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[cfg_attr(feature = "bincode", derive(::bincode::Encode, ::bincode::Decode))]
 pub struct Timestamp(pub u64);
 
 impl From<u64> for Timestamp {
@@ -206,6 +222,12 @@ impl From<u64> for Timestamp {
 impl From<Timestamp> for u64 {
     fn from(value: Timestamp) -> Self {
         value.0
+    }
+}
+
+impl From<TimestampFixed> for Timestamp {
+    fn from(value: TimestampFixed) -> Self {
+        Self(value.0)
     }
 }
 

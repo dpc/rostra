@@ -1,6 +1,6 @@
 use tracing::info;
 
-use crate::event::{Event, EventContent, EventKindKnown, SignedEvent};
+use crate::event::{Event, EventContent, EventKind, SignedEvent};
 use crate::id::RostraIdSecretKey;
 
 #[test_log::test]
@@ -9,7 +9,7 @@ fn event_size() {
 
     let event = Event::builder()
         .author(id_secret.id())
-        .kind(EventKindKnown::Raw)
+        .kind(EventKind::RAW)
         .content(EventContent::from(b"test".to_vec()))
         .build();
 

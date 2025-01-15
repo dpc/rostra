@@ -17,7 +17,8 @@ pub use verified_event::*;
 
 use crate::id::RostraId;
 use crate::{
-    define_array_type_no_serde, ContentHash, MsgLen, NullableShortEventId, ShortEventId, Timestamp,
+    define_array_type_no_serde, ContentHash, MsgLen, NullableShortEventId, ShortEventId,
+    TimestampFixed,
 };
 
 /// An even (header)
@@ -69,7 +70,7 @@ pub struct Event {
     pub content_len: MsgLen,
 
     /// Timestamp of the message
-    pub timestamp: Timestamp,
+    pub timestamp: TimestampFixed,
 
     /// Unused, reserved for future use, timestamp maybe? (8B)
     pub padding: [u8; 16],
@@ -195,6 +196,29 @@ define_array_type_no_serde!(
 #[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
 pub struct EventKind([u8; 2]);
 
+impl EventKind {
+    /// No real content
+    pub const NULL: Self = EventKind::from_u16(0);
+    /// Unspecified binary data
+    pub const RAW: Self = EventKind::from_u16(1);
+
+    /// Control: Start following identity
+    pub const FOLLOW: Self = EventKind::from_u16(0x10);
+    /// Control: Stop following identity
+    pub const UNFOLLOW: Self = EventKind::from_u16(0x11);
+    /// Control: Persona update
+    pub const PERSONA_UPDATE: Self = EventKind::from_u16(0x12);
+
+    /// Social Post, backbone of the social network
+    pub const SOCIAL_POST: Self = EventKind::from_u16(0x20);
+    pub const SOCIAL_LIKE: Self = EventKind::from_u16(0x21);
+    pub const SOCIAL_REPOST: Self = EventKind::from_u16(0x22);
+    pub const SOCIAL_COMMENT: Self = EventKind::from_u16(0x23);
+
+    pub const fn from_u16(value: u16) -> Self {
+        Self(value.to_be_bytes())
+    }
+}
 impl From<u16> for EventKind {
     fn from(value: u16) -> Self {
         Self(value.to_be_bytes())
@@ -205,35 +229,6 @@ impl From<EventKind> for u16 {
     fn from(value: EventKind) -> Self {
         u16::from_be_bytes(value.0)
     }
-}
-
-impl From<EventKindKnown> for EventKind {
-    fn from(value: EventKindKnown) -> Self {
-        (value as u16).into()
-    }
-}
-#[cfg_attr(feature = "serde", derive(::serde::Serialize, ::serde::Deserialize))]
-#[cfg_attr(feature = "bincode", derive(::bincode::Encode, ::bincode::Decode))]
-#[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
-pub enum EventKindKnown {
-    /// No real content
-    Null = 0x00,
-    /// Unspecified binary data
-    Raw = 0x01,
-
-    /// Control: Start following identity
-    Follow = 0x10,
-    /// Control: Stop following identity
-    Unfollow = 0x11,
-    /// Control: Persona update
-    PersonaUpdate = 0x12,
-
-    /// Social Post, backbone of the social network
-    SocialPost = 0x20,
-    SocialLike = 0x21,
-    SocialRepost = 0x22,
-    SocialComment = 0x23,
-    SocialAttachment = 0x24,
 }
 
 #[cfg_attr(feature = "serde", derive(::serde::Serialize, ::serde::Deserialize))]

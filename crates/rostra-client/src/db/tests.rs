@@ -1,5 +1,4 @@
-use rostra_core::event::EventKindKnown::SocialPost;
-use rostra_core::event::{Event, EventContent, VerifiedEvent};
+use rostra_core::event::{Event, EventContent, EventKind, VerifiedEvent};
 use rostra_core::id::RostraIdSecretKey;
 use rostra_core::EventId;
 use rostra_util_error::BoxedErrorResult;
@@ -29,7 +28,7 @@ fn build_test_event(
     let author = id_secret.id();
     let event = Event::builder()
         .author(author)
-        .kind(SocialPost)
+        .kind(EventKind::SOCIAL_POST)
         .maybe_parent_prev(parent.map(Into::into))
         .content(content.clone())
         .build();
@@ -117,7 +116,7 @@ fn build_test_event_2(
     let author = id_secret.id();
     let event = Event::builder()
         .author(author)
-        .kind(SocialPost)
+        .kind(EventKind::SOCIAL_POST)
         .maybe_parent_prev(parent.map(Into::into))
         .maybe_delete(delete.map(Into::into))
         .content(content.clone())

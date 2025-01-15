@@ -1,6 +1,6 @@
+use redb_bincode::WriteTransaction;
 use rostra_core::event::{
-    ContentFollow, ContentUnfollow, EventContent, EventKindKnown, VerifiedEvent,
-    VerifiedEventContent,
+    ContentFollow, ContentUnfollow, EventContent, EventKind, VerifiedEvent, VerifiedEventContent,
 };
 use rostra_core::id::RostraId;
 use rostra_core::ShortEventId;
@@ -22,7 +22,7 @@ impl Storage {
 
     pub async fn new(db: Database, self_id: RostraId) -> DbResult<Self> {
         let self_followees = db
-            .read_followees(self_id.into())
+            .read_followees(self_id)
             .await?
             .into_iter()
             .map(|(id, _)| id)
@@ -145,41 +145,74 @@ impl Storage {
                     &events_table
                 )?);
 
-                let content_added = if u32::from(event_content.event.content_len)
-                    > Self::MAX_CONTENT_LEN
-                {
-                    Database::insert_event_content_tx(event_content, &mut events_content_table)?
-                } else {
-                    false
-                };
+                let content_added =
+                    if u32::from(event_content.event.content_len) > Self::MAX_CONTENT_LEN {
+                        Database::insert_event_content_tx(event_content, &mut events_content_table)?
+                    } else {
+                        false
+                    };
 
                 if content_added {
-                    if event_content.event.kind == EventKindKnown::Follow.into() {
-                        match event_content.content.decode::<ContentFollow>() {
-                            Ok(_follow_content) => {
-                                // Database::insert_follow_tx(event_content.event.author, follow_content)?;
-                                todo!();
-                            },
-                            Err(err) => {
-                                debug!(target: LOG_TARGET, err = %err.fmt_compact(), "Ignoring malformed ContentFollow payload");
-                            },
-                        }
-                    } else if event_content.event.kind == EventKindKnown::Unfollow.into() {
-                        match event_content.content.decode::<ContentUnfollow>() {
-                            Ok(_unfollow_content) => {
-                                // Database::insert_follow_tx(event_content.event.author, unfollow_content)?;
-                                todo!()
-                            },
-                            Err(err) => {
-                                debug!(target: LOG_TARGET, err = %err.fmt_compact(), "Ignoring malformed ContentUnfollow payload");
-                            },
-                        }
-                    }
+                    self.process_event_content_inserted_tx(event_content, tx)?;
                 }
                 Ok(())
             })
             .await
             .expect("Storage error")
+    }
+
+    /// After an event content was inserted process special kinds of event
+    /// content, like follows/unfollows
+    pub fn process_event_content_inserted_tx(
+        &self,
+        event_content: &VerifiedEventContent,
+        tx: &WriteTransaction,
+    ) -> DbResult<()> {
+        match event_content.event.kind {
+            EventKind::FOLLOW | EventKind::UNFOLLOW => {
+                let mut id_followees_table = tx.open_table(&crate::db::TABLE_ID_FOLLOWEES)?;
+                let mut id_followers_table = tx.open_table(&crate::db::TABLE_ID_FOLLOWERS)?;
+                let mut id_unfollowed_table = tx.open_table(&crate::db::TABLE_ID_UNFOLLOWED)?;
+
+                match event_content.event.kind {
+                    EventKind::FOLLOW => match event_content.content.decode::<ContentFollow>() {
+                        Ok(follow_content) => {
+                            Database::insert_follow_tx(
+                                event_content.event.author,
+                                event_content.event.timestamp.into(),
+                                follow_content,
+                                &mut id_followees_table,
+                                &mut id_followers_table,
+                                &mut id_unfollowed_table,
+                            )?;
+                        }
+                        Err(err) => {
+                            debug!(target: LOG_TARGET, err = %err.fmt_compact(), "Ignoring malformed ContentFollow payload");
+                        }
+                    },
+                    EventKind::UNFOLLOW => {
+                        match event_content.content.decode::<ContentUnfollow>() {
+                            Ok(unfollow_content) => {
+                                Database::insert_unfollow_tx(
+                                    event_content.event.author,
+                                    event_content.event.timestamp.into(),
+                                    unfollow_content,
+                                    &mut id_followees_table,
+                                    &mut id_followers_table,
+                                    &mut id_unfollowed_table,
+                                )?;
+                            }
+                            Err(err) => {
+                                debug!(target: LOG_TARGET, err = %err.fmt_compact(), "Ignoring malformed ContentUnfollow payload");
+                            }
+                        }
+                    }
+                    _ => unreachable!(),
+                }
+            }
+            _ => {}
+        };
+        Ok(())
     }
 
     pub async fn wants_content(

@@ -1,6 +1,6 @@
 use bincode::config;
 
-use crate::{MsgLen, NullableShortEventId, ShortEventId, Timestamp};
+use crate::{MsgLen, NullableShortEventId, ShortEventId, TimestampFixed};
 
 pub const STANDARD_LIMIT_16M: usize = 0x1_0000_0000;
 pub const STD_BINCODE_CONFIG: config::Configuration<
@@ -38,7 +38,7 @@ impl bincode::Decode for MsgLen {
     }
 }
 
-impl bincode::Encode for Timestamp {
+impl bincode::Encode for TimestampFixed {
     fn encode<E: bincode::enc::Encoder>(
         &self,
         encoder: &mut E,
@@ -48,7 +48,7 @@ impl bincode::Encode for Timestamp {
     }
 }
 
-impl<'de> bincode::BorrowDecode<'de> for Timestamp {
+impl<'de> bincode::BorrowDecode<'de> for TimestampFixed {
     fn borrow_decode<D: bincode::de::BorrowDecoder<'de>>(
         decoder: &mut D,
     ) -> Result<Self, bincode::error::DecodeError> {
@@ -56,7 +56,7 @@ impl<'de> bincode::BorrowDecode<'de> for Timestamp {
     }
 }
 
-impl bincode::Decode for Timestamp {
+impl bincode::Decode for TimestampFixed {
     fn decode<D: bincode::de::Decoder>(
         decoder: &mut D,
     ) -> core::result::Result<Self, bincode::error::DecodeError> {

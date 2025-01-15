@@ -1,9 +1,10 @@
 use bincode::{Decode, Encode};
 use events::EventsMissingRecord;
 pub use events::{ContentState, EventRecord};
-use ids::IdsFolloweesTsRecord;
 pub use ids::{IdRecord, IdsFolloweesRecord};
+use ids::{IdsFollowersRecord, IdsPersonaRecord, IdsUnfollowedRecord};
 use redb_bincode::TableDefinition;
+use rostra_core::event::PersonaId;
 use rostra_core::id::{RostraId, ShortRostraId};
 use rostra_core::ShortEventId;
 
@@ -19,11 +20,16 @@ pub const TABLE_SELF: TableDefinition<'_, (), ShortRostraId> = TableDefinition::
 pub const TABLE_IDS: TableDefinition<'_, ShortRostraId, IdRecord> = TableDefinition::new("ids");
 
 /// Table with `who` -> `whom` following
-pub const TABLE_IDS_FOLLOWEES: TableDefinition<'_, (ShortRostraId, RostraId), IdsFolloweesRecord> =
+pub const TABLE_ID_FOLLOWEES: TableDefinition<'_, (RostraId, RostraId), IdsFolloweesRecord> =
     TableDefinition::new("ids-followees");
 
-pub const TABLE_IDS_FOLLOWEES_TS: TableDefinition<'_, ShortRostraId, IdsFolloweesTsRecord> =
-    TableDefinition::new("ids-followees-ts");
+pub const TABLE_ID_FOLLOWERS: TableDefinition<'_, (RostraId, RostraId), IdsFollowersRecord> =
+    TableDefinition::new("ids-followers");
+pub const TABLE_ID_UNFOLLOWED: TableDefinition<'_, (RostraId, RostraId), IdsUnfollowedRecord> =
+    TableDefinition::new("ids-unfollowed");
+
+pub const TABLE_ID_PERSONAS: TableDefinition<'_, (RostraId, PersonaId), IdsPersonaRecord> =
+    TableDefinition::new("personas");
 
 pub const TABLE_EVENTS: TableDefinition<'_, ShortEventId, EventRecord> =
     TableDefinition::new("events");
