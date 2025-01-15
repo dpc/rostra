@@ -37,7 +37,8 @@ directories = "5"
 ed25519-dalek = "2.1.1"
 futures = "0.3.31"
 futures-util = "*"
-iroh-net = { version = "0.28.1", features = ["iroh-relay"] }
+iroh = { version = "0.31.0", default-features = false }
+iroh-base = { version = "0.31.0", default-features = false }
 iroh-io = "0.6.0"
 itertools = "0.13.0"
 pkarr = "2.2.1"

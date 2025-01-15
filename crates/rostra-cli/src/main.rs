@@ -167,7 +167,7 @@ async fn handle_cmd(opts: Opts) -> CliResult<serde_json::Value> {
             let secret = RostraIdSecretKey::generate();
             let id = secret.id();
 
-            Ok(serde_json::to_value(&serde_json::json!({
+            Ok(serde_json::to_value(serde_json::json!({
                 "id": id,
                 "secret": secret,
             }))

@@ -91,7 +91,7 @@ impl FromStr for RostraIdSecretKey {
     type Err = RostraIdSecretKeyError;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        let bytes = bip39::Mnemonic::from_str(&s)
+        let bytes = bip39::Mnemonic::from_str(s)
             .map_err(|e| format!("Mnemonic deserialization error: {e}"))?
             .to_entropy();
         if bytes.len() != 32 {

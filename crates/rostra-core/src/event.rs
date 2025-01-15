@@ -137,6 +137,7 @@ impl ToOwned for EventContentData {
 }
 
 impl Borrow<EventContentData> for EventContent {
+    #[allow(clippy::needless_lifetimes)]
     fn borrow<'s>(&'s self) -> &'s EventContentData {
         // Use unsafe code to change type of referent.
         // Safety: `EventContentRef` is a `repr(transparent)` wrapper around `[u8]`.
@@ -152,6 +153,10 @@ pub struct EventContent(Vec<u8>);
 impl EventContent {
     pub fn len(&self) -> usize {
         self.0.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.0.is_empty()
     }
 }
 

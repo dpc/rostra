@@ -9,10 +9,10 @@ pub const ROSTRA_P2P_V0_ALPN: &[u8] = b"rostra-p2p-v0";
 #[derive(Debug, Snafu)]
 pub enum RpcError {
     Connection {
-        source: iroh_net::endpoint::ConnectionError,
+        source: iroh::endpoint::ConnectionError,
     },
     Write {
-        source: iroh_net::endpoint::WriteError,
+        source: iroh::endpoint::WriteError,
     },
     Read {
         source: BoxedError,

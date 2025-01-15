@@ -8,8 +8,8 @@ use bao_tree::io::round_up_to_chunks;
 use bao_tree::{blake3, BaoTree, BlockSize, ByteRanges};
 use bincode::{Decode, Encode};
 use convi::{CastInto, ExpectFrom};
+use iroh::endpoint::{RecvStream, SendStream};
 use iroh_io::{TokioStreamReader, TokioStreamWriter};
-use iroh_net::endpoint::{RecvStream, SendStream};
 use rostra_core::bincode::STD_BINCODE_CONFIG;
 use rostra_core::event::{EventContent, SignedEvent};
 use rostra_core::{ContentHash, MsgLen, ShortEventId};
@@ -21,7 +21,7 @@ use crate::{
     MessageTooLargeSnafu, ReadSnafu, RpcResult, TrailerSnafu, WriteSnafu,
 };
 
-pub struct Connection(iroh_net::endpoint::Connection);
+pub struct Connection(iroh::endpoint::Connection);
 
 /// Max request message size
 ///
@@ -31,8 +31,8 @@ pub const MAX_REQUEST_SIZE: u32 = 4 * 1024;
 /// Max response message size
 pub const MAX_RESPONSE_SIZE: u32 = 32 * 1024 * 1024;
 
-impl From<iroh_net::endpoint::Connection> for Connection {
-    fn from(iroh_conn: iroh_net::endpoint::Connection) -> Self {
+impl From<iroh::endpoint::Connection> for Connection {
+    fn from(iroh_conn: iroh::endpoint::Connection) -> Self {
         Self(iroh_conn)
     }
 }
@@ -97,7 +97,7 @@ pub trait RpcMessage: bincode::Encode + bincode::Decode {
             return Err(bincode::error::DecodeError::LimitExceeded);
         }
 
-        let (v, consumed_len) = bincode::decode_from_slice(&bytes, STD_BINCODE_CONFIG)?;
+        let (v, consumed_len) = bincode::decode_from_slice(bytes, STD_BINCODE_CONFIG)?;
 
         if consumed_len != bytes.len() {
             return Err(bincode::error::DecodeError::Other(
@@ -185,7 +185,7 @@ where
     // No async writer support, sad
     let mut req_bytes = Vec::with_capacity(128);
     // id
-    bincode::encode_into_std_write(&R::RPC_ID, &mut req_bytes, STD_BINCODE_CONFIG)
+    bincode::encode_into_std_write(R::RPC_ID, &mut req_bytes, STD_BINCODE_CONFIG)
         .expect("Can't fail");
     // length placeholder
     bincode::encode_into_std_write(MsgLen(0), &mut req_bytes, STD_BINCODE_CONFIG)
@@ -328,7 +328,7 @@ impl Connection {
         bincode::encode_into_std_write(MsgLen(0), &mut bytes, STD_BINCODE_CONFIG)
             .expect("Can't fail");
         // msg itself
-        bincode::encode_into_std_write(&v, &mut bytes, STD_BINCODE_CONFIG)
+        bincode::encode_into_std_write(v, &mut bytes, STD_BINCODE_CONFIG)
             .expect("Can't fail encoding to vec");
 
         let msg_len = bytes.len() - 4;
@@ -354,8 +354,7 @@ impl Connection {
 
         let len = len.cast_into();
 
-        let mut resp_bytes = Vec::with_capacity(len);
-        resp_bytes.resize(len, 0);
+        let mut resp_bytes = vec![0u8; len];
 
         recv.read_exact(resp_bytes.as_mut_slice())
             .await
@@ -403,14 +402,9 @@ impl Connection {
         // Encode the first 100000 bytes of the file
         let ranges = ByteRanges::from(0u64..bytes_len.into());
         let ranges = round_up_to_chunks(&ranges);
-        encode_ranges_validated(
-            &mut bytes.as_ref(),
-            &mut ob,
-            &ranges,
-            TokioStreamWriter(send),
-        )
-        .await
-        .context(EncodingBaoSnafu)?;
+        encode_ranges_validated(bytes, &mut ob, &ranges, TokioStreamWriter(send))
+            .await
+            .context(EncodingBaoSnafu)?;
 
         Ok(())
     }

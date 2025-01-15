@@ -288,6 +288,7 @@ impl Database {
         })
     }
 
+    #[allow(clippy::needless_lifetimes)]
     pub fn insert_event_content_tx<'t, 'e>(
         VerifiedEventContent {
             event_id, content, ..
@@ -408,7 +409,7 @@ impl Database {
             ids_followees_table.insert(&(author, followee_id), &IdsFolloweesRecord { persona })?;
         }
 
-        return Ok(true);
+        Ok(true)
     }
 }
 

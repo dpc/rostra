@@ -64,10 +64,10 @@ impl<'de> serde::de::Deserialize<'de> for EventContent {
                 .decode(hex_str.as_bytes())
                 .map_err(serde::de::Error::custom)?;
 
-            Ok(EventContent(bytes.try_into().expect("Just checked length")))
+            Ok(EventContent(bytes))
         } else {
             let bytes = Vec::<u8>::deserialize(de)?;
-            Ok(EventContent(bytes.try_into().expect("Just checked len")))
+            Ok(EventContent(bytes))
         }
     }
 }

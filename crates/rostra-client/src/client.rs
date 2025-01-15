@@ -7,7 +7,7 @@ use std::time::Duration;
 use std::{ops, result};
 
 use backon::Retryable as _;
-use iroh_net::{AddrInfo, NodeAddr};
+use iroh::NodeAddr;
 use itertools::Itertools as _;
 use pkarr::PkarrClient;
 use rostra_core::event::{Event, EventContent, EventKindKnown, SignedEvent};
@@ -115,7 +115,7 @@ pub struct Client {
     ///
     /// Each time new random-seed generated one, (optionally) published via
     /// Pkarr under main `RostraId` identity.
-    pub(crate) endpoint: iroh_net::Endpoint,
+    pub(crate) endpoint: iroh::Endpoint,
 
     /// A watch-channel that can be used to notify some tasks manually to check
     /// for updates again
@@ -139,7 +139,7 @@ impl Client {
         #[builder(default = ClientMode::Light)] // Default to light
         mode: ClientMode,
     ) -> InitResult<Arc<Self>> {
-        let id_secret = id_secret.unwrap_or_else(|| RostraIdSecretKey::generate());
+        let id_secret = id_secret.unwrap_or_else(RostraIdSecretKey::generate);
         let id = id_secret.id();
 
         debug!(id = %id.try_fmt(), "Rostra Client");
@@ -224,11 +224,10 @@ impl Client {
             .into())
     }
 
-    pub(crate) async fn make_iroh_endpoint() -> InitResult<iroh_net::Endpoint> {
-        use iroh_net::key::SecretKey;
-        use iroh_net::Endpoint;
+    pub(crate) async fn make_iroh_endpoint() -> InitResult<iroh::Endpoint> {
+        use iroh::{Endpoint, SecretKey};
 
-        let secret_key = SecretKey::generate();
+        let secret_key = SecretKey::generate(&mut rand::thread_rng());
         let ep = Endpoint::builder()
             .secret_key(secret_key)
             .alpns(vec![ROSTRA_P2P_V0_ALPN.to_vec()])
@@ -242,7 +241,7 @@ impl Client {
     }
 
     pub(crate) fn start_id_publisher(&self) {
-        tokio::spawn(IdPublisher::new(self, self.id_secret.clone()).run());
+        tokio::spawn(IdPublisher::new(self, self.id_secret).run());
     }
 
     pub(crate) fn start_request_handler(&self) {
@@ -257,11 +256,11 @@ impl Client {
     }
 
     pub(crate) async fn iroh_address(&self) -> IrohResult<NodeAddr> {
-        pub(crate) fn sanitize_addr_info(addr_info: AddrInfo) -> AddrInfo {
+        pub(crate) fn sanitize_node_addr(node_addr: NodeAddr) -> NodeAddr {
             pub(crate) fn is_ipv4_cgnat(ip: Ipv4Addr) -> bool {
                 matches!(ip.octets(), [100, b, ..] if (64..128).contains(&b))
             }
-            let direct_addresses = addr_info
+            let direct_addresses = node_addr
                 .direct_addresses
                 .into_iter()
                 .filter(|addr| match addr {
@@ -295,18 +294,12 @@ impl Client {
                 // Limit to 4
                 .take(4)
                 .collect();
-            AddrInfo {
-                direct_addresses,
-                ..addr_info
-            }
-        }
-
-        pub(crate) fn sanitize_node_addr(node_addr: NodeAddr) -> NodeAddr {
             NodeAddr {
-                info: sanitize_addr_info(node_addr.info),
+                direct_addresses,
                 ..node_addr
             }
         }
+
         self.endpoint.node_addr().await.map(sanitize_node_addr)
     }
 

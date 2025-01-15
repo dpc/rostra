@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
-use iroh_net::endpoint::Incoming;
-use iroh_net::Endpoint;
+use iroh::endpoint::Incoming;
+use iroh::Endpoint;
 use rostra_core::id::RostraId;
 use rostra_p2p::connection::{
     Connection, FeedEventRequest, FeedEventResponse, GetEventContentRequest,
@@ -22,7 +22,7 @@ const LOG_TARGET: &str = "rostra::client::req_handler";
 #[derive(Debug, Snafu)]
 pub enum IncomingConnectionError {
     Connection {
-        source: iroh_net::endpoint::ConnectionError,
+        source: iroh::endpoint::ConnectionError,
     },
     #[snafu(transparent)]
     Rpc {
@@ -132,7 +132,7 @@ impl RequestHandler {
     async fn handle_ping_request(
         &self,
         req_msg: Vec<u8>,
-        mut send: iroh_net::endpoint::SendStream,
+        mut send: iroh::endpoint::SendStream,
     ) -> Result<(), IncomingConnectionError> {
         let req = PingRequest::decode_whole::<MAX_REQUEST_SIZE>(&req_msg).context(DecodingSnafu)?;
         Connection::write_success_return_code(&mut send).await?;
@@ -143,15 +143,15 @@ impl RequestHandler {
     async fn handle_feed_event(
         &self,
         req_msg: Vec<u8>,
-        mut send: iroh_net::endpoint::SendStream,
-        mut read: iroh_net::endpoint::RecvStream,
+        mut send: iroh::endpoint::SendStream,
+        mut read: iroh::endpoint::RecvStream,
     ) -> Result<(), IncomingConnectionError> {
         let FeedEventRequest(rostra_core::event::SignedEvent { event, sig }) =
             FeedEventRequest::decode_whole::<MAX_REQUEST_SIZE>(&req_msg).context(DecodingSnafu)?;
 
         let our_id = self.our_id;
 
-        if event.author != our_id.into() {
+        if event.author != our_id {
             Connection::write_return_code(&mut send, FeedEventResponse::RETURN_CODE_ID_MISMATCH)
                 .await?;
             return InvalidRequestSnafu.fail();
@@ -203,8 +203,8 @@ impl RequestHandler {
     async fn handle_get_event(
         &self,
         req_msg: Vec<u8>,
-        mut send: iroh_net::endpoint::SendStream,
-        _read: iroh_net::endpoint::RecvStream,
+        mut send: iroh::endpoint::SendStream,
+        _read: iroh::endpoint::RecvStream,
     ) -> Result<(), IncomingConnectionError> {
         let GetEventRequest(event_id) =
             GetEventRequest::decode_whole::<MAX_REQUEST_SIZE>(&req_msg).context(DecodingSnafu)?;
@@ -224,8 +224,8 @@ impl RequestHandler {
     async fn handle_get_event_content(
         &self,
         req_msg: Vec<u8>,
-        mut send: iroh_net::endpoint::SendStream,
-        _read: iroh_net::endpoint::RecvStream,
+        mut send: iroh::endpoint::SendStream,
+        _read: iroh::endpoint::RecvStream,
     ) -> Result<(), IncomingConnectionError> {
         let GetEventContentRequest(event_id) =
             GetEventContentRequest::decode_whole::<MAX_REQUEST_SIZE>(&req_msg)
@@ -247,7 +247,7 @@ impl RequestHandler {
                 .expect("Must have event if we have content");
             Connection::write_bao_content(
                 &mut send,
-                &content.as_ref(),
+                content.as_ref(),
                 event.event.event.content_hash,
             )
             .await?;

@@ -1,7 +1,7 @@
 use core::{fmt, str};
 
-use iroh_net::ticket::{NodeTicket, Ticket};
-use iroh_net::NodeAddr;
+use iroh::NodeAddr;
+use iroh_base::ticket::{NodeTicket, Ticket as _};
 use rostra_core::ShortEventId;
 use rostra_util_error::BoxedError;
 use serde::{Deserialize, Serialize};

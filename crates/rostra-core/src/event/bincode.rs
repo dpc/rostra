@@ -34,7 +34,7 @@ impl Event {
         let parent_aux = parent_aux.map(Into::into);
 
         let timestamp = timestamp
-            .unwrap_or_else(|| SystemTime::now())
+            .unwrap_or_else(SystemTime::now)
             .duration_since(UNIX_EPOCH)
             .expect("Dates before Unix epoch are unsupported")
             .as_secs();
@@ -78,7 +78,7 @@ impl<'a, 'de: 'a> bincode::BorrowDecode<'de> for &'a EventContentData {
         decoder: &mut D,
     ) -> Result<Self, bincode::error::DecodeError> {
         let bytes_ref: &[u8] = bincode::BorrowDecode::borrow_decode(decoder)?;
-        let ptr = &*bytes_ref as *const [u8] as *const EventContentData;
+        let ptr = bytes_ref as *const [u8] as *const EventContentData;
         Ok(unsafe { &*ptr })
     }
 }

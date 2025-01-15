@@ -15,7 +15,8 @@ bon = { workspace = true }
 data-encoding = { workspace = true }
 ed25519-dalek = { workspace = true }
 futures = { workspace = true }
-iroh-net = { workspace = true }
+iroh-base = { workspace = true, features = ["ticket"] }
+iroh = { workspace = true }
 iroh-io = { workspace = true }
 itertools = { workspace = true }
 pkarr = { workspace = true, features = ["async", "relay"] }
@@ -34,6 +35,7 @@ rostra-util-error = { workspace = true }
 rostra-util-fmt = { workspace = true }
 serde = { workspace = true }
 snafu = { workspace = true }
+rand = { workspace = true }
 tokio = { workspace = true }
 tracing = { workspace = true }
 tracing-subscriber = { workspace = true }

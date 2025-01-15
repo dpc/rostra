@@ -13,7 +13,7 @@ fn event_size() {
         .content(EventContent::from(b"test".to_vec()))
         .build();
 
-    let event_encoded = bincode::encode_to_vec(&event, STD_BINCODE_CONFIG).expect("Can't fail");
+    let event_encoded = bincode::encode_to_vec(event, STD_BINCODE_CONFIG).expect("Can't fail");
 
     assert_eq!(
         event_encoded.len(),
@@ -24,7 +24,7 @@ fn event_size() {
 
     let signed = event.signed_by(id_secret);
 
-    let signed_encoded = bincode::encode_to_vec(&signed, STD_BINCODE_CONFIG).expect("Can't fail");
+    let signed_encoded = bincode::encode_to_vec(signed, STD_BINCODE_CONFIG).expect("Can't fail");
 
     assert_eq!(signed_encoded.len(), 192);
 }

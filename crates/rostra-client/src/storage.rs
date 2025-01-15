@@ -45,7 +45,7 @@ impl Storage {
                 let events_table = tx
                     .open_table(&crate::db::TABLE_EVENTS)
                     .expect("Storage error");
-                Ok(Database::has_event_tx(event_id, &events_table)?)
+                Database::has_event_tx(event_id, &events_table)
             })
             .await
             .expect("Database panic")
@@ -59,7 +59,7 @@ impl Storage {
         self.db
             .read_with(|tx| {
                 let events_table = tx.open_table(&crate::db::TABLE_EVENTS)?;
-                Ok(Database::get_event_tx(event_id, &events_table)?)
+                Database::get_event_tx(event_id, &events_table)
             })
             .await
             .expect("Database panic")
@@ -148,7 +148,7 @@ impl Storage {
                 let content_added = if u32::from(event_content.event.content_len)
                     > Self::MAX_CONTENT_LEN
                 {
-                    Database::insert_event_content_tx(&event_content, &mut events_content_table)?
+                    Database::insert_event_content_tx(event_content, &mut events_content_table)?
                 } else {
                     false
                 };

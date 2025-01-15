@@ -13,7 +13,7 @@ bincode = { workspace = true }
 convi = { workspace = true }
 futures = { workspace = true }
 iroh-io = { workspace = true }
-iroh-net = { workspace = true }
+iroh = { workspace = true }
 pkarr = { workspace = true, features = ["async"] }
 rostra-core = { workspace = true, features = ["bincode"] }
 rostra-util-error = { workspace = true }
