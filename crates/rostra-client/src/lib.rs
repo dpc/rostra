@@ -10,6 +10,7 @@ pub mod id;
 
 use std::str::FromStr;
 
+pub use db::{Database, DbError};
 use error::{
     InvalidDomainSnafu, InvalidEncodingSnafu, InvalidKeySnafu, MissingValueSnafu, RRecordResult,
     WrongTypeSnafu,

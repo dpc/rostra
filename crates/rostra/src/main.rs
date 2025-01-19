@@ -1,4 +1,5 @@
 mod cli;
+mod web_ui;
 
 use std::io;
 use std::time::Duration;
@@ -7,7 +8,7 @@ use clap::Parser;
 use cli::Opts;
 use futures::future::pending;
 use rostra_client::error::{ConnectError, IdResolveError, IdSecretReadError, InitError, PostError};
-use rostra_client::Client;
+use rostra_client::{Client, Database, DbError};
 use rostra_core::id::RostraIdSecretKey;
 use rostra_p2p::connection::{Connection, PingRequest, PingResponse};
 use rostra_p2p::RpcError;
@@ -17,6 +18,7 @@ use tokio::time::Instant;
 use tracing::info;
 use tracing::level_filters::LevelFilter;
 use tracing_subscriber::EnvFilter;
+use web_ui::WebUiServerError;
 
 pub const PROJECT_NAME: &str = "rostra";
 pub const LOG_TARGET: &str = "rostra::cli";
@@ -27,6 +29,8 @@ type WhateverResult<T> = std::result::Result<T, snafu::Whatever>;
 pub enum CliError {
     #[snafu(display("Initialization error: {source}"))]
     Init { source: InitError },
+    #[snafu(display("WebUI Server error: {source}"))]
+    WebUiServer { source: WebUiServerError },
     #[snafu(display("ID resolution error: {source}"))]
     Resolve { source: IdResolveError },
     #[snafu(display("Connection error: {source}"))]
@@ -39,6 +43,10 @@ pub enum CliError {
     Post { source: PostError },
     #[snafu(display("Miscellaneous error: {source}"))]
     Whatever { source: Whatever },
+    #[snafu(display("Data dir error: {source:?}"))]
+    DataDir { source: io::Error },
+    #[snafu(display("Database error: {source}"))]
+    Database { source: DbError },
 }
 
 pub type CliResult<T> = std::result::Result<T, CliError>;
@@ -59,14 +67,14 @@ async fn main() -> CliResult<()> {
 }
 
 async fn handle_cmd(opts: Opts) -> CliResult<serde_json::Value> {
-    match opts.cmd {
+    Ok(match opts.cmd {
         cli::OptsCmd::Dev(cmd) => match cmd {
             cli::DevCmd::ResolveId { id } => {
                 let client = Client::builder().build().await.context(InitSnafu)?;
 
                 let out = client.resolve_id_data(id).await.context(ResolveSnafu)?;
 
-                Ok(serde_json::to_value(out).expect("Can't fail"))
+                serde_json::to_value(out).expect("Can't fail")
             }
             cli::DevCmd::Test => {
                 let client = Client::builder().build().await.context(InitSnafu)?;
@@ -142,7 +150,7 @@ async fn handle_cmd(opts: Opts) -> CliResult<serde_json::Value> {
                     seq = seq.wrapping_add(1);
                 }
 
-                Ok(serde_json::to_value(&resp).expect("Can't fail"))
+                serde_json::to_value(&resp).expect("Can't fail")
             }
         },
         cli::OptsCmd::Serve { secret_file } => {
@@ -163,15 +171,43 @@ async fn handle_cmd(opts: Opts) -> CliResult<serde_json::Value> {
 
             pending().await
         }
+        cli::OptsCmd::WebUi(web_opts) => {
+            let secret_id = if let Some(secret_file) = web_opts.secret_file.clone() {
+                Some(
+                    Client::read_id_secret(&secret_file)
+                        .await
+                        .context(SecretSnafu)?,
+                )
+            } else {
+                None
+            };
+            let client = Client::builder()
+                .maybe_id_secret(secret_id)
+                .db(Database::open(opts.global.mk_db_path().await?)
+                    .await
+                    .context(DatabaseSnafu)?)
+                .build()
+                .await
+                .context(InitSnafu)?;
+
+            web_ui::Server::init(web_opts, client.handle())
+                .await
+                .context(WebUiServerSnafu)?
+                .run()
+                .await
+                .context(WebUiServerSnafu)?;
+
+            serde_json::Value::Null
+        }
         cli::OptsCmd::GenId => {
             let secret = RostraIdSecretKey::generate();
             let id = secret.id();
 
-            Ok(serde_json::to_value(serde_json::json!({
+            serde_json::to_value(serde_json::json!({
                 "id": id,
                 "secret": secret,
             }))
-            .expect("Can't fail"))
+            .expect("Can't fail")
         }
         cli::OptsCmd::Post { body, secret_file } => {
             let id_secret = Client::read_id_secret(&secret_file)
@@ -188,9 +224,9 @@ async fn handle_cmd(opts: Opts) -> CliResult<serde_json::Value> {
 
             client.post(body).await?;
 
-            Ok(serde_json::Value::Bool(true))
+            serde_json::Value::Bool(true)
         }
-    }
+    })
 }
 
 pub fn init_logging() -> WhateverResult<()> {

@@ -135,23 +135,20 @@ impl Client {
         id_secret: Option<RostraIdSecretKey>,
         #[builder(default = true)] start_request_handler: bool,
         #[builder(default = true)] start_id_publisher: bool,
-
-        #[builder(default = ClientMode::Light)] // Default to light
-        mode: ClientMode,
+        db: Option<Database>,
     ) -> InitResult<Arc<Self>> {
         let id_secret = id_secret.unwrap_or_else(RostraIdSecretKey::generate);
         let id = id_secret.id();
 
         debug!(id = %id.try_fmt(), "Rostra Client");
+        let is_mode_full = db.is_some();
 
-        let is_mode_full = mode.is_full();
-
-        let storage = match mode {
-            ClientMode::Full(db) => {
+        let storage = match db {
+            Some(db) => {
                 let storage = Storage::new(db, id).await?;
                 Some(storage)
             }
-            ClientMode::Light => None,
+            None => None,
         };
 
         let pkarr_client = PkarrClient::builder()
@@ -308,7 +305,7 @@ impl Client {
         None
     }
 
-    pub(crate) fn handle(&self) -> ClientHandle {
+    pub fn handle(&self) -> ClientHandle {
         self.handle.clone()
     }
 
