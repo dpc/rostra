@@ -95,6 +95,9 @@ pub struct WebUiOpts {
     #[arg(long)]
     pub secret_file: Option<PathBuf>,
 
+    #[arg(long)]
+    pub skip_xdg_open: bool,
+
     /// Listen address
     #[arg(long, short, default_value = "[::1]:0", env = "ROSTRA_LISTEN")]
     pub listen: String,

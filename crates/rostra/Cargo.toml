@@ -17,6 +17,7 @@ brotli = { workspace = true }
 directories = { workspace = true }
 futures = { workspace = true }
 futures-util = { workspace = true }
+duct = { workspace = true }
 maud = { workspace = true }
 iroh = { workspace = true, default-features = false }
 pkarr = { workspace = true, features = ["async"] }
@@ -28,7 +29,7 @@ rostra-p2p-api = { workspace = true }
 rostra-util-error = { workspace = true }
 tokio = { workspace = true }
 tokio-stream = { workspace = true, features = ["fs"] }
-tower-http = { workspace = true, features = ["cors", "compression-br", "fs" ] }
+tower-http = { workspace = true, features = ["cors", "compression-br", "fs"] }
 tracing = { workspace = true }
 tracing-subscriber = { workspace = true }
 clap = { workspace = true }

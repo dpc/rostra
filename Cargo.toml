@@ -36,6 +36,7 @@ clap = { version = "4.5.23", features = ["derive", "env"] }
 convi = { version = "0.1.1", features = ["min_target_pointer_width_32"] }
 data-encoding = "2.6"
 directories = "5"
+duct = "*"
 ed25519-dalek = "2.1.1"
 futures = "0.3.31"
 bytes = "*"

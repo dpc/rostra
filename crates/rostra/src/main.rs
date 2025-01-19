@@ -6,6 +6,7 @@ use std::time::Duration;
 
 use clap::Parser;
 use cli::Opts;
+use duct::cmd;
 use futures::future::pending;
 use rostra_client::error::{ConnectError, IdResolveError, IdSecretReadError, InitError, PostError};
 use rostra_client::{Client, Database, DbError};
@@ -15,8 +16,8 @@ use rostra_p2p::RpcError;
 use rostra_util_error::FmtCompact as _;
 use snafu::{FromString, ResultExt, Snafu, Whatever};
 use tokio::time::Instant;
-use tracing::info;
 use tracing::level_filters::LevelFilter;
+use tracing::{info, warn};
 use tracing_subscriber::EnvFilter;
 use web_ui::WebUiServerError;
 
@@ -190,12 +191,21 @@ async fn handle_cmd(opts: Opts) -> CliResult<serde_json::Value> {
                 .await
                 .context(InitSnafu)?;
 
-            web_ui::Server::init(web_opts, client.handle())
-                .await
-                .context(WebUiServerSnafu)?
-                .run()
+            let server = web_ui::Server::init(web_opts, client.handle())
                 .await
                 .context(WebUiServerSnafu)?;
+
+            if cmd!(
+                "xdg-open",
+                format!("http://{}", server.addr().context(WebUiServerSnafu)?)
+            )
+            .run()
+            .is_err()
+            {
+                warn!(target: LOG_TARGET, "Failed to open browser");
+            };
+
+            server.run().await.context(WebUiServerSnafu)?;
 
             serde_json::Value::Null
         }

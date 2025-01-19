@@ -75,7 +75,7 @@ watch *ARGS="":
   if [ ! -f Cargo.toml ]; then
     cd {{invocation_directory()}}
   fi
-  env ROSTRA_DEV_MODE=1 RUST_LOG=info,iroh=error cargo watch -i 'crates/rostra/assets/**' -s "cargo run web-ui --listen [::1]:2345 --reuseport {{ARGS}}"
+  env ROSTRA_DEV_MODE=1 RUST_LOG=info,iroh=error cargo watch -i 'crates/rostra/assets/**' -s "cargo run web-ui --listen [::1]:2345 --reuseport {{ARGS}} --skip-xdg-open"
 
 
 # run `cargo clippy` on everything

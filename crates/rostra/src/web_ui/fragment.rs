@@ -54,6 +54,13 @@ pub fn page(title: &str, content: Markup) -> Markup {
 
                 // (header())
                 nav ."o-navBar" {
+
+                    form ."m-composeForm" {
+                        textarea ."m-composeForm__content" placeholder="What's on your mind?" dir="auto" {}
+                        div ."m-composeForm__footer" {
+                            button ".m-composeForm__submit" { "Post" }
+                        }
+                    }
                     div ."o-navBar__list" {
                         a ."o-navBar__item" href="/" { "Home" }
                         a ."o-navBar__item" href="/" { "Something" }
@@ -84,7 +91,11 @@ pub fn post(username: &str, content: &str) -> Markup {
     html! {
         article ."m-postOverview" {
             div ."m-postOverview__main" {
-                img ."m-postOverview__userImage" src="https://avatars.githubusercontent.com/u/9209?v=4" { }
+                img ."m-postOverview__userImage"
+                    src="https://avatars.githubusercontent.com/u/9209?v=4"
+                    width="32pt"
+                    height="32pt"
+                    { }
 
                 div ."m-postOverview__contentSide" {
                     header .".m-postOverview__header" {

@@ -17,16 +17,16 @@ Rostra is a mostly-f2f (friend to friend), meaning
 there is no "global feed". Users can discover new identities
 and content only through existing connections.
 
-Rostra comes with a support for personal sub-identities, to allow
+Rostra comes with a support for "personas" (sub-identities), to allow
 publishing/following to/from a subset of person's identity.
 E.g. you might be interested in someone's technical work,
 but not their political opinions. By supporting sub-identities,
-users can remain wholesome without risking alienating their
-followers.
+users can remain wholesome and post without risking diluting
+their strongest aspects or alienating their followers.
 
 Rostra is extensible, and can be used for applications other
-than social networks, as long as it fits its general data
-model.
+than Twitter-like-app, as long as it fits its general
+social-graph-based data model.
 
 ## Architecture
 
@@ -40,7 +40,7 @@ When a Rostra node starts, it generates a random Iroh endpoint,
 and publishes connection details in a Pkarr address. Multiple
 devices can use the same identity and use Pkarr to coordinate
 to achieve fallback, redundancy and storage offloading. Rostra
-node that has most recently published it's Pkarr record is
+node that has most recently published its Pkarr record is
 effectively "active" and will have other nodes connect to it.
 
 
@@ -54,8 +54,7 @@ is a short self-signed header committing to actual data with a blake3 hash.
 Separating header and data allows quick and reliable history replication,
 while supporting potentially large payloads, replicated using bao verified
 streams. It also supports volountary data deletion, based on followers
-respecting the request to no longer store, circulate and display past content
-marked as "deleted" in the new events.
+respecting the request to no longer store, circulate and display certain past content.
 
 An Event also contains up to two hashes to existing events, forming a mostly-chain-like
 DAG, that allows interested users/nodes to track and replicate whole or part of the history.
@@ -96,7 +95,7 @@ Differences:
 * Actually P2P. DHTs and P2P work just fine in BitTorrent for 2 decades already.
 * Abandons JS, embraces Rust and Unix tech. Optimizing for JS-integration is not
   the most important goal, especially as it sacorifices actually being P2P.
-* Optimizes for performanced and resource usage.
+* Optimizes for performance and resource usage.
 
 
 ### BlueSky
