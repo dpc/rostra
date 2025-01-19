@@ -26,7 +26,7 @@ where
 pub fn static_file_handler(state: SharedAppState) -> Router {
     Router::new()
         .route(
-            "/:file",
+            "/{file}",
             get(
                 |state: State<SharedAppState>, path: Path<String>, req_headers: HeaderMap| async move {
                     let Some(asset) = state.assets.get_from_path(&path) else {
@@ -114,7 +114,7 @@ pub async fn not_found(_state: State<SharedAppState>, _req: Request<Body>) -> im
 
 pub fn route_handler(state: SharedAppState) -> Router {
     Router::new()
-        // .route("/", get(index))
+        .route("/", get(index))
         // .route("/a/", put(account_new))
         // .route("/t/", put(token_new))
         // .route("/m/", put(metric_new).get(metric_find))

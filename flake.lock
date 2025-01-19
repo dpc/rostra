@@ -157,11 +157,11 @@
         "systems": "systems_3"
       },
       "locked": {
-        "lastModified": 1734552999,
-        "narHash": "sha256-C2Mur/p/fn5WkKeb/4bfFdlSugwLaeue/BLxycKV9Cw=",
+        "lastModified": 1736284136,
+        "narHash": "sha256-IlNjz7jNSoQQSPGaYI0cphbQUMf0DttwQeNO5Kp9X2A=",
         "owner": "rustshop",
         "repo": "flakebox",
-        "rev": "9c4317506f39bf34d974a164ba462cbbacc35d38",
+        "rev": "a2de1c7f8a8bfe3ba2ac2d5d9746546f88c97e8f",
         "type": "github"
       },
       "original": {

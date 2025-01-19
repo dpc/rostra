@@ -12,7 +12,7 @@ use std::time::Duration;
 use asset_cache::AssetCache;
 use axum::http::header::{ACCEPT, CONTENT_TYPE};
 use axum::http::{HeaderName, HeaderValue, Method};
-use axum::{middleware, Router};
+use axum::Router;
 use rostra_client::ClientHandle;
 use snafu::{ResultExt as _, Snafu, Whatever};
 use tokio::net::{TcpListener, TcpSocket};
@@ -20,6 +20,7 @@ use tokio::signal;
 use tower_http::compression::predicate::SizeAbove;
 use tower_http::compression::CompressionLayer;
 use tower_http::cors::CorsLayer;
+use tower_http::services::ServeDir;
 use tower_http::CompressionLevel;
 use tracing::info;
 
@@ -105,11 +106,13 @@ impl Server {
     }
 
     pub async fn run(self) -> ServerResult<()> {
-        let state = self.state.clone();
-        let router = Router::new()
-            .with_state(state)
-            // .merge(routes::route_handler(self.state.clone()))
-            .nest("/assets", routes::static_file_handler(self.state.clone()));
+        let mut router = Router::new().merge(routes::route_handler(self.state.clone()));
+
+        if std::env::var("ROSTRA_DEV_MODE").is_ok() {
+            router = router.nest_service("/assets", ServeDir::new("crates/rostra/assets/"));
+        } else {
+            router = router.nest("/assets", routes::static_file_handler(self.state.clone()));
+        }
 
         info!("Starting server");
         let listen = self.addr()?;
@@ -156,12 +159,11 @@ fn cors_layer(opts: &WebUiOpts, listen: SocketAddr) -> ServerResult<CorsLayer> {
 
 impl WebUiOpts {
     pub fn cors_origin(&self, listen: SocketAddr) -> WhateverResult<HeaderValue> {
-        Ok(self
-            .cors_origin
+        self.cors_origin
             .clone()
             .unwrap_or_else(|| format!("http://{}", listen))
             .parse()
-            .whatever_context("cors_origin does not parse as an http value")?)
+            .whatever_context("cors_origin does not parse as an http value")
     }
 }
 

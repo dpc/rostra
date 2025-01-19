@@ -28,7 +28,7 @@ rostra-p2p-api = { workspace = true }
 rostra-util-error = { workspace = true }
 tokio = { workspace = true }
 tokio-stream = { workspace = true, features = ["fs"] }
-tower-http = { workspace = true, features = ["cors", "compression-br"] }
+tower-http = { workspace = true, features = ["cors", "compression-br", "fs" ] }
 tracing = { workspace = true }
 tracing-subscriber = { workspace = true }
 clap = { workspace = true }

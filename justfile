@@ -69,13 +69,13 @@ test: build
 
 
 # run and restart on changes
-watch *ARGS="-x run":
+watch *ARGS="":
   #!/usr/bin/env bash
   set -euo pipefail
   if [ ! -f Cargo.toml ]; then
     cd {{invocation_directory()}}
   fi
-  env RUST_LOG=${RUST_LOG:-debug} cargo watch {{ARGS}}
+  env ROSTRA_DEV_MODE=1 RUST_LOG=info,iroh=error cargo watch -i 'crates/rostra/assets/**' -s "cargo run web-ui --listen [::1]:2345 --reuseport {{ARGS}}"
 
 
 # run `cargo clippy` on everything

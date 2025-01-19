@@ -7,7 +7,7 @@ use std::string::String;
 use axum::extract::Path;
 use bytes::Bytes;
 use futures_util::stream::StreamExt as _;
-use snafu::ResultExt as _;
+use snafu::{OptionExt as _, ResultExt as _};
 use tokio_stream::wrappers::ReadDirStream;
 use tracing::info;
 
@@ -37,7 +37,7 @@ impl AssetCache {
     }
 
     fn get_cache_key(path: &str) -> String {
-        let mut parts = path.split(|c| c == '.' || c == HASH_SPLIT_CHAR);
+        let mut parts = path.split(['.', HASH_SPLIT_CHAR]);
 
         let basename = parts.next().unwrap_or_default();
         let ext = parts.last().unwrap_or_default();
@@ -69,7 +69,7 @@ impl AssetCache {
                 .clone()
                 .into_os_string()
                 .into_string()
-                .map_err(|_| format!("Invalid path"))
+                .ok()
                 .whatever_context("Invalid path")?;
             tracing::debug!(path = %stored_path, "Loading asset");
 

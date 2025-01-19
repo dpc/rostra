@@ -2,7 +2,10 @@ use std::env;
 use std::path::{Path, PathBuf};
 
 fn main() {
-    println!("cargo:rerun-if-changed=assets");
+    println!("cargo:rerun-if-env-changed=ROSTRA_DEV_MODE");
+    if env::var("ROSTRA_DEV_MODE").is_err() {
+        println!("cargo:rerun-if-changed=assets");
+    }
 
     // This should make it possible for distros to override default location.
     let out_dir = PathBuf::from(
