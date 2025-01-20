@@ -1,6 +1,6 @@
 use snafu::Snafu;
 
-use crate::{define_array_type_public, define_array_type_public_no_serde};
+use crate::{define_array_type_public, define_array_type_public_no_serde, EventId, ShortEventId};
 
 #[cfg(feature = "ed25519-dalek")]
 mod ed25519;
@@ -62,5 +62,41 @@ impl AsRef<str> for RostraIdSecretKeyError {
 impl From<String> for RostraIdSecretKeyError {
     fn from(msg: String) -> Self {
         Self { msg }
+    }
+}
+
+pub trait ToShort {
+    type ShortId;
+    fn to_short(self) -> Self::ShortId;
+}
+
+impl ToShort for ShortRostraId {
+    type ShortId = Self;
+
+    fn to_short(self) -> Self::ShortId {
+        self
+    }
+}
+
+impl ToShort for RostraId {
+    type ShortId = ShortRostraId;
+
+    fn to_short(self) -> Self::ShortId {
+        self.into()
+    }
+}
+impl ToShort for ShortEventId {
+    type ShortId = Self;
+
+    fn to_short(self) -> Self::ShortId {
+        self
+    }
+}
+
+impl ToShort for EventId {
+    type ShortId = ShortEventId;
+
+    fn to_short(self) -> Self::ShortId {
+        self.into()
     }
 }

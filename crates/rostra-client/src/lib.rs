@@ -22,7 +22,7 @@ use snafu::{OptionExt as _, ResultExt};
 
 const RRECORD_P2P_KEY: &str = "rostra-p2p";
 const RRECORD_HEAD_KEY: &str = "rostra-head";
-const LOG_TARGET: &str = "rostra::client";
+const LOG_TARGET: &str = "rostra";
 
 mod client;
 pub use crate::client::*;

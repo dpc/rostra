@@ -17,7 +17,7 @@ use crate::client::Client;
 use crate::db::DbError;
 use crate::{ClientHandle, ClientRefError, ClientStorageError};
 
-const LOG_TARGET: &str = "rostra::client::req_handler";
+const LOG_TARGET: &str = "rostra::req_handler";
 
 #[derive(Debug, Snafu)]
 pub enum IncomingConnectionError {
@@ -209,7 +209,7 @@ impl RequestHandler {
         let GetEventRequest(event_id) =
             GetEventRequest::decode_whole::<MAX_REQUEST_SIZE>(&req_msg).context(DecodingSnafu)?;
 
-        let client = self.client.app_ref()?;
+        let client = self.client.client_ref()?;
         let storage = client.storage()?;
 
         let event = storage.get_event(event_id).await;
@@ -231,7 +231,7 @@ impl RequestHandler {
             GetEventContentRequest::decode_whole::<MAX_REQUEST_SIZE>(&req_msg)
                 .context(DecodingSnafu)?;
 
-        let client = self.client.app_ref()?;
+        let client = self.client.client_ref()?;
         let storage = client.storage()?;
 
         let content = storage.get_event_content(event_id).await;

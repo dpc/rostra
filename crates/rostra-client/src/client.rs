@@ -10,7 +10,7 @@ use backon::Retryable as _;
 use iroh::NodeAddr;
 use itertools::Itertools as _;
 use pkarr::PkarrClient;
-use rostra_core::event::{Event, EventContent, EventKind, SignedEvent};
+use rostra_core::event::{Event, EventContent, EventKind, SignedEvent, VerifiedEvent};
 use rostra_core::id::{RostraId, RostraIdSecretKey};
 use rostra_core::ShortEventId;
 use rostra_p2p::connection::{Connection, FeedEventRequest, FeedEventResponse};
@@ -65,7 +65,7 @@ impl ClientHandle {
             r: PhantomData,
         })
     }
-    pub fn app_ref(&self) -> ClientRefResult<ClientRef<'_>> {
+    pub fn client_ref(&self) -> ClientRefResult<ClientRef<'_>> {
         let client = self.0.upgrade().context(ClientRefSnafu)?;
         Ok(ClientRef {
             client,
@@ -301,8 +301,9 @@ impl Client {
     }
 
     pub async fn events_head(&self) -> Option<ShortEventId> {
-        // TODO
-        None
+        let storage = self.storage.as_ref()?;
+
+        storage.get_self_current_head().await
     }
 
     pub fn handle(&self) -> ClientHandle {
@@ -403,6 +404,32 @@ impl Client {
     }
 
     pub async fn post(&self, body: String) -> PostResult<()> {
+        let storage = self
+            .storage()
+            .expect("Implement fallback for lack of storage");
+
+        let current_head = storage.get_self_current_head().await;
+        let random_event = storage.get_self_random_eventid().await;
+
+        let signed_event = Event::builder()
+            .author(self.id)
+            .kind(EventKind::SOCIAL_POST)
+            .content(body.as_bytes().to_owned().into())
+            .maybe_parent_prev(current_head)
+            .maybe_parent_aux(random_event)
+            .build()
+            .signed_by(self.id_secret);
+
+        let _ = storage
+            .process_event(
+                &VerifiedEvent::verify_signed(self.id, signed_event).expect("Can't fail to verify"),
+            )
+            .await;
+
+        Ok(())
+    }
+
+    pub async fn post_omni(&self, body: String) -> PostResult<()> {
         pub(crate) const ACTIVE_RESERVATION_TIMEOUT: Duration = Duration::from_secs(120);
         let mut known_head = None;
         let mut active_reservation: Option<(CompactTicket, Instant)> = None;
@@ -489,6 +516,12 @@ impl Client {
         self.storage
             .as_ref()
             .map(|storage| storage.self_followees_list_subscribe())
+    }
+
+    pub fn self_head_subscribe(&self) -> Option<watch::Receiver<Option<ShortEventId>>> {
+        self.storage
+            .as_ref()
+            .map(|storage| storage.self_head_subscribe())
     }
 
     pub fn check_for_updates_tx_subscribe(&self) -> watch::Receiver<()> {

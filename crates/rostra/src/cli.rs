@@ -7,10 +7,6 @@ use snafu::ResultExt as _;
 
 use crate::{CliResult, DataDirSnafu};
 
-fn default_rostra_assets_dir() -> PathBuf {
-    PathBuf::from(env!("ROSTRA_SHARE_DIR")).join("assets")
-}
-
 /// Command line options for the Rostra CLI application
 #[derive(Debug, Parser)]
 #[command(version, about, long_about = None)]
@@ -111,10 +107,20 @@ pub struct WebUiOpts {
     pub cors_origin: Option<String>,
 
     /// Root directory of the assets dir
-    #[arg(long, env = "ROSTRA_ASSETS_DIR", default_value_os_t = default_rostra_assets_dir())]
-    pub assets_dir: PathBuf,
+    #[arg(long, env = "ROSTRA_ASSETS_DIR")]
+    pub assets_dir: Option<PathBuf>,
 }
 
+impl From<&WebUiOpts> for rostra_web_ui::Opts {
+    fn from(opts: &WebUiOpts) -> Self {
+        Self::new(
+            opts.listen.clone(),
+            opts.cors_origin.clone(),
+            opts.assets_dir.clone(),
+            opts.reuseport,
+        )
+    }
+}
 /// Development and debugging commands
 #[derive(Debug, Subcommand)]
 pub enum DevCmd {

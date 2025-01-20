@@ -1,3 +1,5 @@
+use std::fmt;
+
 #[cfg(feature = "bincode")]
 pub mod bincode;
 pub mod event;
@@ -248,5 +250,15 @@ impl From<ShortEventId> for NullableShortEventId {
 impl From<NullableShortEventId> for Option<ShortEventId> {
     fn from(value: NullableShortEventId) -> Self {
         value.0
+    }
+}
+
+impl fmt::Display for NullableShortEventId {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        if let Some(id) = self.0 {
+            id.fmt(f)
+        } else {
+            f.write_str("none")
+        }
     }
 }

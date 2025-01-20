@@ -1,5 +1,5 @@
 [package]
-name = "rostra"
+name = "rostra-web-ui"
 
 description = { workspace = true }
 edition = { workspace = true }
@@ -9,17 +9,13 @@ version = { workspace = true }
 [lints]
 workspace = true
 
-[[bin]]
-name = "rostra"
-
 [dependencies]
-anyhow = { workspace = true }
+axum = { workspace = true }
 bytes = { workspace = true }
-directories = { workspace = true }
+brotli = { workspace = true }
 futures = { workspace = true }
 futures-util = { workspace = true }
-duct = { workspace = true }
-iroh = { workspace = true, default-features = false }
+maud = { workspace = true }
 pkarr = { workspace = true, features = ["async"] }
 snafu = { workspace = true }
 rostra-core = { workspace = true }
@@ -27,11 +23,9 @@ rostra-client = { workspace = true }
 rostra-p2p = { workspace = true, features = ["serde"] }
 rostra-p2p-api = { workspace = true }
 rostra-util-error = { workspace = true }
-rostra-web-ui  = { workspace = true }
 tokio = { workspace = true }
 tokio-stream = { workspace = true, features = ["fs"] }
+tower-http = { workspace = true, features = ["cors", "compression-br", "fs"] }
 tracing = { workspace = true }
-tracing-subscriber = { workspace = true }
-clap = { workspace = true }
 serde_json = { workspace = true }
 serde = { workspace = true }

@@ -6,13 +6,18 @@ use rostra_core::id::RostraId;
 use rostra_core::ShortEventId;
 use rostra_util_error::FmtCompact as _;
 use tokio::sync::watch;
-use tracing::debug;
+use tracing::{debug, info};
 
-use crate::db::{Database, DbResult, InsertEventOutcome, TABLE_EVENTS_HEADS, TABLE_EVENTS_MISSING};
+use crate::db::{
+    Database, DbResult, InsertEventOutcome, TABLE_EVENTS_BY_TIME, TABLE_EVENTS_HEADS,
+    TABLE_EVENTS_MISSING, TABLE_EVENTS_SELF,
+};
 
 pub struct Storage {
     db: Database,
     self_followee_list_updated: watch::Sender<Vec<RostraId>>,
+    self_head_updated: watch::Sender<Option<ShortEventId>>,
+    self_id: RostraId,
 }
 
 pub const LOG_TARGET: &str = "rostra::storage";
@@ -27,15 +32,26 @@ impl Storage {
             .into_iter()
             .map(|(id, _)| id)
             .collect();
+
+        let self_head = db.get_head(self_id).await?;
+
         let (self_followee_list_updated, _) = watch::channel(self_followees);
+        let (self_head_updated, _) = watch::channel(self_head);
+
         Ok(Self {
+            self_id,
             db,
             self_followee_list_updated,
+            self_head_updated,
         })
     }
 
     pub fn self_followees_list_subscribe(&self) -> watch::Receiver<Vec<RostraId>> {
         self.self_followee_list_updated.subscribe()
+    }
+
+    pub fn self_head_subscribe(&self) -> watch::Receiver<Option<ShortEventId>> {
+        self.self_head_updated.subscribe()
     }
 
     pub async fn has_event(&self, event_id: impl Into<ShortEventId>) -> bool {
@@ -86,24 +102,71 @@ impl Storage {
             .await
             .expect("Database panic")
     }
+
+    pub async fn get_self_current_head(&self) -> Option<ShortEventId> {
+        self.db
+            .read_with(|tx| {
+                let events_heads_table = tx.open_table(&TABLE_EVENTS_HEADS)?;
+
+                Database::get_head_tx(self.self_id, &events_heads_table)
+            })
+            .await
+            .expect("Storage error")
+    }
+
+    pub async fn get_self_random_eventid(&self) -> Option<ShortEventId> {
+        self.db
+            .read_with(|tx| {
+                let events_self_table = tx.open_table(&TABLE_EVENTS_SELF)?;
+
+                Database::get_random_self_event(&events_self_table)
+            })
+            .await
+            .expect("Storage error")
+    }
+
     pub async fn process_event(
         &self,
         event: &VerifiedEvent,
     ) -> (InsertEventOutcome, ProcessEventState) {
-        self.db
+        let mut new_self_head = None;
+        let ret = self
+            .db
             .write_with(|tx| {
                 let mut events_table = tx.open_table(&crate::db::TABLE_EVENTS)?;
                 let mut events_content_table = tx.open_table(&crate::db::TABLE_EVENTS_CONTENT)?;
                 let mut events_missing_table = tx.open_table(&TABLE_EVENTS_MISSING)?;
                 let mut events_heads_table = tx.open_table(&TABLE_EVENTS_HEADS)?;
+                let mut events_by_time_table = tx.open_table(&TABLE_EVENTS_BY_TIME)?;
 
                 let insert_event_outcome = Database::insert_event_tx(
                     event,
                     &mut events_table,
+                    &mut events_by_time_table,
                     &mut events_content_table,
                     &mut events_missing_table,
                     &mut events_heads_table,
                 )?;
+
+                if let InsertEventOutcome::Inserted { was_missing, .. } = insert_event_outcome {
+                    info!(target: LOG_TARGET,
+                        event_id = %event.event_id,
+                        author = %event.event.author,
+                        parent_prev = %event.event.parent_prev,
+                        parent_aux = %event.event.parent_aux,
+                        "New event inserted"
+                    );
+                    if event.event.author == self.self_id {
+                        let mut events_self_table = tx.open_table(&crate::db::TABLE_EVENTS_SELF)?;
+                        Database::insert_self_event_id(event.event_id, &mut events_self_table)?;
+
+                        if !was_missing {
+                            info!(target: LOG_TARGET, event_id = %event.event_id, "New self head");
+
+                            new_self_head = Some(event.event_id.into());
+                        }
+                    }
+                }
 
                 let process_event_content_state = if Self::MAX_CONTENT_LEN
                     < u32::from(event.event.content_len)
@@ -128,7 +191,13 @@ impl Storage {
                 Ok((insert_event_outcome, process_event_content_state))
             })
             .await
-            .expect("Storage error")
+            .expect("Storage error");
+
+        if let Some(new_self_head) = new_self_head {
+            let _ = self.self_head_updated.send(Some(new_self_head));
+        }
+
+        ret
     }
 
     /// Process event content

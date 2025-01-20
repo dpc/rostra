@@ -4,7 +4,7 @@ use rostra_core::id::RostraId;
 use tracing::{debug, info, instrument};
 
 use crate::client::Client;
-const LOG_TARGET: &str = "rostra::client::publisher";
+const LOG_TARGET: &str = "rostra::publisher";
 
 pub struct FolloweeChecker {
     _client: crate::client::ClientHandle,

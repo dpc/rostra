@@ -882,9 +882,9 @@ dependencies = [
 
 [[package]]
 name = "data-encoding"
-version = "2.6.0"
+version = "2.7.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e8566979429cf69b49a5c740c60791108e86440e8be149bbea4fe54d2c32d6e2"
+checksum = "0e60eed09d8c01d3cee5b7d30acb059b76614c918fa0f992e0dd6eeb10daad6f"
 
 [[package]]
 name = "der"
@@ -3596,8 +3596,6 @@ name = "rostra"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "axum",
- "brotli",
  "bytes",
  "clap",
  "directories",
@@ -3605,19 +3603,18 @@ dependencies = [
  "futures",
  "futures-util",
  "iroh",
- "maud",
  "pkarr",
  "rostra-client",
  "rostra-core",
  "rostra-p2p",
  "rostra-p2p-api",
  "rostra-util-error",
+ "rostra-web-ui",
  "serde",
  "serde_json",
  "snafu",
  "tokio",
  "tokio-stream",
- "tower-http",
  "tracing",
  "tracing-subscriber",
 ]
@@ -3722,6 +3719,31 @@ dependencies = [
 [[package]]
 name = "rostra-util-fmt"
 version = "0.1.0"
+
+[[package]]
+name = "rostra-web-ui"
+version = "0.1.0"
+dependencies = [
+ "axum",
+ "brotli",
+ "bytes",
+ "futures",
+ "futures-util",
+ "maud",
+ "pkarr",
+ "rostra-client",
+ "rostra-core",
+ "rostra-p2p",
+ "rostra-p2p-api",
+ "rostra-util-error",
+ "serde",
+ "serde_json",
+ "snafu",
+ "tokio",
+ "tokio-stream",
+ "tower-http",
+ "tracing",
+]
 
 [[package]]
 name = "rtnetlink"

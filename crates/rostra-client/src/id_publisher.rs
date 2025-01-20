@@ -1,24 +1,35 @@
+use std::future;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use pkarr::dns::rdata::TXT;
 use pkarr::dns::SimpleDnsError;
 use pkarr::{dns, Keypair, SignedPacket};
-use rostra_core::id::RostraIdSecretKey;
+use rostra_core::id::{RostraId, RostraIdSecretKey, ToShort as _};
+use rostra_core::ShortEventId;
+use rostra_util_fmt::AsFmtOption as _;
 use snafu::ResultExt as _;
+use tokio::sync::watch;
 use tracing::{debug, instrument, trace, warn};
 
 use crate::client::Client;
 use crate::error::{DnsSnafu, IdPublishResult, PkarrPacketSnafu, PkarrPublishSnafu};
 use crate::id::{CompactTicket, IdPublishedData};
 use crate::{RRECORD_HEAD_KEY, RRECORD_P2P_KEY};
-const LOG_TARGET: &str = "rostra::client::publisher";
+const LOG_TARGET: &str = "rostra::publisher";
 
 pub struct IdPublisher {
     app: crate::client::ClientHandle,
     pkarr_client: Arc<pkarr::PkarrClientAsync>,
     pkarr_client_relay: Arc<pkarr::PkarrRelayClientAsync>,
     keypair: pkarr::Keypair,
+    self_head_rx: Option<watch::Receiver<Option<ShortEventId>>>,
+}
+
+impl IdPublisher {
+    fn self_id(&self) -> RostraId {
+        RostraId::from(self.keypair.public_key())
+    }
 }
 
 impl IdPublishedData {
@@ -66,22 +77,38 @@ impl IdPublishedData {
 }
 
 impl IdPublisher {
-    pub fn new(app: &Client, id_secret: RostraIdSecretKey) -> Self {
+    pub fn new(client: &Client, id_secret: RostraIdSecretKey) -> Self {
         debug!(target: LOG_TARGET, pkarr_id = %id_secret.id(), "Starting ID publishing task" );
         Self {
-            app: app.handle(),
+            app: client.handle(),
             keypair: id_secret.into(),
-            pkarr_client: app.pkarr_client(),
-            pkarr_client_relay: app.pkarr_client_relay(),
+            pkarr_client: client.pkarr_client(),
+            pkarr_client_relay: client.pkarr_client_relay(),
+            self_head_rx: client.self_head_subscribe(),
         }
     }
 
     /// Run the thread
     #[instrument(skip(self), ret)]
-    pub async fn run(self) {
-        let mut interval = tokio::time::interval(Duration::from_secs(30));
+    pub async fn run(mut self) {
+        let mut interval = tokio::time::interval(Duration::from_secs(60));
         loop {
-            interval.tick().await;
+            tokio::select! {
+                // either periodically
+                _ = interval.tick() => (),
+                // or when our head changes
+                res = async {
+                    if let Some(rx) = self.self_head_rx.as_mut() {
+                        rx.changed().await
+                    } else {
+                        future::pending().await
+                    }
+                }  => {
+                    if res.is_err() {
+                        break;
+                    }
+                }
+            }
 
             let (addr, head) = {
                 let Some(app) = self.app.app_ref_opt() else {
@@ -117,11 +144,11 @@ impl IdPublisher {
 
     /// Publish current state
     async fn publish(&self, data: IdPublishedData, ttl_secs: u32) -> IdPublishResult<()> {
-        debug!(
+        trace!(
             target: LOG_TARGET,
-            id = %self.keypair.public_key(),
+            id = %self.self_id().to_short(),
             ticket = ?data.ticket,
-            head = ?data.head,
+            head = %data.head.fmt_option(),
             "Publishing RostraId"
         );
         let instant = Instant::now();
@@ -140,8 +167,9 @@ impl IdPublisher {
 
         debug!(
             target: LOG_TARGET,
-            id = %self.keypair.public_key(),
             time_ms = instant.elapsed().as_millis(),
+            id = %self.self_id().to_short(),
+            head = %data.head.fmt_option(),
             "Published RostraId"
         );
 

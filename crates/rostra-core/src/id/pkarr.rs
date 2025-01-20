@@ -3,7 +3,7 @@ use std::str::FromStr;
 
 use pkarr::{Keypair, PublicKey};
 
-use super::{RostraId, RostraIdSecretKey};
+use super::{RostraId, RostraIdSecretKey, ShortRostraId};
 
 type PkarrResult<T> = std::result::Result<T, ::pkarr::Error>;
 
@@ -35,6 +35,7 @@ impl fmt::Display for RostraIdTryFmt {
         }
     }
 }
+
 impl From<Keypair> for RostraId {
     fn from(keypair: Keypair) -> Self {
         Self(keypair.public_key().to_bytes())
@@ -58,5 +59,11 @@ impl TryFrom<RostraId> for PublicKey {
 impl From<RostraIdSecretKey> for pkarr::Keypair {
     fn from(id_secret: RostraIdSecretKey) -> Self {
         pkarr::Keypair::from_secret_key(&id_secret.0)
+    }
+}
+
+impl fmt::Display for ShortRostraId {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", z32::encode(self.0.as_slice()))
     }
 }

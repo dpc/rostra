@@ -1,5 +1,4 @@
 mod cli;
-mod web_ui;
 
 use std::io;
 use std::time::Duration;
@@ -14,12 +13,12 @@ use rostra_core::id::RostraIdSecretKey;
 use rostra_p2p::connection::{Connection, PingRequest, PingResponse};
 use rostra_p2p::RpcError;
 use rostra_util_error::FmtCompact as _;
+use rostra_web_ui::{Server, WebUiServerError};
 use snafu::{FromString, ResultExt, Snafu, Whatever};
 use tokio::time::Instant;
 use tracing::level_filters::LevelFilter;
 use tracing::{info, warn};
 use tracing_subscriber::EnvFilter;
-use web_ui::WebUiServerError;
 
 pub const PROJECT_NAME: &str = "rostra";
 pub const LOG_TARGET: &str = "rostra::cli";
@@ -172,38 +171,40 @@ async fn handle_cmd(opts: Opts) -> CliResult<serde_json::Value> {
 
             pending().await
         }
-        cli::OptsCmd::WebUi(web_opts) => {
+        cli::OptsCmd::WebUi(ref web_opts) => {
             let secret_id = if let Some(secret_file) = web_opts.secret_file.clone() {
-                Some(
-                    Client::read_id_secret(&secret_file)
-                        .await
-                        .context(SecretSnafu)?,
-                )
+                Client::read_id_secret(&secret_file)
+                    .await
+                    .context(SecretSnafu)?
             } else {
-                None
+                RostraIdSecretKey::generate()
             };
             let client = Client::builder()
-                .maybe_id_secret(secret_id)
-                .db(Database::open(opts.global.mk_db_path().await?)
-                    .await
-                    .context(DatabaseSnafu)?)
+                .id_secret(secret_id)
+                .db(
+                    Database::open(opts.global.mk_db_path().await?, secret_id.id())
+                        .await
+                        .context(DatabaseSnafu)?,
+                )
                 .build()
                 .await
                 .context(InitSnafu)?;
 
-            let server = web_ui::Server::init(web_opts, client.handle())
+            let server = Server::init(web_opts.into(), client.handle())
                 .await
                 .context(WebUiServerSnafu)?;
 
-            if cmd!(
-                "xdg-open",
-                format!("http://{}", server.addr().context(WebUiServerSnafu)?)
-            )
-            .run()
-            .is_err()
-            {
-                warn!(target: LOG_TARGET, "Failed to open browser");
-            };
+            if !web_opts.skip_xdg_open {
+                if cmd!(
+                    "xdg-open",
+                    format!("http://{}", server.addr().context(WebUiServerSnafu)?)
+                )
+                .run()
+                .is_err()
+                {
+                    warn!(target: LOG_TARGET, "Failed to open browser");
+                };
+            }
 
             server.run().await.context(WebUiServerSnafu)?;
 

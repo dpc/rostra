@@ -1,14 +1,34 @@
+mod new_post;
+
 use axum::body::Body;
 use axum::extract::{FromRequest, Path, Request, State};
-use axum::http::header::{ACCEPT_ENCODING, CONTENT_ENCODING, CONTENT_TYPE};
+use axum::http::header::{self, ACCEPT_ENCODING, CONTENT_ENCODING, CONTENT_TYPE};
 use axum::http::{HeaderMap, HeaderValue, StatusCode};
 use axum::middleware::{self, Next};
 use axum::response::{Html, IntoResponse, Response};
-use axum::routing::get;
+use axum::routing::{get, post};
 use axum::Router;
+use maud::Markup;
 
 use super::error::{RequestError, RequestResult, UserErrorResponse};
-use super::{fragment, SharedAppState};
+use super::SharedAppState;
+
+#[derive(Clone, Debug)]
+#[must_use]
+pub struct Maud(pub Markup);
+
+impl IntoResponse for Maud {
+    fn into_response(self) -> Response {
+        (
+            [(
+                header::CONTENT_TYPE,
+                HeaderValue::from_static("text/html; charset=utf-8"),
+            )],
+            self.0 .0,
+        )
+            .into_response()
+    }
+}
 
 #[derive(FromRequest)]
 #[from_request(via(axum::Json), rejection(RequestError))]
@@ -99,8 +119,8 @@ pub async fn cache_control(request: Request, next: Next) -> Response {
     response
 }
 
-pub async fn index() -> RequestResult<impl IntoResponse> {
-    Ok(Html(fragment::index().into_string()))
+pub async fn index(state: State<SharedAppState>) -> RequestResult<impl IntoResponse> {
+    Ok(Html(state.index().into_string()))
 }
 
 pub async fn not_found(_state: State<SharedAppState>, _req: Request<Body>) -> impl IntoResponse {
@@ -115,6 +135,7 @@ pub async fn not_found(_state: State<SharedAppState>, _req: Request<Body>) -> im
 pub fn route_handler(state: SharedAppState) -> Router {
     Router::new()
         .route("/", get(index))
+        .route("/post", post(new_post::new_post))
         // .route("/a/", put(account_new))
         // .route("/t/", put(token_new))
         // .route("/m/", put(metric_new).get(metric_find))

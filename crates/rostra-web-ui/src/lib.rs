@@ -5,6 +5,7 @@ mod routes;
 
 use std::io;
 use std::net::{AddrParseError, SocketAddr};
+use std::path::{Path, PathBuf};
 use std::str::FromStr as _;
 use std::sync::Arc;
 use std::time::Duration;
@@ -14,6 +15,7 @@ use axum::http::header::{ACCEPT, CONTENT_TYPE};
 use axum::http::{HeaderName, HeaderValue, Method};
 use axum::Router;
 use rostra_client::ClientHandle;
+use rostra_util_error::WhateverResult;
 use snafu::{ResultExt as _, Snafu, Whatever};
 use tokio::net::{TcpListener, TcpSocket};
 use tokio::signal;
@@ -24,8 +26,38 @@ use tower_http::services::ServeDir;
 use tower_http::CompressionLevel;
 use tracing::info;
 
-use crate::cli::WebUiOpts;
-use crate::WhateverResult;
+fn default_rostra_assets_dir() -> PathBuf {
+    PathBuf::from(env!("ROSTRA_SHARE_DIR")).join("assets")
+}
+
+pub struct Opts {
+    pub listen: String,
+    pub cors_origin: Option<String>,
+    assets_dir: PathBuf,
+    pub reuseport: bool,
+}
+
+impl Opts {
+    pub fn new(
+        listen: String,
+        cors_origin: Option<String>,
+        assets_dir: Option<PathBuf>,
+        reuseport: bool,
+    ) -> Self {
+        Self {
+            listen,
+            cors_origin,
+            assets_dir: assets_dir.unwrap_or_else(default_rostra_assets_dir),
+            reuseport,
+        }
+    }
+}
+
+impl Opts {
+    pub fn assets_dir(&self) -> &Path {
+        &self.assets_dir
+    }
+}
 
 pub struct AppState {
     client: ClientHandle,
@@ -37,7 +69,7 @@ pub struct Server {
     listener: TcpListener,
 
     state: SharedAppState,
-    opts: WebUiOpts,
+    opts: Opts,
 }
 
 #[derive(Debug, Snafu)]
@@ -62,7 +94,7 @@ pub enum WebUiServerError {
 
 pub type ServerResult<T> = std::result::Result<T, WebUiServerError>;
 impl Server {
-    pub async fn init(opts: WebUiOpts, client: ClientHandle) -> ServerResult<Server> {
+    pub async fn init(opts: Opts, client: ClientHandle) -> ServerResult<Server> {
         let listener = Self::get_listener(&opts).await?;
 
         let assets = AssetCache::load_files(&opts.assets_dir)
@@ -82,7 +114,7 @@ impl Server {
         })
     }
 
-    pub async fn get_listener(opts: &WebUiOpts) -> ServerResult<TcpListener> {
+    pub async fn get_listener(opts: &Opts) -> ServerResult<TcpListener> {
         let socket = {
             let addr = SocketAddr::from_str(&opts.listen).context(ListenAddrSnafu)?;
 
@@ -109,7 +141,10 @@ impl Server {
         let mut router = Router::new().merge(routes::route_handler(self.state.clone()));
 
         if std::env::var("ROSTRA_DEV_MODE").is_ok() {
-            router = router.nest_service("/assets", ServeDir::new("crates/rostra/assets/"));
+            router = router.nest_service(
+                "/assets",
+                ServeDir::new(format!("{}/assets", env!("CARGO_MANIFEST_DIR"))),
+            );
         } else {
             router = router.nest("/assets", routes::static_file_handler(self.state.clone()));
         }
@@ -140,7 +175,7 @@ fn compression_layer() -> CompressionLayer<SizeAbove> {
         .compress_when(SizeAbove::new(512))
 }
 
-fn cors_layer(opts: &WebUiOpts, listen: SocketAddr) -> ServerResult<CorsLayer> {
+fn cors_layer(opts: &Opts, listen: SocketAddr) -> ServerResult<CorsLayer> {
     Ok(CorsLayer::new()
         .allow_credentials(true)
         .allow_headers([ACCEPT, CONTENT_TYPE, HeaderName::from_static("csrf-token")])
@@ -157,7 +192,7 @@ fn cors_layer(opts: &WebUiOpts, listen: SocketAddr) -> ServerResult<CorsLayer> {
         ]))
 }
 
-impl WebUiOpts {
+impl Opts {
     pub fn cors_origin(&self, listen: SocketAddr) -> WhateverResult<HeaderValue> {
         self.cors_origin
             .clone()

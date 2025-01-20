@@ -2,15 +2,17 @@ mod models;
 mod tables;
 
 use std::borrow::{Borrow as _, Cow};
+use std::ops;
 use std::path::PathBuf;
 
 use events::ContentStateRef;
 use ids::{IdsFollowersRecord, IdsUnfollowedRecord};
+use rand::{thread_rng, Rng as _};
 use redb_bincode::{ReadTransaction, ReadableTable, Table, WriteTransaction};
 use rostra_core::event::{
     ContentFollow, ContentUnfollow, SignedEvent, VerifiedEvent, VerifiedEventContent,
 };
-use rostra_core::id::{RostraId, ShortRostraId};
+use rostra_core::id::RostraId;
 use rostra_core::{ShortEventId, Timestamp};
 use rostra_util_error::BoxedError;
 use snafu::{Location, ResultExt as _, Snafu};
@@ -22,7 +24,7 @@ use tracing::{debug, info, instrument};
 
 pub use self::tables::*;
 
-const LOG_TARGET: &str = "rostra::client::db";
+const LOG_TARGET: &str = "rostra::db";
 
 #[derive(Debug, Snafu)]
 pub enum DbError {
@@ -70,6 +72,11 @@ pub enum DbError {
         #[snafu(implicit)]
         location: Location,
     },
+    #[snafu(visibility(pub))]
+    IdMismatch {
+        #[snafu(implicit)]
+        location: Location,
+    },
 }
 pub type DbResult<T> = std::result::Result<T, DbError>;
 
@@ -79,17 +86,33 @@ pub struct Database(redb_bincode::Database);
 impl Database {
     const DB_VER: u64 = 0;
 
+    #[instrument(skip_all)]
+    pub async fn open(path: impl Into<PathBuf>, self_id: RostraId) -> DbResult<Database> {
+        let path = path.into();
+        debug!(target: LOG_TARGET, path = %path.display(), "Opening database");
+        let create = tokio::task::spawn_blocking(move || redb_bincode::Database::create(path))
+            .await
+            .context(JoinSnafu)?
+            .context(DatabaseSnafu)?;
+
+        let s = Self::from(create).init().await?;
+
+        s.verify_self(self_id).await?;
+        Ok(s)
+    }
+
     async fn init(self) -> DbResult<Self> {
         self.write_with(|dbtx| {
             dbtx.open_table(&TABLE_DB_VER)?;
-            dbtx.open_table(&TABLE_EVENTS)?;
-            dbtx.open_table(&TABLE_SELF)?;
+            dbtx.open_table(&TABLE_ID_SELF)?;
             dbtx.open_table(&TABLE_IDS)?;
             dbtx.open_table(&TABLE_ID_FOLLOWEES)?;
             dbtx.open_table(&TABLE_ID_FOLLOWERS)?;
             dbtx.open_table(&TABLE_ID_UNFOLLOWED)?;
             dbtx.open_table(&TABLE_ID_PERSONAS)?;
             dbtx.open_table(&TABLE_EVENTS)?;
+            dbtx.open_table(&TABLE_EVENTS_BY_TIME)?;
+            dbtx.open_table(&TABLE_EVENTS_SELF)?;
             dbtx.open_table(&TABLE_EVENTS_MISSING)?;
             dbtx.open_table(&TABLE_EVENTS_HEADS)?;
 
@@ -160,14 +183,29 @@ impl Database {
         })
     }
 
-    #[instrument(skip_all)]
-    pub async fn open(path: impl Into<PathBuf>) -> DbResult<Database> {
-        let path = path.into();
-        let create = tokio::task::spawn_blocking(move || redb_bincode::Database::create(path))
-            .await
-            .context(JoinSnafu)?
-            .context(DatabaseSnafu)?;
-        Self::from(create).init().await
+    pub async fn verify_self(&self, self_id: RostraId) -> DbResult<()> {
+        self.write_with(|tx| {
+            let mut id_self_table = tx.open_table(&TABLE_ID_SELF)?;
+
+            if let Some(existing_id) = Self::read_self_id_tx(&id_self_table)? {
+                if existing_id != self_id {
+                    return IdMismatchSnafu.fail();
+                }
+            } else {
+                Self::write_self_id_tx(self_id, &mut id_self_table)?;
+            }
+            Ok(())
+        })
+        .await
+    }
+
+    pub async fn get_head(&self, id: RostraId) -> DbResult<Option<ShortEventId>> {
+        self.read_with(|tx| {
+            let events_heads = tx.open_table(&TABLE_EVENTS_HEADS)?;
+
+            Self::get_head_tx(id, &events_heads)
+        })
+        .await
     }
 
     pub async fn read_followees(
@@ -213,6 +251,16 @@ impl Database {
             .map(|res| res.map(|(k, v)| (k.value().1, v.value())))
             .collect::<Result<Vec<_>, _>>()?)
     }
+
+    pub(crate) fn insert_self_event_id(
+        event_id: impl Into<rostra_core::ShortEventId>,
+
+        events_self_table: &mut Table<ShortEventId, ()>,
+    ) -> DbResult<()> {
+        events_self_table.insert(&event_id.into(), &())?;
+        Ok(())
+    }
+
     /// Insert an event and do all the accounting for it
     ///
     /// Return `true`
@@ -223,20 +271,20 @@ impl Database {
             sig,
         }: &VerifiedEvent,
         events_table: &mut Table<ShortEventId, EventRecord>,
+        events_by_time_table: &mut Table<(Timestamp, ShortEventId), ()>,
         events_content_table: &mut Table<ShortEventId, ContentState>,
-        events_missing_table: &mut Table<(ShortRostraId, ShortEventId), EventsMissingRecord>,
-        events_heads_table: &mut Table<(ShortRostraId, ShortEventId), EventsHeadsTableValue>,
+        events_missing_table: &mut Table<(RostraId, ShortEventId), EventsMissingRecord>,
+        events_heads_table: &mut Table<(RostraId, ShortEventId), EventsHeadsTableValue>,
     ) -> DbResult<InsertEventOutcome> {
         let author = event.author;
         let event_id = ShortEventId::from(*event_id);
-        let short_author = ShortRostraId::from(author);
 
         if events_table.get(&event_id)?.is_some() {
             return Ok(InsertEventOutcome::AlreadyPresent);
         }
 
         let (was_missing, is_deleted) = if let Some(prev_missing) = events_missing_table
-            .remove(&(short_author, event_id))?
+            .remove(&(author, event_id))?
             .map(|g| g.value())
         {
             // if the missing was marked as deleted, we'll record it
@@ -252,7 +300,7 @@ impl Database {
             )
         } else {
             // since nothing was expecting this event yet, it must be a "head"
-            events_heads_table.insert(&(short_author, event_id), &EventsHeadsTableValue)?;
+            events_heads_table.insert(&(author, event_id), &EventsHeadsTableValue)?;
             (false, false)
         };
 
@@ -286,7 +334,7 @@ impl Database {
             } else {
                 // we do not have this parent yet, so we mark it as missing
                 events_missing_table.insert(
-                    &(short_author, parent_id),
+                    &(author, parent_id),
                     &EventsMissingRecord {
                         // potentially mark that the missing event was already deleted
                         deleted_by: (event.is_delete_parent_aux_content_set() && parent_is_aux)
@@ -296,7 +344,7 @@ impl Database {
                 missing_parents.push(parent_id);
             }
             // if the event was considered a "head", it shouldn't as it has a child
-            events_heads_table.remove(&(short_author, parent_id))?;
+            events_heads_table.remove(&(author, parent_id))?;
         }
 
         events_table.insert(
@@ -308,6 +356,7 @@ impl Database {
                 },
             },
         )?;
+        events_by_time_table.insert(&(event.timestamp.into(), event_id), &())?;
 
         Ok(InsertEventOutcome::Inserted {
             was_missing,
@@ -367,10 +416,9 @@ impl Database {
     }
 
     pub fn get_missing_events_tx(
-        author: impl Into<ShortRostraId>,
-        events_missing_table: &impl ReadableTable<(ShortRostraId, ShortEventId), EventsMissingRecord>,
+        author: RostraId,
+        events_missing_table: &impl ReadableTable<(RostraId, ShortEventId), EventsMissingRecord>,
     ) -> DbResult<Vec<ShortEventId>> {
-        let author = author.into();
         Ok(events_missing_table
             .range((author, ShortEventId::ZERO)..=(author, ShortEventId::MAX))?
             .map(|r| r.map(|(k, _v)| k.value().1))
@@ -378,10 +426,9 @@ impl Database {
     }
 
     pub fn get_heads_events_tx(
-        author: impl Into<ShortRostraId>,
-        events_heads_table: &impl ReadableTable<(ShortRostraId, ShortEventId), EventsHeadsTableValue>,
+        author: RostraId,
+        events_heads_table: &impl ReadableTable<(RostraId, ShortEventId), EventsHeadsTableValue>,
     ) -> DbResult<Vec<ShortEventId>> {
-        let author = author.into();
         Ok(events_heads_table
             .range((author, ShortEventId::ZERO)..=(author, ShortEventId::MAX))?
             .map(|r| r.map(|(k, _v)| k.value().1))
@@ -479,6 +526,88 @@ impl Database {
 
         Ok(true)
     }
+
+    pub(crate) fn read_self_id_tx(
+        id_self_table: &impl ReadableTable<(), RostraId>,
+    ) -> Result<Option<RostraId>, DbError> {
+        Ok(id_self_table.get(&())?.map(|v| v.value()))
+    }
+
+    pub(crate) fn write_self_id_tx(
+        self_id: RostraId,
+        id_self_table: &mut Table<(), RostraId>,
+    ) -> DbResult<()> {
+        let _ = id_self_table.insert(&(), &self_id)?;
+        Ok(())
+    }
+
+    pub(crate) fn get_head_tx(
+        self_id: RostraId,
+        events_heads_table: &impl ReadableTable<(RostraId, ShortEventId), EventsHeadsTableValue>,
+    ) -> DbResult<Option<ShortEventId>> {
+        Ok(events_heads_table
+            .range((self_id, ShortEventId::ZERO)..=(self_id, ShortEventId::MAX))?
+            .next()
+            .transpose()?
+            .map(|(k, _)| k.value().1))
+    }
+
+    pub(crate) fn get_random_self_event(
+        events_self_table: &impl ReadableTable<ShortEventId, ()>,
+    ) -> Result<Option<ShortEventId>, DbError> {
+        let pivot = ShortEventId::random();
+
+        let before_pivot = (ShortEventId::ZERO)..(pivot);
+        let after_pivot = (pivot)..=(ShortEventId::MAX);
+
+        Ok(Some(if thread_rng().gen() {
+            if let Some(k) = get_first_in_range(events_self_table, after_pivot)? {
+                k
+            } else if let Some(k) = get_last_in_range(events_self_table, before_pivot)? {
+                k
+            } else {
+                return Ok(None);
+            }
+        } else {
+            if let Some(k) = get_first_in_range(events_self_table, before_pivot)? {
+                k
+            } else if let Some(k) = get_last_in_range(events_self_table, after_pivot)? {
+                k
+            } else {
+                return Ok(None);
+            }
+        }))
+    }
+}
+
+fn get_first_in_range<K, V>(
+    events_table: &impl ReadableTable<K, V>,
+    range: impl ops::RangeBounds<K>,
+) -> Result<Option<K>, DbError>
+where
+    K: bincode::Decode + bincode::Encode,
+    V: bincode::Decode + bincode::Encode,
+{
+    Ok(events_table
+        .range(range)?
+        .next()
+        .transpose()?
+        .map(|(k, _)| k.value()))
+}
+
+fn get_last_in_range<K, V>(
+    events_table: &impl ReadableTable<K, V>,
+    range: impl ops::RangeBounds<K>,
+) -> Result<Option<K>, DbError>
+where
+    K: bincode::Decode + bincode::Encode,
+    V: bincode::Decode + bincode::Encode,
+{
+    Ok(events_table
+        .range(range)?
+        .next_back()
+        .transpose()?
+        .map(|(k, _)| k.value()))
 }
 
 pub enum InsertEventOutcome {

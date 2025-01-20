@@ -1,5 +1,5 @@
 use rostra_core::event::{Event, EventContent, EventKind, VerifiedEvent};
-use rostra_core::id::RostraIdSecretKey;
+use rostra_core::id::{RostraId, RostraIdSecretKey};
 use rostra_core::EventId;
 use rostra_util_error::BoxedErrorResult;
 use snafu::ResultExt as _;
@@ -7,11 +7,11 @@ use tempfile::{tempdir, TempDir};
 use tracing::info;
 
 use crate::db::tables::{ContentState, TABLE_EVENTS, TABLE_EVENTS_HEADS, TABLE_EVENTS_MISSING};
-use crate::db::{Database, TABLE_EVENTS_CONTENT};
+use crate::db::{Database, TABLE_EVENTS_BY_TIME, TABLE_EVENTS_CONTENT};
 
-async fn temp_db() -> BoxedErrorResult<(TempDir, super::Database)> {
+async fn temp_db(self_id: RostraId) -> BoxedErrorResult<(TempDir, super::Database)> {
     let dir = tempdir()?;
-    let db = super::Database::open(dir.path().join("db.redb"))
+    let db = super::Database::open(dir.path().join("db.redb"), self_id)
         .await
         .boxed()?;
 
@@ -40,10 +40,9 @@ fn build_test_event(
 
 #[test_log::test(tokio::test(flavor = "multi_thread"))]
 async fn test_store_event() -> BoxedErrorResult<()> {
-    let (_dir, db) = temp_db().await?;
-
     let id_secret = RostraIdSecretKey::generate();
     let author = id_secret.id();
+    let (_dir, db) = temp_db(author).await?;
 
     let event_a = build_test_event(id_secret, None);
     let event_a_id = event_a.event_id;
@@ -56,6 +55,7 @@ async fn test_store_event() -> BoxedErrorResult<()> {
 
     db.write_with(|tx| {
         let mut events_table = tx.open_table(&TABLE_EVENTS).boxed()?;
+        let mut events_by_time_table = tx.open_table(&TABLE_EVENTS_BY_TIME)?;
         let mut events_content_table = tx.open_table(&TABLE_EVENTS_CONTENT).boxed()?;
         let mut events_missing_table = tx.open_table(&TABLE_EVENTS_MISSING).boxed()?;
         let mut events_heads_table = tx.open_table(&TABLE_EVENTS_HEADS).boxed()?;
@@ -79,6 +79,7 @@ async fn test_store_event() -> BoxedErrorResult<()> {
                 Database::insert_event_tx(
                     &event,
                     &mut events_table,
+                    &mut events_by_time_table,
                     &mut events_content_table,
                     &mut events_missing_table,
                     &mut events_heads_table,
@@ -129,9 +130,8 @@ fn build_test_event_2(
 
 #[test_log::test(tokio::test(flavor = "multi_thread"))]
 async fn test_store_deleted_event() -> BoxedErrorResult<()> {
-    let (_dir, db) = temp_db().await?;
-
     let id_secret = RostraIdSecretKey::generate();
+    let (_dir, db) = temp_db(id_secret.id()).await?;
 
     let event_a = build_test_event_2(id_secret, None, None);
     let event_a_id = event_a.event_id;
@@ -144,6 +144,7 @@ async fn test_store_deleted_event() -> BoxedErrorResult<()> {
 
     db.write_with(|tx| {
         let mut events_table = tx.open_table(&TABLE_EVENTS).boxed()?;
+        let mut events_by_time_table = tx.open_table(&TABLE_EVENTS_BY_TIME)?;
         let mut events_content_table = tx.open_table(&TABLE_EVENTS_CONTENT).boxed()?;
         let mut events_missing_table = tx.open_table(&TABLE_EVENTS_MISSING).boxed()?;
         let mut events_heads_table = tx.open_table(&TABLE_EVENTS_HEADS).boxed()?;
@@ -174,6 +175,7 @@ async fn test_store_deleted_event() -> BoxedErrorResult<()> {
                 Database::insert_event_tx(
                     &event,
                     &mut events_table,
+                    &mut events_by_time_table,
                     &mut events_content_table,
                     &mut events_missing_table,
                     &mut events_heads_table,

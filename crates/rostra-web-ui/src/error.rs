@@ -1,5 +1,7 @@
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
+use rostra_client::error::PostError;
+use rostra_client::ClientRefError;
 use serde::Serialize;
 use snafu::Snafu;
 use tracing::info;
@@ -28,7 +30,12 @@ pub struct UserErrorResponse {
 }
 
 #[derive(Debug, Snafu)]
-pub enum RequestError {}
+pub enum RequestError {
+    #[snafu(transparent)]
+    Client { source: ClientRefError },
+    #[snafu(transparent)]
+    PostError { source: PostError },
+}
 pub type RequestResult<T> = std::result::Result<T, RequestError>;
 
 impl IntoResponse for RequestError {

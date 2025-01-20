@@ -13,7 +13,7 @@ use crate::client::Client;
 use crate::db::InsertEventOutcome;
 use crate::storage::Storage;
 use crate::ClientRef;
-const LOG_TARGET: &str = "rostra::client::head_checker";
+const LOG_TARGET: &str = "rostra::head_checker";
 
 pub struct FolloweeHeadChecker {
     client: crate::client::ClientHandle,

@@ -91,12 +91,12 @@ pub struct Event {
 
     /// Auxiliary parent
     ///
-    /// With some `flags` and `kind`s it is meant to point at the `EventID`
+    /// With some `flags` and `kind`s it is meant to point at the `EventId`
     /// used for replacement, attachment, or some other special meaning, as
     /// opposed to the `parent_event` which is always about exact ordering.
     ///
     /// In all cases used to potentially merge divergent chains
-    /// into one DAG. Also, by pointing at some much older `EventID`
+    /// into one DAG. Also, by pointing at some much older `EventId`
     /// it allows fetching older events, without traversing
     /// the DAG/chain one by one, potentially suffering latency
     /// of getting the data serially.

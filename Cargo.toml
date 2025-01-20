@@ -7,6 +7,7 @@ members = [
   "crates/rostra-p2p-api",
   "crates/rostra-util-error",
   "crates/rostra-util-fmt",
+  "crates/rostra-web-ui",
 ]
 resolver = "2"
 
@@ -14,7 +15,11 @@ resolver = "2"
 version = "0.1.0"
 edition = "2021"
 license = "MIT"
-description = "f2fi, p2p social network"
+description = "A p2p (f2f) social network."
+
+[workspace.lints.clippy]
+collapsible_if = "allow"
+collapsible_else_if = "allow"
 
 [workspace.metadata]
 name = "rostra"
@@ -34,7 +39,7 @@ bon = "3.3.0"
 bip39 = "2.0.0"
 clap = { version = "4.5.23", features = ["derive", "env"] }
 convi = { version = "0.1.1", features = ["min_target_pointer_width_32"] }
-data-encoding = "2.6"
+data-encoding = "2.7"
 directories = "5"
 duct = "*"
 ed25519-dalek = "2.1.1"
@@ -59,6 +64,7 @@ rostra-p2p = { path = "crates/rostra-p2p" }
 rostra-p2p-api = { path = "crates/rostra-p2p-api" }
 rostra-util-error = { path = "crates/rostra-util-error" }
 rostra-util-fmt = { path = "crates/rostra-util-fmt" }
+rostra-web-ui = { path = "crates/rostra-web-ui" }
 serde = "1.0.216"
 serde_json = "1.0.134"
 snafu = { version = "0.8.5", features = ["rust_1_81"] }
@@ -68,6 +74,7 @@ tower-http = "0.5"
 tracing = "0.1.41"
 tracing-subscriber = { version = "0.3.19", features = ["env-filter"] }
 z32 = "1.1.1"
+
 
 [profile.dev]
 debug = "line-tables-only"
