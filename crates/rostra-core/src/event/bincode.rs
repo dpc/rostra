@@ -23,7 +23,7 @@ impl Event {
         parent_prev: Option<ShortEventId>,
         parent_aux: Option<ShortEventId>,
         timestamp: Option<SystemTime>,
-        content: EventContent,
+        content: &EventContent,
     ) -> Self {
         if delete.is_some() && parent_aux.is_some() {
             panic!("Can't set both both delete and parent_aux");

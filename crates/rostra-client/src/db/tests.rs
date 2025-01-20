@@ -30,7 +30,7 @@ fn build_test_event(
         .author(author)
         .kind(EventKind::SOCIAL_POST)
         .maybe_parent_prev(parent.map(Into::into))
-        .content(content.clone())
+        .content(&content)
         .build();
 
     let signed_event = event.signed_by(id_secret);
@@ -120,7 +120,7 @@ fn build_test_event_2(
         .kind(EventKind::SOCIAL_POST)
         .maybe_parent_prev(parent.map(Into::into))
         .maybe_delete(delete.map(Into::into))
-        .content(content.clone())
+        .content(&content)
         .build();
 
     let signed_event = event.signed_by(id_secret);

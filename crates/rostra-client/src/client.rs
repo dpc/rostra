@@ -10,7 +10,10 @@ use backon::Retryable as _;
 use iroh::NodeAddr;
 use itertools::Itertools as _;
 use pkarr::PkarrClient;
-use rostra_core::event::{Event, EventContent, EventKind, SignedEvent, VerifiedEvent};
+use rostra_core::bincode::STD_BINCODE_CONFIG;
+use rostra_core::event::{
+    content, Event, EventContent, EventKind, PersonaId, SignedEvent, VerifiedEvent,
+};
 use rostra_core::id::{RostraId, RostraIdSecretKey};
 use rostra_core::ShortEventId;
 use rostra_p2p::connection::{Connection, FeedEventRequest, FeedEventResponse};
@@ -26,10 +29,10 @@ use tracing::{debug, info};
 use super::{get_rrecord_typed, take_first_ok_some, RRECORD_HEAD_KEY, RRECORD_P2P_KEY};
 use crate::db::{Database, DbResult};
 use crate::error::{
-    ConnectIrohSnafu, ConnectResult, IdResolveError, IdResolveResult, IdSecretReadResult,
-    InitIrohClientSnafu, InitPkarrClientSnafu, InitResult, InvalidIdSnafu, IoSnafu, IrohResult,
-    MissingTicketSnafu, NotFoundSnafu, ParsingSnafu, PkarrResolveSnafu, PostResult, RRecordSnafu,
-    ResolveSnafu,
+    ConnectIrohSnafu, ConnectResult, EncodeSnafu, IdResolveError, IdResolveResult,
+    IdSecretReadResult, InitIrohClientSnafu, InitPkarrClientSnafu, InitResult, InvalidIdSnafu,
+    IoSnafu, IrohResult, MissingTicketSnafu, NotFoundSnafu, ParsingSnafu, PkarrResolveSnafu,
+    PostResult, RRecordSnafu, ResolveSnafu,
 };
 use crate::id::{CompactTicket, IdPublishedData, IdResolvedData};
 use crate::id_publisher::IdPublisher;
@@ -403,30 +406,57 @@ impl Client {
             .await
     }
 
-    pub async fn post(&self, body: String) -> PostResult<()> {
+    pub async fn publish_event<C>(&self, content: C) -> PostResult<()>
+    where
+        C: content::Content,
+    {
         let storage = self
             .storage()
-            .expect("Implement fallback for lack of storage");
+            .expect("TODO: Implement fallback for lack of storage");
 
         let current_head = storage.get_self_current_head().await;
         let random_event = storage.get_self_random_eventid().await;
 
+        let content = EventContent::from(
+            bincode::encode_to_vec(&content, STD_BINCODE_CONFIG)
+                .whatever_context("Could not encode content?!")
+                .context(EncodeSnafu)?,
+        );
+
         let signed_event = Event::builder()
             .author(self.id)
-            .kind(EventKind::SOCIAL_POST)
-            .content(body.as_bytes().to_owned().into())
+            .kind(C::KIND)
+            .content(&content)
             .maybe_parent_prev(current_head)
             .maybe_parent_aux(random_event)
             .build()
             .signed_by(self.id_secret);
 
+        let verified_event = VerifiedEvent::verify_signed(self.id, signed_event)
+            .expect("Can't fail to verify self-created event");
+        let verified_event_content =
+            rostra_core::event::VerifiedEventContent::verify(verified_event.clone(), content)
+                .expect("Can't fail to verify self-created content");
         let _ = storage
-            .process_event(
-                &VerifiedEvent::verify_signed(self.id, signed_event).expect("Can't fail to verify"),
-            )
+            .process_event_with_content(&verified_event, &verified_event_content)
             .await;
 
         Ok(())
+    }
+
+    pub async fn post(&self, body: String) -> PostResult<()> {
+        self.publish_event(content::SocialPost {
+            persona: PersonaId(0),
+            djot_content: body,
+        })
+        .await
+    }
+    pub async fn follow(&self, followee: RostraId) -> PostResult<()> {
+        self.publish_event(content::Follow {
+            followee,
+            persona: PersonaId(0),
+        })
+        .await
     }
 
     pub async fn post_omni(&self, body: String) -> PostResult<()> {
@@ -469,7 +499,7 @@ impl Client {
                         Event::builder()
                             .author(self.id)
                             .kind(EventKind::SOCIAL_POST)
-                            .content(body.as_bytes().to_owned().into())
+                            .content(&body.as_bytes().to_owned().into())
                             .build()
                             .signed_by(self.id_secret)
                     }));

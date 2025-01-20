@@ -19,21 +19,24 @@ pub async fn new_post(
     Form(form): Form<Input>,
 ) -> RequestResult<impl IntoResponse> {
     state.client.client_ref()?.post(form.content).await?;
-    Ok(Maud(html! {
+    Ok(Maud(state.new_post_form(html! {
         div {
             p { "Posted!" }
         }
-        (state.new_post_form())
-    }))
+    })))
 }
 
 impl AppState {
-    pub fn new_post_form(&self) -> Markup {
+    pub fn new_post_form(&self, notification: impl Into<Option<Markup>>) -> Markup {
+        let notification = notification.into();
         html! {
             form ."m-newPostForm"
                 hx-post="/post"
                 hx-swap="outerHTML"
             {
+                @if let Some(n) = notification {
+                    (n)
+                }
                 textarea ."m-newPostForm__content"
                     placeholder="What's on your mind?"
                     dir="auto"

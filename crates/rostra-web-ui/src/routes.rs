@@ -1,4 +1,6 @@
+mod add_followee;
 mod new_post;
+mod self_account;
 
 use axum::body::Body;
 use axum::extract::{FromRequest, Path, Request, State};
@@ -136,6 +138,7 @@ pub fn route_handler(state: SharedAppState) -> Router {
     Router::new()
         .route("/", get(index))
         .route("/post", post(new_post::new_post))
+        .route("/followee", post(add_followee::add_followee))
         // .route("/a/", put(account_new))
         // .route("/t/", put(token_new))
         // .route("/m/", put(metric_new).get(metric_find))

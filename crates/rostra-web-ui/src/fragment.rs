@@ -22,6 +22,7 @@ impl AppState {
             }
         }
     }
+
     pub fn html_page(&self, title: &str) -> Markup {
         html! {
             (self.html_head(title))
@@ -38,12 +39,15 @@ impl AppState {
                     // (header())
                     nav ."o-navBar" {
 
-                        (self.new_post_form())
+                        (self.self_account())
+
+                        (self.new_post_form(None))
 
                         div ."o-navBar__list" {
                             a ."o-navBar__item" href="/" { "Home" }
                             a ."o-navBar__item" href="/" { "Something" }
                         }
+                        (self.add_followee_form(None))
                     }
 
                     main ."o-mainBar" {

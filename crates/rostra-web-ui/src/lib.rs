@@ -14,7 +14,8 @@ use asset_cache::AssetCache;
 use axum::http::header::{ACCEPT, CONTENT_TYPE};
 use axum::http::{HeaderName, HeaderValue, Method};
 use axum::Router;
-use rostra_client::ClientHandle;
+use rostra_client::{ClientHandle, ClientRefError};
+use rostra_core::id::RostraId;
 use rostra_util_error::WhateverResult;
 use snafu::{ResultExt as _, Snafu, Whatever};
 use tokio::net::{TcpListener, TcpSocket};
@@ -60,6 +61,7 @@ impl Opts {
 }
 
 pub struct AppState {
+    id: RostraId,
     client: ClientHandle,
     pub assets: AssetCache,
 }
@@ -90,6 +92,11 @@ pub enum WebUiServerError {
     AssetsLoad {
         source: Whatever,
     },
+
+    #[snafu(transparent)]
+    ClientRef {
+        source: ClientRefError,
+    },
 }
 
 pub type ServerResult<T> = std::result::Result<T, WebUiServerError>;
@@ -101,6 +108,7 @@ impl Server {
             .await
             .context(AssetsLoadSnafu)?;
         let state = Arc::new(AppState {
+            id: client.client_ref()?.rostra_id(),
             client,
             assets,
             // req_counter: AtomicU64::default(),

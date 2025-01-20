@@ -1,3 +1,5 @@
+pub mod content;
+
 #[cfg(feature = "ed25519-dalek")]
 mod ed25519;
 
@@ -10,15 +12,13 @@ mod bincode;
 #[cfg(all(feature = "ed25519-dalek", feature = "bincode"))]
 mod verified_event;
 use std::borrow::Borrow;
-use std::collections::BTreeSet;
 
 #[cfg(all(feature = "ed25519-dalek", feature = "bincode"))]
 pub use verified_event::*;
 
 use crate::id::RostraId;
 use crate::{
-    define_array_type_no_serde, ContentHash, MsgLen, NullableShortEventId, ShortEventId,
-    TimestampFixed,
+    define_array_type_no_serde, ContentHash, MsgLen, NullableShortEventId, TimestampFixed,
 };
 
 /// An even (header)
@@ -176,7 +176,7 @@ impl AsRef<[u8]> for EventContent {
 #[cfg_attr(feature = "serde", derive(::serde::Serialize, ::serde::Deserialize))]
 #[cfg_attr(feature = "bincode", derive(::bincode::Encode, ::bincode::Decode))]
 #[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
-pub struct PersonaId(u32);
+pub struct PersonaId(pub u32);
 
 #[cfg_attr(feature = "serde", derive(::serde::Serialize, ::serde::Deserialize))]
 #[cfg_attr(feature = "bincode", derive(::bincode::Encode, ::bincode::Decode))]
@@ -229,51 +229,4 @@ impl From<EventKind> for u16 {
     fn from(value: EventKind) -> Self {
         u16::from_be_bytes(value.0)
     }
-}
-
-#[cfg_attr(feature = "serde", derive(::serde::Serialize, ::serde::Deserialize))]
-#[cfg_attr(feature = "bincode", derive(::bincode::Encode, ::bincode::Decode))]
-#[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
-pub struct ContentFollow {
-    pub followee: RostraId,
-    pub persona_id: PersonaId,
-}
-
-#[cfg_attr(feature = "serde", derive(::serde::Serialize, ::serde::Deserialize))]
-#[cfg_attr(feature = "bincode", derive(::bincode::Encode, ::bincode::Decode))]
-#[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
-pub struct ContentUnfollow {
-    pub followee: RostraId,
-}
-
-#[cfg_attr(feature = "serde", derive(::serde::Serialize, ::serde::Deserialize))]
-#[cfg_attr(feature = "bincode", derive(::bincode::Encode, ::bincode::Decode))]
-#[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
-pub struct ContentSocialPost {
-    /// List of sub-personas this post belongs to
-    pub persona: String,
-    pub timestamp: u32,
-    pub djot_content: String,
-}
-
-#[cfg_attr(feature = "serde", derive(::serde::Serialize, ::serde::Deserialize))]
-#[cfg_attr(feature = "bincode", derive(::bincode::Encode, ::bincode::Decode))]
-#[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
-pub struct ContentSocialLike {
-    /// List of sub-personas this post belongs to
-    pub personas: BTreeSet<String>,
-    pub timestamp: u32,
-    pub author: RostraId,
-    pub event_id: ShortEventId,
-}
-
-#[cfg_attr(feature = "serde", derive(::serde::Serialize, ::serde::Deserialize))]
-#[cfg_attr(feature = "bincode", derive(::bincode::Encode, ::bincode::Decode))]
-#[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
-pub struct ContentSocialRepost {
-    /// List of sub-personas this post belongs to
-    pub personas: BTreeSet<String>,
-    pub timestamp: u32,
-    pub author: RostraId,
-    pub event_id: ShortEventId,
 }

@@ -23,38 +23,8 @@
         flakeboxLib = flakebox.lib.${system} {
           config = {
             github.ci.buildOutputs = [ ".#ci.${projectName}" ];
-            just.rules.watch.content = pkgs.lib.mkForce ''
-              # run and restart on changes
-              watch *ARGS="":
-                #!/usr/bin/env bash
-                set -euo pipefail
-
-                if [ ! -f Cargo.toml ]; then
-                  cd {{invocation_directory()}}
-                fi
-
-                mkdir -p dev
-                if [ ! -e "dev/secret" ]; then
-                  cargo run gen-id | jq -r '.secret' > dev/secret
-                fi
-
-                env \
-                  ROSTRA_DEV_MODE=1 \
-                  RUST_LOG=rostra=debug,info,iroh=error,mainline=error \
-                  cargo watch \
-                    -i 'dev/**' \
-                    -i 'crates/rostra/assets/**' \
-                    -s " \
-                      cargo run -- \
-                        --data-dir ./dev/ \
-                        web-ui \
-                        --listen [::1]:2345 \
-                        --skip-xdg-open \
-                        --secret-file dev/secret \
-                        --reuseport {{ARGS}} \
-                      "
-            '';
-
+            just.importPaths = [ "justfile.rostra.just" ];
+            just.rules.watch.enable = false;
           };
         };
 
