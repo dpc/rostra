@@ -21,7 +21,7 @@ pub type ContentState = ContentStateRef<'static>;
 
 #[derive(Debug, Encode, Decode, Clone)]
 pub struct EventRecord {
-    pub event: SignedEvent,
+    pub signed: SignedEvent,
 }
 
 #[derive(Decode, Encode, Debug)]

@@ -1,3 +1,5 @@
+pub mod social;
+
 use rostra_core::event::{
     content, EventContent, EventKind, PersonaId, VerifiedEvent, VerifiedEventContent,
 };
@@ -8,8 +10,8 @@ use tokio::sync::watch;
 use tracing::{debug, info};
 
 use crate::db::{
-    Database, DbResult, InsertEventOutcome, WriteTransactionCtx, TABLE_EVENTS_BY_TIME,
-    TABLE_EVENTS_HEADS, TABLE_EVENTS_MISSING, TABLE_EVENTS_SELF,
+    events, events_by_time, events_content, Database, DbResult, InsertEventOutcome,
+    WriteTransactionCtx, TABLE_EVENTS_HEADS, TABLE_EVENTS_MISSING, TABLE_EVENTS_SELF,
 };
 
 pub struct Storage {
@@ -60,9 +62,7 @@ impl Storage {
         let event_id = event_id.into();
         self.db
             .read_with(|tx| {
-                let events_table = tx
-                    .open_table(&crate::db::TABLE_EVENTS)
-                    .expect("Storage error");
+                let events_table = tx.open_table(&events::TABLE).expect("Storage error");
                 Database::has_event_tx(event_id, &events_table)
             })
             .await
@@ -87,11 +87,11 @@ impl Storage {
     pub async fn get_event(
         &self,
         event_id: impl Into<ShortEventId>,
-    ) -> Option<crate::db::events::EventRecord> {
+    ) -> Option<crate::db::event::EventRecord> {
         let event_id = event_id.into();
         self.db
             .read_with(|tx| {
-                let events_table = tx.open_table(&crate::db::TABLE_EVENTS)?;
+                let events_table = tx.open_table(&events::TABLE)?;
                 Database::get_event_tx(event_id, &events_table)
             })
             .await
@@ -105,13 +105,13 @@ impl Storage {
         let event_id = event_id.into();
         self.db
             .read_with(|tx| {
-                let events_content_table = tx.open_table(&crate::db::TABLE_EVENTS_CONTENT)?;
+                let events_content_table = tx.open_table(&crate::db::events_content::TABLE)?;
                 Ok(
                     Database::get_event_content_tx(event_id, &events_content_table)?.and_then(
                         |content_state| match content_state {
-                            crate::db::events::ContentStateRef::Present(b) => Some(b.into_owned()),
-                            crate::db::events::ContentStateRef::Deleted { .. }
-                            | crate::db::events::ContentStateRef::Pruned => None,
+                            crate::db::event::ContentStateRef::Present(b) => Some(b.into_owned()),
+                            crate::db::event::ContentStateRef::Deleted { .. }
+                            | crate::db::event::ContentStateRef::Pruned => None,
                         },
                     ),
                 )
@@ -172,11 +172,11 @@ impl Storage {
         event: &VerifiedEvent,
         tx: &WriteTransactionCtx,
     ) -> DbResult<(InsertEventOutcome, ProcessEventState)> {
-        let mut events_table = tx.open_table(&crate::db::TABLE_EVENTS)?;
-        let mut events_content_table = tx.open_table(&crate::db::TABLE_EVENTS_CONTENT)?;
+        let mut events_table = tx.open_table(&events::TABLE)?;
+        let mut events_content_table = tx.open_table(&events_content::TABLE)?;
         let mut events_missing_table = tx.open_table(&TABLE_EVENTS_MISSING)?;
         let mut events_heads_table = tx.open_table(&TABLE_EVENTS_HEADS)?;
-        let mut events_by_time_table = tx.open_table(&TABLE_EVENTS_BY_TIME)?;
+        let mut events_by_time_table = tx.open_table(&events_by_time::TABLE)?;
 
         let insert_event_outcome = Database::insert_event_tx(
             event,
@@ -248,8 +248,8 @@ impl Storage {
         event_content: &VerifiedEventContent,
         tx: &WriteTransactionCtx,
     ) -> DbResult<()> {
-        let events_table = tx.open_table(&crate::db::TABLE_EVENTS)?;
-        let mut events_content_table = tx.open_table(&crate::db::TABLE_EVENTS_CONTENT)?;
+        let events_table = tx.open_table(&events::TABLE)?;
+        let mut events_content_table = tx.open_table(&events_content::TABLE)?;
 
         debug_assert!(Database::has_event_tx(
             event_content.event_id,
@@ -345,7 +345,7 @@ impl Storage {
 
         self.db
             .read_with(|tx| {
-                let events_content_table = tx.open_table(&crate::db::TABLE_EVENTS_CONTENT)?;
+                let events_content_table = tx.open_table(&events_content::TABLE)?;
 
                 Database::has_event_content_tx(event_id.into(), &events_content_table)
             })

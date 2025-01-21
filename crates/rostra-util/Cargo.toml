@@ -1,0 +1,13 @@
+[package]
+name = "rostra-util"
+
+description = { workspace = true }
+edition = { workspace = true }
+license = { workspace = true }
+version = { workspace = true }
+
+[features]
+default = []
+
+[dependencies]
+snafu = { workspace = true }

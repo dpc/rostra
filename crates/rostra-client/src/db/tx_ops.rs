@@ -1,21 +1,21 @@
 use std::borrow::{Borrow as _, Cow};
 
-use events::ContentStateRef;
+use event::ContentStateRef;
 use ids::{IdsFollowersRecord, IdsUnfollowedRecord};
 use rand::{thread_rng, Rng as _};
 use redb_bincode::{ReadableTable, Table};
 use rostra_core::event::{content, SignedEvent, VerifiedEvent, VerifiedEventContent};
 use rostra_core::id::{RostraId, ToShort as _};
 use rostra_core::{ShortEventId, Timestamp};
-use tables::events::EventsMissingRecord;
+use tables::event::EventsMissingRecord;
 use tables::ids::IdsFolloweesRecord;
 use tables::{ContentState, EventRecord, EventsHeadsTableValue};
 use tracing::debug;
 
 use super::id_self::IdSelfRecord;
 use super::{
-    events, get_first_in_range, get_last_in_range, ids, tables, Database, DbError, DbResult,
-    InsertEventOutcome,
+    event, events, events_by_time, events_content, get_first_in_range, get_last_in_range, ids,
+    tables, Database, DbError, DbResult, InsertEventOutcome,
 };
 use crate::db::LOG_TARGET;
 
@@ -58,9 +58,9 @@ impl Database {
             event,
             sig,
         }: &VerifiedEvent,
-        events_table: &mut Table<ShortEventId, EventRecord>,
-        events_by_time_table: &mut Table<(Timestamp, ShortEventId), ()>,
-        events_content_table: &mut Table<ShortEventId, ContentState>,
+        events_table: &mut events::Table,
+        events_by_time_table: &mut events_by_time::Table,
+        events_content_table: &mut events_content::Table,
         events_missing_table: &mut Table<(RostraId, ShortEventId), EventsMissingRecord>,
         events_heads_table: &mut Table<(RostraId, ShortEventId), EventsHeadsTableValue>,
     ) -> DbResult<InsertEventOutcome> {
@@ -138,7 +138,7 @@ impl Database {
         events_table.insert(
             &event_id,
             &EventRecord {
-                event: SignedEvent {
+                signed: SignedEvent {
                     event: *event,
                     sig: *sig,
                 },
@@ -159,7 +159,7 @@ impl Database {
         VerifiedEventContent {
             event_id, content, ..
         }: &'e VerifiedEventContent,
-        events_content_table: &'t mut Table<ShortEventId, ContentState>,
+        events_content_table: &'t mut events_content::Table,
     ) -> DbResult<bool> {
         let event_id = event_id.to_short();
         if let Some(existing_content) = events_content_table.get(&event_id)?.map(|g| g.value()) {
@@ -183,7 +183,7 @@ impl Database {
 
     pub fn prune_event_content_tx(
         event_id: impl Into<ShortEventId>,
-        events_content_table: &mut Table<ShortEventId, ContentState>,
+        events_content_table: &mut events_content::Table,
     ) -> DbResult<bool> {
         let event_id = event_id.into();
         if let Some(existing_content) = events_content_table.get(&event_id)?.map(|g| g.value()) {
@@ -225,27 +225,27 @@ impl Database {
 
     pub fn get_event_tx(
         event: impl Into<ShortEventId>,
-        events_table: &impl ReadableTable<ShortEventId, EventRecord>,
+        events_table: &impl events::ReadableTable,
     ) -> DbResult<Option<EventRecord>> {
         Ok(events_table.get(&event.into())?.map(|r| r.value()))
     }
 
     pub fn has_event_tx(
         event: impl Into<ShortEventId>,
-        events_table: &impl ReadableTable<ShortEventId, EventRecord>,
+        events_table: &impl events::ReadableTable,
     ) -> DbResult<bool> {
         Ok(events_table.get(&event.into())?.is_some())
     }
 
     pub fn get_event_content_tx(
         event: impl Into<ShortEventId>,
-        events_content_table: &impl ReadableTable<ShortEventId, ContentState>,
+        events_content_table: &impl events_content::ReadableTable,
     ) -> DbResult<Option<ContentState>> {
         Ok(events_content_table.get(&event.into())?.map(|r| r.value()))
     }
     pub fn has_event_content_tx(
         event: impl Into<ShortEventId>,
-        events_content_table: &impl ReadableTable<ShortEventId, ContentState>,
+        events_content_table: &impl events_content::ReadableTable,
     ) -> DbResult<bool> {
         Ok(events_content_table.get(&event.into())?.is_some())
     }

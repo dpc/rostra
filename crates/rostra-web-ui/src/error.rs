@@ -1,7 +1,7 @@
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
 use rostra_client::error::PostError;
-use rostra_client::ClientRefError;
+use rostra_client::{ClientRefError, ClientStorageError};
 use serde::Serialize;
 use snafu::Snafu;
 use tracing::info;
@@ -33,6 +33,9 @@ pub struct UserErrorResponse {
 pub enum RequestError {
     #[snafu(transparent)]
     Client { source: ClientRefError },
+    // TODO: shouldn't really exist here
+    #[snafu(transparent)]
+    ClientStorage { source: ClientStorageError },
     #[snafu(transparent)]
     PostError { source: PostError },
 }

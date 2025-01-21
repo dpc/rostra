@@ -3710,6 +3710,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "rostra-util"
+version = "0.1.0"
+dependencies = [
+ "snafu",
+]
+
+[[package]]
 name = "rostra-util-error"
 version = "0.1.0"
 dependencies = [

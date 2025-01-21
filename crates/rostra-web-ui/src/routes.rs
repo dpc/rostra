@@ -1,6 +1,7 @@
 mod add_followee;
 mod new_post;
 mod self_account;
+mod timeline;
 
 use axum::body::Body;
 use axum::extract::{FromRequest, Path, Request, State};
@@ -122,7 +123,7 @@ pub async fn cache_control(request: Request, next: Next) -> Response {
 }
 
 pub async fn index(state: State<SharedAppState>) -> RequestResult<impl IntoResponse> {
-    Ok(Html(state.index().into_string()))
+    Ok(Maud(state.index().await?))
 }
 
 pub async fn not_found(_state: State<SharedAppState>, _req: Request<Body>) -> impl IntoResponse {

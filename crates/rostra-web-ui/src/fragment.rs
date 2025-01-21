@@ -1,10 +1,11 @@
 use maud::{html, Markup, DOCTYPE};
 
+use crate::error::RequestResult;
 use crate::AppState;
 
 impl AppState {
-    pub fn index(&self) -> Markup {
-        self.html_page("You're Rostra!")
+    pub async fn index(&self) -> RequestResult<Markup> {
+        self.html_page("You're Rostra!").await
     }
 
     /// Html page header
@@ -23,8 +24,8 @@ impl AppState {
         }
     }
 
-    pub fn html_page(&self, title: &str) -> Markup {
-        html! {
+    pub async fn html_page(&self, title: &str) -> RequestResult<Markup> {
+        Ok(html! {
             (self.html_head(title))
             body ."o-body" {
                 // div #"gray-out-page" ."fixed inset-0 send-error-hidden"  {
@@ -51,6 +52,8 @@ impl AppState {
                     }
 
                     main ."o-mainBar" {
+
+                        (self.main_bar_timeline().await?)
                         div ."o-mainBar__item" {
                             (post_overview("dpc", "Cool stuff"))
                         }
@@ -67,7 +70,7 @@ impl AppState {
                     (footer())
                 }
             }
-        }
+        })
     }
 }
 

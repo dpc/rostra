@@ -6,8 +6,8 @@ use snafu::ResultExt as _;
 use tempfile::{tempdir, TempDir};
 use tracing::info;
 
-use crate::db::tables::{ContentState, TABLE_EVENTS, TABLE_EVENTS_HEADS, TABLE_EVENTS_MISSING};
-use crate::db::{Database, TABLE_EVENTS_BY_TIME, TABLE_EVENTS_CONTENT};
+use crate::db::tables::{ContentState, TABLE_EVENTS_HEADS, TABLE_EVENTS_MISSING};
+use crate::db::{events, events_by_time, events_content, Database};
 
 async fn temp_db(self_id: RostraId) -> BoxedErrorResult<(TempDir, super::Database)> {
     let dir = tempdir()?;
@@ -54,9 +54,9 @@ async fn test_store_event() -> BoxedErrorResult<()> {
     let event_d_id = event_d.event_id;
 
     db.write_with(|tx| {
-        let mut events_table = tx.open_table(&TABLE_EVENTS).boxed()?;
-        let mut events_by_time_table = tx.open_table(&TABLE_EVENTS_BY_TIME)?;
-        let mut events_content_table = tx.open_table(&TABLE_EVENTS_CONTENT).boxed()?;
+        let mut events_table = tx.open_table(&events::TABLE).boxed()?;
+        let mut events_by_time_table = tx.open_table(&events_by_time::TABLE)?;
+        let mut events_content_table = tx.open_table(&events_content::TABLE).boxed()?;
         let mut events_missing_table = tx.open_table(&TABLE_EVENTS_MISSING).boxed()?;
         let mut events_heads_table = tx.open_table(&TABLE_EVENTS_HEADS).boxed()?;
 
@@ -143,9 +143,9 @@ async fn test_store_deleted_event() -> BoxedErrorResult<()> {
     let event_d_id = event_d.event_id;
 
     db.write_with(|tx| {
-        let mut events_table = tx.open_table(&TABLE_EVENTS).boxed()?;
-        let mut events_by_time_table = tx.open_table(&TABLE_EVENTS_BY_TIME)?;
-        let mut events_content_table = tx.open_table(&TABLE_EVENTS_CONTENT).boxed()?;
+        let mut events_table = tx.open_table(&events::TABLE).boxed()?;
+        let mut events_by_time_table = tx.open_table(&events_by_time::TABLE)?;
+        let mut events_content_table = tx.open_table(&events_content::TABLE).boxed()?;
         let mut events_missing_table = tx.open_table(&TABLE_EVENTS_MISSING).boxed()?;
         let mut events_heads_table = tx.open_table(&TABLE_EVENTS_HEADS).boxed()?;
 

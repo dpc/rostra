@@ -15,7 +15,7 @@ use rostra_core::event::{
     content, Event, EventContent, EventKind, PersonaId, SignedEvent, VerifiedEvent,
 };
 use rostra_core::id::{RostraId, RostraIdSecretKey, ToShort as _};
-use rostra_core::ShortEventId;
+use rostra_core::{ShortEventId, Timestamp};
 use rostra_p2p::connection::{Connection, FeedEventRequest, FeedEventResponse};
 use rostra_p2p::RpcError;
 use rostra_p2p_api::ROSTRA_P2P_V0_ALPN;
@@ -37,6 +37,7 @@ use crate::error::{
 use crate::id::{CompactTicket, IdPublishedData, IdResolvedData};
 use crate::id_publisher::IdPublisher;
 use crate::request_handler::RequestHandler;
+use crate::storage::social::EventPaginationCursor;
 use crate::storage::Storage;
 use crate::LOG_TARGET;
 
@@ -314,6 +315,35 @@ impl Client {
         self.endpoint.node_addr().await.map(sanitize_node_addr)
     }
 
+    pub fn self_head_subscribe(&self) -> Option<watch::Receiver<Option<ShortEventId>>> {
+        self.storage
+            .as_ref()
+            .map(|storage| storage.self_head_subscribe())
+    }
+
+    pub fn check_for_updates_tx_subscribe(&self) -> watch::Receiver<()> {
+        self.check_for_updates_tx.subscribe()
+    }
+
+    pub fn storage_opt(&self) -> Option<Arc<Storage>> {
+        self.storage.clone()
+    }
+
+    pub fn storage(&self) -> ClientStorageResult<Arc<Storage>> {
+        self.storage.clone().context(ClientStorageSnafu)
+    }
+
+    pub async fn paginate_social_posts_rev(
+        &self,
+        cursor: Option<EventPaginationCursor>,
+        limit: usize,
+    ) -> ClientStorageResult<Vec<(Timestamp, ShortEventId, content::SocialPost)>> {
+        self.storage()?
+            .paginate_social_posts_rev(cursor, limit)
+            .await;
+
+        todo!()
+    }
     pub async fn events_head(&self) -> Option<ShortEventId> {
         let storage = self.storage.as_ref()?;
 
@@ -557,23 +587,5 @@ impl Client {
         self.storage
             .as_ref()
             .map(|storage| storage.self_followees_list_subscribe())
-    }
-
-    pub fn self_head_subscribe(&self) -> Option<watch::Receiver<Option<ShortEventId>>> {
-        self.storage
-            .as_ref()
-            .map(|storage| storage.self_head_subscribe())
-    }
-
-    pub fn check_for_updates_tx_subscribe(&self) -> watch::Receiver<()> {
-        self.check_for_updates_tx.subscribe()
-    }
-
-    pub fn storage_opt(&self) -> Option<Arc<Storage>> {
-        self.storage.clone()
-    }
-
-    pub fn storage(&self) -> ClientStorageResult<Arc<Storage>> {
-        self.storage.clone().context(ClientStorageSnafu)
     }
 }

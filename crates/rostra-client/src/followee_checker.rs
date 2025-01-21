@@ -26,7 +26,7 @@ impl FolloweeChecker {
     pub async fn run(mut self) {
         let mut interval = tokio::time::interval(Duration::from_secs(30));
 
-        let mut previous_followees = {
+        let _previous_followees = {
             let Ok(storage) = self.client.storage() else {
                 return;
             };

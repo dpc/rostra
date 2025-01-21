@@ -5,6 +5,7 @@ members = [
   "crates/rostra-client",
   "crates/rostra-p2p",
   "crates/rostra-p2p-api",
+  "crates/rostra-util",
   "crates/rostra-util-error",
   "crates/rostra-util-fmt",
   "crates/rostra-web-ui",
@@ -62,6 +63,7 @@ rostra-core = { path = "crates/rostra-core" }
 rostra-client = { path = "crates/rostra-client" }
 rostra-p2p = { path = "crates/rostra-p2p" }
 rostra-p2p-api = { path = "crates/rostra-p2p-api" }
+rostra-util = { path = "crates/rostra-util" }
 rostra-util-error = { path = "crates/rostra-util-error" }
 rostra-util-fmt = { path = "crates/rostra-util-fmt" }
 rostra-web-ui = { path = "crates/rostra-web-ui" }

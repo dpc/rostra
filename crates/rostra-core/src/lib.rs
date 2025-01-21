@@ -213,7 +213,13 @@ impl From<TimestampFixed> for u64 {
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 #[cfg_attr(feature = "bincode", derive(::bincode::Encode, ::bincode::Decode))]
+#[cfg_attr(feature = "serde", derive(::serde::Serialize, ::serde::Deserialize))]
 pub struct Timestamp(pub u64);
+
+impl Timestamp {
+    pub const ZERO: Self = Self(0);
+    pub const MAX: Self = Self(u64::MAX);
+}
 
 impl From<u64> for Timestamp {
     fn from(value: u64) -> Self {

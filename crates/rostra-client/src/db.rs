@@ -150,8 +150,9 @@ impl Database {
             dbtx.open_table(&TABLE_ID_FOLLOWERS)?;
             dbtx.open_table(&TABLE_ID_UNFOLLOWED)?;
             dbtx.open_table(&TABLE_ID_PERSONAS)?;
-            dbtx.open_table(&TABLE_EVENTS)?;
-            dbtx.open_table(&TABLE_EVENTS_BY_TIME)?;
+            dbtx.open_table(&events::TABLE)?;
+            dbtx.open_table(&events_by_time::TABLE)?;
+            dbtx.open_table(&events_content::TABLE)?;
             dbtx.open_table(&TABLE_EVENTS_SELF)?;
             dbtx.open_table(&TABLE_EVENTS_MISSING)?;
             dbtx.open_table(&TABLE_EVENTS_HEADS)?;

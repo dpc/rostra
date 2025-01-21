@@ -216,7 +216,7 @@ impl RequestHandler {
 
         Connection::write_success_return_code(&mut send).await?;
 
-        Connection::write_message(&mut send, &GetEventResponse(event.map(|e| e.event))).await?;
+        Connection::write_message(&mut send, &GetEventResponse(event.map(|e| e.signed))).await?;
 
         Ok(())
     }
@@ -248,7 +248,7 @@ impl RequestHandler {
             Connection::write_bao_content(
                 &mut send,
                 content.as_ref(),
-                event.event.event.content_hash,
+                event.signed.event.content_hash,
             )
             .await?;
         }
