@@ -18,7 +18,7 @@ const LOG_TARGET: &str = "rostra::head_checker";
 pub struct FolloweeHeadChecker {
     client: crate::client::ClientHandle,
     storage: Arc<Storage>,
-    followee_updated: tokio::sync::watch::Receiver<Vec<RostraId>>,
+    followee_updated: tokio::sync::watch::Receiver<()>,
     check_for_updates_rx: tokio::sync::watch::Receiver<()>,
 }
 
@@ -60,11 +60,15 @@ impl FolloweeHeadChecker {
                     }
                 }
             }
-            // read / mark everything as read
-            let self_followees = followee_updated.borrow_and_update().clone();
-            check_for_updates_rx.mark_unchanged();
 
-            for followee in &self_followees {
+            let Ok(storage) = self.client.storage() else {
+                break;
+            };
+            let storage = storage.expect("Must no run head checker without storage");
+
+            let self_followees = storage.get_self_followees().await;
+
+            for (followee, _persona_id) in &self_followees {
                 let Some(client) = self.client.app_ref_opt() else {
                     debug!(target: LOG_TARGET, "Client gone, quitting");
 

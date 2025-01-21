@@ -18,6 +18,20 @@ use crate::id::{CompactTicket, IdPublishedData};
 use crate::{RRECORD_HEAD_KEY, RRECORD_P2P_KEY};
 const LOG_TARGET: &str = "rostra::publisher";
 
+/// Check if env variable is set and not equal `0` or `false` which are common
+/// ways to disable something.
+pub fn is_env_var_set(var: &str) -> bool {
+    std::env::var_os(var).is_some_and(|v| v != "0" && v != "false")
+}
+
+fn is_rostra_dev_mode_set() -> bool {
+    is_env_var_set("ROSTRA_DEV_MODE")
+}
+
+pub fn publishing_interval() -> Duration {
+    Duration::from_secs(60)
+}
+
 pub struct IdPublisher {
     app: crate::client::ClientHandle,
     pkarr_client: Arc<pkarr::PkarrClientAsync>,
@@ -91,7 +105,7 @@ impl IdPublisher {
     /// Run the thread
     #[instrument(skip(self), ret)]
     pub async fn run(mut self) {
-        let mut interval = tokio::time::interval(Duration::from_secs(60));
+        let mut interval = tokio::time::interval(publishing_interval());
         loop {
             tokio::select! {
                 // either periodically

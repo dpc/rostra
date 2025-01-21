@@ -1,6 +1,7 @@
 use bincode::{Decode, Encode};
 use events::EventsMissingRecord;
 pub use events::{ContentState, EventRecord};
+use id_self::IdSelfRecord;
 pub use ids::{IdRecord, IdsFolloweesRecord};
 use ids::{IdsFollowersRecord, IdsPersonaRecord, IdsUnfollowedRecord};
 use redb_bincode::TableDefinition;
@@ -9,11 +10,12 @@ use rostra_core::id::{RostraId, ShortRostraId};
 use rostra_core::{ShortEventId, Timestamp};
 
 pub(crate) mod events;
+pub(crate) mod id_self;
 pub(crate) mod ids;
 
 pub const TABLE_DB_VER: TableDefinition<'_, (), u64> = TableDefinition::new("db-ver");
 
-pub const TABLE_ID_SELF: TableDefinition<'_, (), RostraId> = TableDefinition::new("id-self");
+pub const TABLE_ID_SELF: TableDefinition<'_, (), IdSelfRecord> = TableDefinition::new("id-self");
 
 /// Basically `short_id` -> `full_id`, plus maybe more data in the future about
 /// the id

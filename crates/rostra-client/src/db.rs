@@ -223,17 +223,28 @@ impl Database {
         })
     }
 
+    pub async fn iroh_secret(&self) -> DbResult<iroh::SecretKey> {
+        self.read_with(|tx| {
+            let id_self_table = tx.open_table(&TABLE_ID_SELF)?;
+
+            let self_id = Self::read_self_id_tx(&id_self_table)?
+                .expect("Must have iroh secret generated after opening");
+            Ok(iroh::SecretKey::from_bytes(&self_id.iroh_secret))
+        })
+        .await
+    }
+
     pub async fn verify_self(&self, self_id: RostraId) -> DbResult<()> {
         self.write_with(|tx| {
             let mut id_self_table = tx.open_table(&TABLE_ID_SELF)?;
 
-            if let Some(existing_id) = Self::read_self_id_tx(&id_self_table)? {
-                if existing_id != self_id {
+            if let Some(existing_self_id_record) = Self::read_self_id_tx(&id_self_table)? {
+                if existing_self_id_record.rostra_id != self_id {
                     return IdMismatchSnafu.fail();
                 }
             } else {
                 Self::write_self_id_tx(self_id, &mut id_self_table)?;
-            }
+            };
             Ok(())
         })
         .await

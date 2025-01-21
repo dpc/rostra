@@ -14,7 +14,7 @@ use rostra_core::bincode::STD_BINCODE_CONFIG;
 use rostra_core::event::{
     content, Event, EventContent, EventKind, PersonaId, SignedEvent, VerifiedEvent,
 };
-use rostra_core::id::{RostraId, RostraIdSecretKey};
+use rostra_core::id::{RostraId, RostraIdSecretKey, ToShort as _};
 use rostra_core::ShortEventId;
 use rostra_p2p::connection::{Connection, FeedEventRequest, FeedEventResponse};
 use rostra_p2p::RpcError;
@@ -74,6 +74,11 @@ impl ClientHandle {
             client,
             r: PhantomData,
         })
+    }
+    pub fn storage(&self) -> ClientRefResult<Option<Arc<Storage>>> {
+        let client = self.0.upgrade().context(ClientRefSnafu)?;
+
+        Ok(client.storage_opt())
     }
 }
 
@@ -168,7 +173,7 @@ impl Client {
         .as_async()
         .into();
 
-        let endpoint = Self::make_iroh_endpoint().await?;
+        let endpoint = Self::make_iroh_endpoint(storage.as_ref().map(|s| s.iroh_secret())).await?;
         let (check_for_updates_tx, _) = watch::channel(());
 
         let client = Arc::new_cyclic(|client| Self {
@@ -207,9 +212,11 @@ impl Client {
     pub async fn connect(&self, id: RostraId) -> ConnectResult<Connection> {
         let ticket = self.resolve_id_ticket(id).await.context(ResolveSnafu)?;
 
+        let node_addr = NodeAddr::from(ticket);
+        debug!(target: LOG_TARGET, iroh_id = %node_addr.node_id, id = %id.to_short(), "Connecting");
         Ok(self
             .endpoint
-            .connect(ticket, ROSTRA_P2P_V0_ALPN)
+            .connect(node_addr, ROSTRA_P2P_V0_ALPN)
             .await
             .context(ConnectIrohSnafu)?
             .into())
@@ -224,19 +231,23 @@ impl Client {
             .into())
     }
 
-    pub(crate) async fn make_iroh_endpoint() -> InitResult<iroh::Endpoint> {
+    pub(crate) async fn make_iroh_endpoint(
+        iroh_secret: impl Into<Option<iroh::SecretKey>>,
+    ) -> InitResult<iroh::Endpoint> {
         use iroh::{Endpoint, SecretKey};
 
-        let secret_key = SecretKey::generate(&mut rand::thread_rng());
+        let secret_key = iroh_secret
+            .into()
+            .unwrap_or_else(|| SecretKey::generate(&mut rand::thread_rng()));
+        // We rely entirely on tickets published by our own publisher
+        // for every RostraID via Pkarr, so we don't need discovery
         let ep = Endpoint::builder()
             .secret_key(secret_key)
             .alpns(vec![ROSTRA_P2P_V0_ALPN.to_vec()])
-            // We rely entirely on tickets publicshed by our own publisher
-            // for every RostraID via Pkarr, so we don't need discovery
-            // .discovery(Box::new(discovery))
             .bind()
             .await
             .context(InitIrohClientSnafu)?;
+        debug!(target: LOG_TARGET, iroh_id = %ep.node_id(), "Created Iroh endpoint");
         Ok(ep)
     }
 
@@ -542,7 +553,7 @@ impl Client {
         Ok(())
     }
 
-    pub fn self_followees_list_subscribe(&self) -> Option<watch::Receiver<Vec<RostraId>>> {
+    pub fn self_followees_list_subscribe(&self) -> Option<watch::Receiver<()>> {
         self.storage
             .as_ref()
             .map(|storage| storage.self_followees_list_subscribe())

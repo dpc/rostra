@@ -12,6 +12,7 @@ use tables::ids::IdsFolloweesRecord;
 use tables::{ContentState, EventRecord, EventsHeadsTableValue};
 use tracing::debug;
 
+use super::id_self::IdSelfRecord;
 use super::{
     events, get_first_in_range, get_last_in_range, ids, tables, Database, DbError, DbResult,
     InsertEventOutcome,
@@ -253,7 +254,6 @@ impl Database {
         author: RostraId,
         timestamp: Timestamp,
         content::Follow { followee, persona }: content::Follow,
-
         followees_table: &mut Table<(RostraId, RostraId), IdsFolloweesRecord>,
         followers_table: &mut Table<(RostraId, RostraId), IdsFollowersRecord>,
         unfollowed_table: &mut Table<(RostraId, RostraId), IdsUnfollowedRecord>,
@@ -279,6 +279,7 @@ impl Database {
             },
         )?;
         followers_table.insert(&(followee, author), &IdsFollowersRecord {})?;
+
         debug!(target: LOG_TARGET, follower = %author.to_short(), followee=%followee.to_short(), "Follow update");
 
         Ok(true)
@@ -313,17 +314,21 @@ impl Database {
     }
 
     pub(crate) fn read_self_id_tx(
-        id_self_table: &impl ReadableTable<(), RostraId>,
-    ) -> Result<Option<RostraId>, DbError> {
+        id_self_table: &impl ReadableTable<(), IdSelfRecord>,
+    ) -> Result<Option<IdSelfRecord>, DbError> {
         Ok(id_self_table.get(&())?.map(|v| v.value()))
     }
 
     pub(crate) fn write_self_id_tx(
         self_id: RostraId,
-        id_self_table: &mut Table<(), RostraId>,
-    ) -> DbResult<()> {
-        let _ = id_self_table.insert(&(), &self_id)?;
-        Ok(())
+        id_self_table: &mut Table<(), IdSelfRecord>,
+    ) -> DbResult<IdSelfRecord> {
+        let id_self_record = IdSelfRecord {
+            rostra_id: self_id,
+            iroh_secret: thread_rng().gen(),
+        };
+        let _ = id_self_table.insert(&(), &id_self_record)?;
+        Ok(id_self_record)
     }
 
     pub(crate) fn get_head_tx(

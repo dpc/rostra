@@ -1,5 +1,6 @@
-use redb_bincode::WriteTransaction;
-use rostra_core::event::{content, EventContent, EventKind, VerifiedEvent, VerifiedEventContent};
+use rostra_core::event::{
+    content, EventContent, EventKind, PersonaId, VerifiedEvent, VerifiedEventContent,
+};
 use rostra_core::id::RostraId;
 use rostra_core::ShortEventId;
 use rostra_util_error::FmtCompact as _;
@@ -13,9 +14,10 @@ use crate::db::{
 
 pub struct Storage {
     db: Database,
-    self_followee_list_updated: watch::Sender<Vec<RostraId>>,
+    self_followee_list_updated: watch::Sender<()>,
     self_head_updated: watch::Sender<Option<ShortEventId>>,
     self_id: RostraId,
+    iroh_secret: iroh::SecretKey,
 }
 
 pub const LOG_TARGET: &str = "rostra::storage";
@@ -24,27 +26,29 @@ impl Storage {
     const MAX_CONTENT_LEN: u32 = 1_000_000u32;
 
     pub async fn new(db: Database, self_id: RostraId) -> DbResult<Self> {
-        let self_followees = db
-            .read_followees(self_id)
-            .await?
-            .into_iter()
-            .map(|(id, _)| id)
-            .collect();
+        // let self_followees = db
+        //     .read_followees(self_id)
+        //     .await?
+        //     .into_iter()
+        //     .map(|(id, _)| id)
+        //     .collect();
 
         let self_head = db.get_head(self_id).await?;
+        let iroh_secret = db.iroh_secret().await?;
 
-        let (self_followee_list_updated, _) = watch::channel(self_followees);
+        let (self_followee_list_updated, _) = watch::channel(());
         let (self_head_updated, _) = watch::channel(self_head);
 
         Ok(Self {
             self_id,
+            iroh_secret,
             db,
             self_followee_list_updated,
             self_head_updated,
         })
     }
 
-    pub fn self_followees_list_subscribe(&self) -> watch::Receiver<Vec<RostraId>> {
+    pub fn self_followees_list_subscribe(&self) -> watch::Receiver<()> {
         self.self_followee_list_updated.subscribe()
     }
 
@@ -60,6 +64,21 @@ impl Storage {
                     .open_table(&crate::db::TABLE_EVENTS)
                     .expect("Storage error");
                 Database::has_event_tx(event_id, &events_table)
+            })
+            .await
+            .expect("Database panic")
+    }
+
+    pub async fn get_self_followees(&self) -> Vec<(RostraId, PersonaId)> {
+        self.db
+            .read_with(|tx| {
+                let ids_followees_table = tx.open_table(&crate::db::TABLE_ID_FOLLOWEES)?;
+                Ok(
+                    Database::read_followees_tx(self.self_id, &ids_followees_table)?
+                        .into_iter()
+                        .map(|(id, record)| (id, record.persona))
+                        .collect(),
+                )
             })
             .await
             .expect("Database panic")
@@ -254,9 +273,10 @@ impl Storage {
     pub fn process_event_content_inserted_tx(
         &self,
         event_content: &VerifiedEventContent,
-        tx: &WriteTransaction,
+        tx: &WriteTransactionCtx,
     ) -> DbResult<()> {
-        match event_content.event.kind {
+        let author = event_content.event.author;
+        let updated = match event_content.event.kind {
             EventKind::FOLLOW | EventKind::UNFOLLOW => {
                 let mut id_followees_table = tx.open_table(&crate::db::TABLE_ID_FOLLOWEES)?;
                 let mut id_followers_table = tx.open_table(&crate::db::TABLE_ID_FOLLOWERS)?;
@@ -264,42 +284,47 @@ impl Storage {
 
                 match event_content.event.kind {
                     EventKind::FOLLOW => match event_content.content.decode::<content::Follow>() {
-                        Ok(follow_content) => {
-                            Database::insert_follow_tx(
-                                event_content.event.author,
-                                event_content.event.timestamp.into(),
-                                follow_content,
-                                &mut id_followees_table,
-                                &mut id_followers_table,
-                                &mut id_unfollowed_table,
-                            )?;
-                        }
+                        Ok(follow_content) => Database::insert_follow_tx(
+                            author,
+                            event_content.event.timestamp.into(),
+                            follow_content,
+                            &mut id_followees_table,
+                            &mut id_followers_table,
+                            &mut id_unfollowed_table,
+                        )?,
                         Err(err) => {
                             debug!(target: LOG_TARGET, err = %err.fmt_compact(), "Ignoring malformed ContentFollow payload");
+                            false
                         }
                     },
                     EventKind::UNFOLLOW => {
                         match event_content.content.decode::<content::Unfollow>() {
-                            Ok(unfollow_content) => {
-                                Database::insert_unfollow_tx(
-                                    event_content.event.author,
-                                    event_content.event.timestamp.into(),
-                                    unfollow_content,
-                                    &mut id_followees_table,
-                                    &mut id_followers_table,
-                                    &mut id_unfollowed_table,
-                                )?;
-                            }
+                            Ok(unfollow_content) => Database::insert_unfollow_tx(
+                                author,
+                                event_content.event.timestamp.into(),
+                                unfollow_content,
+                                &mut id_followees_table,
+                                &mut id_followers_table,
+                                &mut id_unfollowed_table,
+                            )?,
                             Err(err) => {
                                 debug!(target: LOG_TARGET, err = %err.fmt_compact(), "Ignoring malformed ContentUnfollow payload");
+                                false
                             }
                         }
                     }
                     _ => unreachable!(),
                 }
             }
-            _ => {}
+            _ => false,
         };
+
+        if updated && author == self.self_id {
+            let sender = self.self_followee_list_updated.clone();
+            tx.on_commit(move || {
+                let _ = sender.send(());
+            });
+        }
         Ok(())
     }
 
@@ -326,6 +351,10 @@ impl Storage {
             })
             .await
             .expect("Storage error")
+    }
+
+    pub fn iroh_secret(&self) -> iroh::SecretKey {
+        self.iroh_secret.clone()
     }
 }
 
