@@ -6,8 +6,8 @@ use snafu::ResultExt as _;
 use tempfile::{tempdir, TempDir};
 use tracing::info;
 
-use crate::db::tables::{ContentState, TABLE_EVENTS_HEADS, TABLE_EVENTS_MISSING};
-use crate::db::{events, events_by_time, events_content, Database};
+use crate::db::tables::ContentState;
+use crate::db::{events, events_by_time, events_content, events_heads, events_missing, Database};
 
 async fn temp_db(self_id: RostraId) -> BoxedErrorResult<(TempDir, super::Database)> {
     let dir = tempdir()?;
@@ -57,8 +57,8 @@ async fn test_store_event() -> BoxedErrorResult<()> {
         let mut events_table = tx.open_table(&events::TABLE).boxed()?;
         let mut events_by_time_table = tx.open_table(&events_by_time::TABLE)?;
         let mut events_content_table = tx.open_table(&events_content::TABLE).boxed()?;
-        let mut events_missing_table = tx.open_table(&TABLE_EVENTS_MISSING).boxed()?;
-        let mut events_heads_table = tx.open_table(&TABLE_EVENTS_HEADS).boxed()?;
+        let mut events_missing_table = tx.open_table(&events_missing::TABLE).boxed()?;
+        let mut events_heads_table = tx.open_table(&events_heads::TABLE).boxed()?;
 
         for (event, missing_expect, heads_expect) in [
             (event_a, vec![], vec![event_a_id]),
@@ -146,8 +146,8 @@ async fn test_store_deleted_event() -> BoxedErrorResult<()> {
         let mut events_table = tx.open_table(&events::TABLE).boxed()?;
         let mut events_by_time_table = tx.open_table(&events_by_time::TABLE)?;
         let mut events_content_table = tx.open_table(&events_content::TABLE).boxed()?;
-        let mut events_missing_table = tx.open_table(&TABLE_EVENTS_MISSING).boxed()?;
-        let mut events_heads_table = tx.open_table(&TABLE_EVENTS_HEADS).boxed()?;
+        let mut events_missing_table = tx.open_table(&events_missing::TABLE).boxed()?;
+        let mut events_heads_table = tx.open_table(&events_heads::TABLE).boxed()?;
 
         for (event, expected_states) in [
             (event_a, [Some(None), None, None, None]),

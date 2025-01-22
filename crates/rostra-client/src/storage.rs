@@ -10,8 +10,8 @@ use tokio::sync::watch;
 use tracing::{debug, info};
 
 use crate::db::{
-    events, events_by_time, events_content, Database, DbResult, InsertEventOutcome,
-    WriteTransactionCtx, TABLE_EVENTS_HEADS, TABLE_EVENTS_MISSING, TABLE_EVENTS_SELF,
+    events, events_by_time, events_content, events_heads, events_missing, events_self,
+    ids_followees, Database, DbResult, InsertEventOutcome, WriteTransactionCtx,
 };
 
 pub struct Storage {
@@ -72,7 +72,7 @@ impl Storage {
     pub async fn get_self_followees(&self) -> Vec<(RostraId, PersonaId)> {
         self.db
             .read_with(|tx| {
-                let ids_followees_table = tx.open_table(&crate::db::TABLE_ID_FOLLOWEES)?;
+                let ids_followees_table = tx.open_table(&ids_followees::TABLE)?;
                 Ok(
                     Database::read_followees_tx(self.self_id, &ids_followees_table)?
                         .into_iter()
@@ -123,7 +123,7 @@ impl Storage {
     pub async fn get_self_current_head(&self) -> Option<ShortEventId> {
         self.db
             .read_with(|tx| {
-                let events_heads_table = tx.open_table(&TABLE_EVENTS_HEADS)?;
+                let events_heads_table = tx.open_table(&events_heads::TABLE)?;
 
                 Database::get_head_tx(self.self_id, &events_heads_table)
             })
@@ -134,7 +134,7 @@ impl Storage {
     pub async fn get_self_random_eventid(&self) -> Option<ShortEventId> {
         self.db
             .read_with(|tx| {
-                let events_self_table = tx.open_table(&TABLE_EVENTS_SELF)?;
+                let events_self_table = tx.open_table(&events_self::TABLE)?;
 
                 Database::get_random_self_event(&events_self_table)
             })
@@ -174,8 +174,8 @@ impl Storage {
     ) -> DbResult<(InsertEventOutcome, ProcessEventState)> {
         let mut events_table = tx.open_table(&events::TABLE)?;
         let mut events_content_table = tx.open_table(&events_content::TABLE)?;
-        let mut events_missing_table = tx.open_table(&TABLE_EVENTS_MISSING)?;
-        let mut events_heads_table = tx.open_table(&TABLE_EVENTS_HEADS)?;
+        let mut events_missing_table = tx.open_table(&events_missing::TABLE)?;
+        let mut events_heads_table = tx.open_table(&events_heads::TABLE)?;
         let mut events_by_time_table = tx.open_table(&events_by_time::TABLE)?;
 
         let insert_event_outcome = Database::insert_event_tx(
@@ -196,7 +196,7 @@ impl Storage {
                 "New event inserted"
             );
             if event.event.author == self.self_id {
-                let mut events_self_table = tx.open_table(&crate::db::TABLE_EVENTS_SELF)?;
+                let mut events_self_table = tx.open_table(&crate::db::events_self::TABLE)?;
                 Database::insert_self_event_id(event.event_id, &mut events_self_table)?;
 
                 if !was_missing {
@@ -278,9 +278,9 @@ impl Storage {
         let author = event_content.event.author;
         let updated = match event_content.event.kind {
             EventKind::FOLLOW | EventKind::UNFOLLOW => {
-                let mut id_followees_table = tx.open_table(&crate::db::TABLE_ID_FOLLOWEES)?;
-                let mut id_followers_table = tx.open_table(&crate::db::TABLE_ID_FOLLOWERS)?;
-                let mut id_unfollowed_table = tx.open_table(&crate::db::TABLE_ID_UNFOLLOWED)?;
+                let mut ids_followees_t = tx.open_table(&crate::db::ids_followees::TABLE)?;
+                let mut ids_followers_t = tx.open_table(&crate::db::ids_followers::TABLE)?;
+                let mut id_unfollowed_t = tx.open_table(&crate::db::ids_unfollowed::TABLE)?;
 
                 match event_content.event.kind {
                     EventKind::FOLLOW => match event_content.content.decode::<content::Follow>() {
@@ -288,9 +288,9 @@ impl Storage {
                             author,
                             event_content.event.timestamp.into(),
                             follow_content,
-                            &mut id_followees_table,
-                            &mut id_followers_table,
-                            &mut id_unfollowed_table,
+                            &mut ids_followees_t,
+                            &mut ids_followers_t,
+                            &mut id_unfollowed_t,
                         )?,
                         Err(err) => {
                             debug!(target: LOG_TARGET, err = %err.fmt_compact(), "Ignoring malformed ContentFollow payload");
@@ -303,9 +303,9 @@ impl Storage {
                                 author,
                                 event_content.event.timestamp.into(),
                                 unfollow_content,
-                                &mut id_followees_table,
-                                &mut id_followers_table,
-                                &mut id_unfollowed_table,
+                                &mut ids_followees_t,
+                                &mut ids_followers_t,
+                                &mut id_unfollowed_t,
                             )?,
                             Err(err) => {
                                 debug!(target: LOG_TARGET, err = %err.fmt_compact(), "Ignoring malformed ContentUnfollow payload");

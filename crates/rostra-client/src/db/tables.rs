@@ -1,37 +1,16 @@
-use bincode::{Decode, Encode};
 use event::EventsMissingRecord;
 pub use event::{ContentState, EventRecord};
 use id_self::IdSelfRecord;
-pub use ids::{IdRecord, IdsFolloweesRecord};
+pub use ids::IdsFolloweesRecord;
 use ids::{IdsFollowersRecord, IdsPersonaRecord, IdsUnfollowedRecord};
-use redb_bincode::TableDefinition;
 use rostra_core::event::PersonaId;
-use rostra_core::id::{RostraId, ShortRostraId};
+use rostra_core::id::RostraId;
 use rostra_core::{ShortEventId, Timestamp};
 
+pub use self::event::EventsHeadsTableRecord;
 pub(crate) mod event;
 pub(crate) mod id_self;
 pub(crate) mod ids;
-
-pub const TABLE_DB_VER: TableDefinition<'_, (), u64> = TableDefinition::new("db-ver");
-
-pub const TABLE_ID_SELF: TableDefinition<'_, (), IdSelfRecord> = TableDefinition::new("id-self");
-
-/// Basically `short_id` -> `full_id`, plus maybe more data in the future about
-/// the id
-pub const TABLE_IDS: TableDefinition<'_, ShortRostraId, IdRecord> = TableDefinition::new("ids");
-
-/// Table with `who` -> `whom` following
-pub const TABLE_ID_FOLLOWEES: TableDefinition<'_, (RostraId, RostraId), IdsFolloweesRecord> =
-    TableDefinition::new("ids-followees");
-
-pub const TABLE_ID_FOLLOWERS: TableDefinition<'_, (RostraId, RostraId), IdsFollowersRecord> =
-    TableDefinition::new("ids-followers");
-pub const TABLE_ID_UNFOLLOWED: TableDefinition<'_, (RostraId, RostraId), IdsUnfollowedRecord> =
-    TableDefinition::new("ids-unfollowed");
-
-pub type TableIdPersonas<'a> = TableDefinition<'a, (RostraId, PersonaId), IdsPersonaRecord>;
-pub const TABLE_ID_PERSONAS: TableIdPersonas = TableDefinition::new("personas");
 
 macro_rules! def_table {
     ($name:ident : $k:tt => $v:tt) => {
@@ -49,18 +28,15 @@ macro_rules! def_table {
     };
 }
 
+def_table!(db_migration_ver: () => u64);
+def_table!(ids_self: () => IdSelfRecord);
+def_table!(ids_followees: (RostraId, RostraId) => IdsFolloweesRecord);
+def_table!(ids_followers: (RostraId, RostraId) => IdsFollowersRecord);
+def_table!(ids_unfollowed: (RostraId, RostraId) => IdsUnfollowedRecord);
+def_table!(ids_personas: (RostraId, PersonaId) => IdsPersonaRecord);
 def_table!(events_by_time: (Timestamp, ShortEventId) => ());
 def_table!(events: ShortEventId => EventRecord);
 def_table!(events_content: ShortEventId => ContentState);
-
-pub const TABLE_EVENTS_SELF: TableDefinition<'_, ShortEventId, ()> =
-    TableDefinition::new("events-self");
-
-pub const TABLE_EVENTS_MISSING: TableDefinition<'_, (RostraId, ShortEventId), EventsMissingRecord> =
-    TableDefinition::new("events-missing");
-
-#[derive(Decode, Encode, Debug)]
-pub struct EventsHeadsTableValue;
-
-pub const TABLE_EVENTS_HEADS: TableDefinition<'_, (RostraId, ShortEventId), EventsHeadsTableValue> =
-    TableDefinition::new("events-heads");
+def_table!(events_self: ShortEventId => ());
+def_table!(events_missing: (RostraId, ShortEventId) => EventsMissingRecord);
+def_table!(events_heads: (RostraId, ShortEventId) => EventsHeadsTableRecord);

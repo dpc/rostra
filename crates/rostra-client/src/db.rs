@@ -143,19 +143,18 @@ impl Database {
 
     async fn init(self) -> DbResult<Self> {
         self.write_with(|dbtx| {
-            dbtx.open_table(&TABLE_DB_VER)?;
-            dbtx.open_table(&TABLE_ID_SELF)?;
-            dbtx.open_table(&TABLE_IDS)?;
-            dbtx.open_table(&TABLE_ID_FOLLOWEES)?;
-            dbtx.open_table(&TABLE_ID_FOLLOWERS)?;
-            dbtx.open_table(&TABLE_ID_UNFOLLOWED)?;
-            dbtx.open_table(&TABLE_ID_PERSONAS)?;
-            dbtx.open_table(&events::TABLE)?;
-            dbtx.open_table(&events_by_time::TABLE)?;
-            dbtx.open_table(&events_content::TABLE)?;
-            dbtx.open_table(&TABLE_EVENTS_SELF)?;
-            dbtx.open_table(&TABLE_EVENTS_MISSING)?;
-            dbtx.open_table(&TABLE_EVENTS_HEADS)?;
+            // dbtx.open_table(&db_ver::TABLE)?;
+            // dbtx.open_table(&id_self::TABLE)?;
+            // dbtx.open_table(&id::TABLE)?;
+            // dbtx.open_table(&events_id_followees::TABLE)?;
+            // dbtx.open_table(&TABLE_ID_UNFOLLOWED)?;
+            // dbtx.open_table(&events_id_personas::TABLE)?;
+            // dbtx.open_table(&events::TABLE)?;
+            // dbtx.open_table(&events_by_time::TABLE)?;
+            // dbtx.open_table(&events_content::TABLE)?;
+            // dbtx.open_table(&events_self::TABLE)?;
+            // dbtx.open_table(&events_missing::TABLE)?;
+            // dbtx.open_table(&events_heads::TABLE)?;
 
             Self::handle_db_ver_migrations(dbtx)?;
 
@@ -167,7 +166,7 @@ impl Database {
     }
 
     fn handle_db_ver_migrations(dbtx: &WriteTransaction) -> DbResult<()> {
-        let mut table_db_ver = dbtx.open_table(&TABLE_DB_VER)?;
+        let mut table_db_ver = dbtx.open_table(&db_migration_ver::TABLE)?;
 
         let Some(cur_db_ver) = table_db_ver.first()?.map(|g| g.1.value()) else {
             info!(target: LOG_TARGET, "Initializing empty database");
@@ -226,7 +225,7 @@ impl Database {
 
     pub async fn iroh_secret(&self) -> DbResult<iroh::SecretKey> {
         self.read_with(|tx| {
-            let id_self_table = tx.open_table(&TABLE_ID_SELF)?;
+            let id_self_table = tx.open_table(&ids_self::TABLE)?;
 
             let self_id = Self::read_self_id_tx(&id_self_table)?
                 .expect("Must have iroh secret generated after opening");
@@ -237,7 +236,7 @@ impl Database {
 
     pub async fn verify_self(&self, self_id: RostraId) -> DbResult<()> {
         self.write_with(|tx| {
-            let mut id_self_table = tx.open_table(&TABLE_ID_SELF)?;
+            let mut id_self_table = tx.open_table(&ids_self::TABLE)?;
 
             if let Some(existing_self_id_record) = Self::read_self_id_tx(&id_self_table)? {
                 if existing_self_id_record.rostra_id != self_id {
@@ -253,7 +252,7 @@ impl Database {
 
     pub async fn get_head(&self, id: RostraId) -> DbResult<Option<ShortEventId>> {
         self.read_with(|tx| {
-            let events_heads = tx.open_table(&TABLE_EVENTS_HEADS)?;
+            let events_heads = tx.open_table(&events_heads::TABLE)?;
 
             Self::get_head_tx(id, &events_heads)
         })
@@ -265,7 +264,7 @@ impl Database {
         id: RostraId,
     ) -> DbResult<Vec<(RostraId, IdsFolloweesRecord)>> {
         self.read_with(|tx| {
-            let ids_followees_table = tx.open_table(&TABLE_ID_FOLLOWEES)?;
+            let ids_followees_table = tx.open_table(&ids_followees::TABLE)?;
 
             Self::read_followees_tx(id, &ids_followees_table)
         })
@@ -277,7 +276,7 @@ impl Database {
         id: RostraId,
     ) -> DbResult<Vec<(RostraId, IdsFollowersRecord)>> {
         self.read_with(|tx| {
-            let ids_followers_table = tx.open_table(&TABLE_ID_FOLLOWERS)?;
+            let ids_followers_table = tx.open_table(&ids_followers::TABLE)?;
 
             Self::read_followers_tx(id, &ids_followers_table)
         })

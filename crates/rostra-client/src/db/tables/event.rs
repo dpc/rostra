@@ -31,3 +31,6 @@ pub struct EventsMissingRecord {
     // we might return any.
     pub deleted_by: Option<ShortEventId>,
 }
+
+#[derive(Decode, Encode, Debug)]
+pub struct EventsHeadsTableRecord;

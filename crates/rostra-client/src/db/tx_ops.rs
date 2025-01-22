@@ -9,13 +9,14 @@ use rostra_core::id::{RostraId, ToShort as _};
 use rostra_core::{ShortEventId, Timestamp};
 use tables::event::EventsMissingRecord;
 use tables::ids::IdsFolloweesRecord;
-use tables::{ContentState, EventRecord, EventsHeadsTableValue};
+use tables::{ContentState, EventRecord};
 use tracing::debug;
 
 use super::id_self::IdSelfRecord;
 use super::{
-    event, events, events_by_time, events_content, get_first_in_range, get_last_in_range, ids,
-    tables, Database, DbError, DbResult, InsertEventOutcome,
+    event, events, events_by_time, events_content, events_heads, events_missing,
+    get_first_in_range, get_last_in_range, ids, tables, Database, DbError, DbResult,
+    EventsHeadsTableRecord, InsertEventOutcome,
 };
 use crate::db::LOG_TARGET;
 
@@ -61,8 +62,8 @@ impl Database {
         events_table: &mut events::Table,
         events_by_time_table: &mut events_by_time::Table,
         events_content_table: &mut events_content::Table,
-        events_missing_table: &mut Table<(RostraId, ShortEventId), EventsMissingRecord>,
-        events_heads_table: &mut Table<(RostraId, ShortEventId), EventsHeadsTableValue>,
+        events_missing_table: &mut events_missing::Table,
+        events_heads_table: &mut events_heads::Table,
     ) -> DbResult<InsertEventOutcome> {
         let author = event.author;
         let event_id = ShortEventId::from(*event_id);
@@ -88,7 +89,7 @@ impl Database {
             )
         } else {
             // since nothing was expecting this event yet, it must be a "head"
-            events_heads_table.insert(&(author, event_id), &EventsHeadsTableValue)?;
+            events_heads_table.insert(&(author, event_id), &EventsHeadsTableRecord)?;
             (false, false)
         };
 
@@ -215,7 +216,7 @@ impl Database {
 
     pub fn get_heads_events_tx(
         author: RostraId,
-        events_heads_table: &impl ReadableTable<(RostraId, ShortEventId), EventsHeadsTableValue>,
+        events_heads_table: &impl ReadableTable<(RostraId, ShortEventId), EventsHeadsTableRecord>,
     ) -> DbResult<Vec<ShortEventId>> {
         Ok(events_heads_table
             .range((author, ShortEventId::ZERO)..=(author, ShortEventId::MAX))?
@@ -333,7 +334,7 @@ impl Database {
 
     pub(crate) fn get_head_tx(
         self_id: RostraId,
-        events_heads_table: &impl ReadableTable<(RostraId, ShortEventId), EventsHeadsTableValue>,
+        events_heads_table: &impl ReadableTable<(RostraId, ShortEventId), EventsHeadsTableRecord>,
     ) -> DbResult<Option<ShortEventId>> {
         Ok(events_heads_table
             .range((self_id, ShortEventId::ZERO)..=(self_id, ShortEventId::MAX))?
