@@ -23,12 +23,12 @@ macro_rules! def_table {
             pub trait ReadableTable: redb_bincode::ReadableTable<Key, Value> {}
             impl<RT> ReadableTable for RT where RT: redb_bincode::ReadableTable<Key, Value> {}
             pub type Table<'a> = redb_bincode::Table<'a, Key, Value>;
-            pub const TABLE: Definition = redb_bincode::TableDefinition::new(stringify!($module));
+            pub const TABLE: Definition = redb_bincode::TableDefinition::new(stringify!($name));
         }
     };
 }
 
-def_table!(db_migration_ver: () => u64);
+def_table!(db_version: () => u64);
 def_table!(ids_self: () => IdSelfRecord);
 def_table!(ids_followees: (RostraId, RostraId) => IdsFolloweesRecord);
 def_table!(ids_followers: (RostraId, RostraId) => IdsFollowersRecord);

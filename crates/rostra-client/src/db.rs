@@ -136,8 +136,6 @@ pub struct Database {
 }
 
 impl Database {
-    const DB_VER: u64 = 0;
-
     #[instrument(skip_all)]
     pub async fn open(path: impl Into<PathBuf>, self_id: RostraId) -> DbResult<Database> {
         let path = path.into();
@@ -148,6 +146,7 @@ impl Database {
             .context(DatabaseSnafu)?;
 
         Self::write_with_inner(&inner, |tx| {
+            Self::init_tables_tx(tx)?;
             Self::verify_self_tx(self_id, &mut tx.open_table(&ids_self::TABLE)?)?;
             Self::handle_db_ver_migrations(tx)?;
             Ok(())
@@ -174,54 +173,6 @@ impl Database {
         };
 
         Ok(s)
-    }
-
-    // async fn init(self) -> DbResult<Self> {
-    //     self.write_with(|dbtx| {
-    //         // dbtx.open_table(&db_ver::TABLE)?;
-    //         // dbtx.open_table(&id_self::TABLE)?;
-    //         // dbtx.open_table(&id::TABLE)?;
-    //         // dbtx.open_table(&events_id_followees::TABLE)?;
-    //         // dbtx.open_table(&TABLE_ID_UNFOLLOWED)?;
-    //         // dbtx.open_table(&events_id_personas::TABLE)?;
-    //         // dbtx.open_table(&events::TABLE)?;
-    //         // dbtx.open_table(&events_by_time::TABLE)?;
-    //         // dbtx.open_table(&events_content::TABLE)?;
-    //         // dbtx.open_table(&events_self::TABLE)?;
-    //         // dbtx.open_table(&events_missing::TABLE)?;
-    //         // dbtx.open_table(&events_heads::TABLE)?;
-
-    //         Self::handle_db_ver_migrations(dbtx)?;
-
-    //         Ok(())
-    //     })
-    //     .await?;
-
-    //     Ok(self)
-    // }
-
-    fn handle_db_ver_migrations(dbtx: &WriteTransaction) -> DbResult<()> {
-        let mut table_db_ver = dbtx.open_table(&db_migration_ver::TABLE)?;
-
-        let Some(cur_db_ver) = table_db_ver.first()?.map(|g| g.1.value()) else {
-            info!(target: LOG_TARGET, "Initializing empty database");
-            table_db_ver.insert(&(), &Self::DB_VER)?;
-
-            return Ok(());
-        };
-
-        debug!(target: LOG_TARGET, db_ver = cur_db_ver, "Checking db version");
-        if Self::DB_VER < cur_db_ver {
-            return DbVersionTooHighSnafu {
-                db_ver: cur_db_ver,
-                code_ver: Self::DB_VER,
-            }
-            .fail();
-        }
-
-        // migration code will go here
-
-        Ok(())
     }
 
     const MAX_CONTENT_LEN: u32 = 1_000_000u32;

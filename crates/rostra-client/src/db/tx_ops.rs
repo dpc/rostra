@@ -10,17 +10,61 @@ use rostra_core::{ShortEventId, Timestamp};
 use tables::event::EventsMissingRecord;
 use tables::ids::IdsFolloweesRecord;
 use tables::{ContentState, EventRecord};
-use tracing::debug;
+use tracing::{debug, info};
 
 use super::id_self::IdSelfRecord;
 use super::{
-    event, events, events_by_time, events_content, events_heads, events_missing,
-    get_first_in_range, get_last_in_range, ids, ids_self, tables, Database, DbError, DbResult,
-    EventsHeadsTableRecord, InsertEventOutcome,
+    db_version, event, events, events_by_time, events_content, events_heads, events_missing,
+    events_self, get_first_in_range, get_last_in_range, ids, ids_followees, ids_followers,
+    ids_personas, ids_self, ids_unfollowed, tables, Database, DbError, DbResult,
+    EventsHeadsTableRecord, InsertEventOutcome, WriteTransactionCtx,
 };
-use crate::db::LOG_TARGET;
+use crate::db::{DbVersionTooHighSnafu, LOG_TARGET};
 
 impl Database {
+    pub(crate) fn init_tables_tx(tx: &WriteTransactionCtx) -> DbResult<()> {
+        tx.open_table(&db_version::TABLE)?;
+        tx.open_table(&ids_self::TABLE)?;
+        tx.open_table(&ids_followers::TABLE)?;
+        tx.open_table(&ids_followees::TABLE)?;
+        tx.open_table(&ids_unfollowed::TABLE)?;
+        tx.open_table(&ids_personas::TABLE)?;
+        tx.open_table(&events::TABLE)?;
+        tx.open_table(&events_by_time::TABLE)?;
+        tx.open_table(&events_content::TABLE)?;
+        tx.open_table(&events_self::TABLE)?;
+        tx.open_table(&events_missing::TABLE)?;
+        tx.open_table(&events_heads::TABLE)?;
+
+        Ok(())
+    }
+
+    pub(crate) fn handle_db_ver_migrations(dbtx: &WriteTransactionCtx) -> DbResult<()> {
+        const DB_VER: u64 = 0;
+
+        let mut table_db_ver = dbtx.open_table(&db_version::TABLE)?;
+
+        let Some(cur_db_ver) = table_db_ver.first()?.map(|g| g.1.value()) else {
+            info!(target: LOG_TARGET, "Initializing new database");
+            table_db_ver.insert(&(), &DB_VER)?;
+
+            return Ok(());
+        };
+
+        debug!(target: LOG_TARGET, db_ver = cur_db_ver, "Checking db version");
+        if DB_VER < cur_db_ver {
+            return DbVersionTooHighSnafu {
+                db_ver: cur_db_ver,
+                code_ver: DB_VER,
+            }
+            .fail();
+        }
+
+        // migration code will go here
+
+        Ok(())
+    }
+
     pub fn read_followees_tx(
         id: RostraId,
         ids_followees_table: &impl ReadableTable<(RostraId, RostraId), IdsFolloweesRecord>,
