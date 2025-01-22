@@ -27,6 +27,7 @@ use tokio::time::Instant;
 use tracing::{debug, info};
 
 use super::{get_rrecord_typed, take_first_ok_some, RRECORD_HEAD_KEY, RRECORD_P2P_KEY};
+use crate::db::social::EventPaginationCursor;
 use crate::db::{Database, DbResult};
 use crate::error::{
     ConnectIrohSnafu, ConnectResult, EncodeSnafu, IdResolveError, IdResolveResult,
@@ -37,8 +38,6 @@ use crate::error::{
 use crate::id::{CompactTicket, IdPublishedData, IdResolvedData};
 use crate::id_publisher::IdPublisher;
 use crate::request_handler::RequestHandler;
-use crate::storage::social::EventPaginationCursor;
-use crate::storage::Storage;
 use crate::LOG_TARGET;
 
 #[derive(Debug, Snafu)]
@@ -76,7 +75,7 @@ impl ClientHandle {
             r: PhantomData,
         })
     }
-    pub fn storage(&self) -> ClientRefResult<Option<Arc<Storage>>> {
+    pub fn storage(&self) -> ClientRefResult<Option<Arc<Database>>> {
         let client = self.0.upgrade().context(ClientRefSnafu)?;
 
         Ok(client.storage_opt())
@@ -118,7 +117,7 @@ pub struct Client {
     pub(crate) id: RostraId,
     pub(crate) id_secret: RostraIdSecretKey,
 
-    storage: Option<Arc<Storage>>,
+    db: Option<Arc<Database>>,
 
     /// Our iroh-net endpoint
     ///
@@ -152,14 +151,6 @@ impl Client {
         debug!(id = %id.try_fmt(), "Rostra Client");
         let is_mode_full = db.is_some();
 
-        let storage = match db {
-            Some(db) => {
-                let storage = Storage::new(db, id).await?;
-                Some(storage)
-            }
-            None => None,
-        };
-
         let pkarr_client = PkarrClient::builder()
             .build()
             .context(InitPkarrClientSnafu)?
@@ -174,7 +165,7 @@ impl Client {
         .as_async()
         .into();
 
-        let endpoint = Self::make_iroh_endpoint(storage.as_ref().map(|s| s.iroh_secret())).await?;
+        let endpoint = Self::make_iroh_endpoint(db.as_ref().map(|s| s.iroh_secret())).await?;
         let (check_for_updates_tx, _) = watch::channel(());
 
         let client = Arc::new_cyclic(|client| Self {
@@ -183,7 +174,7 @@ impl Client {
             endpoint,
             pkarr_client,
             pkarr_client_relay,
-            storage: storage.map(Into::into),
+            db: db.map(Into::into),
             id,
             check_for_updates_tx,
         });
@@ -316,7 +307,7 @@ impl Client {
     }
 
     pub fn self_head_subscribe(&self) -> Option<watch::Receiver<Option<ShortEventId>>> {
-        self.storage
+        self.db
             .as_ref()
             .map(|storage| storage.self_head_subscribe())
     }
@@ -325,12 +316,12 @@ impl Client {
         self.check_for_updates_tx.subscribe()
     }
 
-    pub fn storage_opt(&self) -> Option<Arc<Storage>> {
-        self.storage.clone()
+    pub fn storage_opt(&self) -> Option<Arc<Database>> {
+        self.db.clone()
     }
 
-    pub fn storage(&self) -> ClientStorageResult<Arc<Storage>> {
-        self.storage.clone().context(ClientStorageSnafu)
+    pub fn storage(&self) -> ClientStorageResult<Arc<Database>> {
+        self.db.clone().context(ClientStorageSnafu)
     }
 
     pub async fn paginate_social_posts_rev(
@@ -345,7 +336,7 @@ impl Client {
         todo!()
     }
     pub async fn events_head(&self) -> Option<ShortEventId> {
-        let storage = self.storage.as_ref()?;
+        let storage = self.db.as_ref()?;
 
         storage.get_self_current_head().await
     }
@@ -584,7 +575,7 @@ impl Client {
     }
 
     pub fn self_followees_list_subscribe(&self) -> Option<watch::Receiver<()>> {
-        self.storage
+        self.db
             .as_ref()
             .map(|storage| storage.self_followees_list_subscribe())
     }

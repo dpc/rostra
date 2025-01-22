@@ -15,7 +15,7 @@ use tracing::debug;
 use super::id_self::IdSelfRecord;
 use super::{
     event, events, events_by_time, events_content, events_heads, events_missing,
-    get_first_in_range, get_last_in_range, ids, tables, Database, DbError, DbResult,
+    get_first_in_range, get_last_in_range, ids, ids_self, tables, Database, DbError, DbResult,
     EventsHeadsTableRecord, InsertEventOutcome,
 };
 use crate::db::LOG_TARGET;
@@ -315,7 +315,7 @@ impl Database {
     }
 
     pub(crate) fn read_self_id_tx(
-        id_self_table: &impl ReadableTable<(), IdSelfRecord>,
+        id_self_table: &impl ids_self::ReadableTable,
     ) -> Result<Option<IdSelfRecord>, DbError> {
         Ok(id_self_table.get(&())?.map(|v| v.value()))
     }
@@ -368,5 +368,13 @@ impl Database {
                 return Ok(None);
             }
         }))
+    }
+
+    pub fn get_iroh_secret_tx(
+        ids_self_t: &impl ids_self::ReadableTable,
+    ) -> DbResult<iroh::SecretKey> {
+        let self_id = Self::read_self_id_tx(ids_self_t)?
+            .expect("Must have iroh secret generated after opening");
+        Ok(iroh::SecretKey::from_bytes(&self_id.iroh_secret))
     }
 }

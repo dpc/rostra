@@ -11,13 +11,12 @@ use tracing::{debug, info, instrument};
 
 use crate::client::Client;
 use crate::db::InsertEventOutcome;
-use crate::storage::Storage;
-use crate::ClientRef;
+use crate::{ClientRef, Database};
 const LOG_TARGET: &str = "rostra::head_checker";
 
 pub struct FolloweeHeadChecker {
     client: crate::client::ClientHandle,
-    storage: Arc<Storage>,
+    db: Arc<Database>,
     followee_updated: tokio::sync::watch::Receiver<()>,
     check_for_updates_rx: tokio::sync::watch::Receiver<()>,
 }
@@ -27,7 +26,7 @@ impl FolloweeHeadChecker {
         debug!(target: LOG_TARGET, "Starting followee head checking task" );
         Self {
             client: client.handle(),
-            storage: client
+            db: client
                 .storage_opt()
                 .expect("Must start followee head checker only on a client with storage"),
 
@@ -108,7 +107,7 @@ impl FolloweeHeadChecker {
             .whatever_context("Could not resolve id published data")?;
 
         if let Some(head) = data.published.head {
-            if self.storage.has_event(head).await {
+            if self.db.has_event(head).await {
                 return Ok(None);
             } else {
                 return Ok(Some(head));

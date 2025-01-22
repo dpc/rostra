@@ -4,7 +4,6 @@ mod followee_checker;
 mod followee_head_checker;
 mod id_publisher;
 mod request_handler;
-mod storage;
 
 pub mod id;
 
