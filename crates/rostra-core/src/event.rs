@@ -129,6 +129,12 @@ impl Event {
 #[repr(transparent)]
 pub struct EventContentData([u8]);
 
+impl EventContentData {
+    pub fn as_slice(&self) -> &[u8] {
+        &self.0
+    }
+}
+
 impl ToOwned for EventContentData {
     type Owned = EventContent;
 

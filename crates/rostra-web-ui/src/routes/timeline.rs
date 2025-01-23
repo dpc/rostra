@@ -14,14 +14,14 @@ impl AppState {
     pub async fn main_bar_timeline(&self) -> RequestResult<Markup> {
         let posts = self
             .client
-            .client_ref()?
+            .storage()??
             .paginate_social_posts_rev(None, 100)
-            .await?;
+            .await;
         Ok(html! {
             @for post in posts {
                 div ."o-mainBarTimeline" {
                     div ."o-mainBarTimeline__item" {
-                        (post_overview("dpc", "Cool stuff"))
+                        (post_overview(&post.event.author.to_string(), &post.content.djot_content))
                     }
                 }
             }

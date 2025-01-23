@@ -69,6 +69,7 @@ impl RpcId {
     pub const FEED_EVENT: Self = Self(1);
     pub const GET_EVENT: Self = Self(2);
     pub const GET_EVENT_CONTENT: Self = Self(3);
+    pub const GET_HEAD_UPDATE: Self = Self(4);
     pub const fn const_from(value: u16) -> Self {
         Self(value)
     }
@@ -158,6 +159,14 @@ define_rpc!(
     pub struct GetEventRequest(pub ShortEventId);,
     GetEventResponse,
     pub struct GetEventResponse(pub Option<SignedEvent>);
+);
+
+define_rpc!(
+    RpcId::GET_HEAD_UPDATE,
+    GetHeadUpdateRequest,
+    pub struct GetHeadUpdateRequest(pub ShortEventId);,
+    GetHeadUpdateResponse,
+    pub struct GetHeadUpdateResponse(pub ShortEventId);
 );
 
 impl GetEventRequest {

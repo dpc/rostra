@@ -52,16 +52,7 @@ impl AppState {
                     }
 
                     main ."o-mainBar" {
-
                         (self.main_bar_timeline().await?)
-                        div ."o-mainBar__item" {
-                            (post_overview("dpc", "Cool stuff"))
-                        }
-
-                        div ."o-mainBar__item" {
-                            (post_overview("someone", "Some other cool stuff"))
-                        }
-
                     }
 
                     div ."o-sideBar" {
@@ -106,15 +97,6 @@ pub fn post_overview(username: &str, content: &str) -> Markup {
                         p {
                             (content)
                         }
-
-                        p {
-                            "Molestias commodi voluptate qui nemo veniam quis. Commodi rem quis sapiente omnis dolorem nihil qui. Name totam quaerat qui blanditiis et et enim."
-                        }
-
-                        p {
-                            "Molestias commodi voluptate qui nemo veniam quis. Commodi rem quis sapiente omnis dolorem nihil qui. Name totam quaerat qui blanditiis et et enim."
-                        }
-
                     }
                 }
             }

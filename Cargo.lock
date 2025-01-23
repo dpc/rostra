@@ -3642,6 +3642,7 @@ dependencies = [
  "rostra-core",
  "rostra-p2p",
  "rostra-p2p-api",
+ "rostra-util",
  "rostra-util-error",
  "rostra-util-fmt",
  "serde",

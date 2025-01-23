@@ -36,6 +36,7 @@ rostra-core = { workspace = true, features = [
 ] }
 rostra-util-error = { workspace = true }
 rostra-util-fmt = { workspace = true }
+rostra-util = { workspace = true }
 serde = { workspace = true }
 snafu = { workspace = true }
 rand = { workspace = true }

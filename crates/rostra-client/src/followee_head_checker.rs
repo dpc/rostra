@@ -5,6 +5,7 @@ use std::time::Duration;
 use rostra_core::event::{VerifiedEvent, VerifiedEventContent};
 use rostra_core::id::RostraId;
 use rostra_core::ShortEventId;
+use rostra_util::is_rostra_dev_mode_set;
 use rostra_util_error::{FmtCompact, WhateverResult};
 use snafu::{whatever, ResultExt as _};
 use tracing::{debug, info, instrument};
@@ -42,8 +43,11 @@ impl FolloweeHeadChecker {
     pub async fn run(self) {
         let mut check_for_updates_rx = self.check_for_updates_rx.clone();
         let mut followee_updated = self.followee_updated.clone();
-        let mut interval = tokio::time::interval(Duration::from_secs(10 * 60));
-
+        let mut interval = tokio::time::interval(if is_rostra_dev_mode_set() {
+            Duration::from_secs(1)
+        } else {
+            Duration::from_secs(10 * 60)
+        });
         loop {
             // Trigger on ticks or any change
             tokio::select! {

@@ -31,7 +31,7 @@ impl AppState {
         let notification = notification.into();
         html! {
             form ."m-addFolloweeForm"
-                hx-post="/followee"
+                hx-post="/ui/followee"
                 hx-swap="outerHTML"
             {
                 @if let Some(n) = notification {

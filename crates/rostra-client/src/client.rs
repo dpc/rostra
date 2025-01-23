@@ -75,10 +75,16 @@ impl ClientHandle {
             r: PhantomData,
         })
     }
-    pub fn storage(&self) -> ClientRefResult<Option<Arc<Database>>> {
+    pub fn storage_opt(&self) -> ClientRefResult<Option<Arc<Database>>> {
         let client = self.0.upgrade().context(ClientRefSnafu)?;
 
         Ok(client.storage_opt())
+    }
+
+    pub fn storage(&self) -> ClientRefResult<ClientStorageResult<Arc<Database>>> {
+        let client = self.0.upgrade().context(ClientRefSnafu)?;
+
+        Ok(client.storage())
     }
 }
 
@@ -324,17 +330,6 @@ impl Client {
         self.db.clone().context(ClientStorageSnafu)
     }
 
-    pub async fn paginate_social_posts_rev(
-        &self,
-        cursor: Option<EventPaginationCursor>,
-        limit: usize,
-    ) -> ClientStorageResult<Vec<(Timestamp, ShortEventId, content::SocialPost)>> {
-        self.storage()?
-            .paginate_social_posts_rev(cursor, limit)
-            .await;
-
-        todo!()
-    }
     pub async fn events_head(&self) -> Option<ShortEventId> {
         let storage = self.db.as_ref()?;
 

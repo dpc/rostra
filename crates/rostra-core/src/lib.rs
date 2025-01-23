@@ -211,6 +211,12 @@ impl From<TimestampFixed> for u64 {
     }
 }
 
+impl From<Timestamp> for TimestampFixed {
+    fn from(value: Timestamp) -> Self {
+        Self(value.0)
+    }
+}
+
 #[derive(Copy, Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 #[cfg_attr(feature = "bincode", derive(::bincode::Encode, ::bincode::Decode))]
 #[cfg_attr(feature = "serde", derive(::serde::Serialize, ::serde::Deserialize))]

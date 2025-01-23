@@ -8,7 +8,7 @@ use axum::extract::{FromRequest, Path, Request, State};
 use axum::http::header::{self, ACCEPT_ENCODING, CONTENT_ENCODING, CONTENT_TYPE};
 use axum::http::{HeaderMap, HeaderValue, StatusCode};
 use axum::middleware::{self, Next};
-use axum::response::{IntoResponse, Response};
+use axum::response::{IntoResponse, Redirect, Response};
 use axum::routing::{get, post};
 use axum::Router;
 use maud::Markup;
@@ -137,9 +137,10 @@ pub async fn not_found(_state: State<SharedAppState>, _req: Request<Body>) -> im
 
 pub fn route_handler(state: SharedAppState) -> Router {
     Router::new()
-        .route("/", get(index))
-        .route("/post", post(new_post::new_post))
-        .route("/followee", post(add_followee::add_followee))
+        .route("/", get(root))
+        .route("/ui/", get(index))
+        .route("/ui/post", post(new_post::new_post))
+        .route("/ui/followee", post(add_followee::add_followee))
         // .route("/a/", put(account_new))
         // .route("/t/", put(token_new))
         // .route("/m/", put(metric_new).get(metric_find))
@@ -148,4 +149,8 @@ pub fn route_handler(state: SharedAppState) -> Router {
         .fallback(not_found)
         .with_state(state)
         .layer(middleware::from_fn(cache_control))
+}
+
+async fn root() -> Redirect {
+    Redirect::permanent("/ui")
 }

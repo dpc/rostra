@@ -67,7 +67,7 @@ impl Database {
 
     pub fn read_followees_tx(
         id: RostraId,
-        ids_followees_table: &impl ReadableTable<(RostraId, RostraId), IdsFolloweesRecord>,
+        ids_followees_table: &impl ids_followees::ReadableTable,
     ) -> DbResult<Vec<(RostraId, IdsFolloweesRecord)>> {
         Ok(ids_followees_table
             .range((id, RostraId::ZERO)..=(id, RostraId::MAX))?
@@ -77,7 +77,7 @@ impl Database {
 
     pub fn read_followers_tx(
         id: RostraId,
-        ids_followers_table: &impl ReadableTable<(RostraId, RostraId), IdsFollowersRecord>,
+        ids_followers_table: &impl ids_followers::ReadableTable,
     ) -> DbResult<Vec<(RostraId, IdsFollowersRecord)>> {
         Ok(ids_followers_table
             .range((id, RostraId::ZERO)..=(id, RostraId::MAX))?
@@ -87,8 +87,7 @@ impl Database {
 
     pub(crate) fn insert_self_event_id(
         event_id: impl Into<rostra_core::ShortEventId>,
-
-        events_self_table: &mut Table<ShortEventId, ()>,
+        events_self_table: &mut events_self::Table,
     ) -> DbResult<()> {
         events_self_table.insert(&event_id.into(), &())?;
         Ok(())
@@ -250,7 +249,7 @@ impl Database {
 
     pub fn get_missing_events_tx(
         author: RostraId,
-        events_missing_table: &impl ReadableTable<(RostraId, ShortEventId), EventsMissingRecord>,
+        events_missing_table: &impl events_missing::ReadableTable,
     ) -> DbResult<Vec<ShortEventId>> {
         Ok(events_missing_table
             .range((author, ShortEventId::ZERO)..=(author, ShortEventId::MAX))?
@@ -260,7 +259,7 @@ impl Database {
 
     pub fn get_heads_events_tx(
         author: RostraId,
-        events_heads_table: &impl ReadableTable<(RostraId, ShortEventId), EventsHeadsTableRecord>,
+        events_heads_table: &impl events_heads::ReadableTable,
     ) -> DbResult<Vec<ShortEventId>> {
         Ok(events_heads_table
             .range((author, ShortEventId::ZERO)..=(author, ShortEventId::MAX))?
