@@ -31,7 +31,10 @@
         buildPaths = [
           "Cargo.toml"
           "Cargo.lock"
-          "src"
+          "crates"
+          "crates/.*"
+          ".*/Cargo.toml"
+          ".*\.rs"
         ];
 
         buildSrc = flakeboxLib.filterSubPaths {
@@ -53,13 +56,21 @@
               }
             );
           in
-          {
-            ${projectName} = craneLib.buildPackage { };
+          rec {
+            rostraDeps = craneLib.buildDepsOnly { };
+            rostra = craneLib.buildPackage {
+              meta.mainProgram = "rostra";
+              cargoArtifacts = rostraDeps;
+
+              preBuild = ''
+                export ROSTRA_SHARE_DIR=$out/share
+              '';
+            };
           }
         );
       in
       {
-        packages.default = multiBuild.${projectName};
+        packages.default = multiBuild.rostra;
 
         legacyPackages = multiBuild;
 

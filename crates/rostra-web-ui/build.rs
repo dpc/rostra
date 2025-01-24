@@ -2,6 +2,8 @@ use std::env;
 use std::path::{Path, PathBuf};
 
 fn main() {
+    println!("cargo:rerun-if-changed=assets");
+
     println!("cargo:rerun-if-env-changed=ROSTRA_DEV_MODE");
     if env::var("ROSTRA_DEV_MODE").is_err() {
         println!("cargo:rerun-if-changed=assets");
@@ -9,9 +11,10 @@ fn main() {
 
     // This should make it possible for distros to override default location.
     let out_dir = PathBuf::from(
-        std::env::var_os("ROSTRA_BUILD_OUT_DIR").unwrap_or_else(|| env::var_os("OUT_DIR").unwrap()),
+        std::env::var_os("ROSTRA_SHARE_DIR").unwrap_or_else(|| env::var_os("OUT_DIR").unwrap()),
     );
     println!("cargo::rustc-env=ROSTRA_SHARE_DIR={}", out_dir.display());
+    println!("cargo:rerun-if-env-changed=ROSTRA_SHARE_DIR");
 
     let assets_out_dir = out_dir.join("assets");
 

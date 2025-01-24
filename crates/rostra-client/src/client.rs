@@ -27,7 +27,6 @@ use tokio::time::Instant;
 use tracing::{debug, info};
 
 use super::{get_rrecord_typed, take_first_ok_some, RRECORD_HEAD_KEY, RRECORD_P2P_KEY};
-use crate::db::social::EventPaginationCursor;
 use crate::db::{Database, DbResult};
 use crate::error::{
     ConnectIrohSnafu, ConnectResult, EncodeSnafu, IdResolveError, IdResolveResult,
@@ -238,7 +237,7 @@ impl Client {
             .into()
             .unwrap_or_else(|| SecretKey::generate(&mut rand::thread_rng()));
         // We rely entirely on tickets published by our own publisher
-        // for every RostraID via Pkarr, so we don't need discovery
+        // for every RostraId via Pkarr, so we don't need discovery
         let ep = Endpoint::builder()
             .secret_key(secret_key)
             .alpns(vec![ROSTRA_P2P_V0_ALPN.to_vec()])

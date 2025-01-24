@@ -119,6 +119,7 @@ pub enum DbError {
         location: Location,
     },
     #[snafu(visibility(pub))]
+    #[snafu(display("Provided Id does not match one used previously"))]
     IdMismatch {
         #[snafu(implicit)]
         location: Location,

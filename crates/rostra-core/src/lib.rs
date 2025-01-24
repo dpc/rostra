@@ -138,7 +138,7 @@ define_array_type_public!(
     /// [`id::RostraId`] so even though client might potentially grind collisions
     /// (64-bits of resistance) it really gains them nothing.
     ///
-    /// One might think of a `FullEventId` = `(RostraID, EventId)`, where
+    /// One might think of a `FullEventId` = `(RostraId, EventId)`, where
     /// the `RostraId` is passed separately or known in the context.
     ///
     /// However non-naive applications should probably store event in a smarter

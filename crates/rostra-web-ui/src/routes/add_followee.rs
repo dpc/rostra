@@ -38,7 +38,7 @@ impl AppState {
                     (n)
                 }
                 input ."m-addFolloweeForm__content"
-                    placeholder="RostraID"
+                    placeholder="RostraId"
                     type="text"
                     name="rostra_id"
                     {}
