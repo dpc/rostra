@@ -40,26 +40,30 @@ impl AppState {
                     // (header())
                     nav ."o-navBar" {
 
-                        (self.self_account())
+                        div ."o-navBar__selfAccount" {
+                            (self.self_account())
+                        }
 
                         (self.new_post_form(None))
 
-                        div ."o-navBar__list" {
-                            a ."o-navBar__item" href="/" { "Home" }
-                            a ."o-navBar__item" href="/" { "Something" }
-                        }
                         (self.add_followee_form(None))
+
+                        div ."o-navBar__list" {
+                            span ."o-navBar_header" { "Rostra:" }
+                            a ."o-navBar__item" href="https://github.com/dpc/rostra" { "Github" }
+                            // a ."o-navBar__item" href="/" { "Something" }
+                        }
                     }
 
                     main ."o-mainBar" {
                         (self.main_bar_timeline().await?)
                     }
 
-                    div ."o-sideBar" {
-                        "side bar"
-                    }
-                    (footer())
+                    // div ."o-sideBar" {
+                    //     "side bar"
+                    // }
                 }
+                (footer())
             }
         })
     }

@@ -138,7 +138,7 @@ pub async fn not_found(_state: State<SharedAppState>, _req: Request<Body>) -> im
 pub fn route_handler(state: SharedAppState) -> Router {
     Router::new()
         .route("/", get(root))
-        .route("/ui/", get(index))
+        .route("/ui", get(index))
         .route("/ui/post", post(new_post::new_post))
         .route("/ui/followee", post(add_followee::add_followee))
         // .route("/a/", put(account_new))

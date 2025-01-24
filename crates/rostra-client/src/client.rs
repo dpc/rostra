@@ -15,7 +15,7 @@ use rostra_core::event::{
     content, Event, EventContent, EventKind, PersonaId, SignedEvent, VerifiedEvent,
 };
 use rostra_core::id::{RostraId, RostraIdSecretKey, ToShort as _};
-use rostra_core::{ShortEventId, Timestamp};
+use rostra_core::ShortEventId;
 use rostra_p2p::connection::{Connection, FeedEventRequest, FeedEventResponse};
 use rostra_p2p::RpcError;
 use rostra_p2p_api::ROSTRA_P2P_V0_ALPN;

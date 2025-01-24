@@ -69,7 +69,7 @@ impl RpcId {
     pub const FEED_EVENT: Self = Self(1);
     pub const GET_EVENT: Self = Self(2);
     pub const GET_EVENT_CONTENT: Self = Self(3);
-    pub const GET_HEAD_UPDATE: Self = Self(4);
+    pub const WAIT_HEAD_UPDATE: Self = Self(4);
     pub const fn const_from(value: u16) -> Self {
         Self(value)
     }
@@ -162,11 +162,11 @@ define_rpc!(
 );
 
 define_rpc!(
-    RpcId::GET_HEAD_UPDATE,
-    GetHeadUpdateRequest,
-    pub struct GetHeadUpdateRequest(pub ShortEventId);,
-    GetHeadUpdateResponse,
-    pub struct GetHeadUpdateResponse(pub ShortEventId);
+    RpcId::WAIT_HEAD_UPDATE,
+    WaitHeadUpdateRequest,
+    pub struct WaitHeadUpdateRequest(pub ShortEventId);,
+    WaitHeadUpdateResponse,
+    pub struct WaitHeadUpdateResponse(pub ShortEventId);
 );
 
 impl GetEventRequest {

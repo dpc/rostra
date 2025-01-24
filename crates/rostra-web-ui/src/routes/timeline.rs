@@ -18,11 +18,11 @@ impl AppState {
             .paginate_social_posts_rev(None, 100)
             .await;
         Ok(html! {
-            @for post in posts {
-                div ."o-mainBarTimeline" {
-                    div ."o-mainBarTimeline__item" {
-                        (post_overview(&post.event.author.to_string(), &post.content.djot_content))
-                    }
+            div ."o-mainBarTimeline" {
+                @for post in posts {
+                        div ."o-mainBarTimeline__item" {
+                            (post_overview(&post.event.author.to_string(), &post.content.djot_content))
+                        }
                 }
             }
         })

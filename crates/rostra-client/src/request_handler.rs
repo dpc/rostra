@@ -1,3 +1,4 @@
+use std::collections::HashSet;
 use std::sync::Arc;
 
 use iroh::endpoint::Incoming;
@@ -6,7 +7,7 @@ use rostra_core::id::RostraId;
 use rostra_p2p::connection::{
     Connection, FeedEventRequest, FeedEventResponse, GetEventContentRequest,
     GetEventContentResponse, GetEventRequest, GetEventResponse, PingRequest, PingResponse, RpcId,
-    RpcMessage as _, MAX_REQUEST_SIZE,
+    RpcMessage as _, WaitHeadUpdateRequest, WaitHeadUpdateResponse, MAX_REQUEST_SIZE,
 };
 use rostra_p2p::RpcError;
 use rostra_util_error::FmtCompact as _;
@@ -123,6 +124,9 @@ impl RequestHandler {
                 }
                 RpcId::GET_EVENT_CONTENT => {
                     self.handle_get_event_content(req_msg, send, recv).await?;
+                }
+                RpcId::WAIT_HEAD_UPDATE => {
+                    self.handle_wait_head_update(req_msg, send, recv).await?;
                 }
                 _ => return UnknownRpcIdSnafu { id }.fail(),
             }
@@ -253,6 +257,47 @@ impl RequestHandler {
             .await?;
         }
 
+        Ok(())
+    }
+
+    async fn handle_wait_head_update(
+        &self,
+        req_msg: Vec<u8>,
+        mut send: iroh::endpoint::SendStream,
+        _read: iroh::endpoint::RecvStream,
+    ) -> Result<(), IncomingConnectionError> {
+        let WaitHeadUpdateRequest(event_id) =
+            WaitHeadUpdateRequest::decode_whole::<MAX_REQUEST_SIZE>(&req_msg)
+                .context(DecodingSnafu)?;
+
+        Connection::write_success_return_code(&mut send).await?;
+
+        // Note: do not keep storage around
+        let mut head_updated = self.client.storage()??.self_head_subscribe();
+
+        let mut heads;
+        loop {
+            heads = self.client.storage()??.get_heads_self().await?;
+
+            if heads.contains(&event_id) {
+                break;
+            }
+            head_updated
+                .changed()
+                .await
+                .map_err(|_| ClientStorageError)?;
+        }
+
+        Connection::write_message(
+            &mut send,
+            &WaitHeadUpdateResponse(
+                heads
+                    .into_iter()
+                    .next()
+                    .expect("Must have at least one element"),
+            ),
+        )
+        .await?;
         Ok(())
     }
 }

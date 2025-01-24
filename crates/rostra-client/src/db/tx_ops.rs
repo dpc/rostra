@@ -1,4 +1,5 @@
 use std::borrow::{Borrow as _, Cow};
+use std::collections::HashSet;
 
 use event::ContentStateRef;
 use ids::{IdsFollowersRecord, IdsUnfollowedRecord};
@@ -384,6 +385,16 @@ impl Database {
             .next()
             .transpose()?
             .map(|(k, _)| k.value().1))
+    }
+
+    pub(crate) fn get_heads_tx(
+        self_id: RostraId,
+        events_heads_table: &impl events_heads::ReadableTable,
+    ) -> DbResult<HashSet<ShortEventId>> {
+        Ok(events_heads_table
+            .range((self_id, ShortEventId::ZERO)..=(self_id, ShortEventId::MAX))?
+            .map(|r| r.map(|(k, _)| k.value().1))
+            .collect::<Result<HashSet<_>, _>>()?)
     }
 
     pub(crate) fn get_random_self_event(

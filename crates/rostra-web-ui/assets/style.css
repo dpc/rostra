@@ -1,4 +1,13 @@
+
+:root {
+ --background-border-color: rgb(217, 217, 232);
+}
+
 * { margin: 0; padding: 0; box-sizing: border-box; }
+
+* {
+  font-family: sans-serif;
+}
 
 .o-pageLayout {
   display: flex;
@@ -8,7 +17,10 @@
 
 .o-navBar {
   flex: 1;
-  padding: 10pt;
+  display: flex;
+  flex-direction: column;
+  gap: 10pt;
+  padding: 5pt;
 }
 
 .o-navBar__list {
@@ -22,8 +34,24 @@
 .o-mainBar {
   flex: 3;
   flex-grow: 3;
-  border-inline: 1px solid gray;
+  padding: 4pt;
+}
+
+.o-mainBarTimeline {
+  /* border-inline: 1px solid gray; */
   background: oklch(95.12% 0 117.53);
+
+
+  padding: 4pt;
+  border: 1px solid var(--background-border-color);
+}
+
+.o-mainBarTimeline > * + * {
+  border-top: 1px solid var(--background-border-color);
+}
+.o-mainBarTimeline__item {
+  padding-top: 4pt;
+  padding-bottom: 4pt;
 }
 
 .o-mainBar__item {
@@ -64,4 +92,56 @@
   margin-bottom: 5pt;
   /* margin-inline: 10pt; */
   /* display: block; */
+}
+
+.m-selfAccount__copyButton.-active {
+  background: oklch(64.56% 0.2141 160.43);
+}
+
+.m-selfAccount {
+  display: flex;
+  justify-content: flex-start;
+  gap: 2pt;
+  padding-top: 2pt;
+  padding-bottom: 2pt;
+}
+
+.m-selfAccount__content {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+}
+
+.m-selfAccount__displayName {
+  font-weight: 700;
+}
+
+.m-newPostForm {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 5pt;
+}
+
+.m-newPostForm__content {
+  padding: 5pt;
+  min-height: 200px;
+  min-width: 100%;
+  width: 100%;
+  border: 1px solid var(--background-border-color);
+  border-radius: 4pt;
+}
+
+
+.m-addFolloweeForm {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 5pt;
+}
+
+.m-addFolloweeForm__content {
+  border: 1px solid var(--background-border-color);
+  border-radius: 4pt;
+  min-width: 100%;
 }

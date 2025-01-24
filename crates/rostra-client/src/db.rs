@@ -3,6 +3,7 @@ pub mod social;
 mod tables;
 mod tx_ops;
 
+use std::collections::HashSet;
 use std::path::PathBuf;
 use std::{ops, result};
 
@@ -535,6 +536,23 @@ impl Database {
         .await
     }
 
+    pub async fn get_heads(&self, id: RostraId) -> DbResult<HashSet<ShortEventId>> {
+        self.read_with(|tx| {
+            let events_heads = tx.open_table(&events_heads::TABLE)?;
+
+            Self::get_heads_tx(id, &events_heads)
+        })
+        .await
+    }
+
+    pub async fn get_heads_self(&self) -> DbResult<HashSet<ShortEventId>> {
+        self.read_with(|tx| {
+            let events_heads = tx.open_table(&events_heads::TABLE)?;
+
+            Self::get_heads_tx(self.self_id, &events_heads)
+        })
+        .await
+    }
     pub async fn read_followees(
         &self,
         id: RostraId,

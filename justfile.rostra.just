@@ -22,7 +22,7 @@ dev PORT="2345":
       RUST_LOG=rostra=trace,info,iroh=error,mainline=error \
       cargo watch \
         -i 'dev/**' \
-        -i 'crates/rostra/assets/**' \
+        -i 'crates/rostra-web-ui/assets/**' \
         -s " \
           cargo run -- \
             --data-dir "$ROSTRA_DATA_DIR" \
