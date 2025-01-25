@@ -103,7 +103,7 @@ pub struct ClientRef<'r> {
     pub(crate) r: PhantomData<&'r ()>,
 }
 
-impl<'r> ops::Deref for ClientRef<'r> {
+impl ops::Deref for ClientRef<'_> {
     type Target = Client;
 
     fn deref(&self) -> &Self::Target {

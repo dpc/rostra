@@ -2,7 +2,7 @@ use std::{error, fmt, result};
 
 pub struct FmtCompactError<'e, E>(pub &'e E);
 
-impl<'e, E> fmt::Display for FmtCompactError<'e, E>
+impl<E> fmt::Display for FmtCompactError<'_, E>
 where
     E: error::Error,
 {
@@ -23,7 +23,7 @@ where
 
 pub struct FmtCompactResult<'r, O, E>(pub &'r result::Result<O, E>);
 
-impl<'r, O, E> fmt::Display for FmtCompactResult<'r, O, E>
+impl<O, E> fmt::Display for FmtCompactResult<'_, O, E>
 where
     E: error::Error,
     O: fmt::Display,

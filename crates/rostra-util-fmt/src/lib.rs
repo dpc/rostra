@@ -2,7 +2,7 @@ use std::fmt;
 
 pub struct FmtOption<'r, O>(pub Option<&'r O>);
 
-impl<'r, O> fmt::Display for FmtOption<'r, O>
+impl<O> fmt::Display for FmtOption<'_, O>
 where
     O: fmt::Display,
 {

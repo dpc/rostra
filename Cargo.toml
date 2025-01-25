@@ -89,7 +89,8 @@ incremental = false
 [profile.release]
 debug = "line-tables-only"
 lto = "fat"
-codegen-units = 1
+# super-slow, and we don't need so much speed
+# codegen-units = 1
 
 # Workaround: https://github.com/rust-lang/cargo/issues/12457 which causes
 #             https://github.com/ipetkov/crane/issues/370
