@@ -65,9 +65,9 @@
 }
 
 
-
 .m-postOverview__main {
   display: flex;
+  min-width: 20rem;
 }
 
 .m-postOverview__userImage {
@@ -80,9 +80,15 @@
   padding-inline: 10pt;
 }
 
+.m-postOverview__contentSide > * {
+  word-wrap: break-word;
+  word-break: break-all;
+}
+
 .m-postOverview__username {
   font-weight: bold;
 }
+
 
 .m-postOverview__content {
 }

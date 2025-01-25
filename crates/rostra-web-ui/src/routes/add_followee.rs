@@ -7,7 +7,7 @@ use serde::Deserialize;
 
 use super::Maud;
 use crate::error::RequestResult;
-use crate::{AppState, SharedAppState};
+use crate::{SharedState, UiState};
 
 #[derive(Deserialize)]
 pub struct Input {
@@ -15,10 +15,15 @@ pub struct Input {
 }
 
 pub async fn add_followee(
-    state: State<SharedAppState>,
+    state: State<SharedState>,
     Form(form): Form<Input>,
 ) -> RequestResult<impl IntoResponse> {
-    state.client.client_ref()?.follow(form.rostra_id).await?;
+    state
+        .client()
+        .await?
+        .client_ref()?
+        .follow(form.rostra_id)
+        .await?;
     Ok(Maud(state.add_followee_form(html! {
     div {
         p { "Followed!" }
@@ -26,7 +31,7 @@ pub async fn add_followee(
     })))
 }
 
-impl AppState {
+impl UiState {
     pub fn add_followee_form(&self, notification: impl Into<Option<Markup>>) -> Markup {
         let notification = notification.into();
         html! {

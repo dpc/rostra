@@ -68,9 +68,20 @@
             };
           }
         );
+
+        rostra-wrapper = pkgs.writeShellScriptBin "rostra" ''
+          if [ -z "$1" ]; then
+            ${multiBuild.rostra}/bin/rostra web-ui
+          else
+            ${multiBuild.rostra}/bin/rostra "$@"
+          fi
+        '';
       in
       {
-        packages.default = multiBuild.rostra;
+        packages = {
+          default = rostra-wrapper;
+          rostra-raw = multiBuild.rostra;
+        };
 
         legacyPackages = multiBuild;
 

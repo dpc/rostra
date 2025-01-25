@@ -2,6 +2,7 @@ mod add_followee;
 mod new_post;
 mod self_account;
 mod timeline;
+mod unlock;
 
 use axum::body::Body;
 use axum::extract::{FromRequest, Path, Request, State};
@@ -13,8 +14,8 @@ use axum::routing::{get, post};
 use axum::Router;
 use maud::Markup;
 
-use super::error::{RequestError, RequestResult, UserErrorResponse};
-use super::SharedAppState;
+use super::error::{RequestError, UserErrorResponse};
+use super::SharedState;
 
 #[derive(Clone, Debug)]
 #[must_use]
@@ -46,12 +47,12 @@ where
     }
 }
 
-pub fn static_file_handler(state: SharedAppState) -> Router {
+pub fn static_file_handler(state: SharedState) -> Router {
     Router::new()
         .route(
             "/{file}",
             get(
-                |state: State<SharedAppState>, path: Path<String>, req_headers: HeaderMap| async move {
+                |state: State<SharedState>, path: Path<String>, req_headers: HeaderMap| async move {
                     let Some(asset) = state.assets.get_from_path(&path) else {
                         return StatusCode::NOT_FOUND.into_response();
                     };
@@ -67,21 +68,24 @@ pub fn static_file_handler(state: SharedAppState) -> Router {
                         ),
                     );
 
-                    let accepts_brotli = req_headers.get_all(ACCEPT_ENCODING)
-                        .into_iter().any(|encodings| {
-                            let Ok(str) = encodings.to_str() else { return false };
+                    let accepts_brotli =
+                        req_headers
+                            .get_all(ACCEPT_ENCODING)
+                            .into_iter()
+                            .any(|encodings| {
+                                let Ok(str) = encodings.to_str() else {
+                                    return false;
+                                };
 
-                            str.split(',').any(|s| s.trim() == "br")
+                                str.split(',').any(|s| s.trim() == "br")
+                            });
 
-                          });
+                    let content = if accepts_brotli {
+                        if let Some(compressed) = asset.compressed.as_ref() {
+                            resp_headers.insert(CONTENT_ENCODING, HeaderValue::from_static("br"));
 
-                    let content =
-                        if accepts_brotli {
-                            if let Some(compressed) = asset.compressed.as_ref() {
-                                resp_headers.insert(CONTENT_ENCODING, HeaderValue::from_static("br"));
-
-                                compressed.clone()
-                            } else {
+                            compressed.clone()
+                        } else {
                             asset.raw.clone()
                         }
                     } else {
@@ -122,11 +126,7 @@ pub async fn cache_control(request: Request, next: Next) -> Response {
     response
 }
 
-pub async fn index(state: State<SharedAppState>) -> RequestResult<impl IntoResponse> {
-    Ok(Maud(state.index().await?))
-}
-
-pub async fn not_found(_state: State<SharedAppState>, _req: Request<Body>) -> impl IntoResponse {
+pub async fn not_found(_state: State<SharedState>, _req: Request<Body>) -> impl IntoResponse {
     (
         StatusCode::NOT_FOUND,
         AppJson(UserErrorResponse {
@@ -135,12 +135,14 @@ pub async fn not_found(_state: State<SharedAppState>, _req: Request<Body>) -> im
     )
 }
 
-pub fn route_handler(state: SharedAppState) -> Router {
+pub fn route_handler(state: SharedState) -> Router {
     Router::new()
         .route("/", get(root))
-        .route("/ui", get(index))
+        .route("/ui", get(timeline::get))
         .route("/ui/post", post(new_post::new_post))
         .route("/ui/followee", post(add_followee::add_followee))
+        .route("/ui/unlock", get(unlock::get).post(unlock::post))
+        .route("/ui/unlock/random", get(unlock::get_random))
         // .route("/a/", put(account_new))
         // .route("/t/", put(token_new))
         // .route("/m/", put(metric_new).get(metric_find))

@@ -4,8 +4,8 @@ mod tables;
 mod tx_ops;
 
 use std::collections::HashSet;
-use std::path::PathBuf;
-use std::{ops, result};
+use std::path::{Path, PathBuf};
+use std::{io, ops, result};
 
 use ids::IdsFollowersRecord;
 use redb_bincode::{ReadTransaction, ReadableTable, WriteTransaction};
@@ -138,6 +138,14 @@ pub struct Database {
 }
 
 impl Database {
+    pub async fn mk_db_path(
+        data_dir: &Path,
+        self_id: RostraId,
+    ) -> std::result::Result<PathBuf, io::Error> {
+        tokio::fs::create_dir_all(&data_dir).await?;
+        Ok(data_dir.join(format!("{}.redb", self_id)))
+    }
+
     #[instrument(skip_all)]
     pub async fn open(path: impl Into<PathBuf>, self_id: RostraId) -> DbResult<Database> {
         let path = path.into();

@@ -4,11 +4,11 @@ use std::io;
 use std::time::Duration;
 
 use clap::Parser;
-use cli::Opts;
+use cli::{make_web_opts, Opts};
 use duct::cmd;
 use futures::future::pending;
 use rostra_client::error::{ConnectError, IdResolveError, IdSecretReadError, InitError, PostError};
-use rostra_client::{Client, Database, DbError};
+use rostra_client::{Client, DbError};
 use rostra_core::id::RostraIdSecretKey;
 use rostra_p2p::connection::{Connection, PingRequest, PingResponse};
 use rostra_p2p::RpcError;
@@ -172,25 +172,7 @@ async fn handle_cmd(opts: Opts) -> CliResult<serde_json::Value> {
             pending().await
         }
         cli::OptsCmd::WebUi(ref web_opts) => {
-            let secret_id = if let Some(secret_file) = web_opts.secret_file.clone() {
-                Client::read_id_secret(&secret_file)
-                    .await
-                    .context(SecretSnafu)?
-            } else {
-                RostraIdSecretKey::generate()
-            };
-            let client = Client::builder()
-                .id_secret(secret_id)
-                .db(
-                    Database::open(opts.global.mk_db_path().await?, secret_id.id())
-                        .await
-                        .context(DatabaseSnafu)?,
-                )
-                .build()
-                .await
-                .context(InitSnafu)?;
-
-            let server = Server::init(web_opts.into(), client.handle())
+            let server = Server::init(make_web_opts(opts.global.data_dir(), web_opts))
                 .await
                 .context(WebUiServerSnafu)?;
 

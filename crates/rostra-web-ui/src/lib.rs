@@ -3,20 +3,21 @@ mod error;
 mod fragment;
 mod routes;
 
-use std::io;
 use std::net::{AddrParseError, SocketAddr};
 use std::path::{Path, PathBuf};
 use std::str::FromStr as _;
 use std::sync::Arc;
 use std::time::Duration;
+use std::{io, result};
 
 use asset_cache::AssetCache;
 use axum::http::header::{ACCEPT, CONTENT_TYPE};
 use axum::http::{HeaderName, HeaderValue, Method};
 use axum::Router;
-use rostra_client::{ClientHandle, ClientRefError};
-use rostra_core::id::RostraId;
-use rostra_util_error::WhateverResult;
+use rostra_client::error::{IdSecretReadError, InitError};
+use rostra_client::{Client, ClientHandle, ClientRefError, Database, DbError};
+use rostra_core::id::RostraIdSecretKey;
+use rostra_util_error::{BoxedError, WhateverResult};
 use snafu::{ResultExt as _, Snafu, Whatever};
 use tokio::net::{TcpListener, TcpSocket};
 use tokio::signal;
@@ -31,11 +32,14 @@ fn default_rostra_assets_dir() -> PathBuf {
     PathBuf::from(env!("ROSTRA_SHARE_DIR")).join("assets")
 }
 
+#[derive(Clone, Debug)]
 pub struct Opts {
     pub listen: String,
     pub cors_origin: Option<String>,
+    pub secret_file: Option<PathBuf>,
     assets_dir: PathBuf,
     pub reuseport: bool,
+    pub data_dir: PathBuf,
 }
 
 impl Opts {
@@ -44,12 +48,16 @@ impl Opts {
         cors_origin: Option<String>,
         assets_dir: Option<PathBuf>,
         reuseport: bool,
+        data_dir: PathBuf,
+        secret_file: Option<PathBuf>,
     ) -> Self {
         Self {
             listen,
             cors_origin,
             assets_dir: assets_dir.unwrap_or_else(default_rostra_assets_dir),
             reuseport,
+            data_dir,
+            secret_file,
         }
     }
 }
@@ -60,17 +68,88 @@ impl Opts {
     }
 }
 
-pub struct AppState {
-    id: RostraId,
-    client: ClientHandle,
+#[derive(Debug, Snafu)]
+pub enum UiStateClientError {
+    ClientNotLoaded,
+    #[snafu(transparent)]
+    ClientGone {
+        source: ClientRefError,
+    },
+}
+pub type UiStateClientResult<T> = result::Result<T, UiStateClientError>;
+
+#[derive(Debug, Snafu)]
+pub enum UiStateClientUnlockError {
+    AlreadyLoaded,
+    InvalidMnemonic {
+        source: BoxedError,
+    },
+    #[snafu(transparent)]
+    Io {
+        source: io::Error,
+    },
+    Database {
+        source: DbError,
+    },
+    Init {
+        source: InitError,
+    },
+}
+pub type UiStateClientUnlockResult<T> = result::Result<T, UiStateClientUnlockError>;
+
+pub struct UiState {
+    client: tokio::sync::RwLock<Option<Arc<Client>>>,
     pub assets: AssetCache,
+    opts: Opts,
 }
 
-pub type SharedAppState = Arc<AppState>;
+impl UiState {
+    pub async fn client(&self) -> UiStateClientResult<ClientHandle> {
+        if let Some(read) = self.client.read().await.as_ref() {
+            Ok(read.handle())
+        } else {
+            ClientNotLoadedSnafu.fail()
+        }
+    }
+
+    pub async fn unlock(&self, mnemonic: &str) -> UiStateClientUnlockResult<()> {
+        let secret_id = RostraIdSecretKey::from_str(mnemonic)
+            .boxed()
+            .context(InvalidMnemonicSnafu)?;
+        self.unlock_secret(secret_id).await
+    }
+    pub async fn unlock_secret(
+        &self,
+        secret_id: RostraIdSecretKey,
+    ) -> UiStateClientUnlockResult<()> {
+        let mut write = self.client.write().await;
+        if write.is_some() {
+            return AlreadyLoadedSnafu.fail();
+        }
+
+        let self_id = secret_id.id();
+        let client = Client::builder()
+            .id_secret(secret_id)
+            .db(Database::open(
+                Database::mk_db_path(&self.opts.data_dir, self_id).await?,
+                self_id,
+            )
+            .await
+            .context(DatabaseSnafu)?)
+            .build()
+            .await
+            .context(InitSnafu)?;
+
+        *write = Some(client);
+        Ok(())
+    }
+}
+
+pub type SharedState = Arc<UiState>;
 pub struct Server {
     listener: TcpListener,
 
-    state: SharedAppState,
+    state: SharedState,
     opts: Opts,
 }
 
@@ -79,6 +158,14 @@ pub enum WebUiServerError {
     #[snafu(transparent)]
     IO {
         source: io::Error,
+    },
+
+    Secret {
+        source: IdSecretReadError,
+    },
+
+    SecretUnlock {
+        source: UiStateClientUnlockError,
     },
 
     ListenAddr {
@@ -101,18 +188,28 @@ pub enum WebUiServerError {
 
 pub type ServerResult<T> = std::result::Result<T, WebUiServerError>;
 impl Server {
-    pub async fn init(opts: Opts, client: ClientHandle) -> ServerResult<Server> {
+    pub async fn init(opts: Opts) -> ServerResult<Server> {
         let listener = Self::get_listener(&opts).await?;
 
         let assets = AssetCache::load_files(&opts.assets_dir)
             .await
             .context(AssetsLoadSnafu)?;
-        let state = Arc::new(AppState {
-            id: client.client_ref()?.rostra_id(),
-            client,
+        let state = Arc::new(UiState {
             assets,
-            // req_counter: AtomicU64::default(),
+            client: tokio::sync::RwLock::new(None),
+            opts: opts.clone(),
         });
+
+        if let Some(secret_file) = opts.secret_file.clone() {
+            let secret_id = Client::read_id_secret(&secret_file)
+                .await
+                .context(SecretSnafu)?;
+
+            state
+                .unlock_secret(secret_id)
+                .await
+                .context(SecretUnlockSnafu)?;
+        };
 
         info!("Listening on {}", listener.local_addr()?);
         Ok(Self {

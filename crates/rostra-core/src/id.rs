@@ -1,3 +1,5 @@
+use core::fmt;
+
 use snafu::Snafu;
 
 use crate::{define_array_type_public, define_array_type_public_no_serde, EventId, ShortEventId};
@@ -46,6 +48,16 @@ impl RostraId {
 }
 
 define_array_type_public_no_serde!(struct RostraIdSecretKey, 32);
+
+impl fmt::Display for RostraIdSecretKey {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(
+            &bip39::Mnemonic::from_entropy(self.0.as_slice())
+                .expect("Fixed len, can't fail")
+                .to_string(),
+        )
+    }
+}
 
 #[derive(Debug, Snafu)]
 #[snafu(display("SecretKey error: {msg}"))]

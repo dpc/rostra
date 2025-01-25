@@ -1,5 +1,5 @@
 use axum::http::StatusCode;
-use axum::response::{IntoResponse, Response};
+use axum::response::{IntoResponse, Redirect, Response};
 use rostra_client::error::PostError;
 use rostra_client::{ClientRefError, ClientStorageError};
 use serde::Serialize;
@@ -7,6 +7,7 @@ use snafu::Snafu;
 use tracing::info;
 
 use super::routes::AppJson;
+use crate::UiStateClientError;
 
 /// Error by the user
 #[derive(Debug, Snafu)]
@@ -33,6 +34,8 @@ pub struct UserErrorResponse {
 pub enum RequestError {
     #[snafu(transparent)]
     Client { source: ClientRefError },
+    #[snafu(transparent)]
+    StateClient { source: UiStateClientError },
     // TODO: shouldn't really exist here
     #[snafu(transparent)]
     ClientStorage { source: ClientStorageError },
@@ -49,10 +52,15 @@ impl IntoResponse for RequestError {
             if let Some(user_err) = root_cause(&self).downcast_ref::<UserRequestError>() {
                 return user_err.into_response();
             } else {
-                (
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    "Internal Service Error".to_owned(),
-                )
+                match self {
+                    RequestError::StateClient { .. } => {
+                        return Redirect::temporary("/ui/unlock").into_response();
+                    }
+                    _ => (
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        "Internal Service Error".to_owned(),
+                    ),
+                }
             };
 
         (status_code, AppJson(UserErrorResponse { message })).into_response()

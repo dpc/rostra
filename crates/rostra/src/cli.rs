@@ -3,9 +3,6 @@ use std::sync::LazyLock;
 
 use clap::{Args, Parser, Subcommand};
 use rostra_core::id::RostraId;
-use snafu::ResultExt as _;
-
-use crate::{CliResult, DataDirSnafu};
 
 /// Command line options for the Rostra CLI application
 #[derive(Debug, Parser)]
@@ -40,18 +37,6 @@ impl GlobalOpts {
                 .state_dir()
                 .unwrap_or_else(|| PROJECTS_DIR.data_local_dir())
         })
-    }
-
-    #[allow(dead_code)]
-    pub fn db_path(&self) -> PathBuf {
-        self.data_dir().join("rostra.redb")
-    }
-
-    pub async fn mk_db_path(&self) -> CliResult<PathBuf> {
-        tokio::fs::create_dir_all(&self.data_dir())
-            .await
-            .context(DataDirSnafu)?;
-        Ok(self.data_dir().join("rostra.redb"))
     }
 }
 
@@ -111,16 +96,17 @@ pub struct WebUiOpts {
     pub assets_dir: Option<PathBuf>,
 }
 
-impl From<&WebUiOpts> for rostra_web_ui::Opts {
-    fn from(opts: &WebUiOpts) -> Self {
-        Self::new(
-            opts.listen.clone(),
-            opts.cors_origin.clone(),
-            opts.assets_dir.clone(),
-            opts.reuseport,
-        )
-    }
+pub fn make_web_opts(data_dir: &Path, opts: &WebUiOpts) -> rostra_web_ui::Opts {
+    rostra_web_ui::Opts::new(
+        opts.listen.clone(),
+        opts.cors_origin.clone(),
+        opts.assets_dir.clone(),
+        opts.reuseport,
+        data_dir.to_owned(),
+        opts.secret_file.clone(),
+    )
 }
+
 /// Development and debugging commands
 #[derive(Debug, Subcommand)]
 pub enum DevCmd {

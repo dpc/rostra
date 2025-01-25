@@ -51,11 +51,7 @@ impl serde::Serialize for RostraIdSecretKey {
         S: serde::Serializer,
     {
         if s.is_human_readable() {
-            s.serialize_str(
-                &bip39::Mnemonic::from_entropy(self.0.as_slice())
-                    .expect("Fixed len, can't fail")
-                    .to_string(),
-            )
+            s.serialize_str(&self.to_string())
         } else {
             s.serialize_bytes(&self.0)
         }

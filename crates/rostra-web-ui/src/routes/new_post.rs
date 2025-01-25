@@ -5,9 +5,9 @@ use maud::{html, Markup};
 use serde::Deserialize;
 
 use super::super::error::RequestResult;
-use super::super::SharedAppState;
+use super::super::SharedState;
 use super::Maud;
-use crate::AppState;
+use crate::UiState;
 
 #[derive(Deserialize)]
 pub struct Input {
@@ -15,10 +15,15 @@ pub struct Input {
 }
 
 pub async fn new_post(
-    state: State<SharedAppState>,
+    state: State<SharedState>,
     Form(form): Form<Input>,
 ) -> RequestResult<impl IntoResponse> {
-    state.client.client_ref()?.post(form.content).await?;
+    state
+        .client()
+        .await?
+        .client_ref()?
+        .post(form.content)
+        .await?;
     Ok(Maud(state.new_post_form(html! {
         div {
             p { "Posted!" }
@@ -26,7 +31,7 @@ pub async fn new_post(
     })))
 }
 
-impl AppState {
+impl UiState {
     pub fn new_post_form(&self, notification: impl Into<Option<Markup>>) -> Markup {
         let notification = notification.into();
         html! {

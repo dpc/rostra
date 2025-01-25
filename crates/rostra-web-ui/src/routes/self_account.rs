@@ -1,10 +1,11 @@
 use maud::{html, Markup, PreEscaped};
 
-use crate::AppState;
+use crate::error::RequestResult;
+use crate::UiState;
 
-impl AppState {
-    pub fn self_account(&self) -> Markup {
-        html! {
+impl UiState {
+    pub async fn self_account(&self) -> RequestResult<Markup> {
+        Ok(html! {
             div ."m-selfAccount" {
                 script {
                     (PreEscaped(
@@ -32,9 +33,9 @@ impl AppState {
                     span ."m-selfAccount__displayName" { "Display Name" }
                     button
                         ."m-selfAccount__copyButton"
-                        data-value=(self.id) onclick="copyIdToClipboard(event)" { "ID" }
+                        data-value=(self.client().await?.client_ref()?.rostra_id()) onclick="copyIdToClipboard(event)" { "ID" }
                 }
             }
-        }
+        })
     }
 }

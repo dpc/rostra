@@ -1,13 +1,9 @@
 use maud::{html, Markup, DOCTYPE};
 
 use crate::error::RequestResult;
-use crate::AppState;
+use crate::UiState;
 
-impl AppState {
-    pub async fn index(&self) -> RequestResult<Markup> {
-        self.html_page("You're Rostra!").await
-    }
-
+impl UiState {
     /// Html page header
     pub(crate) fn html_head(&self, page_title: &str) -> Markup {
         html! {
@@ -24,7 +20,7 @@ impl AppState {
         }
     }
 
-    pub async fn html_page(&self, title: &str) -> RequestResult<Markup> {
+    pub async fn html_page(&self, title: &str, content: Markup) -> RequestResult<Markup> {
         Ok(html! {
             (self.html_head(title))
             body ."o-body" {
@@ -35,34 +31,7 @@ impl AppState {
                 //     }
                 //     div ."inset-0 absolute z-0 bg-gray-500 opacity-50" {}
                 // }
-                div ."o-pageLayout" {
-
-                    // (header())
-                    nav ."o-navBar" {
-
-                        div ."o-navBar__selfAccount" {
-                            (self.self_account())
-                        }
-
-                        (self.new_post_form(None))
-
-                        (self.add_followee_form(None))
-
-                        div ."o-navBar__list" {
-                            span ."o-navBar_header" { "Rostra:" }
-                            a ."o-navBar__item" href="https://github.com/dpc/rostra" { "Github" }
-                            // a ."o-navBar__item" href="/" { "Something" }
-                        }
-                    }
-
-                    main ."o-mainBar" {
-                        (self.main_bar_timeline().await?)
-                    }
-
-                    // div ."o-sideBar" {
-                    //     "side bar"
-                    // }
-                }
+                div ."o-pageLayout" { (content) }
                 (footer())
             }
         })

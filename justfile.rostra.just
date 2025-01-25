@@ -15,7 +15,7 @@ dev PORT="2345":
       cargo run gen-id | jq -r '.secret' > "$ROSTRA_DATA_DIR/secret"
     fi
 
-    xdg-open "http://[::1]:{{PORT}}"
+    ( sleep 1 ; xdg-open "http://[::1]:{{PORT}}" ) &
 
     env \
       ROSTRA_DEV_MODE=1 \
