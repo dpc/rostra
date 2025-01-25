@@ -151,3 +151,49 @@
   border-radius: 4pt;
   min-width: 100%;
 }
+
+
+.unlockScreen {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
+  min-height: 100vh;
+  min-width: 100vw;
+}
+
+.unlockScreen__form {
+  padding: 2rem;
+  background: white;
+  border-radius: 8px;
+  box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+
+  display: flex;
+  flex-direction: column;
+  gap: .5rem;
+}
+
+.unlockScreen__header > * {
+  padding-top: 4pt;
+  padding-bottom: 4pt;
+}
+
+.unlockScreen__fakeUsername {
+  display: none;
+}
+
+.unlockScreen__unlockLine {
+  display: flex;
+  gap: 5pt;
+}
+
+.unlockScreen__mnemonic {
+  width: 100%;
+}
+
+.unlockScreen__unlockButton {
+  width: 5rem;
+}
+.unlockScreen__generateButton {
+  width: 5rem;
+}

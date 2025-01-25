@@ -1,8 +1,8 @@
 use axum::extract::State;
-use axum::http::{header, HeaderName, HeaderValue, StatusCode};
-use axum::response::{IntoResponse, Redirect, Response};
+use axum::http::{HeaderName, HeaderValue, StatusCode};
+use axum::response::{IntoResponse, Response};
 use axum::Form;
-use maud::{html, Markup, PreEscaped};
+use maud::{html, Markup};
 use rostra_core::id::RostraIdSecretKey;
 use serde::Deserialize;
 
@@ -58,49 +58,50 @@ impl UiState {
         current_mnemonic: &str,
         notification: impl Into<Option<Markup>>,
     ) -> RequestResult<Markup> {
+        let random_mnemonic = &RostraIdSecretKey::generate().to_string();
         let notification = notification.into();
         let content = html! {
-                form ."unlockScreen"
+            div ."unlockScreen" {
+
+                form ."unlockScreen__form"
                     autocomplete="on" {
                     @if let Some(n) = notification {
                         (n)
                     }
-                    p ."unlockScreen__" { }
+                    // some browsers might refuse to save if there's no "username"
+                    div ."unlockScreen__header"  {
+
+                        h4 { "Welcome to Rostra!" }
+                        p { "To use Rostra you need to paste an existing mnemonic or generate a new one."}
+                        p { "Make sure you save it in your browser's password manager and make a backup."}
+                    }
                     input ."unlockScreen__fakeUsername"
                         type="username"
-                        value="RostraID"
+                        value="RostraId"
                         required
                         {}
-                    input ."unlockScreen__mnemonic"
-                        type="password"
-                        name="password"
-                        autocomplete="current-password"
-                        required
-                        placeholder="mnemonic"
-                        value=(current_mnemonic)
-                        { }
-                    button ."unlockScreen__unlockButton"
-                        type="submit"
-                        hx-target="closest .unlockScreen"
-                        hx-post="/ui/unlock"
-                        { "Unlock" }
+                    div."unlockScreen__unlockLine" {
+                        input ."unlockScreen__mnemonic"
+                            type="password"
+                            name="password"
+                            autocomplete="current-password"
+                            required
+                            placeholder="mnemonic"
+                            value=(current_mnemonic)
+                            { }
+                        button ."unlockScreen__unlockButton"
+                            type="submit"
+                            hx-target="closest .unlockScreen"
+                            hx-post="/ui/unlock"
+                            { "Unlock" }
+                    }
                     button
+                        type="button" // do not submit the form!
                         ."unlockScreen__generateButton"
-                        hx-get="/ui/unlock/random"
-                        hx-target="closest .unlockScreen"
-                        type="submit"
+                        onclick={"document.querySelector('.unlockScreen__mnemonic').value = '" (random_mnemonic) "';"}
                         { "Generate" }
-                        script {
-                            (PreEscaped(
-                                r#"
-                                ['input', 'change', 'keydown', 'keyup', 'keypress'].forEach(evt => 
-                                    document
-                                        .querySelector('.unlockScreen__mnemonic')
-                                        .dispatchEvent(new Event(evt, {bubbles: true}))
-                                );
-                            "#))
-                        }
                 }
+            }
         };
         self.html_page("Sign in", content).await
     }
