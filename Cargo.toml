@@ -81,6 +81,15 @@ z32 = "1.1.1"
 [profile.dev]
 debug = "line-tables-only"
 lto = "off"
+incremental = true
+
+[profile.dev.package."*"] # external dependencies
+opt-level = 1
+
+[profile.dev.package]
+ring = { opt-level = 2 }
+ed25519 = { opt-level = 2 }
+ed25519-dalek = { opt-level = 2 }
 
 [profile.ci]
 inherits = "dev"
