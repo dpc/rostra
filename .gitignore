@@ -3,4 +3,5 @@
 /result
 /dev
 /.env
+/tmp
 .aider*
