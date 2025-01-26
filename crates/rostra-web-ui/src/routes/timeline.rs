@@ -49,6 +49,7 @@ impl UiState {
             .await;
         Ok(html! {
             div ."o-mainBarTimeline" {
+                div ."o-mainBarTimeline__preview" { }
                 @for post in posts {
                     div ."o-mainBarTimeline__item" {
                         (post_overview(&post.event.author.to_string(), &post.content.djot_content))

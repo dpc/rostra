@@ -48,9 +48,10 @@ pre { font-family: monospace; }
   border: 1px solid var(--background-border-color);
 }
 
-.o-mainBarTimeline > * + * {
-  border-top: 1px solid var(--background-border-color);
+.o-mainBarTimeline > .o-mainBarTimeline__item:not(:last-child) {
+  border-bottom: 1px solid var(--background-border-color);
 }
+
 .o-mainBarTimeline__item {
   padding-top: 4pt;
   padding-bottom: 4pt;

@@ -7,6 +7,7 @@ use serde::Deserialize;
 use super::super::error::RequestResult;
 use super::super::SharedState;
 use super::Maud;
+use crate::fragment::post_overview;
 use crate::UiState;
 
 #[derive(Deserialize)]
@@ -31,6 +32,22 @@ pub async fn new_post(
     })))
 }
 
+pub async fn new_post_preview(
+    state: State<SharedState>,
+    Form(form): Form<Input>,
+) -> RequestResult<impl IntoResponse> {
+    let self_id = state.client().await?.client_ref()?.rostra_id();
+    Ok(Maud(html! {
+        @if !form.content.is_empty() {
+            div ."o-mainBarTimeline__item o-mainBarTimeline__preview" {
+                (post_overview(&self_id.to_string(), &form.content))
+            }
+        } else {
+            div ."o-mainBarTimeline__preview" { }
+        }
+    }))
+}
+
 impl UiState {
     pub fn new_post_form(&self, notification: impl Into<Option<Markup>>) -> Markup {
         let notification = notification.into();
@@ -46,6 +63,11 @@ impl UiState {
                     placeholder="What's on your mind?"
                     dir="auto"
                     name="content"
+                    hx-post="/ui/post/preview"
+                    hx-include="closest form"
+                    hx-trigger="input changed delay:.2s"
+                    hx-target=".o-mainBarTimeline__preview"
+                    hx-swap="outerHTML"
                     {}
                 div ."m-newPostForm__footer" {
                     a href="https://www.djot.net/playground/" target="_blank" { "Formatting" }
