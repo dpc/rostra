@@ -6,7 +6,7 @@ use serde::{Deserialize, Serialize};
 use tracing::debug;
 
 use super::Database;
-use crate::db::{events, events_by_time, events_content, ContentState, LOG_TARGET};
+use crate::{events, events_by_time, events_content, ContentState, LOG_TARGET};
 
 #[derive(
     Encode, Decode, Serialize, Deserialize, Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord,

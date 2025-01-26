@@ -16,7 +16,6 @@ use rostra_core::id::RostraId;
 use rostra_core::ShortEventId;
 use rostra_util_error::{BoxedError, FmtCompact as _};
 use snafu::{Location, ResultExt as _, Snafu};
-use tables::ids::IdsFolloweesRecord;
 use tokio::sync::watch;
 use tokio::task::JoinError;
 use tracing::{debug, info, instrument};
@@ -222,7 +221,7 @@ impl Database {
     pub async fn get_event(
         &self,
         event_id: impl Into<ShortEventId>,
-    ) -> Option<crate::db::event::EventRecord> {
+    ) -> Option<crate::event::EventRecord> {
         let event_id = event_id.into();
         self.read_with(|tx| {
             let events_table = tx.open_table(&events::TABLE)?;
@@ -238,13 +237,13 @@ impl Database {
     ) -> Option<EventContent> {
         let event_id = event_id.into();
         self.read_with(|tx| {
-            let events_content_table = tx.open_table(&crate::db::events_content::TABLE)?;
+            let events_content_table = tx.open_table(&crate::events_content::TABLE)?;
             Ok(
                 Database::get_event_content_tx(event_id, &events_content_table)?.and_then(
                     |content_state| match content_state {
-                        crate::db::event::ContentStateRef::Present(b) => Some(b.into_owned()),
-                        crate::db::event::ContentStateRef::Deleted { .. }
-                        | crate::db::event::ContentStateRef::Pruned => None,
+                        crate::event::ContentStateRef::Present(b) => Some(b.into_owned()),
+                        crate::event::ContentStateRef::Deleted { .. }
+                        | crate::event::ContentStateRef::Pruned => None,
                     },
                 ),
             )
@@ -325,7 +324,7 @@ impl Database {
                 "New event inserted"
             );
             if event.event.author == self.self_id {
-                let mut events_self_table = tx.open_table(&crate::db::events_self::TABLE)?;
+                let mut events_self_table = tx.open_table(&crate::events_self::TABLE)?;
                 Database::insert_self_event_id(event.event_id, &mut events_self_table)?;
 
                 if !was_missing {
@@ -406,9 +405,9 @@ impl Database {
         let author = event_content.event.author;
         let updated = match event_content.event.kind {
             EventKind::FOLLOW | EventKind::UNFOLLOW => {
-                let mut ids_followees_t = tx.open_table(&crate::db::ids_followees::TABLE)?;
-                let mut ids_followers_t = tx.open_table(&crate::db::ids_followers::TABLE)?;
-                let mut id_unfollowed_t = tx.open_table(&crate::db::ids_unfollowed::TABLE)?;
+                let mut ids_followees_t = tx.open_table(&crate::ids_followees::TABLE)?;
+                let mut ids_followers_t = tx.open_table(&crate::ids_followers::TABLE)?;
+                let mut id_unfollowed_t = tx.open_table(&crate::ids_unfollowed::TABLE)?;
 
                 match event_content.event.kind {
                     EventKind::FOLLOW => match event_content.content.decode::<content::Follow>() {

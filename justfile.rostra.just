@@ -23,6 +23,7 @@ dev PORT="2345":
       cargo watch \
         -i 'dev/**' \
         -i 'crates/rostra-web-ui/assets/**' \
+        -i 'assets/**' \
         -s " \
           cargo run -- \
             --data-dir "$ROSTRA_DATA_DIR" \

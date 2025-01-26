@@ -50,9 +50,9 @@ impl UiState {
         Ok(html! {
             div ."o-mainBarTimeline" {
                 @for post in posts {
-                        div ."o-mainBarTimeline__item" {
-                            (post_overview(&post.event.author.to_string(), &post.content.djot_content))
-                        }
+                    div ."o-mainBarTimeline__item" {
+                        (post_overview(&post.event.author.to_string(), &post.content.djot_content))
+                    }
                 }
             }
         })

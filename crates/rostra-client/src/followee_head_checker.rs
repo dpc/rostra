@@ -2,24 +2,25 @@ use std::collections::BinaryHeap;
 use std::sync::Arc;
 use std::time::Duration;
 
+use rostra_client_db::{Database, InsertEventOutcome};
 use rostra_core::event::{VerifiedEvent, VerifiedEventContent};
 use rostra_core::id::RostraId;
 use rostra_core::ShortEventId;
 use rostra_util::is_rostra_dev_mode_set;
 use rostra_util_error::{FmtCompact, WhateverResult};
 use snafu::{whatever, ResultExt as _};
+use tokio::sync::watch;
 use tracing::{debug, info, instrument};
 
 use crate::client::Client;
-use crate::db::InsertEventOutcome;
-use crate::{ClientRef, Database};
+use crate::ClientRef;
 const LOG_TARGET: &str = "rostra::head_checker";
 
 pub struct FolloweeHeadChecker {
     client: crate::client::ClientHandle,
     db: Arc<Database>,
-    followee_updated: tokio::sync::watch::Receiver<()>,
-    check_for_updates_rx: tokio::sync::watch::Receiver<()>,
+    followee_updated: watch::Receiver<()>,
+    check_for_updates_rx: watch::Receiver<()>,
 }
 
 impl FolloweeHeadChecker {
@@ -44,9 +45,9 @@ impl FolloweeHeadChecker {
         let mut check_for_updates_rx = self.check_for_updates_rx.clone();
         let mut followee_updated = self.followee_updated.clone();
         let mut interval = tokio::time::interval(if is_rostra_dev_mode_set() {
-            Duration::from_secs(1)
+            Duration::from_secs(10)
         } else {
-            Duration::from_secs(10 * 60)
+            Duration::from_secs(60)
         });
         loop {
             // Trigger on ticks or any change

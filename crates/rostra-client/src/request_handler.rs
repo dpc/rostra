@@ -2,6 +2,7 @@ use std::sync::Arc;
 
 use iroh::endpoint::Incoming;
 use iroh::Endpoint;
+use rostra_client_db::DbError;
 use rostra_core::id::RostraId;
 use rostra_p2p::connection::{
     Connection, FeedEventRequest, FeedEventResponse, GetEventContentRequest,
@@ -14,7 +15,6 @@ use snafu::{OptionExt as _, ResultExt as _, Snafu};
 use tracing::{debug, info, instrument};
 
 use crate::client::Client;
-use crate::db::DbError;
 use crate::{ClientHandle, ClientRefError, ClientStorageError};
 
 const LOG_TARGET: &str = "rostra::req_handler";

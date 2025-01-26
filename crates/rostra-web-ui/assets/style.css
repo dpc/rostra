@@ -5,9 +5,11 @@
 
 * { margin: 0; padding: 0; box-sizing: border-box; }
 
-* {
+body {
   font-family: sans-serif;
 }
+
+pre { font-family: monospace; }
 
 .o-pageLayout {
   display: flex;
@@ -96,30 +98,88 @@
 .m-postOverview__content p {
   margin-top: 5pt;
   margin-bottom: 5pt;
-  /* margin-inline: 10pt; */
-  /* display: block; */
-}
-
-.m-selfAccount__copyButton.-active {
-  background: oklch(64.56% 0.2141 160.43);
 }
 
 .m-selfAccount {
   display: flex;
   justify-content: flex-start;
-  gap: 2pt;
-  padding-top: 2pt;
-  padding-bottom: 2pt;
+  gap: 0.5rem;
+  padding-top: 0.5rem;
+  padding-bottom: 0.5rem;
 }
 
 .m-selfAccount__content {
   display: flex;
   flex-direction: column;
   align-items: flex-start;
+  gap: 0.5rem;
 }
 
 .m-selfAccount__displayName {
   font-weight: 700;
+  height: 1.1rem;
+  line-height: 1.1rem;
+  vertical-align: middle;
+  /* border: 1px solid #ccc; */
+  /* border: 1px solid #ccc; */
+  /* border-block: 1px solid #ccc; */
+  font-size: 1rem;
+}
+
+
+.m-selfAccount__buttons {
+  display: flex;
+  gap: 0.5rem;
+}
+
+.m-selfAccount__copyButton {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.1rem .25rem;
+}
+
+.m-selfAccount__copyButtonIcon {
+  background: url('/assets/icons/id-card.svg') center/contain no-repeat;
+  width: 1rem;
+  height: 1rem;
+  display: inline-block;
+}
+
+.m-selfAccount__editButton {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.1rem .25rem;
+}
+.m-selfAccount__editButtonIcon {
+  background: url('/assets/icons/id-card.svg') center/contain no-repeat;
+  width: 1rem;
+  height: 1rem;
+  display: inline-block;
+}
+
+.m-selfAccount__saveButton {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.1rem .25rem;
+}
+
+.m-selfAccount__saveButtonIcon {
+  background: url('/assets/icons/upload.svg') center/contain no-repeat;
+  width: 1rem;
+  height: 1rem;
+  display: inline-block;
+}
+
+
+.m-selfAccount__copyButton:hover .m-selfAccount__copyButtonIcon {
+  background-image: url('/assets/icons/copy.svg');
+}
+
+.m-selfAccount__copyButton.-active .m-selfAccount__copyButtonIcon {
+  background-image: url('/assets/icons/circle-check.svg') !important;
 }
 
 .m-newPostForm {
@@ -136,6 +196,12 @@
   width: 100%;
   border: 1px solid var(--background-border-color);
   border-radius: 4pt;
+}
+
+.m-newPostForm__footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 5pt;
 }
 
 

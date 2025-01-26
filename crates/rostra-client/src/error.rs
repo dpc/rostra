@@ -1,10 +1,9 @@
 use std::io;
 
 use pkarr::dns::SimpleDnsError;
+use rostra_client_db::DbError;
 use rostra_core::id::RostraIdSecretKeyError;
 use snafu::{Snafu, Whatever};
-
-use crate::db::DbError;
 
 /// Meh alias
 pub type IrohError = anyhow::Error;

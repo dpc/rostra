@@ -10,6 +10,7 @@ use backon::Retryable as _;
 use iroh::NodeAddr;
 use itertools::Itertools as _;
 use pkarr::PkarrClient;
+use rostra_client_db::{Database, DbResult};
 use rostra_core::bincode::STD_BINCODE_CONFIG;
 use rostra_core::event::{
     content, Event, EventContent, EventKind, PersonaId, SignedEvent, VerifiedEvent,
@@ -27,7 +28,6 @@ use tokio::time::Instant;
 use tracing::{debug, info};
 
 use super::{get_rrecord_typed, take_first_ok_some, RRECORD_HEAD_KEY, RRECORD_P2P_KEY};
-use crate::db::{Database, DbResult};
 use crate::error::{
     ConnectIrohSnafu, ConnectResult, EncodeSnafu, IdResolveError, IdResolveResult,
     IdSecretReadResult, InitIrohClientSnafu, InitPkarrClientSnafu, InitResult, InvalidIdSnafu,

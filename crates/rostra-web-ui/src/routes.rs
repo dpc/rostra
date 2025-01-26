@@ -143,6 +143,7 @@ pub fn route_handler(state: SharedState) -> Router {
         .route("/ui/followee", post(add_followee::add_followee))
         .route("/ui/unlock", get(unlock::get).post(unlock::post))
         .route("/ui/unlock/random", get(unlock::get_random))
+        .route("/ui/self/edit", get(self_account::get_self_account_edit))
         // .route("/a/", put(account_new))
         // .route("/t/", put(token_new))
         // .route("/m/", put(metric_new).get(metric_find))

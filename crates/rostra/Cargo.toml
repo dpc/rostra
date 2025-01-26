@@ -24,6 +24,7 @@ pkarr = { workspace = true, features = ["async"] }
 snafu = { workspace = true }
 rostra-core = { workspace = true }
 rostra-client = { workspace = true }
+rostra-client-db = { workspace = true }
 rostra-p2p = { workspace = true, features = ["serde"] }
 rostra-p2p-api = { workspace = true }
 rostra-util-error = { workspace = true }

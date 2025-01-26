@@ -1,5 +1,5 @@
 [package]
-name = "rostra-client"
+name = "rostra-client-db"
 
 description = { workspace = true }
 edition = { workspace = true }
@@ -25,7 +25,6 @@ itertools = { workspace = true }
 pkarr = { workspace = true, features = ["async", "relay"] }
 redb = { workspace = true }
 redb-bincode = { workspace = true }
-rostra-client-db = { workspace = true }
 rostra-p2p = { workspace = true }
 rostra-p2p-api = { workspace = true }
 rostra-core = { workspace = true, features = [

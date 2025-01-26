@@ -1,4 +1,4 @@
-use maud::{html, Markup, DOCTYPE};
+use maud::{html, Markup, PreEscaped, DOCTYPE};
 
 use crate::error::RequestResult;
 use crate::UiState;
@@ -44,7 +44,12 @@ pub(crate) fn footer() -> Markup {
         script
             src="https://unpkg.com/htmx.org@2.0.4"
             integrity="sha512-2kIcAizYXhIn8TzUvqzEDZNuDZ+aW7yE/+f1HJHXFjQcGNfv1kqzJSTBRBSlOgp6B/KZsz1K0a3ZTqP9dnxioQ==" crossorigin="anonymous"
-            {};
+            {}
+
+
+        script id="MathJax-script" async src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js" {}
+
+
         // script src="https://unpkg.com/htmx.org@1.9.12/dist/ext/response-targets.js" {};
         // script type="module" src="/assets/script.js" {};
         // script type="module" src="/assets/script-htmx-send-error.js" {};
@@ -52,6 +57,18 @@ pub(crate) fn footer() -> Markup {
 }
 
 pub fn post_overview(username: &str, content: &str) -> Markup {
+    let content_html =
+        jotdown::html::render_to_string(jotdown::Parser::new(content).map(|e| match e {
+            jotdown::Event::Start(jotdown::Container::RawBlock { format }, attrs)
+                if format == "html" =>
+            {
+                jotdown::Event::Start(jotdown::Container::CodeBlock { language: format }, attrs)
+            }
+            jotdown::Event::End(jotdown::Container::RawBlock { format }) if format == "html" => {
+                jotdown::Event::End(jotdown::Container::CodeBlock { language: format })
+            }
+            e => e,
+        }));
     html! {
         article ."m-postOverview" {
             div ."m-postOverview__main" {
@@ -68,7 +85,7 @@ pub fn post_overview(username: &str, content: &str) -> Markup {
 
                     div ."m-postOverview__content" {
                         p {
-                            (content)
+                            (PreEscaped(content_html))
                         }
                     }
                 }

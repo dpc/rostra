@@ -15,11 +15,13 @@ bytes = { workspace = true }
 brotli = { workspace = true }
 futures = { workspace = true }
 futures-util = { workspace = true }
+jotdown = { workspace = true }
 maud = { workspace = true }
 pkarr = { workspace = true, features = ["async"] }
 snafu = { workspace = true }
 rostra-core = { workspace = true }
 rostra-client = { workspace = true }
+rostra-client-db = { workspace = true }
 rostra-p2p = { workspace = true, features = ["serde"] }
 rostra-p2p-api = { workspace = true }
 rostra-util-error = { workspace = true }

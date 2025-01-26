@@ -1,4 +1,5 @@
 use std::env;
+use std::fs::create_dir_all;
 use std::path::{Path, PathBuf};
 
 fn main() {
@@ -33,6 +34,7 @@ fn copy_files(src_dir: &Path, dst_dir: &Path) {
 
         println!("Copying {} to {}", src.display(), dst.display());
         if entry.file_type().unwrap().is_dir() {
+            create_dir_all(&dst).expect("Failed to create dst directory");
             copy_files(&src, &dst);
         } else {
             std::fs::copy(src, dst).expect("failed to copy file");

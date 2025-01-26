@@ -1,4 +1,3 @@
-pub(crate) mod db;
 pub mod error;
 mod followee_checker;
 mod followee_head_checker;
@@ -9,7 +8,6 @@ pub mod id;
 
 use std::str::FromStr;
 
-pub use db::{Database, DbError};
 use error::{
     InvalidDomainSnafu, InvalidEncodingSnafu, InvalidKeySnafu, MissingValueSnafu, RRecordResult,
     WrongTypeSnafu,

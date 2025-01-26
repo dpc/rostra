@@ -47,9 +47,9 @@ impl UiState {
                     dir="auto"
                     name="content"
                     {}
-                div ."m-newPostForm__footer"
-                {
-                    button ".m-newPostForm__submit" { "Post" }
+                div ."m-newPostForm__footer" {
+                    a href="https://www.djot.net/playground/" target="_blank" { "Formatting" }
+                    button ".m-newPostForm__submit" type="submit" { "Post" }
                 }
             }
         }

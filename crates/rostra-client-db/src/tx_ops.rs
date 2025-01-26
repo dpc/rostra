@@ -20,7 +20,7 @@ use super::{
     ids_personas, ids_self, ids_unfollowed, tables, Database, DbError, DbResult,
     EventsHeadsTableRecord, InsertEventOutcome, WriteTransactionCtx,
 };
-use crate::db::{DbVersionTooHighSnafu, LOG_TARGET};
+use crate::{DbVersionTooHighSnafu, LOG_TARGET};
 
 impl Database {
     pub(crate) fn init_tables_tx(tx: &WriteTransactionCtx) -> DbResult<()> {

@@ -3,6 +3,7 @@ members = [
   "crates/rostra-core",
   "crates/rostra",
   "crates/rostra-client",
+  "crates/rostra-client-db",
   "crates/rostra-p2p",
   "crates/rostra-p2p-api",
   "crates/rostra-util",
@@ -51,6 +52,7 @@ iroh = { version = "0.31.0", default-features = false }
 iroh-base = { version = "0.31.0", default-features = false }
 iroh-io = "0.6.0"
 itertools = "0.13.0"
+jotdown = "0.7.0"
 pkarr = "2.2.1"
 proptest = "1.6.0"
 maud = "*"
@@ -61,6 +63,7 @@ redb = "2.3.0"
 redb-bincode = "0.2.2"
 rostra-core = { path = "crates/rostra-core" }
 rostra-client = { path = "crates/rostra-client" }
+rostra-client-db = { path = "crates/rostra-client-db" }
 rostra-p2p = { path = "crates/rostra-p2p" }
 rostra-p2p-api = { path = "crates/rostra-p2p-api" }
 rostra-util = { path = "crates/rostra-util" }

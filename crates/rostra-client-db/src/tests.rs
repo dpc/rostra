@@ -6,8 +6,8 @@ use snafu::ResultExt as _;
 use tempfile::{tempdir, TempDir};
 use tracing::info;
 
-use crate::db::tables::ContentState;
-use crate::db::{events, events_by_time, events_content, events_heads, events_missing, Database};
+use crate::tables::ContentState;
+use crate::{events, events_by_time, events_content, events_heads, events_missing, Database};
 
 async fn temp_db(self_id: RostraId) -> BoxedErrorResult<(TempDir, super::Database)> {
     let dir = tempdir()?;
