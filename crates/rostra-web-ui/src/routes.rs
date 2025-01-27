@@ -50,7 +50,7 @@ where
 pub fn static_file_handler(state: SharedState) -> Router {
     Router::new()
         .route(
-            "/{file}",
+            "/{*file}",
             get(
                 |state: State<SharedState>, path: Path<String>, req_headers: HeaderMap| async move {
                     let Some(asset) = state.assets.get_from_path(&path) else {

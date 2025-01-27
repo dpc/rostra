@@ -29,6 +29,8 @@ use tower_http::services::ServeDir;
 use tower_http::CompressionLevel;
 use tracing::info;
 
+const LOG_TARGET: &str = "rostra::web_ui";
+
 fn default_rostra_assets_dir() -> PathBuf {
     PathBuf::from(env!("ROSTRA_SHARE_DIR")).join("assets")
 }

@@ -10,6 +10,7 @@ version = { workspace = true }
 workspace = true
 
 [dependencies]
+async-stream = { workspace = true }
 axum = { workspace = true }
 bytes = { workspace = true }
 brotli = { workspace = true }

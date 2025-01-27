@@ -1,16 +1,18 @@
 use std::collections::HashMap;
 use std::future::ready;
-use std::io::Write as _;
-use std::path;
+use std::io::{self, Write as _};
+use std::path::{self, PathBuf};
 use std::string::String;
 
 use axum::extract::Path;
 use bytes::Bytes;
-use futures_util::stream::StreamExt as _;
+use futures::stream::{BoxStream, StreamExt};
 use rostra_util_error::WhateverResult;
 use snafu::{OptionExt as _, ResultExt as _};
 use tokio_stream::wrappers::ReadDirStream;
 use tracing::info;
+
+use crate::LOG_TARGET;
 
 const HASH_SPLIT_CHAR: char = '.';
 
@@ -44,60 +46,58 @@ impl AssetCache {
         format!("{}.{}", basename, ext)
     }
 
-    pub async fn load_files(dir: &path::Path) -> WhateverResult<Self> {
-        info!(dir=%dir.display(), "Loading assets");
+    pub async fn load_files(root_dir: &path::Path) -> WhateverResult<Self> {
+        info!(target: LOG_TARGET, dir=%root_dir.display(), "Loading assets");
         let mut cache = HashMap::default();
 
-        let assets: Vec<WhateverResult<(String, StaticAsset)>> = ReadDirStream::new(
-            tokio::fs::read_dir(dir)
-                .await
-                .whatever_context("Fail to read dir")?,
-        )
-        .map(|file| async move {
-            let file = file.whatever_context("Failed to read file metadata")?;
-            let path = file.path();
-            let filename = path.file_name().and_then(|n| n.to_str());
-            let ext = path.extension().and_then(|p| p.to_str());
+        let assets: Vec<WhateverResult<(String, StaticAsset)>> =
+            read_dir_stream(root_dir.to_owned())
+                .map(|file| async move {
+                    let path = file.whatever_context("Failed to read file metadata")?;
+                    // let filename = path.file_name().and_then(|n| n.to_str());
+                    let filename = path.strip_prefix(root_dir).expect("Can't fail").to_str();
+                    // .and_then(|n| n.to_str());
+                    let ext = path.extension().and_then(|p| p.to_str());
 
-            let (filename, ext) = match (filename, ext) {
-                (Some(filename), Some(ext)) => (filename, ext),
-                _ => return Ok(None),
-            };
+                    let (filename, ext) = match (filename, ext) {
+                        (Some(filename), Some(ext)) => (filename, ext),
+                        _ => return Ok(None),
+                    };
 
-            let stored_path = path
-                .clone()
-                .into_os_string()
-                .into_string()
-                .ok()
-                .whatever_context("Invalid path")?;
-            tracing::debug!(path = %stored_path, "Loading asset");
+                    let stored_path = path
+                        .clone()
+                        .into_os_string()
+                        .into_string()
+                        .ok()
+                        .whatever_context("Invalid path")?;
+                    tracing::debug!(path = %stored_path, "Loading asset");
 
-            let raw = tokio::fs::read(&path)
-                .await
-                .whatever_context("Could not read file")?;
+                    let raw = tokio::fs::read(&path)
+                        .await
+                        .whatever_context("Could not read file")?;
 
-            let compressed = match ext {
-                "css" | "js" => Some(compress_data(&raw)),
-                _ => None,
-            };
+                    let compressed = match ext {
+                        "css" | "js" | "svg" => Some(compress_data(&raw)),
+                        _ => None,
+                    };
 
-            Ok(Some((
-                filename.to_string(),
-                StaticAsset {
-                    path: stored_path,
-                    raw: Bytes::from(raw),
-                    compressed: compressed.map(Bytes::from),
-                },
-            )))
-        })
-        .buffered(8)
-        .filter_map(
-            |res_opt: WhateverResult<std::option::Option<(String, StaticAsset)>>| {
-                ready(res_opt.transpose())
-            },
-        )
-        .collect::<Vec<_>>()
-        .await;
+                    Ok(Some((
+                        filename.to_string(),
+                        StaticAsset {
+                            path: stored_path,
+                            raw: Bytes::from(raw),
+                            compressed: compressed.map(Bytes::from),
+                        },
+                    )))
+                })
+                .buffered(8)
+                .filter_map(
+                    |res_opt: WhateverResult<std::option::Option<(String, StaticAsset)>>| {
+                        ready(res_opt.transpose())
+                    },
+                )
+                .collect::<Vec<_>>()
+                .await;
 
         for asset_res in assets {
             let (filename, asset) = asset_res?;
@@ -136,6 +136,8 @@ impl StaticAsset {
             Some(match ext {
                 "js" => "application/javascript",
                 "css" => "text/css",
+                "svg" => "image/svg+xml",
+                "ico" => "image/x-icon",
                 _ => return None,
             })
         })
@@ -152,4 +154,33 @@ fn compress_data(input: &[u8]) -> Vec<u8> {
     drop(writer);
 
     bytes
+}
+
+// async fn read_dir_stream(dir: impl AsRef<path::Path>) -> impl Stream<Item =
+// io::Result<PathBuf>> {
+fn read_dir_stream(dir: PathBuf) -> BoxStream<'static, io::Result<PathBuf>> {
+    async_stream::try_stream! {
+        let entries = ReadDirStream::new(
+            tokio::fs::read_dir(dir).await?
+        );
+
+        futures::pin_mut!(entries);
+        while let Some(entry) = entries.next().await {
+            let entry = entry?;
+            let path = entry.path();
+            let file_type = entry.file_type().await?;
+
+            if file_type.is_dir() {
+                let subdir = read_dir_stream(path);
+                futures::pin_mut!(subdir);
+                while let Some(res) = subdir.next().await {
+                    let res = res?;
+                    yield res;
+                }
+            } else if file_type.is_file() {
+                yield path;
+            }
+        }
+    }
+    .boxed()
 }
