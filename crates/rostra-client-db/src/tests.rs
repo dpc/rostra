@@ -6,7 +6,7 @@ use snafu::ResultExt as _;
 use tempfile::{tempdir, TempDir};
 use tracing::info;
 
-use crate::tables::ContentState;
+use crate::event::EventContentState;
 use crate::{events, events_by_time, events_content, events_heads, events_missing, Database};
 
 async fn temp_db(self_id: RostraId) -> BoxedErrorResult<(TempDir, super::Database)> {
@@ -24,7 +24,7 @@ fn build_test_event(
 ) -> VerifiedEvent {
     let parent = parent.into();
 
-    let content = EventContent::from(vec![]);
+    let content = EventContent::new(vec![]);
     let author = id_secret.id();
     let event = Event::builder()
         .author(author)
@@ -193,7 +193,7 @@ async fn test_store_deleted_event() -> BoxedErrorResult<()> {
                         info!(event_id = %event_id, ?content, "State");
 
                         match content {
-                            Some(ContentState::Deleted { deleted_by }) => Some(deleted_by),
+                            Some(EventContentState::Deleted { deleted_by }) => Some(deleted_by),
                             Some(_) => None,
                             None => None,
                         }

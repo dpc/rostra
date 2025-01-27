@@ -6,7 +6,8 @@ use serde::{Deserialize, Serialize};
 use tracing::debug;
 
 use super::Database;
-use crate::{events, events_by_time, events_content, ContentState, LOG_TARGET};
+use crate::event::EventContentState;
+use crate::{events, events_by_time, events_content, LOG_TARGET};
 
 #[derive(
     Encode, Decode, Serialize, Deserialize, Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord,
@@ -59,7 +60,7 @@ impl Database {
                 else {
                     continue;
                 };
-                let ContentState::Present(content) = content_state else {
+                let EventContentState::Present(content) = content_state else {
                     continue;
                 };
 

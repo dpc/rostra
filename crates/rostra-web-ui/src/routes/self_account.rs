@@ -1,25 +1,71 @@
 use axum::extract::State;
 use axum::response::IntoResponse;
+use axum::Form;
 use maud::{html, Markup, PreEscaped};
+use rostra_client::ClientRef;
+use rostra_client_db::IdSocialProfileRecord;
+use rostra_core::id::{RostraId, ToShort as _};
+use rostra_core::ShortEventId;
+use serde::Deserialize;
 
 use super::Maud;
 use crate::error::RequestResult;
 use crate::{SharedState, UiState};
 
 pub async fn get_self_account_edit(state: State<SharedState>) -> RequestResult<impl IntoResponse> {
-    Ok(Maud(state.self_account_edit().await?))
+    Ok(Maud(state.render_profile_edit_form().await?))
+}
+
+#[derive(Deserialize)]
+pub struct EditInput {
+    name: String,
+    bio: String,
+}
+
+pub async fn post_self_account_edit(
+    state: State<SharedState>,
+    Form(form): Form<EditInput>,
+) -> RequestResult<impl IntoResponse> {
+    state
+        .client()
+        .await?
+        .client_ref()?
+        .post_profile_update(form.name, form.bio)
+        .await?;
+
+    Ok(Maud(state.render_self_profile_summary().await?))
 }
 
 impl UiState {
-    pub async fn self_display_name(&self) -> String {
-        "TDB: Display Name".into()
+    pub async fn get_social_profile(
+        &self,
+        id: RostraId,
+        client: &ClientRef<'_>,
+    ) -> RequestResult<IdSocialProfileRecord> {
+        let existing = client
+            .storage()?
+            .get_social_profile(id)
+            .await
+            .unwrap_or_else(|| rostra_client_db::IdSocialProfileRecord {
+                event_id: ShortEventId::ZERO,
+                display_name: id.to_short().to_string(),
+                bio: "".into(),
+                img_mime: "".into(),
+                img: vec![],
+            });
+        Ok(existing)
     }
 
     pub async fn self_avatar_url(&self) -> String {
         "/assets/icons/circle-user.svg".into()
     }
 
-    pub async fn self_account(&self) -> RequestResult<Markup> {
+    pub async fn render_self_profile_summary(&self) -> RequestResult<Markup> {
+        let client = self.client().await?;
+        let self_id = client.client_ref()?.rostra_id();
+        let self_profile = self
+            .get_social_profile(self_id, &client.client_ref()?)
+            .await?;
         Ok(html! {
             div ."m-selfAccount" {
                 script {
@@ -45,7 +91,7 @@ impl UiState {
                     { }
 
                 div ."m-selfAccount__content" {
-                    span ."m-selfAccount__displayName" { (self.self_display_name().await) }
+                    span ."m-selfAccount__displayName" { (self_profile.display_name) }
                     div ."m-selfAccount__buttons" {
                         button
                             ."m-selfAccount__copyButton"
@@ -69,25 +115,42 @@ impl UiState {
         })
     }
 
-    pub async fn self_account_edit(&self) -> RequestResult<Markup> {
+    pub async fn render_profile_edit_form(&self) -> RequestResult<Markup> {
+        let client = self.client().await?;
+        let client_ref = client.client_ref()?;
+        let self_profile = self
+            .get_social_profile(client_ref.rostra_id(), &client_ref)
+            .await?;
         Ok(html! {
-            form ."m-selfAccount" {
-
+            form ."m-selfAccount"
+                hx-post="/ui/self/edit"
+                hx-swap="outerHTML"
+            {
                 img ."m-selfAccount__userImage"
                     src=(self.self_avatar_url().await)
                     width="32pt"
-                    height="32pt"
-                    { }
+                    height="32pt" {
+                }
                 div ."m-selfAccount__content" {
-                    input type="text" ."m-selfAccount__displayName" value=(self.self_display_name().await) {  }
+                    input ."m-selfAccount__displayName"
+                        type="text"
+                        name="name"
+                        value=(self_profile.display_name) {
+                    }
+                    textarea."m-selfAccount__bio"
+                        placeholder="Bio..."
+                        type="text"
+                        dir="auto"
+                        name="bio" {
+                        {(self_profile.bio)}
+                    }
 
                     div ."m-selfAccount__buttons" {
                         button
-                            ."m-selfAccount__saveButton"
-                            {
-                                span ."m-selfAccount__saveButtonIcon" width="1rem" height="1rem" {}
-                                "Save"
-                            }
+                            ."m-selfAccount__saveButton" {
+                            span ."m-selfAccount__saveButtonIcon" width="1rem" height="1rem" {}
+                            "Save"
+                        }
                     }
                 }
             }

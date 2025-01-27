@@ -12,6 +12,7 @@ mod bincode;
 #[cfg(all(feature = "ed25519-dalek", feature = "bincode"))]
 mod verified_event;
 use std::borrow::Borrow;
+use std::sync::Arc;
 
 #[cfg(all(feature = "ed25519-dalek", feature = "bincode"))]
 pub use verified_event::*;
@@ -127,37 +128,39 @@ impl Event {
 #[derive(Debug)]
 #[cfg_attr(feature = "bincode", derive(::bincode::Encode))]
 #[repr(transparent)]
-pub struct EventContentData([u8]);
+pub struct EventContentUnsized([u8]);
 
-impl EventContentData {
+impl EventContentUnsized {
     pub fn as_slice(&self) -> &[u8] {
         &self.0
     }
 }
 
-impl ToOwned for EventContentData {
+impl ToOwned for EventContentUnsized {
     type Owned = EventContent;
 
     fn to_owned(&self) -> Self::Owned {
-        EventContent(self.0.to_vec())
+        EventContent(self.0.into())
     }
 }
 
-impl Borrow<EventContentData> for EventContent {
-    #[allow(clippy::needless_lifetimes)]
-    fn borrow<'s>(&'s self) -> &'s EventContentData {
-        // Use unsafe code to change type of referent.
-        // Safety: `EventContentRef` is a `repr(transparent)` wrapper around `[u8]`.
-        let ptr = &*self.0 as *const [u8] as *const EventContentData;
-        unsafe { &*ptr }
-    }
-}
-
+/// Content associated with the event before deserializing
+///
+/// Before semantic meaning of event is processed, it's content is just a bunch
+/// of bytes.
 #[derive(Clone, Debug)]
 #[cfg_attr(feature = "bincode", derive(::bincode::Encode, ::bincode::Decode))]
-pub struct EventContent(Vec<u8>);
+pub struct EventContent(
+    /// We never modify the content, while it is hard to avoid ever cloning it,
+    /// so let's make cloning cheap
+    Arc<[u8]>,
+);
 
 impl EventContent {
+    pub fn new(v: Vec<u8>) -> Self {
+        Self(v.into())
+    }
+
     pub fn len(&self) -> usize {
         self.0.len()
     }
@@ -167,15 +170,30 @@ impl EventContent {
     }
 }
 
+impl From<Arc<[u8]>> for EventContent {
+    fn from(value: Arc<[u8]>) -> Self {
+        EventContent(value)
+    }
+}
+
 impl From<Vec<u8>> for EventContent {
     fn from(value: Vec<u8>) -> Self {
-        EventContent(value)
+        EventContent(value.into())
     }
 }
 
 impl AsRef<[u8]> for EventContent {
     fn as_ref(&self) -> &[u8] {
         &self.0
+    }
+}
+
+impl Borrow<EventContentUnsized> for EventContent {
+    #[allow(clippy::needless_lifetimes)]
+    fn borrow<'s>(&'s self) -> &'s EventContentUnsized {
+        // Safety: [`EventContentUnsized`] is a `repr(transparent)`
+        let ptr = &*self.0 as *const [u8] as *const EventContentUnsized;
+        unsafe { &*ptr }
     }
 }
 
@@ -220,6 +238,7 @@ impl EventKind {
     pub const SOCIAL_LIKE: Self = EventKind::from_u16(0x21);
     pub const SOCIAL_REPOST: Self = EventKind::from_u16(0x22);
     pub const SOCIAL_COMMENT: Self = EventKind::from_u16(0x23);
+    pub const SOCIAL_PROFILE_UPDATE: Self = EventKind::from_u16(0x24);
 
     pub const fn from_u16(value: u16) -> Self {
         Self(value.to_be_bytes())

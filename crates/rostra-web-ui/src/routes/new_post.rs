@@ -1,13 +1,12 @@
 use axum::extract::State;
 use axum::response::IntoResponse;
 use axum::Form;
-use maud::{html, Markup};
+use maud::{html, Markup, PreEscaped};
 use serde::Deserialize;
 
 use super::super::error::RequestResult;
 use super::super::SharedState;
 use super::Maud;
-use crate::fragment::post_overview;
 use crate::UiState;
 
 #[derive(Deserialize)]
@@ -25,25 +24,45 @@ pub async fn new_post(
         .client_ref()?
         .post(form.content)
         .await?;
-    Ok(Maud(state.new_post_form(html! {
+
+    let form = state.new_post_form(html! {
         div {
             p { "Posted!" }
         }
-    })))
+    });
+    Ok(Maud(html! {
+
+        (form)
+
+        // clean up the preview
+        div ."o-mainBarTimeline__item -preview -empty"
+            hx-swap-oob="outerHTML: .o-mainBarTimeline__item.-preview"
+        { }
+
+    }))
 }
 
 pub async fn new_post_preview(
     state: State<SharedState>,
     Form(form): Form<Input>,
 ) -> RequestResult<impl IntoResponse> {
-    let self_id = state.client().await?.client_ref()?.rostra_id();
+    let client = state.client().await?;
+    let self_id = client.client_ref()?.rostra_id();
     Ok(Maud(html! {
         @if !form.content.is_empty() {
-            div ."o-mainBarTimeline__item o-mainBarTimeline__preview" {
-                (post_overview(&self_id.to_string(), &form.content))
+            div ."o-mainBarTimeline__item -preview" {
+                (state.post_overview(&client.client_ref()?, self_id, &form.content).await?)
+
+
+                script {
+
+                (PreEscaped(r#"
+                    MathJax.typesetPromise();
+                "#))
+                }
             }
-        } else {
-            div ."o-mainBarTimeline__preview" { }
+        } @else {
+            div ."o-mainBarTimeline__item -preview -empty" { }
         }
     }))
 }
@@ -66,13 +85,29 @@ impl UiState {
                     hx-post="/ui/post/preview"
                     hx-include="closest form"
                     hx-trigger="input changed delay:.2s"
-                    hx-target=".o-mainBarTimeline__preview"
+                    hx-target=".o-mainBarTimeline__item.-preview"
                     hx-swap="outerHTML"
+                    hx-preserve="false"
+                    autofocus
                     {}
                 div ."m-newPostForm__footer" {
-                    a href="https://www.djot.net/playground/" target="_blank" { "Formatting" }
+                    a href="https://htmlpreview.github.io/?https://github.com/jgm/djot/blob/master/doc/syntax.html" target="_blank" { "Formatting" }
                     button ".m-newPostForm__submit" type="submit" { "Post" }
                 }
+            }
+            script {
+                (PreEscaped(r#"
+                    (function() {
+                        const form = document.querySelector('.m-newPostForm');
+                        const input = document.querySelector('.m-newPostForm__content');
+
+                        input.addEventListener('keydown', (e) => {
+                            if (e.ctrlKey && e.key === 'Enter') {
+                                htmx.trigger(form, 'submit');
+                            }
+                        });
+                    }())
+                "#))
             }
         }
     }

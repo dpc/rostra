@@ -12,7 +12,7 @@ use redb_bincode::{ReadTransaction, ReadableTable, WriteTransaction};
 use rostra_core::event::{
     content, EventContent, EventKind, PersonaId, VerifiedEvent, VerifiedEventContent,
 };
-use rostra_core::id::RostraId;
+use rostra_core::id::{RostraId, ToShort as _};
 use rostra_core::ShortEventId;
 use rostra_util_error::{BoxedError, FmtCompact as _};
 use snafu::{Location, ResultExt as _, Snafu};
@@ -241,9 +241,9 @@ impl Database {
             Ok(
                 Database::get_event_content_tx(event_id, &events_content_table)?.and_then(
                     |content_state| match content_state {
-                        crate::event::ContentStateRef::Present(b) => Some(b.into_owned()),
-                        crate::event::ContentStateRef::Deleted { .. }
-                        | crate::event::ContentStateRef::Pruned => None,
+                        crate::event::EventContentState::Present(b) => Some(b.into_owned()),
+                        crate::event::EventContentState::Deleted { .. }
+                        | crate::event::EventContentState::Pruned => None,
                     },
                 ),
             )
@@ -403,18 +403,19 @@ impl Database {
         tx: &WriteTransactionCtx,
     ) -> DbResult<()> {
         let author = event_content.event.author;
-        let updated = match event_content.event.kind {
+        #[allow(clippy::single_match)]
+        match event_content.event.kind {
             EventKind::FOLLOW | EventKind::UNFOLLOW => {
                 let mut ids_followees_t = tx.open_table(&crate::ids_followees::TABLE)?;
                 let mut ids_followers_t = tx.open_table(&crate::ids_followers::TABLE)?;
                 let mut id_unfollowed_t = tx.open_table(&crate::ids_unfollowed::TABLE)?;
 
-                match event_content.event.kind {
+                let updated = match event_content.event.kind {
                     EventKind::FOLLOW => match event_content.content.decode::<content::Follow>() {
-                        Ok(follow_content) => Database::insert_follow_tx(
+                        Ok(content) => Database::insert_follow_tx(
                             author,
                             event_content.event.timestamp.into(),
-                            follow_content,
+                            content,
                             &mut ids_followees_t,
                             &mut ids_followers_t,
                             &mut id_unfollowed_t,
@@ -426,10 +427,10 @@ impl Database {
                     },
                     EventKind::UNFOLLOW => {
                         match event_content.content.decode::<content::Unfollow>() {
-                            Ok(unfollow_content) => Database::insert_unfollow_tx(
+                            Ok(content) => Database::insert_unfollow_tx(
                                 author,
                                 event_content.event.timestamp.into(),
-                                unfollow_content,
+                                content,
                                 &mut ids_followees_t,
                                 &mut ids_followers_t,
                                 &mut id_unfollowed_t,
@@ -441,17 +442,44 @@ impl Database {
                         }
                     }
                     _ => unreachable!(),
+                };
+
+                if updated && author == self.self_id {
+                    let sender = self.self_followee_list_updated.clone();
+                    tx.on_commit(move || {
+                        let _ = sender.send(());
+                    });
                 }
             }
-            _ => false,
+            _ => match event_content.event.kind {
+                EventKind::SOCIAL_PROFILE_UPDATE => {
+                    match event_content
+                        .content
+                        .decode::<content::SocialProfileUpdate>()
+                    {
+                        Ok(content) => {
+                            Database::insert_latest_value_tx(
+                                event_content.event.timestamp.into(),
+                                &author,
+                                IdSocialProfileRecord {
+                                    event_id: event_content.event_id.to_short(),
+                                    display_name: content.display_name,
+                                    bio: content.bio,
+                                    img_mime: content.img_mime,
+                                    img: content.img,
+                                },
+                                &mut tx.open_table(&crate::ids_social_profile::TABLE)?,
+                            )?;
+                        }
+                        Err(err) => {
+                            debug!(target: LOG_TARGET, err = %err.fmt_compact(), "Ignoring malformed SocialProfileUpdate payload");
+                        }
+                    }
+                }
+                _ => {}
+            },
         };
 
-        if updated && author == self.self_id {
-            let sender = self.self_followee_list_updated.clone();
-            tx.on_commit(move || {
-                let _ = sender.send(());
-            });
-        }
         Ok(())
     }
 
@@ -561,6 +589,17 @@ impl Database {
         })
         .await
     }
+
+    pub async fn get_social_profile(&self, id: RostraId) -> Option<IdSocialProfileRecord> {
+        self.read_with(|tx| {
+            let events_heads = tx.open_table(&ids_social_profile::TABLE)?;
+
+            Self::get_social_profile_tx(id, &events_heads)
+        })
+        .await
+        .expect("Database panic")
+    }
+
     pub async fn read_followees(
         &self,
         id: RostraId,

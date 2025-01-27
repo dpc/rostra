@@ -467,7 +467,7 @@ impl Connection {
                 let resp = resp.to_owned();
                 Box::pin(async move {
                     if resp.0 {
-                        Ok(Some(EventContent::from(
+                        Ok(Some(EventContent::new(
                             Connection::read_bao_content(recv, len, hash).await?,
                         )))
                     } else {

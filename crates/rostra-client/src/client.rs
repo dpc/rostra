@@ -201,6 +201,7 @@ impl Client {
     }
 }
 
+#[bon::bon]
 impl Client {
     pub fn rostra_id(&self) -> RostraId {
         self.id
@@ -432,7 +433,12 @@ impl Client {
             .await
     }
 
-    pub async fn publish_event<C>(&self, content: C) -> PostResult<()>
+    #[builder]
+    pub async fn publish_event<C>(
+        &self,
+        #[builder(start_fn)] content: C,
+        replace: Option<ShortEventId>,
+    ) -> PostResult<()>
     where
         C: content::Content,
     {
@@ -441,7 +447,11 @@ impl Client {
             .expect("TODO: Implement fallback for lack of storage");
 
         let current_head = storage.get_self_current_head().await;
-        let random_event = storage.get_self_random_eventid().await;
+        let aux_event = if replace.is_some() {
+            None
+        } else {
+            storage.get_self_random_eventid().await
+        };
 
         let content = EventContent::from(
             bincode::encode_to_vec(&content, STD_BINCODE_CONFIG)
@@ -454,7 +464,8 @@ impl Client {
             .kind(C::KIND)
             .content(&content)
             .maybe_parent_prev(current_head)
-            .maybe_parent_aux(random_event)
+            .maybe_parent_aux(aux_event)
+            .maybe_delete(replace)
             .build()
             .signed_by(self.id_secret);
 
@@ -472,16 +483,38 @@ impl Client {
 
     pub async fn post(&self, body: String) -> PostResult<()> {
         self.publish_event(content::SocialPost {
-            persona: PersonaId(0),
             djot_content: body,
+            persona: PersonaId(0),
         })
+        .call()
         .await
     }
+    pub async fn post_profile_update(&self, display_name: String, bio: String) -> PostResult<()> {
+        let existing = if let Ok(storage) = self.storage() {
+            storage
+                .get_social_profile(self.rostra_id())
+                .await
+                .map(|r| r.event_id)
+        } else {
+            None
+        };
+        self.publish_event(content::SocialProfileUpdate {
+            display_name,
+            bio,
+            img_mime: "".into(),
+            img: vec![],
+        })
+        .maybe_replace(existing)
+        .call()
+        .await
+    }
+
     pub async fn follow(&self, followee: RostraId) -> PostResult<()> {
         self.publish_event(content::Follow {
             followee,
             persona: PersonaId(0),
         })
+        .call()
         .await
     }
 

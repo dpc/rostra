@@ -1,12 +1,12 @@
 use std::borrow::Cow;
 
 use bincode::{Decode, Encode};
-use rostra_core::event::{EventContentData, SignedEvent};
+use rostra_core::event::{EventContentUnsized, SignedEvent};
 use rostra_core::ShortEventId;
 
 #[derive(Debug, Encode, Decode, Clone)]
-pub enum ContentStateRef<'a> {
-    Present(Cow<'a, EventContentData>),
+pub enum EventContentState<'a> {
+    Present(Cow<'a, EventContentUnsized>),
     // Deleted as requested by the author
     Deleted {
         // Notably: we only store one ShortEventId somewhat opportunistically
@@ -17,7 +17,7 @@ pub enum ContentStateRef<'a> {
     Pruned,
 }
 
-pub type ContentState = ContentStateRef<'static>;
+pub type EventContentStateOwned = EventContentState<'static>;
 
 #[derive(Debug, Encode, Decode, Clone)]
 pub struct EventRecord {

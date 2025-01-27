@@ -1,4 +1,4 @@
-use maud::{html, Markup, PreEscaped, DOCTYPE};
+use maud::{html, Markup, DOCTYPE};
 
 use crate::error::RequestResult;
 use crate::UiState;
@@ -53,47 +53,5 @@ pub(crate) fn footer() -> Markup {
         // script src="https://unpkg.com/htmx.org@1.9.12/dist/ext/response-targets.js" {};
         // script type="module" src="/assets/script.js" {};
         // script type="module" src="/assets/script-htmx-send-error.js" {};
-    }
-}
-
-pub fn post_overview(username: &str, content: &str) -> Markup {
-    let content_html =
-        jotdown::html::render_to_string(jotdown::Parser::new(content).map(|e| match e {
-            jotdown::Event::Start(jotdown::Container::RawBlock { format }, attrs)
-                if format == "html" =>
-            {
-                jotdown::Event::Start(jotdown::Container::CodeBlock { language: format }, attrs)
-            }
-            jotdown::Event::End(jotdown::Container::RawBlock { format }) if format == "html" => {
-                jotdown::Event::End(jotdown::Container::CodeBlock { language: format })
-            }
-            e => e,
-        }));
-    html! {
-        article ."m-postOverview" {
-            div ."m-postOverview__main" {
-                img ."m-postOverview__userImage"
-                    src="https://avatars.githubusercontent.com/u/9209?v=4"
-                    width="32pt"
-                    height="32pt"
-                    { }
-
-                div ."m-postOverview__contentSide" {
-                    header .".m-postOverview__header" {
-                        span ."m-postOverview__username" { (username) }
-                    }
-
-                    div ."m-postOverview__content" {
-                        p {
-                            (PreEscaped(content_html))
-                        }
-                    }
-                }
-            }
-
-            div ."m-postOverview__buttonBar"{
-                // "Buttons here"
-            }
-        }
     }
 }

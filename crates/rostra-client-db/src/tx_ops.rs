@@ -1,31 +1,31 @@
-use std::borrow::{Borrow as _, Cow};
+use std::borrow::Cow;
 use std::collections::HashSet;
 
-use event::ContentStateRef;
 use ids::{IdsFollowersRecord, IdsUnfollowedRecord};
 use rand::{thread_rng, Rng as _};
 use redb_bincode::{ReadableTable, Table};
 use rostra_core::event::{content, SignedEvent, VerifiedEvent, VerifiedEventContent};
 use rostra_core::id::{RostraId, ToShort as _};
 use rostra_core::{ShortEventId, Timestamp};
-use tables::event::EventsMissingRecord;
+use tables::event::{EventContentState, EventsMissingRecord};
 use tables::ids::IdsFolloweesRecord;
-use tables::{ContentState, EventRecord};
+use tables::EventRecord;
 use tracing::{debug, info};
 
-use super::id_self::IdSelfRecord;
+use super::id_self::IdSelfAccountRecord;
 use super::{
-    db_version, event, events, events_by_time, events_content, events_heads, events_missing,
-    events_self, get_first_in_range, get_last_in_range, ids, ids_followees, ids_followers,
-    ids_personas, ids_self, ids_unfollowed, tables, Database, DbError, DbResult,
-    EventsHeadsTableRecord, InsertEventOutcome, WriteTransactionCtx,
+    db_version, events, events_by_time, events_content, events_heads, events_missing, events_self,
+    get_first_in_range, get_last_in_range, ids, ids_followees, ids_followers, ids_personas,
+    ids_self, ids_unfollowed, tables, Database, DbError, DbResult, EventsHeadsTableRecord,
+    InsertEventOutcome, WriteTransactionCtx,
 };
-use crate::{DbVersionTooHighSnafu, LOG_TARGET};
+use crate::{ids_social_profile, DbVersionTooHighSnafu, IdSocialProfileRecord, Latest, LOG_TARGET};
 
 impl Database {
     pub(crate) fn init_tables_tx(tx: &WriteTransactionCtx) -> DbResult<()> {
         tx.open_table(&db_version::TABLE)?;
         tx.open_table(&ids_self::TABLE)?;
+        tx.open_table(&ids_social_profile::TABLE)?;
         tx.open_table(&ids_followers::TABLE)?;
         tx.open_table(&ids_followees::TABLE)?;
         tx.open_table(&ids_unfollowed::TABLE)?;
@@ -125,7 +125,7 @@ impl Database {
                 true,
                 if let Some(deleted_by) = prev_missing.deleted_by {
                     events_content_table
-                        .insert(&event_id, &ContentState::Deleted { deleted_by })?;
+                        .insert(&event_id, &EventContentState::Deleted { deleted_by })?;
                     true
                 } else {
                     false
@@ -159,7 +159,7 @@ impl Database {
                     deleted_parent = Some(parent_id);
                     events_content_table.insert(
                         &parent_id,
-                        &ContentState::Deleted {
+                        &EventContentState::Deleted {
                             deleted_by: event_id,
                         },
                     )?;
@@ -209,19 +209,20 @@ impl Database {
         let event_id = event_id.to_short();
         if let Some(existing_content) = events_content_table.get(&event_id)?.map(|g| g.value()) {
             match existing_content {
-                ContentState::Deleted { .. } => {
+                EventContentState::Deleted { .. } => {
                     return Ok(false);
                 }
-                ContentState::Present(_) => {
+                EventContentState::Present(_) => {
                     return Ok(false);
                 }
-                ContentState::Pruned => {}
+                EventContentState::Pruned => {}
             }
         }
 
-        let borrow = content.borrow();
-        let borrowed: Cow<'_, rostra_core::event::EventContentData> = Cow::Borrowed(borrow);
-        events_content_table.insert(&event_id, &ContentStateRef::Present(borrowed))?;
+        events_content_table.insert(
+            &event_id,
+            &EventContentState::Present(Cow::Owned(content.clone())),
+        )?;
 
         Ok(true)
     }
@@ -233,17 +234,17 @@ impl Database {
         let event_id = event_id.into();
         if let Some(existing_content) = events_content_table.get(&event_id)?.map(|g| g.value()) {
             match existing_content {
-                ContentState::Deleted { .. } => {
+                EventContentState::Deleted { .. } => {
                     return Ok(false);
                 }
-                ContentState::Pruned => {
+                EventContentState::Pruned => {
                     return Ok(true);
                 }
-                ContentState::Present(_) => {}
+                EventContentState::Present(_) => {}
             }
         }
 
-        events_content_table.insert(&event_id, &ContentState::Pruned)?;
+        events_content_table.insert(&event_id, &EventContentState::Pruned)?;
 
         Ok(true)
     }
@@ -285,7 +286,7 @@ impl Database {
     pub fn get_event_content_tx(
         event: impl Into<ShortEventId>,
         events_content_table: &impl events_content::ReadableTable,
-    ) -> DbResult<Option<ContentState>> {
+    ) -> DbResult<Option<EventContentState>> {
         Ok(events_content_table.get(&event.into())?.map(|r| r.value()))
     }
     pub fn has_event_content_tx(
@@ -358,17 +359,44 @@ impl Database {
         Ok(true)
     }
 
+    pub(crate) fn insert_latest_value_tx<K, V>(
+        timestamp: Timestamp,
+        key: &K,
+        value: V,
+        table: &mut redb_bincode::Table<'_, K, Latest<V>>,
+    ) -> DbResult<bool>
+    where
+        K: bincode::Encode + bincode::Decode,
+        V: bincode::Encode + bincode::Decode,
+    {
+        if let Some(existing_value) = table.get(key)?.map(|v| v.value()) {
+            if timestamp <= existing_value.ts {
+                return Ok(false);
+            }
+        }
+
+        table.insert(
+            key,
+            &Latest {
+                ts: timestamp,
+                inner: value,
+            },
+        )?;
+
+        Ok(true)
+    }
+
     pub(crate) fn read_self_id_tx(
         id_self_table: &impl ids_self::ReadableTable,
-    ) -> Result<Option<IdSelfRecord>, DbError> {
+    ) -> Result<Option<IdSelfAccountRecord>, DbError> {
         Ok(id_self_table.get(&())?.map(|v| v.value()))
     }
 
     pub(crate) fn write_self_id_tx(
         self_id: RostraId,
-        id_self_table: &mut Table<(), IdSelfRecord>,
-    ) -> DbResult<IdSelfRecord> {
-        let id_self_record = IdSelfRecord {
+        id_self_table: &mut Table<(), IdSelfAccountRecord>,
+    ) -> DbResult<IdSelfAccountRecord> {
+        let id_self_record = IdSelfAccountRecord {
             rostra_id: self_id,
             iroh_secret: thread_rng().gen(),
         };
@@ -395,6 +423,13 @@ impl Database {
             .range((self_id, ShortEventId::ZERO)..=(self_id, ShortEventId::MAX))?
             .map(|r| r.map(|(k, _)| k.value().1))
             .collect::<Result<HashSet<_>, _>>()?)
+    }
+
+    pub(crate) fn get_social_profile_tx(
+        id: RostraId,
+        table: &impl ids_social_profile::ReadableTable,
+    ) -> DbResult<Option<IdSocialProfileRecord>> {
+        Ok(table.get(&id)?.map(|v| v.value().inner))
     }
 
     pub(crate) fn get_random_self_event(

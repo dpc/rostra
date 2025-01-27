@@ -1,6 +1,7 @@
+use bincode::{Decode, Encode};
+pub use event::EventRecord;
 use event::EventsMissingRecord;
-pub use event::{ContentState, EventRecord};
-use id_self::IdSelfRecord;
+use id_self::IdSelfAccountRecord;
 pub use ids::IdsFolloweesRecord;
 use ids::{IdsFollowersRecord, IdsPersonaRecord, IdsUnfollowedRecord};
 use rostra_core::event::PersonaId;
@@ -13,7 +14,7 @@ pub(crate) mod id_self;
 pub(crate) mod ids;
 
 macro_rules! def_table {
-    ($name:ident : $k:tt => $v:tt) => {
+    ($name:ident : $k:ty => $v:ty) => {
         #[allow(unused)]
         pub mod $name {
             use super::*;
@@ -29,14 +30,30 @@ macro_rules! def_table {
 }
 
 def_table!(db_version: () => u64);
-def_table!(ids_self: () => IdSelfRecord);
+def_table!(ids_self: () => IdSelfAccountRecord);
+def_table!(ids_social_profile: RostraId => Latest<IdSocialProfileRecord>);
 def_table!(ids_followees: (RostraId, RostraId) => IdsFolloweesRecord);
 def_table!(ids_followers: (RostraId, RostraId) => IdsFollowersRecord);
 def_table!(ids_unfollowed: (RostraId, RostraId) => IdsUnfollowedRecord);
 def_table!(ids_personas: (RostraId, PersonaId) => IdsPersonaRecord);
 def_table!(events_by_time: (Timestamp, ShortEventId) => ());
 def_table!(events: ShortEventId => EventRecord);
-def_table!(events_content: ShortEventId => ContentState);
+def_table!(events_content: ShortEventId => event::EventContentStateOwned);
 def_table!(events_self: ShortEventId => ());
 def_table!(events_missing: (RostraId, ShortEventId) => EventsMissingRecord);
 def_table!(events_heads: (RostraId, ShortEventId) => EventsHeadsTableRecord);
+
+#[derive(Debug, Encode, Decode, Clone)]
+pub struct Latest<T> {
+    pub ts: Timestamp,
+    pub inner: T,
+}
+
+#[derive(Debug, Encode, Decode, Clone)]
+pub struct IdSocialProfileRecord {
+    pub event_id: ShortEventId,
+    pub display_name: String,
+    pub bio: String,
+    pub img_mime: String,
+    pub img: Vec<u8>,
+}

@@ -1,3 +1,5 @@
+use std::sync::Arc;
+
 use super::{EventContent, EventKind, EventSignature};
 
 impl serde::Serialize for EventSignature {
@@ -60,13 +62,14 @@ impl<'de> serde::de::Deserialize<'de> for EventContent {
     {
         if de.is_human_readable() {
             let hex_str = String::deserialize(de)?;
-            let bytes = data_encoding::HEXLOWER
+            let bytes: Arc<[u8]> = data_encoding::HEXLOWER
                 .decode(hex_str.as_bytes())
-                .map_err(serde::de::Error::custom)?;
+                .map_err(serde::de::Error::custom)?
+                .into();
 
             Ok(EventContent(bytes))
         } else {
-            let bytes = Vec::<u8>::deserialize(de)?;
+            let bytes = Vec::<u8>::deserialize(de)?.into();
             Ok(EventContent(bytes))
         }
     }
