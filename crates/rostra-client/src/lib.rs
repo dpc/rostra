@@ -1,6 +1,7 @@
 pub mod error;
 mod followee_checker;
 mod followee_head_checker;
+mod head_update_broadcaster;
 mod id_publisher;
 mod request_handler;
 

@@ -201,12 +201,10 @@ impl Database {
 
     #[allow(clippy::needless_lifetimes)]
     pub fn insert_event_content_tx<'t, 'e>(
-        VerifiedEventContent {
-            event_id, content, ..
-        }: &'e VerifiedEventContent,
+        VerifiedEventContent { event, content, .. }: &'e VerifiedEventContent,
         events_content_table: &'t mut events_content::Table,
     ) -> DbResult<bool> {
-        let event_id = event_id.to_short();
+        let event_id = event.event_id.to_short();
         if let Some(existing_content) = events_content_table.get(&event_id)?.map(|g| g.value()) {
             match existing_content {
                 EventContentState::Deleted { .. } => {

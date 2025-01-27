@@ -1,8 +1,8 @@
-use std::collections::BinaryHeap;
+use std::collections::{BinaryHeap, HashMap};
 use std::sync::Arc;
 use std::time::Duration;
 
-use rostra_client_db::{Database, InsertEventOutcome};
+use rostra_client_db::{Database, IdsFolloweesRecord, InsertEventOutcome};
 use rostra_core::event::{VerifiedEvent, VerifiedEventContent};
 use rostra_core::id::RostraId;
 use rostra_core::ShortEventId;
@@ -19,7 +19,7 @@ const LOG_TARGET: &str = "rostra::head_checker";
 pub struct FolloweeHeadChecker {
     client: crate::client::ClientHandle,
     db: Arc<Database>,
-    followee_updated: watch::Receiver<()>,
+    followee_updated: watch::Receiver<HashMap<RostraId, IdsFolloweesRecord>>,
     check_for_updates_rx: watch::Receiver<()>,
 }
 
@@ -33,7 +33,7 @@ impl FolloweeHeadChecker {
                 .expect("Must start followee head checker only on a client with storage"),
 
             followee_updated: client
-                .self_followees_list_subscribe()
+                .self_followees_subscribe()
                 .expect("Can't start folowee checker without storage"),
             check_for_updates_rx: client.check_for_updates_tx_subscribe(),
         }
@@ -146,7 +146,7 @@ impl FolloweeHeadChecker {
             let Some(event) = event else {
                 continue;
             };
-            let event = VerifiedEvent::verify_received(id, event_id, event.event, event.sig)
+            let event = VerifiedEvent::verify_queried(id, event_id, event.event, event.sig)
                 .whatever_context("Invalid event received")?;
 
             let (insert_outcome, process_state) = storage.process_event(&event).await;

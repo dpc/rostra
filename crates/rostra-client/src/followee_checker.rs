@@ -1,5 +1,8 @@
+use std::collections::HashMap;
 use std::time::Duration;
 
+use rostra_client_db::IdsFolloweesRecord;
+use rostra_core::id::RostraId;
 use tracing::{debug, info, instrument};
 
 use crate::client::Client;
@@ -7,7 +10,7 @@ const LOG_TARGET: &str = "rostra::publisher";
 
 pub struct FolloweeChecker {
     client: crate::client::ClientHandle,
-    self_followees_updated: tokio::sync::watch::Receiver<()>,
+    self_followees_updated: tokio::sync::watch::Receiver<HashMap<RostraId, IdsFolloweesRecord>>,
 }
 
 impl FolloweeChecker {
@@ -16,7 +19,7 @@ impl FolloweeChecker {
         Self {
             client: client.handle(),
             self_followees_updated: client
-                .self_followees_list_subscribe()
+                .self_followees_subscribe()
                 .expect("Can't start folowee checker without storage"),
         }
     }

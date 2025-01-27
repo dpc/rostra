@@ -7,7 +7,7 @@ use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::{io, ops, result};
 
-use ids::IdsFollowersRecord;
+pub use ids::{IdsFolloweesRecord, IdsFollowersRecord};
 use redb_bincode::{ReadTransaction, ReadableTable, WriteTransaction};
 use rostra_core::event::{
     content, EventContent, EventKind, PersonaId, VerifiedEvent, VerifiedEventContent,
@@ -192,10 +192,16 @@ impl Database {
 
     const MAX_CONTENT_LEN: u32 = 1_000_000u32;
 
-    pub fn self_followees_list_subscribe(
+    pub fn self_followees_subscribe(
         &self,
     ) -> watch::Receiver<HashMap<RostraId, IdsFolloweesRecord>> {
         self.self_followees_updated.subscribe()
+    }
+
+    pub fn self_followers_subscribe(
+        &self,
+    ) -> watch::Receiver<HashMap<RostraId, IdsFollowersRecord>> {
+        self.self_followers_updated.subscribe()
     }
 
     pub fn self_head_subscribe(&self) -> watch::Receiver<Option<ShortEventId>> {
@@ -291,11 +297,10 @@ impl Database {
 
     pub async fn process_event_with_content(
         &self,
-        event: &VerifiedEvent,
         content: &VerifiedEventContent,
     ) -> (InsertEventOutcome, ProcessEventState) {
         self.write_with(|tx| {
-            let res = self.process_event_tx(event, tx)?;
+            let res = self.process_event_tx(&content.event, tx)?;
             self.process_event_content_tx(content, tx)?;
             Ok(res)
         })
@@ -387,15 +392,16 @@ impl Database {
         let mut events_content_table = tx.open_table(&events_content::TABLE)?;
 
         debug_assert!(Database::has_event_tx(
-            event_content.event_id,
+            event_content.event.event_id,
             &events_table
         )?);
 
-        let content_added = if u32::from(event_content.event.content_len) < Self::MAX_CONTENT_LEN {
-            Database::insert_event_content_tx(event_content, &mut events_content_table)?
-        } else {
-            false
-        };
+        let content_added =
+            if u32::from(event_content.event.event.content_len) < Self::MAX_CONTENT_LEN {
+                Database::insert_event_content_tx(event_content, &mut events_content_table)?
+            } else {
+                false
+            };
 
         if content_added {
             self.process_event_content_inserted_tx(event_content, tx)?;
@@ -410,22 +416,22 @@ impl Database {
         event_content: &VerifiedEventContent,
         tx: &WriteTransactionCtx,
     ) -> DbResult<()> {
-        let author = event_content.event.author;
+        let author = event_content.event.event.author;
         #[allow(clippy::single_match)]
-        match event_content.event.kind {
+        match event_content.event.event.kind {
             EventKind::FOLLOW | EventKind::UNFOLLOW => {
                 let mut ids_followees_t = tx.open_table(&crate::ids_followees::TABLE)?;
                 let mut ids_followers_t = tx.open_table(&crate::ids_followers::TABLE)?;
                 let mut id_unfollowed_t = tx.open_table(&crate::ids_unfollowed::TABLE)?;
 
-                let (followee, updated) = match event_content.event.kind {
+                let (followee, updated) = match event_content.event.event.kind {
                     EventKind::FOLLOW => {
                         match event_content.content.deserialize_cbor::<content::Follow>() {
                             Ok(content) => (
                                 Some(content.followee),
                                 Database::insert_follow_tx(
                                     author,
-                                    event_content.event.timestamp.into(),
+                                    event_content.event.event.timestamp.into(),
                                     content,
                                     &mut ids_followees_t,
                                     &mut ids_followers_t,
@@ -447,7 +453,7 @@ impl Database {
                                 Some(content.followee),
                                 Database::insert_unfollow_tx(
                                     author,
-                                    event_content.event.timestamp.into(),
+                                    event_content.event.event.timestamp.into(),
                                     content,
                                     &mut ids_followees_t,
                                     &mut ids_followers_t,
@@ -484,7 +490,7 @@ impl Database {
                     }
                 }
             }
-            _ => match event_content.event.kind {
+            _ => match event_content.event.event.kind {
                 EventKind::SOCIAL_PROFILE_UPDATE => {
                     match event_content
                         .content
@@ -492,10 +498,10 @@ impl Database {
                     {
                         Ok(content) => {
                             Database::insert_latest_value_tx(
-                                event_content.event.timestamp.into(),
+                                event_content.event.event.timestamp.into(),
                                 &author,
                                 IdSocialProfileRecord {
-                                    event_id: event_content.event_id.to_short(),
+                                    event_id: event_content.event.event_id.to_short(),
                                     display_name: content.display_name,
                                     bio: content.bio,
                                     img_mime: content.img_mime,

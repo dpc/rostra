@@ -23,9 +23,7 @@ pub struct VerifiedEvent {
 
 #[derive(Clone, Debug)]
 pub struct VerifiedEventContent {
-    pub event_id: EventId,
-    pub event: Event,
-    pub sig: EventSignature,
+    pub event: VerifiedEvent,
     pub content: EventContent,
 }
 
@@ -40,7 +38,8 @@ pub enum VerifiedEventError {
 pub type VerifiedEventResult<T> = Result<T, VerifiedEventError>;
 
 impl VerifiedEvent {
-    pub fn verify_received(
+    /// Verify event that was asked for by `(author, event_id)`
+    pub fn verify_queried(
         author: RostraId,
         event_id: impl Into<ShortEventId>,
         event: Event,
@@ -66,35 +65,36 @@ impl VerifiedEvent {
         })
     }
 
+    /// Verify event received event
+    pub fn verify_received_as_is(event: Event, sig: EventSignature) -> VerifiedEventResult<Self> {
+        event
+            .verified_signed_by(sig, event.author)
+            .context(SignatureInvalidSnafu)?;
+
+        Ok(Self {
+            event_id: event.compute_id(),
+            event,
+            sig,
+        })
+    }
+
     pub fn verify_signed(
         author: RostraId,
         SignedEvent { event, sig }: SignedEvent,
     ) -> VerifiedEventResult<Self> {
-        Self::verify_received(author, event.compute_id(), event, sig)
+        Self::verify_queried(author, event.compute_id(), event, sig)
     }
 }
 
 impl VerifiedEventContent {
-    pub fn verify(
-        VerifiedEvent {
-            event_id,
-            event,
-            sig,
-        }: VerifiedEvent,
-        content: EventContent,
-    ) -> VerifiedEventResult<Self> {
-        if content.len() != usize::cast_from(u32::from(event.content_len)) {
+    pub fn verify(event: VerifiedEvent, content: EventContent) -> VerifiedEventResult<Self> {
+        if content.len() != usize::cast_from(u32::from(event.event.content_len)) {
             return ContentMismatchSnafu.fail();
         }
-        if content.compute_content_hash() != event.content_hash {
+        if content.compute_content_hash() != event.event.content_hash {
             return ContentMismatchSnafu.fail();
         }
 
-        Ok(Self {
-            event_id,
-            event,
-            sig,
-            content,
-        })
+        Ok(Self { event, content })
     }
 }

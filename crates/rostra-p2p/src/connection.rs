@@ -183,7 +183,7 @@ define_rpc!(
 
 impl FeedEventResponse {
     pub const RETURN_CODE_ALREADY_HAVE: u8 = 1;
-    pub const RETURN_CODE_ID_MISMATCH: u8 = 2;
+    pub const RETURN_CODE_DOES_NOT_NEED: u8 = 2;
     pub const RETURN_CODE_TOO_LARGE: u8 = 3;
 }
 
@@ -262,6 +262,7 @@ impl Connection {
 
         (extra_data_f)(&mut send).await.context(TrailerSnafu)?;
 
+        Self::read_success_error_code(&mut recv).await?;
         resp
     }
 

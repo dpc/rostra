@@ -1,8 +1,10 @@
+use std::collections::HashMap;
 use std::sync::Arc;
 
 use iroh::endpoint::Incoming;
 use iroh::Endpoint;
-use rostra_client_db::DbError;
+use rostra_client_db::{DbError, IdsFolloweesRecord};
+use rostra_core::event::{EventContent, VerifiedEvent, VerifiedEventContent};
 use rostra_core::id::RostraId;
 use rostra_p2p::connection::{
     Connection, FeedEventRequest, FeedEventResponse, GetEventContentRequest,
@@ -10,8 +12,9 @@ use rostra_p2p::connection::{
     RpcMessage as _, WaitHeadUpdateRequest, WaitHeadUpdateResponse, MAX_REQUEST_SIZE,
 };
 use rostra_p2p::RpcError;
-use rostra_util_error::FmtCompact as _;
-use snafu::{OptionExt as _, ResultExt as _, Snafu};
+use rostra_util_error::{BoxedError, FmtCompact as _};
+use snafu::{Location, OptionExt as _, ResultExt as _, Snafu};
+use tokio::sync::watch;
 use tracing::{debug, info, instrument};
 
 use crate::client::Client;
@@ -23,35 +26,55 @@ const LOG_TARGET: &str = "rostra::req_handler";
 pub enum IncomingConnectionError {
     Connection {
         source: iroh::endpoint::ConnectionError,
+        #[snafu(implicit)]
+        location: Location,
     },
     #[snafu(transparent)]
     Rpc {
         source: RpcError,
+        #[snafu(implicit)]
+        location: Location,
     },
     Decoding {
         source: bincode::error::DecodeError,
+        #[snafu(implicit)]
+        location: Location,
     },
     #[snafu(transparent)]
     Db {
         source: DbError,
+        #[snafu(implicit)]
+        location: Location,
     },
     // TODO: more details
-    InvalidRequest,
+    InvalidRequest {
+        source: BoxedError,
+        #[snafu(implicit)]
+        location: Location,
+    },
     InvalidSignature {
         source: ed25519_dalek::SignatureError,
+        #[snafu(implicit)]
+        location: Location,
     },
     Exiting,
     #[snafu(display("Unknown RPC ID: {id}"))]
     UnknownRpcId {
         id: RpcId,
+        #[snafu(implicit)]
+        location: Location,
     },
     #[snafu(transparent)]
     ClientStorage {
         source: ClientStorageError,
+        #[snafu(implicit)]
+        location: Location,
     },
     #[snafu(transparent)]
     ClientRefError {
         source: ClientRefError,
+        #[snafu(implicit)]
+        location: Location,
     },
 }
 pub type IncomingConnectionResult<T> = std::result::Result<T, IncomingConnectionError>;
@@ -60,15 +83,19 @@ pub struct RequestHandler {
     client: ClientHandle,
     endpoint: Endpoint,
     our_id: RostraId,
+    self_followees_rx: watch::Receiver<HashMap<RostraId, IdsFolloweesRecord>>,
 }
 
 impl RequestHandler {
-    pub fn new(app: &Client, endpoint: Endpoint) -> Arc<Self> {
-        info!(pkarr_id = %app.rostra_id().try_fmt(), "Starting request handler task");
+    pub fn new(client: &Client, endpoint: Endpoint) -> Arc<Self> {
+        info!(pkarr_id = %client.rostra_id().try_fmt(), "Starting request handler task");
         Self {
-            client: app.handle(),
+            client: client.handle(),
             endpoint,
-            our_id: app.rostra_id(),
+            our_id: client.rostra_id(),
+            self_followees_rx: client
+                .self_followees_subscribe()
+                .expect("Can't start folowee checker without storage"),
         }
         .into()
     }
@@ -93,7 +120,10 @@ impl RequestHandler {
         let peer_addr = incoming.remote_address();
         if let Err(err) = self.handle_incoming_try(incoming).await {
             match err {
-                IncomingConnectionError::Connection { source: _ } => { /* normal, ignore */ }
+                // normal, mostly ignore
+                IncomingConnectionError::Connection { source: _, .. } => {
+                    debug!(target: LOG_TARGET, err=%err.fmt_compact(), %peer_addr, "Error handling incoming connection");
+                }
                 _ => {
                     debug!(target: LOG_TARGET, err=%err.fmt_compact(), %peer_addr, "Error handling incoming connection");
                 }
@@ -152,23 +182,28 @@ impl RequestHandler {
         let FeedEventRequest(rostra_core::event::SignedEvent { event, sig }) =
             FeedEventRequest::decode_whole::<MAX_REQUEST_SIZE>(&req_msg).context(DecodingSnafu)?;
 
+        let verified_event = VerifiedEvent::verify_received_as_is(event, sig)
+            .boxed()
+            .context(InvalidRequestSnafu)?;
         let our_id = self.our_id;
 
-        if event.author != our_id {
-            Connection::write_return_code(&mut send, FeedEventResponse::RETURN_CODE_ID_MISMATCH)
+        if event.author == our_id || self.self_followees_rx.borrow().contains_key(&event.author) {
+            // accept
+        } else {
+            Connection::write_return_code(&mut send, FeedEventResponse::RETURN_CODE_DOES_NOT_NEED)
                 .await?;
-            return InvalidRequestSnafu.fail();
+            return Err("Author not needed".into()).context(InvalidRequestSnafu);
         }
         let event_id = event.compute_id();
         event
-            .verified_signed_by(sig, our_id)
+            .verified_signed_by(sig, event.author)
             .context(InvalidSignatureSnafu)?;
 
         {
-            let app = self.client.app_ref_opt().context(ExitingSnafu)?;
+            let client = self.client.app_ref_opt().context(ExitingSnafu)?;
 
-            if app.event_size_limit() < u32::from(event.content_len) {
-                app.store_event_too_large(event_id, event).await?;
+            if client.event_size_limit() < u32::from(event.content_len) {
+                client.store_event_too_large(event_id, event).await?;
                 Connection::write_return_code(
                     &mut send,
                     FeedEventResponse::RETURN_CODE_ALREADY_HAVE,
@@ -176,7 +211,7 @@ impl RequestHandler {
                 .await?;
             }
 
-            if app.does_have_event(event_id).await {
+            if client.does_have_event(event_id).await {
                 Connection::write_return_code(
                     &mut send,
                     FeedEventResponse::RETURN_CODE_ALREADY_HAVE,
@@ -188,14 +223,20 @@ impl RequestHandler {
         Connection::write_success_return_code(&mut send).await?;
         Connection::write_message(&mut send, &FeedEventResponse).await?;
 
-        let decoded =
+        let event_content = EventContent::from(
             Connection::read_bao_content(&mut read, event.content_len.into(), event.content_hash)
-                .await?;
+                .await?,
+        );
 
         {
-            let app = self.client.app_ref_opt().context(ExitingSnafu)?;
+            let client = self.client.app_ref_opt().context(ExitingSnafu)?;
+            let verified_content = VerifiedEventContent::verify(verified_event, event_content)
+                .boxed()
+                .context(InvalidRequestSnafu)?;
 
-            app.store_event(event_id, event, decoded.into()).await?;
+            client
+                .store_event_with_content(event_id, &verified_content)
+                .await?;
         }
 
         Connection::write_success_return_code(&mut send).await?;

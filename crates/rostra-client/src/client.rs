@@ -1,5 +1,7 @@
+use std::collections::HashMap;
 use std::marker::PhantomData;
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
+use std::option::Option;
 use std::path::Path;
 use std::str::FromStr as _;
 use std::sync::{Arc, Weak};
@@ -10,9 +12,9 @@ use backon::Retryable as _;
 use iroh::NodeAddr;
 use itertools::Itertools as _;
 use pkarr::PkarrClient;
-use rostra_client_db::{Database, DbResult};
+use rostra_client_db::{Database, DbResult, IdsFolloweesRecord, IdsFollowersRecord};
 use rostra_core::event::{
-    content, Event, EventContent, EventKind, PersonaId, SignedEvent, VerifiedEvent,
+    content, Event, EventKind, PersonaId, SignedEvent, VerifiedEvent, VerifiedEventContent,
 };
 use rostra_core::id::{RostraId, RostraIdSecretKey, ToShort as _};
 use rostra_core::ShortEventId;
@@ -24,7 +26,7 @@ use rostra_util_fmt::AsFmtOption as _;
 use snafu::{OptionExt as _, ResultExt as _, Snafu};
 use tokio::sync::watch;
 use tokio::time::Instant;
-use tracing::{debug, info};
+use tracing::debug;
 
 use super::{get_rrecord_typed, take_first_ok_some, RRECORD_HEAD_KEY, RRECORD_P2P_KEY};
 use crate::error::{
@@ -194,6 +196,7 @@ impl Client {
         if is_mode_full {
             client.start_followee_checker();
             client.start_followee_head_checker();
+            client.start_head_update_broadcaster();
         }
 
         Ok(client)
@@ -261,6 +264,9 @@ impl Client {
     }
     pub(crate) fn start_followee_head_checker(&self) {
         tokio::spawn(crate::followee_head_checker::FolloweeHeadChecker::new(self).run());
+    }
+    pub(crate) fn start_head_update_broadcaster(&self) {
+        tokio::spawn(crate::head_update_broadcaster::HeadUpdateBroadcaster::new(self).run());
     }
 
     pub(crate) async fn iroh_address(&self) -> IrohResult<NodeAddr> {
@@ -389,14 +395,12 @@ impl Client {
         false
     }
 
-    pub async fn store_event(
+    pub async fn store_event_with_content(
         &self,
         _event_id: impl Into<ShortEventId>,
-        event: Event,
-        content: EventContent,
-    ) -> DbResult<()> {
-        // TODO: store
-        info!(target: LOG_TARGET, ?event, ?content, "Pretending to store");
+        content: &VerifiedEventContent,
+    ) -> ClientStorageResult<()> {
+        self.storage()?.process_event_with_content(content).await;
         Ok(())
     }
 
@@ -470,7 +474,7 @@ impl Client {
             rostra_core::event::VerifiedEventContent::verify(verified_event.clone(), content)
                 .expect("Can't fail to verify self-created content");
         let _ = storage
-            .process_event_with_content(&verified_event, &verified_event_content)
+            .process_event_with_content(&verified_event_content)
             .await;
 
         Ok(())
@@ -596,9 +600,18 @@ impl Client {
         Ok(())
     }
 
-    pub fn self_followees_list_subscribe(&self) -> Option<watch::Receiver<()>> {
+    pub fn self_followees_subscribe(
+        &self,
+    ) -> Option<watch::Receiver<HashMap<RostraId, IdsFolloweesRecord>>> {
         self.db
             .as_ref()
-            .map(|storage| storage.self_followees_list_subscribe())
+            .map(|storage| storage.self_followees_subscribe())
+    }
+    pub fn self_followers_subscribe(
+        &self,
+    ) -> Option<watch::Receiver<HashMap<RostraId, IdsFollowersRecord>>> {
+        self.db
+            .as_ref()
+            .map(|storage| storage.self_followers_subscribe())
     }
 }
