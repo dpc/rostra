@@ -1,5 +1,5 @@
 use std::borrow::Cow;
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 
 use ids::{IdsFollowersRecord, IdsUnfollowedRecord};
 use rand::{thread_rng, Rng as _};
@@ -69,21 +69,21 @@ impl Database {
     pub fn read_followees_tx(
         id: RostraId,
         ids_followees_table: &impl ids_followees::ReadableTable,
-    ) -> DbResult<Vec<(RostraId, IdsFolloweesRecord)>> {
+    ) -> DbResult<HashMap<RostraId, IdsFolloweesRecord>> {
         Ok(ids_followees_table
             .range((id, RostraId::ZERO)..=(id, RostraId::MAX))?
             .map(|res| res.map(|(k, v)| (k.value().1, v.value())))
-            .collect::<Result<Vec<_>, _>>()?)
+            .collect::<Result<HashMap<_, _>, _>>()?)
     }
 
     pub fn read_followers_tx(
         id: RostraId,
         ids_followers_table: &impl ids_followers::ReadableTable,
-    ) -> DbResult<Vec<(RostraId, IdsFollowersRecord)>> {
+    ) -> DbResult<HashMap<RostraId, IdsFollowersRecord>> {
         Ok(ids_followers_table
             .range((id, RostraId::ZERO)..=(id, RostraId::MAX))?
             .map(|res| res.map(|(k, v)| (k.value().1, v.value())))
-            .collect::<Result<Vec<_>, _>>()?)
+            .collect::<Result<HashMap<_, _>, _>>()?)
     }
 
     pub(crate) fn insert_self_event_id(
@@ -404,7 +404,7 @@ impl Database {
         Ok(id_self_record)
     }
 
-    pub(crate) fn get_head_tx(
+    pub(crate) fn read_head_tx(
         self_id: RostraId,
         events_heads_table: &impl ReadableTable<(RostraId, ShortEventId), EventsHeadsTableRecord>,
     ) -> DbResult<Option<ShortEventId>> {
@@ -459,7 +459,7 @@ impl Database {
         }))
     }
 
-    pub fn get_iroh_secret_tx(
+    pub fn read_iroh_secret_tx(
         ids_self_t: &impl ids_self::ReadableTable,
     ) -> DbResult<iroh::SecretKey> {
         let self_id = Self::read_self_id_tx(ids_self_t)?

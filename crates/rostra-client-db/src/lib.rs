@@ -3,7 +3,7 @@ pub mod social;
 mod tables;
 mod tx_ops;
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::{io, ops, result};
 
@@ -132,7 +132,8 @@ pub struct Database {
     self_id: RostraId,
     iroh_secret: iroh::SecretKey,
 
-    self_followee_list_updated: watch::Sender<()>,
+    self_followees_updated: watch::Sender<HashMap<RostraId, IdsFolloweesRecord>>,
+    self_followers_updated: watch::Sender<HashMap<RostraId, IdsFollowersRecord>>,
     self_head_updated: watch::Sender<Option<ShortEventId>>,
 }
 
@@ -162,22 +163,27 @@ impl Database {
         })
         .await?;
 
-        let (self_head, iroh_secret) = Self::read_with_inner(&inner, |tx| {
-            Ok((
-                Self::get_head_tx(self_id, &tx.open_table(&events_heads::TABLE)?)?,
-                Self::get_iroh_secret_tx(&tx.open_table(&ids_self::TABLE)?)?,
-            ))
-        })
-        .await?;
+        let (self_head, iroh_secret, self_followees, self_followers) =
+            Self::read_with_inner(&inner, |tx| {
+                Ok((
+                    Self::read_head_tx(self_id, &tx.open_table(&events_heads::TABLE)?)?,
+                    Self::read_iroh_secret_tx(&tx.open_table(&ids_self::TABLE)?)?,
+                    Self::read_followees_tx(self_id, &tx.open_table(&ids_followees::TABLE)?)?,
+                    Self::read_followers_tx(self_id, &tx.open_table(&ids_followers::TABLE)?)?,
+                ))
+            })
+            .await?;
 
-        let (self_followee_list_updated, _) = watch::channel(());
+        let (self_followees_updated, _) = watch::channel(self_followees);
+        let (self_followers_updated, _) = watch::channel(self_followers);
         let (self_head_updated, _) = watch::channel(self_head);
 
         let s = Self {
             inner,
             self_id,
             iroh_secret,
-            self_followee_list_updated,
+            self_followees_updated,
+            self_followers_updated,
             self_head_updated,
         };
 
@@ -186,8 +192,10 @@ impl Database {
 
     const MAX_CONTENT_LEN: u32 = 1_000_000u32;
 
-    pub fn self_followees_list_subscribe(&self) -> watch::Receiver<()> {
-        self.self_followee_list_updated.subscribe()
+    pub fn self_followees_list_subscribe(
+        &self,
+    ) -> watch::Receiver<HashMap<RostraId, IdsFolloweesRecord>> {
+        self.self_followees_updated.subscribe()
     }
 
     pub fn self_head_subscribe(&self) -> watch::Receiver<Option<ShortEventId>> {
@@ -256,7 +264,7 @@ impl Database {
         self.read_with(|tx| {
             let events_heads_table = tx.open_table(&events_heads::TABLE)?;
 
-            Database::get_head_tx(self.self_id, &events_heads_table)
+            Database::read_head_tx(self.self_id, &events_heads_table)
         })
         .await
         .expect("Storage error")
@@ -410,20 +418,23 @@ impl Database {
                 let mut ids_followers_t = tx.open_table(&crate::ids_followers::TABLE)?;
                 let mut id_unfollowed_t = tx.open_table(&crate::ids_unfollowed::TABLE)?;
 
-                let updated = match event_content.event.kind {
+                let (followee, updated) = match event_content.event.kind {
                     EventKind::FOLLOW => {
                         match event_content.content.deserialize_cbor::<content::Follow>() {
-                            Ok(content) => Database::insert_follow_tx(
-                                author,
-                                event_content.event.timestamp.into(),
-                                content,
-                                &mut ids_followees_t,
-                                &mut ids_followers_t,
-                                &mut id_unfollowed_t,
-                            )?,
+                            Ok(content) => (
+                                Some(content.followee),
+                                Database::insert_follow_tx(
+                                    author,
+                                    event_content.event.timestamp.into(),
+                                    content,
+                                    &mut ids_followees_t,
+                                    &mut ids_followers_t,
+                                    &mut id_unfollowed_t,
+                                )?,
+                            ),
                             Err(err) => {
                                 debug!(target: LOG_TARGET, err = %err.fmt_compact(), "Ignoring malformed ContentFollow payload");
-                                false
+                                (None, false)
                             }
                         }
                     }
@@ -432,28 +443,45 @@ impl Database {
                             .content
                             .deserialize_cbor::<content::Unfollow>()
                         {
-                            Ok(content) => Database::insert_unfollow_tx(
-                                author,
-                                event_content.event.timestamp.into(),
-                                content,
-                                &mut ids_followees_t,
-                                &mut ids_followers_t,
-                                &mut id_unfollowed_t,
-                            )?,
+                            Ok(content) => (
+                                Some(content.followee),
+                                Database::insert_unfollow_tx(
+                                    author,
+                                    event_content.event.timestamp.into(),
+                                    content,
+                                    &mut ids_followees_t,
+                                    &mut ids_followers_t,
+                                    &mut id_unfollowed_t,
+                                )?,
+                            ),
                             Err(err) => {
                                 debug!(target: LOG_TARGET, err = %err.fmt_compact(), "Ignoring malformed ContentUnfollow payload");
-                                false
+                                (None, false)
                             }
                         }
                     }
                     _ => unreachable!(),
                 };
 
-                if updated && author == self.self_id {
-                    let sender = self.self_followee_list_updated.clone();
-                    tx.on_commit(move || {
-                        let _ = sender.send(());
-                    });
+                if updated {
+                    if author == self.self_id {
+                        let followees_sender = self.self_followees_updated.clone();
+                        let self_followees =
+                            Database::read_followees_tx(self.self_id, &ids_followees_t)?;
+                        tx.on_commit(move || {
+                            let _ = followees_sender.send(self_followees);
+                        });
+                    }
+
+                    if followee == Some(self.self_id) {
+                        let followers_sender = self.self_followers_updated.clone();
+                        let self_followers =
+                            Database::read_followers_tx(self.self_id, &ids_followers_t)?;
+
+                        tx.on_commit(move || {
+                            let _ = followers_sender.send(self_followers);
+                        });
+                    }
                 }
             }
             _ => match event_content.event.kind {
@@ -572,7 +600,7 @@ impl Database {
         self.read_with(|tx| {
             let events_heads = tx.open_table(&events_heads::TABLE)?;
 
-            Self::get_head_tx(id, &events_heads)
+            Self::read_head_tx(id, &events_heads)
         })
         .await
     }
@@ -603,30 +631,6 @@ impl Database {
         })
         .await
         .expect("Database panic")
-    }
-
-    pub async fn read_followees(
-        &self,
-        id: RostraId,
-    ) -> DbResult<Vec<(RostraId, IdsFolloweesRecord)>> {
-        self.read_with(|tx| {
-            let ids_followees_table = tx.open_table(&ids_followees::TABLE)?;
-
-            Self::read_followees_tx(id, &ids_followees_table)
-        })
-        .await
-    }
-
-    pub async fn read_followers(
-        &self,
-        id: RostraId,
-    ) -> DbResult<Vec<(RostraId, IdsFollowersRecord)>> {
-        self.read_with(|tx| {
-            let ids_followers_table = tx.open_table(&ids_followers::TABLE)?;
-
-            Self::read_followers_tx(id, &ids_followers_table)
-        })
-        .await
     }
 }
 
