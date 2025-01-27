@@ -157,17 +157,17 @@
         "systems": "systems_3"
       },
       "locked": {
-        "lastModified": 1737938987,
-        "narHash": "sha256-ZIvzqqGVddEuCATvzkD7FIs6jWVDqPhn5n46sHRlD9g=",
+        "lastModified": 1737965657,
+        "narHash": "sha256-iCqtYZVrSeNwmsLS7J7x+40G6AcuL+/O5gdVcCA+Cdw=",
         "owner": "rustshop",
         "repo": "flakebox",
-        "rev": "b8cdcfafd9a0232a3cf21dbe5d5c6e82dc149623",
+        "rev": "6b975dda3f481971fcaa332598d40c9992e738e7",
         "type": "github"
       },
       "original": {
         "owner": "rustshop",
         "repo": "flakebox",
-        "rev": "b8cdcfafd9a0232a3cf21dbe5d5c6e82dc149623",
+        "rev": "6b975dda3f481971fcaa332598d40c9992e738e7",
         "type": "github"
       }
     },

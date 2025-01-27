@@ -89,7 +89,7 @@ impl UiState {
             article ."m-postOverview" {
                 div ."m-postOverview__main" {
                     img ."m-postOverview__userImage"
-                        src="https://avatars.githubusercontent.com/u/9209?v=4"
+                        src="/assets/icons/circle-user.svg"
                         width="32pt"
                         height="32pt"
                         { }

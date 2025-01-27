@@ -4,7 +4,7 @@
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-24.11";
     flake-utils.url = "github:numtide/flake-utils";
-    flakebox.url = "github:rustshop/flakebox?rev=b8cdcfafd9a0232a3cf21dbe5d5c6e82dc149623";
+    flakebox.url = "github:rustshop/flakebox?rev=6b975dda3f481971fcaa332598d40c9992e738e7";
   };
 
   outputs =
@@ -87,6 +87,9 @@
 
         devShells = flakeboxLib.mkShells {
           packages = [ pkgs.jq ];
+          shellHook = ''
+            export FLAKEBOX_GIT_LS_TEXT_IGNORE="crates/rostra-web-ui/assets/libs/"
+          '';
         };
       }
     );

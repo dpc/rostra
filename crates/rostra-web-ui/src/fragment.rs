@@ -41,16 +41,17 @@ impl UiState {
 /// A static footer.
 pub(crate) fn footer() -> Markup {
     html! {
-        script
-            src="https://unpkg.com/htmx.org@2.0.4"
-            integrity="sha512-2kIcAizYXhIn8TzUvqzEDZNuDZ+aW7yE/+f1HJHXFjQcGNfv1kqzJSTBRBSlOgp6B/KZsz1K0a3ZTqP9dnxioQ==" crossorigin="anonymous"
-            {}
+        // script src="https://unpkg.com/htmx.org@2.0.4" {}
+        script src="/assets/libs/htmx.org@2.0.4.js" {}
+
+        // script src="https://unpkg.com/htmx-ext-sse@2.2.2/sse.js" {}
+        script src="/assets/libs/htmx-ext-sse@2.2.2.sse.js" {}
 
 
-        script id="MathJax-script" async src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js" {}
+        // script id="MathJax-script" async src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js" {}
+        script src="/assets/libs/mathjax@3.tex-mml-chtml.js" {}
 
 
-        // script src="https://unpkg.com/htmx.org@1.9.12/dist/ext/response-targets.js" {};
         // script type="module" src="/assets/script.js" {};
         // script type="module" src="/assets/script-htmx-send-error.js" {};
     }
