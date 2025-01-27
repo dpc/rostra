@@ -411,22 +411,27 @@ impl Database {
                 let mut id_unfollowed_t = tx.open_table(&crate::ids_unfollowed::TABLE)?;
 
                 let updated = match event_content.event.kind {
-                    EventKind::FOLLOW => match event_content.content.decode::<content::Follow>() {
-                        Ok(content) => Database::insert_follow_tx(
-                            author,
-                            event_content.event.timestamp.into(),
-                            content,
-                            &mut ids_followees_t,
-                            &mut ids_followers_t,
-                            &mut id_unfollowed_t,
-                        )?,
-                        Err(err) => {
-                            debug!(target: LOG_TARGET, err = %err.fmt_compact(), "Ignoring malformed ContentFollow payload");
-                            false
+                    EventKind::FOLLOW => {
+                        match event_content.content.deserialize_cbor::<content::Follow>() {
+                            Ok(content) => Database::insert_follow_tx(
+                                author,
+                                event_content.event.timestamp.into(),
+                                content,
+                                &mut ids_followees_t,
+                                &mut ids_followers_t,
+                                &mut id_unfollowed_t,
+                            )?,
+                            Err(err) => {
+                                debug!(target: LOG_TARGET, err = %err.fmt_compact(), "Ignoring malformed ContentFollow payload");
+                                false
+                            }
                         }
-                    },
+                    }
                     EventKind::UNFOLLOW => {
-                        match event_content.content.decode::<content::Unfollow>() {
+                        match event_content
+                            .content
+                            .deserialize_cbor::<content::Unfollow>()
+                        {
                             Ok(content) => Database::insert_unfollow_tx(
                                 author,
                                 event_content.event.timestamp.into(),
@@ -455,7 +460,7 @@ impl Database {
                 EventKind::SOCIAL_PROFILE_UPDATE => {
                     match event_content
                         .content
-                        .decode::<content::SocialProfileUpdate>()
+                        .deserialize_cbor::<content::SocialProfileUpdate>()
                     {
                         Ok(content) => {
                             Database::insert_latest_value_tx(

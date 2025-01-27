@@ -11,7 +11,6 @@ use iroh::NodeAddr;
 use itertools::Itertools as _;
 use pkarr::PkarrClient;
 use rostra_client_db::{Database, DbResult};
-use rostra_core::bincode::STD_BINCODE_CONFIG;
 use rostra_core::event::{
     content, Event, EventContent, EventKind, PersonaId, SignedEvent, VerifiedEvent,
 };
@@ -29,10 +28,10 @@ use tracing::{debug, info};
 
 use super::{get_rrecord_typed, take_first_ok_some, RRECORD_HEAD_KEY, RRECORD_P2P_KEY};
 use crate::error::{
-    ConnectIrohSnafu, ConnectResult, EncodeSnafu, IdResolveError, IdResolveResult,
-    IdSecretReadResult, InitIrohClientSnafu, InitPkarrClientSnafu, InitResult, InvalidIdSnafu,
-    IoSnafu, IrohResult, MissingTicketSnafu, NotFoundSnafu, ParsingSnafu, PkarrResolveSnafu,
-    PostResult, RRecordSnafu, ResolveSnafu,
+    ConnectIrohSnafu, ConnectResult, IdResolveError, IdResolveResult, IdSecretReadResult,
+    InitIrohClientSnafu, InitPkarrClientSnafu, InitResult, InvalidIdSnafu, IoSnafu, IrohResult,
+    MissingTicketSnafu, NotFoundSnafu, ParsingSnafu, PkarrResolveSnafu, PostResult, RRecordSnafu,
+    ResolveSnafu,
 };
 use crate::id::{CompactTicket, IdPublishedData, IdResolvedData};
 use crate::id_publisher::IdPublisher;
@@ -453,11 +452,7 @@ impl Client {
             storage.get_self_random_eventid().await
         };
 
-        let content = EventContent::from(
-            bincode::encode_to_vec(&content, STD_BINCODE_CONFIG)
-                .whatever_context("Could not encode content?!")
-                .context(EncodeSnafu)?,
-        );
+        let content = content.serialize_cbor();
 
         let signed_event = Event::builder()
             .author(self.id)

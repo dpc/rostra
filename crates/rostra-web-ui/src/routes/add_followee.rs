@@ -47,7 +47,7 @@ impl UiState {
                     type="text"
                     name="rostra_id"
                     {}
-                button ".m-addFolloweeForm__submit" { "Follow" }
+                button ".m-addFolloweeForm__submit" autocomplete="off" { "Follow" }
             }
         }
     }

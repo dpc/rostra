@@ -12,6 +12,7 @@ mod bincode;
 #[cfg(all(feature = "ed25519-dalek", feature = "bincode"))]
 mod verified_event;
 use std::borrow::Borrow;
+use std::ops;
 use std::sync::Arc;
 
 #[cfg(all(feature = "ed25519-dalek", feature = "bincode"))]
@@ -155,6 +156,14 @@ pub struct EventContent(
     /// so let's make cloning cheap
     Arc<[u8]>,
 );
+
+impl ops::Deref for EventContent {
+    type Target = EventContentUnsized;
+
+    fn deref(&self) -> &Self::Target {
+        self.borrow()
+    }
+}
 
 impl EventContent {
     pub fn new(v: Vec<u8>) -> Self {

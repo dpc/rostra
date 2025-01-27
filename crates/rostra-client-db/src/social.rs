@@ -1,5 +1,4 @@
 use bincode::{Decode, Encode};
-use rostra_core::bincode::STD_BINCODE_CONFIG;
 use rostra_core::event::{content, Event, EventKind};
 use rostra_core::{ShortEventId, Timestamp};
 use serde::{Deserialize, Serialize};
@@ -64,9 +63,7 @@ impl Database {
                     continue;
                 };
 
-                let Ok((social_post, _)) =
-                    bincode::decode_from_slice(content.as_slice(), STD_BINCODE_CONFIG)
-                else {
+                let Ok(social_post) = content.deserialize_cbor::<content::SocialPost>() else {
                     debug!(target: LOG_TARGET, %event_id, "Content invalid");
                     continue;
                 };

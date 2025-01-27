@@ -40,6 +40,7 @@ blake3 = "1.5.5"
 brotli = "*"
 bon = "3.3.0"
 bip39 = "2.0.0"
+ciborium = "0.2.2"
 clap = { version = "4.5.23", features = ["derive", "env"] }
 convi = { version = "0.1.1", features = ["min_target_pointer_width_32"] }
 data-encoding = "2.7"
