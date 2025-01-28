@@ -9,7 +9,7 @@ use crate::{ContentHash, EventId, MsgLen, ShortEventId};
 
 impl EventContent {
     pub fn compute_content_hash(&self) -> ContentHash {
-        blake3::hash(&self.0).into()
+        blake3::hash(self.as_ref()).into()
     }
 }
 

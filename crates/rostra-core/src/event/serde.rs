@@ -49,9 +49,9 @@ impl serde::Serialize for EventContent {
         S: serde::Serializer,
     {
         if ser.is_human_readable() {
-            ser.serialize_str(&data_encoding::HEXLOWER.encode(&self.0))
+            ser.serialize_str(&data_encoding::HEXLOWER.encode(self.as_ref()))
         } else {
-            ser.serialize_bytes(&self.0)
+            ser.serialize_bytes(self.as_ref())
         }
     }
 }
@@ -68,10 +68,10 @@ impl<'de> serde::de::Deserialize<'de> for EventContent {
                 .map_err(serde::de::Error::custom)?
                 .into();
 
-            Ok(EventContent(bytes))
+            Ok(EventContent::from(bytes))
         } else {
-            let bytes = Vec::<u8>::deserialize(de)?.into();
-            Ok(EventContent(bytes))
+            let bytes = Vec::<u8>::deserialize(de)?;
+            Ok(EventContent::from(bytes))
         }
     }
 }
@@ -99,7 +99,7 @@ impl EventContentUnsized {
     where
         T: ::serde::de::DeserializeOwned,
     {
-        ciborium::from_reader(&mut self.0.as_ref())
+        ciborium::from_reader(&mut self.as_ref())
     }
 }
 
