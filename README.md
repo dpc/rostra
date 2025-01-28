@@ -139,3 +139,8 @@ because I like their tech work.
 That's why I think every social network that want people to be "wholesome"
 and not self-censor to optimize target audience needs to implement posting/following
 to/from sub-identities with a simple and convenient UX.
+
+
+## Hacking
+
+See [`HACKING.md`](./HACKING.md)
