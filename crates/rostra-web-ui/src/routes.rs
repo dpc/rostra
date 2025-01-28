@@ -105,7 +105,6 @@ pub async fn cache_control(request: Request, next: Next) -> Response {
 
     if let Some(content_type) = response.headers().get(CONTENT_TYPE) {
         const CACHEABLE_CONTENT_TYPES: &[(&str, u32)] = &[
-            ("text/html", 60),
             ("image/svg+xml", 60),
             ("text/css", 60 * 60 * 24),
             ("application/javascript", 60 * 60 * 24),
@@ -144,6 +143,7 @@ pub fn route_handler(state: SharedState) -> Router {
         .route("/ui/followee", post(add_followee::add_followee))
         .route("/ui/unlock", get(unlock::get).post(unlock::post))
         .route("/ui/unlock/random", get(unlock::get_random))
+        .route("/ui/timeline/updates", get(timeline::get_updates))
         .route(
             "/ui/self/edit",
             get(self_account::get_self_account_edit).post(self_account::post_self_account_edit),

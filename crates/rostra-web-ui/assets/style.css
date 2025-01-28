@@ -43,6 +43,21 @@ button {
   padding: 4pt;
 }
 
+.o-mainBar__newPostsAlert {
+  position: fixed;
+  top: 20px;
+  right: 20px;
+  z-index: 100;
+  background: white;
+  padding: 4pt;
+  border: 1px solid var(--background-border-color);
+
+}
+
+.o-mainBar__newPostsAlert.-hidden {
+  display: none;
+}
+
 .o-mainBarTimeline {
   /* border-inline: 1px solid gray; */
   background: oklch(95.12% 0 117.53);

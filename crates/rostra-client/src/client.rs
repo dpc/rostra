@@ -24,7 +24,7 @@ use rostra_p2p_api::ROSTRA_P2P_V0_ALPN;
 use rostra_util_error::FmtCompact as _;
 use rostra_util_fmt::AsFmtOption as _;
 use snafu::{Location, OptionExt as _, ResultExt as _, Snafu};
-use tokio::sync::watch;
+use tokio::sync::{broadcast, watch};
 use tokio::time::Instant;
 use tracing::debug;
 
@@ -329,6 +329,12 @@ impl Client {
         self.db
             .as_ref()
             .map(|storage| storage.self_head_subscribe())
+    }
+
+    pub fn new_content_subscribe(&self) -> Option<broadcast::Receiver<VerifiedEventContent>> {
+        self.db
+            .as_ref()
+            .map(|storage| storage.new_content_subscribe())
     }
 
     pub fn check_for_updates_tx_subscribe(&self) -> watch::Receiver<()> {

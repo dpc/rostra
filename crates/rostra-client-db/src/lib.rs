@@ -16,7 +16,7 @@ use rostra_core::id::{RostraId, ToShort as _};
 use rostra_core::ShortEventId;
 use rostra_util_error::{BoxedError, FmtCompact as _};
 use snafu::{Location, ResultExt as _, Snafu};
-use tokio::sync::watch;
+use tokio::sync::{broadcast, watch};
 use tokio::task::JoinError;
 use tracing::{debug, info, instrument};
 
@@ -135,6 +135,7 @@ pub struct Database {
     self_followees_updated: watch::Sender<HashMap<RostraId, IdsFolloweesRecord>>,
     self_followers_updated: watch::Sender<HashMap<RostraId, IdsFollowersRecord>>,
     self_head_updated: watch::Sender<Option<ShortEventId>>,
+    new_content_tx: broadcast::Sender<VerifiedEventContent>,
 }
 
 impl Database {
@@ -177,6 +178,7 @@ impl Database {
         let (self_followees_updated, _) = watch::channel(self_followees);
         let (self_followers_updated, _) = watch::channel(self_followers);
         let (self_head_updated, _) = watch::channel(self_head);
+        let (new_content_tx, _) = broadcast::channel(100);
 
         let s = Self {
             inner,
@@ -185,6 +187,7 @@ impl Database {
             self_followees_updated,
             self_followers_updated,
             self_head_updated,
+            new_content_tx,
         };
 
         Ok(s)
@@ -206,6 +209,10 @@ impl Database {
 
     pub fn self_head_subscribe(&self) -> watch::Receiver<Option<ShortEventId>> {
         self.self_head_updated.subscribe()
+    }
+
+    pub fn new_content_subscribe(&self) -> broadcast::Receiver<VerifiedEventContent> {
+        self.new_content_tx.subscribe()
     }
 
     pub async fn has_event(&self, event_id: impl Into<ShortEventId>) -> bool {
@@ -436,6 +443,13 @@ impl Database {
 
         if content_added {
             self.process_event_content_inserted_tx(event_content, tx)?;
+            tx.on_commit({
+                let new_content_tx = self.new_content_tx.clone();
+                let event_content = event_content.clone();
+                move || {
+                    let _ = new_content_tx.send(event_content);
+                }
+            })
         }
         Ok(())
     }

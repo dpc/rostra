@@ -1,21 +1,77 @@
-use axum::extract::State;
+use std::future::pending;
+use std::time::Duration;
+
+use axum::extract::ws::WebSocket;
+use axum::extract::{State, WebSocketUpgrade};
 use axum::response::IntoResponse;
 use maud::{html, Markup, PreEscaped};
 use rostra_client::ClientRef;
+use rostra_core::event::EventKind;
 use rostra_core::id::RostraId;
+use rostra_util_error::FmtCompact as _;
+use tracing::debug;
 
 use super::super::error::RequestResult;
 use super::Maud;
-use crate::{SharedState, UiState};
+use crate::{SharedState, UiState, LOG_TARGET};
 
 pub async fn get(state: State<SharedState>) -> RequestResult<impl IntoResponse> {
     Ok(Maud(state.timeline_page().await?))
 }
 
+pub async fn get_updates(state: State<SharedState>, ws: WebSocketUpgrade) -> impl IntoResponse {
+    ws.on_upgrade(|ws| async move {
+        let _ = state.handle_get_updates(ws).await.inspect_err(|err| {
+            debug!(target: LOG_TARGET, err=%err.fmt_compact(), "WS handler failed");
+        });
+    })
+}
+
 impl UiState {
+    async fn handle_get_updates(&self, mut ws: WebSocket) -> RequestResult<()> {
+        let client = self.client().await?;
+        let self_id = client.client_ref()?.rostra_id();
+        let Some(mut new_posts) = client.client_ref()?.new_content_subscribe() else {
+            pending::<()>().await;
+            return Ok(());
+        };
+
+        let mut count = 0;
+
+        loop {
+            let event_content = match new_posts.recv().await {
+                Ok(event_content) => event_content,
+                Err(tokio::sync::broadcast::error::RecvError::Closed) => {
+                    break;
+                }
+                Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => {
+                    continue;
+                }
+            };
+            if event_content.event.event.kind != EventKind::SOCIAL_POST {
+                continue;
+            }
+            if event_content.event.event.author == self_id {
+                continue;
+            }
+            count += 1;
+            let _ = ws
+                .send(
+                    html! {
+                        (self.new_posts_alert(true, count))
+                    }
+                    .into_string()
+                    .into(),
+                )
+                .await;
+            tokio::time::sleep(Duration::from_millis(100)).await;
+        }
+        Ok(())
+    }
+
     pub async fn timeline_page(&self) -> RequestResult<Markup> {
         let content = html! {
-            nav ."o-navBar" {
+            nav ."o-navBar" hx-ext="ws" ws-connect="/ui/timeline/updates" {
 
                 div ."o-navBar__selfAccount" {
                     (self.render_self_profile_summary().await?)
@@ -33,12 +89,31 @@ impl UiState {
             }
 
             main ."o-mainBar" {
+                (self.new_posts_alert(false, 0))
                 (self.main_bar_timeline().await?)
             }
 
         };
 
         self.html_page("You're Rostra!", content).await
+    }
+
+    pub fn new_posts_alert(&self, visible: bool, count: u64) -> Markup {
+        html! {
+            a ."o-mainBar__newPostsAlert"
+                ."-hidden"[!visible]
+                hx-swap-oob=[visible.then_some("outerHTML: .o-mainBar__newPostsAlert")]
+                 href="/ui"
+            {
+                (if count == 0 {
+                    "No new posts available".to_string()
+                } else if count == 1 {
+                    "New post available".to_string()
+                } else {
+                    format!("{count} new posts available.")
+                })
+            }
+        }
     }
 
     pub async fn main_bar_timeline(&self) -> RequestResult<Markup> {

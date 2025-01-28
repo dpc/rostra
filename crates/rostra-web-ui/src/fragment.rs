@@ -45,7 +45,9 @@ pub(crate) fn footer() -> Markup {
         script src="/assets/libs/htmx.org@2.0.4.js" {}
 
         // script src="https://unpkg.com/htmx-ext-sse@2.2.2/sse.js" {}
-        script src="/assets/libs/htmx-ext-sse@2.2.2.sse.js" {}
+        // script src="/assets/libs/htmx-ext-sse@2.2.2.sse.js" {}
+
+        script src="/assets/libs/htmx-ext-ws@2.0.1.ws.js" {}
 
 
         // script id="MathJax-script" async src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js" {}
