@@ -5,7 +5,7 @@ use crate::id::RostraId;
 use crate::ShortEventId;
 
 #[cfg(feature = "serde")]
-pub trait Content: ::serde::Serialize + ::serde::de::DeserializeOwned {
+pub trait EventContentKind: ::serde::Serialize + ::serde::de::DeserializeOwned {
     const KIND: EventKind;
 
     fn serialize_cbor(&self) -> EventContent {
@@ -24,7 +24,7 @@ pub struct Follow {
     pub persona: PersonaId,
 }
 
-impl Content for Follow {
+impl EventContentKind for Follow {
     const KIND: EventKind = EventKind::FOLLOW;
 }
 
@@ -44,7 +44,7 @@ pub struct SocialPost {
     pub djot_content: String,
 }
 
-impl Content for SocialPost {
+impl EventContentKind for SocialPost {
     const KIND: EventKind = EventKind::SOCIAL_POST;
 }
 
@@ -89,7 +89,7 @@ pub struct SocialProfileUpdate {
     pub img: Vec<u8>,
 }
 
-impl Content for SocialProfileUpdate {
+impl EventContentKind for SocialProfileUpdate {
     const KIND: EventKind = EventKind::SOCIAL_PROFILE_UPDATE;
 }
 
@@ -106,6 +106,6 @@ pub struct SocialComment {
     pub djot_content: String,
 }
 
-impl Content for SocialComment {
+impl EventContentKind for SocialComment {
     const KIND: EventKind = EventKind::SOCIAL_COMMENT;
 }

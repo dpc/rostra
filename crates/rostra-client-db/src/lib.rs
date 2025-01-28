@@ -10,7 +10,7 @@ use std::{io, ops, result};
 pub use ids::{IdsFolloweesRecord, IdsFollowersRecord};
 use redb_bincode::{ReadTransaction, ReadableTable, WriteTransaction};
 use rostra_core::event::{
-    content, EventContent, EventKind, PersonaId, VerifiedEvent, VerifiedEventContent,
+    content_kind, EventContent, EventKind, PersonaId, VerifiedEvent, VerifiedEventContent,
 };
 use rostra_core::id::{RostraId, ToShort as _};
 use rostra_core::ShortEventId;
@@ -464,7 +464,7 @@ impl Database {
             EventKind::SOCIAL_COMMENT => {
                     if let Ok(content) = event_content
                         .content
-                        .deserialize_cbor::<content::SocialComment>().inspect_err(|err| {
+                        .deserialize_cbor::<content_kind::SocialComment>().inspect_err(|err| {
                             debug!(target: LOG_TARGET, err = %err.fmt_compact(), "Ignoring malformed SocialComment payload");
                         }) {
                         let mut social_comment_tbl = tx.open_table(&social_comment::TABLE)?;
@@ -495,7 +495,7 @@ impl Database {
 
                 let (followee, updated) = match event_content.event.event.kind {
                     EventKind::FOLLOW => {
-                        match event_content.content.deserialize_cbor::<content::Follow>() {
+                        match event_content.content.deserialize_cbor::<content_kind::Follow>() {
                             Ok(content) => (
                                 Some(content.followee),
                                 Database::insert_follow_tx(
@@ -516,7 +516,7 @@ impl Database {
                     EventKind::UNFOLLOW => {
                         match event_content
                             .content
-                            .deserialize_cbor::<content::Unfollow>()
+                            .deserialize_cbor::<content_kind::Unfollow>()
                         {
                             Ok(content) => (
                                 Some(content.followee),
@@ -563,7 +563,7 @@ impl Database {
                 EventKind::SOCIAL_PROFILE_UPDATE => {
                     if let Ok(content) = event_content
                         .content
-                        .deserialize_cbor::<content::SocialProfileUpdate>().inspect_err(|err| {
+                        .deserialize_cbor::<content_kind::SocialProfileUpdate>().inspect_err(|err| {
                             debug!(target: LOG_TARGET, err = %err.fmt_compact(), "Ignoring malformed SocialProfileUpdate payload");
                         }) {
                             Database::insert_latest_value_tx(
@@ -583,7 +583,7 @@ impl Database {
                 EventKind::SOCIAL_COMMENT => {
                     if let Ok(content) = event_content
                         .content
-                        .deserialize_cbor::<content::SocialComment>().inspect_err(|err| {
+                        .deserialize_cbor::<content_kind::SocialComment>().inspect_err(|err| {
                             debug!(target: LOG_TARGET, err = %err.fmt_compact(), "Ignoring malformed SocialComment payload");
                         }) {
                         let mut social_comment_tbl = tx.open_table(&social_comment::TABLE)?;

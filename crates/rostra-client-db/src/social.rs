@@ -1,5 +1,5 @@
 use bincode::{Decode, Encode};
-use rostra_core::event::{content, Event, EventKind};
+use rostra_core::event::{content_kind, Event, EventKind};
 use rostra_core::{ShortEventId, Timestamp};
 use serde::{Deserialize, Serialize};
 use tracing::debug;
@@ -28,7 +28,7 @@ impl Database {
         &self,
         upper_bound: Option<EventPaginationCursor>,
         limit: usize,
-    ) -> Vec<EventPaginationRecord<content::SocialPost>> {
+    ) -> Vec<EventPaginationRecord<content_kind::SocialPost>> {
         let upper_bound = upper_bound
             .map(|b| (b.ts, b.event_id))
             .unwrap_or((Timestamp::MAX, ShortEventId::MAX));
@@ -63,7 +63,7 @@ impl Database {
                     continue;
                 };
 
-                let Ok(social_post) = content.deserialize_cbor::<content::SocialPost>() else {
+                let Ok(social_post) = content.deserialize_cbor::<content_kind::SocialPost>() else {
                     debug!(target: LOG_TARGET, %event_id, "Content invalid");
                     continue;
                 };

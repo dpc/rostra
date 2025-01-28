@@ -4,7 +4,9 @@ use std::collections::{HashMap, HashSet};
 use ids::{IdsFollowersRecord, IdsUnfollowedRecord};
 use rand::{thread_rng, Rng as _};
 use redb_bincode::{ReadableTable, Table};
-use rostra_core::event::{content, EventContent, SignedEvent, VerifiedEvent, VerifiedEventContent};
+use rostra_core::event::{
+    content_kind, EventContent, SignedEvent, VerifiedEvent, VerifiedEventContent,
+};
 use rostra_core::id::{RostraId, ToShort as _};
 use rostra_core::{ShortEventId, Timestamp};
 use tables::event::{EventContentState, EventsMissingRecord};
@@ -314,7 +316,7 @@ impl Database {
     pub(crate) fn insert_follow_tx(
         author: RostraId,
         timestamp: Timestamp,
-        content::Follow { followee, persona }: content::Follow,
+        content_kind::Follow { followee, persona }: content_kind::Follow,
         followees_table: &mut Table<(RostraId, RostraId), IdsFolloweesRecord>,
         followers_table: &mut Table<(RostraId, RostraId), IdsFollowersRecord>,
         unfollowed_table: &mut Table<(RostraId, RostraId), IdsUnfollowedRecord>,
@@ -349,7 +351,7 @@ impl Database {
     pub(crate) fn insert_unfollow_tx(
         author: RostraId,
         timestamp: Timestamp,
-        content::Unfollow { followee }: content::Unfollow,
+        content_kind::Unfollow { followee }: content_kind::Unfollow,
         followees_table: &mut Table<(RostraId, RostraId), IdsFolloweesRecord>,
         followers_table: &mut Table<(RostraId, RostraId), IdsFollowersRecord>,
         unfollowed_table: &mut Table<(RostraId, RostraId), IdsUnfollowedRecord>,

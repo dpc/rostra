@@ -1,4 +1,4 @@
-pub mod content;
+pub mod content_kind;
 
 #[cfg(feature = "ed25519-dalek")]
 mod ed25519;

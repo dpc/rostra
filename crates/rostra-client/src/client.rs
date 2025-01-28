@@ -14,7 +14,7 @@ use itertools::Itertools as _;
 use pkarr::PkarrClient;
 use rostra_client_db::{Database, DbResult, IdsFolloweesRecord, IdsFollowersRecord};
 use rostra_core::event::{
-    content, Event, EventKind, PersonaId, SignedEvent, VerifiedEvent, VerifiedEventContent,
+    content_kind, Event, EventKind, PersonaId, SignedEvent, VerifiedEvent, VerifiedEventContent,
 };
 use rostra_core::id::{RostraId, RostraIdSecretKey, ToShort as _};
 use rostra_core::ShortEventId;
@@ -457,7 +457,7 @@ impl Client {
         replace: Option<ShortEventId>,
     ) -> PostResult<()>
     where
-        C: content::Content,
+        C: content_kind::EventContentKind,
     {
         let storage = self
             .storage()
@@ -495,7 +495,7 @@ impl Client {
     }
 
     pub async fn social_post(&self, body: String) -> PostResult<()> {
-        self.publish_event(content::SocialPost {
+        self.publish_event(content_kind::SocialPost {
             djot_content: body,
             persona: PersonaId(0),
         })
@@ -515,7 +515,7 @@ impl Client {
         } else {
             None
         };
-        self.publish_event(content::SocialProfileUpdate {
+        self.publish_event(content_kind::SocialProfileUpdate {
             display_name,
             bio,
             img_mime: "".into(),
@@ -527,7 +527,7 @@ impl Client {
     }
 
     pub async fn follow(&self, followee: RostraId) -> PostResult<()> {
-        self.publish_event(content::Follow {
+        self.publish_event(content_kind::Follow {
             followee,
             persona: PersonaId(0),
         })
