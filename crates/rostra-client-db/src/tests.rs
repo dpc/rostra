@@ -7,7 +7,9 @@ use tempfile::{tempdir, TempDir};
 use tracing::info;
 
 use crate::event::EventContentState;
-use crate::{events, events_by_time, events_content, events_heads, events_missing, Database};
+use crate::{
+    events, events_by_time, events_content, events_heads, events_missing, ids_full, Database,
+};
 
 async fn temp_db(self_id: RostraId) -> BoxedErrorResult<(TempDir, super::Database)> {
     let dir = tempdir()?;
@@ -54,6 +56,7 @@ async fn test_store_event() -> BoxedErrorResult<()> {
     let event_d_id = event_d.event_id;
 
     db.write_with(|tx| {
+        let mut ids_full_tbl = tx.open_table(&ids_full::TABLE).boxed()?;
         let mut events_table = tx.open_table(&events::TABLE).boxed()?;
         let mut events_by_time_table = tx.open_table(&events_by_time::TABLE)?;
         let mut events_content_table = tx.open_table(&events_content::TABLE).boxed()?;
@@ -78,6 +81,7 @@ async fn test_store_event() -> BoxedErrorResult<()> {
                 info!(event_id = %event.event_id, "Inserting");
                 Database::insert_event_tx(
                     &event,
+                    &mut ids_full_tbl,
                     &mut events_table,
                     &mut events_by_time_table,
                     &mut events_content_table,
@@ -143,6 +147,7 @@ async fn test_store_deleted_event() -> BoxedErrorResult<()> {
     let event_d_id = event_d.event_id;
 
     db.write_with(|tx| {
+        let mut ids_full_tbl = tx.open_table(&ids_full::TABLE).boxed()?;
         let mut events_table = tx.open_table(&events::TABLE).boxed()?;
         let mut events_by_time_table = tx.open_table(&events_by_time::TABLE)?;
         let mut events_content_table = tx.open_table(&events_content::TABLE).boxed()?;
@@ -174,6 +179,7 @@ async fn test_store_deleted_event() -> BoxedErrorResult<()> {
                 info!(event_id = %event.event_id, "Inserting");
                 Database::insert_event_tx(
                     &event,
+                    &mut ids_full_tbl,
                     &mut events_table,
                     &mut events_by_time_table,
                     &mut events_content_table,

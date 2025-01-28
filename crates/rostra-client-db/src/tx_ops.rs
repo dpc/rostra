@@ -19,12 +19,15 @@ use super::{
     ids_self, ids_unfollowed, tables, Database, DbError, DbResult, EventsHeadsTableRecord,
     InsertEventOutcome, WriteTransactionCtx,
 };
-use crate::{ids_social_profile, DbVersionTooHighSnafu, IdSocialProfileRecord, Latest, LOG_TARGET};
+use crate::{
+    ids_full, ids_social_profile, DbVersionTooHighSnafu, IdSocialProfileRecord, Latest, LOG_TARGET,
+};
 
 impl Database {
     pub(crate) fn init_tables_tx(tx: &WriteTransactionCtx) -> DbResult<()> {
         tx.open_table(&db_version::TABLE)?;
         tx.open_table(&ids_self::TABLE)?;
+        tx.open_table(&ids_full::TABLE)?;
         tx.open_table(&ids_social_profile::TABLE)?;
         tx.open_table(&ids_followers::TABLE)?;
         tx.open_table(&ids_followees::TABLE)?;
@@ -103,6 +106,7 @@ impl Database {
             event,
             sig,
         }: &VerifiedEvent,
+        ids_full_t: &mut ids_full::Table,
         events_table: &mut events::Table,
         events_by_time_table: &mut events_by_time::Table,
         events_content_table: &mut events_content::Table,
@@ -115,6 +119,9 @@ impl Database {
         if events_table.get(&event_id)?.is_some() {
             return Ok(InsertEventOutcome::AlreadyPresent);
         }
+
+        let (id_short, id_rest) = event.author.split();
+        ids_full_t.insert(&id_short, &id_rest)?;
 
         let (was_missing, is_deleted) = if let Some(prev_missing) = events_missing_table
             .remove(&(author, event_id))?

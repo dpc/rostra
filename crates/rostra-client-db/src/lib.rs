@@ -313,19 +313,21 @@ impl Database {
         event: &VerifiedEvent,
         tx: &WriteTransactionCtx,
     ) -> DbResult<(InsertEventOutcome, ProcessEventState)> {
-        let mut events_table = tx.open_table(&events::TABLE)?;
-        let mut events_content_table = tx.open_table(&events_content::TABLE)?;
-        let mut events_missing_table = tx.open_table(&events_missing::TABLE)?;
-        let mut events_heads_table = tx.open_table(&events_heads::TABLE)?;
-        let mut events_by_time_table = tx.open_table(&events_by_time::TABLE)?;
+        let mut events_tbl = tx.open_table(&events::TABLE)?;
+        let mut events_content_tbl = tx.open_table(&events_content::TABLE)?;
+        let mut events_missing_tbl = tx.open_table(&events_missing::TABLE)?;
+        let mut events_heads_tbl = tx.open_table(&events_heads::TABLE)?;
+        let mut events_by_time_tbl = tx.open_table(&events_by_time::TABLE)?;
+        let mut ids_full_tbl = tx.open_table(&ids_full::TABLE)?;
 
         let insert_event_outcome = Database::insert_event_tx(
             event,
-            &mut events_table,
-            &mut events_by_time_table,
-            &mut events_content_table,
-            &mut events_missing_table,
-            &mut events_heads_table,
+            &mut ids_full_tbl,
+            &mut events_tbl,
+            &mut events_by_time_tbl,
+            &mut events_content_tbl,
+            &mut events_missing_tbl,
+            &mut events_heads_tbl,
         )?;
 
         if let InsertEventOutcome::Inserted { was_missing, .. } = insert_event_outcome {
@@ -354,7 +356,7 @@ impl Database {
 
         let process_event_content_state =
             if Self::MAX_CONTENT_LEN < u32::from(event.event.content_len) {
-                Database::prune_event_content_tx(event.event_id, &mut events_content_table)?;
+                Database::prune_event_content_tx(event.event_id, &mut events_content_tbl)?;
 
                 ProcessEventState::Pruned
             } else {

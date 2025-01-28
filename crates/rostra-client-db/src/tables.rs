@@ -4,7 +4,7 @@ use event::EventsMissingRecord;
 use id_self::IdSelfAccountRecord;
 use ids::{IdsFolloweesRecord, IdsFollowersRecord, IdsPersonaRecord, IdsUnfollowedRecord};
 use rostra_core::event::PersonaId;
-use rostra_core::id::RostraId;
+use rostra_core::id::{RestRostraId, RostraId, ShortRostraId};
 use rostra_core::{ShortEventId, Timestamp};
 
 pub use self::event::EventsHeadsTableRecord;
@@ -13,8 +13,10 @@ pub(crate) mod id_self;
 pub(crate) mod ids;
 
 macro_rules! def_table {
-    ($name:ident : $k:ty => $v:ty) => {
+    ($(#[$outer:meta])*
+        $name:ident : $k:ty => $v:ty) => {
         #[allow(unused)]
+        $(#[$outer])*
         pub mod $name {
             use super::*;
             pub type Key = $k;
@@ -27,9 +29,20 @@ macro_rules! def_table {
         }
     };
 }
+def_table! {
+    /// Tracks database/schema version
+    db_version: () => u64
+}
 
-def_table!(db_version: () => u64);
-def_table!(ids_self: () => IdSelfAccountRecord);
+def_table! {
+    /// Information about own account
+    ids_self: () => IdSelfAccountRecord
+}
+
+def_table! {
+    /// Mapping from shorttened to full `RostraId`
+    ids_full: ShortRostraId => RestRostraId
+}
 def_table!(ids_social_profile: RostraId => Latest<IdSocialProfileRecord>);
 def_table!(ids_followees: (RostraId, RostraId) => IdsFolloweesRecord);
 def_table!(ids_followers: (RostraId, RostraId) => IdsFollowersRecord);
