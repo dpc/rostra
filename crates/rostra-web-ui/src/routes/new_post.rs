@@ -22,7 +22,7 @@ pub async fn new_post(
         .client()
         .await?
         .client_ref()?
-        .post(form.content)
+        .social_post(form.content)
         .await?;
 
     let form = state.new_post_form(html! {

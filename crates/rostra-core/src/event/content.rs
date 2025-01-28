@@ -92,3 +92,20 @@ pub struct SocialProfileUpdate {
 impl Content for SocialProfileUpdate {
     const KIND: EventKind = EventKind::SOCIAL_PROFILE_UPDATE;
 }
+
+#[cfg_attr(feature = "serde", derive(::serde::Serialize, ::serde::Deserialize))]
+#[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
+pub struct SocialComment {
+    #[serde(rename = "i")]
+    pub rostra_id: RostraId,
+    #[serde(rename = "e")]
+    pub event_id: ShortEventId,
+    #[serde(rename = "p")]
+    pub persona: PersonaId,
+    #[serde(rename = "c")]
+    pub djot_content: String,
+}
+
+impl Content for SocialComment {
+    const KIND: EventKind = EventKind::SOCIAL_COMMENT;
+}

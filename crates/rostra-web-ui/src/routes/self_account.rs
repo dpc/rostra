@@ -30,7 +30,7 @@ pub async fn post_self_account_edit(
         .client()
         .await?
         .client_ref()?
-        .post_profile_update(form.name, form.bio)
+        .post_social_profile_update(form.name, form.bio)
         .await?;
 
     Ok(Maud(state.render_self_profile_summary().await?))

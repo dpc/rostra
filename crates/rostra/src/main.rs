@@ -216,7 +216,7 @@ async fn handle_cmd(opts: Opts) -> CliResult<serde_json::Value> {
                 .await
                 .context(InitSnafu)?;
 
-            client.post(body).await?;
+            client.social_post(body).await?;
 
             serde_json::Value::Bool(true)
         }

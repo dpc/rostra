@@ -488,7 +488,7 @@ impl Client {
         Ok(())
     }
 
-    pub async fn post(&self, body: String) -> PostResult<()> {
+    pub async fn social_post(&self, body: String) -> PostResult<()> {
         self.publish_event(content::SocialPost {
             djot_content: body,
             persona: PersonaId(0),
@@ -496,7 +496,11 @@ impl Client {
         .call()
         .await
     }
-    pub async fn post_profile_update(&self, display_name: String, bio: String) -> PostResult<()> {
+    pub async fn post_social_profile_update(
+        &self,
+        display_name: String,
+        bio: String,
+    ) -> PostResult<()> {
         let existing = if let Ok(storage) = self.storage() {
             storage
                 .get_social_profile(self.rostra_id())
@@ -525,7 +529,7 @@ impl Client {
         .await
     }
 
-    pub async fn post_omni(&self, body: String) -> PostResult<()> {
+    pub async fn publish_omni_tbd(&self, body: String) -> PostResult<()> {
         pub(crate) const ACTIVE_RESERVATION_TIMEOUT: Duration = Duration::from_secs(120);
         let mut known_head = None;
         let mut active_reservation: Option<(CompactTicket, Instant)> = None;

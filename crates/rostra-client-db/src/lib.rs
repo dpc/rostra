@@ -442,10 +442,25 @@ impl Database {
 
     pub fn revert_event_content_tx(
         &self,
-        // event_id: ShortEventId,
-        _event_content: &VerifiedEventContent,
-        _tx: &WriteTransactionCtx,
+        event_content: &VerifiedEventContent,
+        tx: &WriteTransactionCtx,
     ) -> DbResult<()> {
+        #[allow(clippy::single_match)]
+        match event_content.event.event.kind {
+            EventKind::SOCIAL_COMMENT => {
+                    if let Ok(content) = event_content
+                        .content
+                        .deserialize_cbor::<content::SocialComment>().inspect_err(|err| {
+                            debug!(target: LOG_TARGET, err = %err.fmt_compact(), "Ignoring malformed SocialComment payload");
+                        }) {
+                        let mut social_comment_tbl = tx.open_table(&social_comment::TABLE)?;
+
+                        social_comment_tbl.remove(&(content.event_id, event_content.event.event.timestamp.into(),event_content.event.event_id.to_short()))?;
+                    }
+            }
+            _ => {}
+        }
+
         Ok(())
     }
 
@@ -532,11 +547,11 @@ impl Database {
             }
             _ => match event_content.event.event.kind {
                 EventKind::SOCIAL_PROFILE_UPDATE => {
-                    match event_content
+                    if let Ok(content) = event_content
                         .content
-                        .deserialize_cbor::<content::SocialProfileUpdate>()
-                    {
-                        Ok(content) => {
+                        .deserialize_cbor::<content::SocialProfileUpdate>().inspect_err(|err| {
+                            debug!(target: LOG_TARGET, err = %err.fmt_compact(), "Ignoring malformed SocialProfileUpdate payload");
+                        }) {
                             Database::insert_latest_value_tx(
                                 event_content.event.event.timestamp.into(),
                                 &author,
@@ -549,12 +564,20 @@ impl Database {
                                 },
                                 &mut tx.open_table(&crate::social_profile::TABLE)?,
                             )?;
-                        }
-                        Err(err) => {
-                            debug!(target: LOG_TARGET, err = %err.fmt_compact(), "Ignoring malformed SocialProfileUpdate payload");
-                        }
                     }
                 }
+                EventKind::SOCIAL_COMMENT => {
+                    if let Ok(content) = event_content
+                        .content
+                        .deserialize_cbor::<content::SocialComment>().inspect_err(|err| {
+                            debug!(target: LOG_TARGET, err = %err.fmt_compact(), "Ignoring malformed SocialComment payload");
+                        }) {
+                        let mut social_comment_tbl = tx.open_table(&social_comment::TABLE)?;
+
+                        social_comment_tbl.insert(&(content.event_id, event_content.event.event.timestamp.into(),event_content.event.event_id.to_short() ), &())?;
+
+                    }
+                },
                 _ => {}
             },
         };
