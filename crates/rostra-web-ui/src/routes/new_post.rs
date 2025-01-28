@@ -88,6 +88,7 @@ impl UiState {
                     hx-target=".o-mainBarTimeline__item.-preview"
                     hx-swap="outerHTML"
                     hx-preserve="false"
+                    autocomplete="off"
                     autofocus
                     {}
                 div ."m-newPostForm__footer" {
