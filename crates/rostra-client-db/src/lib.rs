@@ -330,27 +330,56 @@ impl Database {
             &mut events_heads_tbl,
         )?;
 
-        if let InsertEventOutcome::Inserted { was_missing, .. } = insert_event_outcome {
-            info!(target: LOG_TARGET,
-                event_id = %event.event_id,
-                author = %event.event.author,
-                parent_prev = %event.event.parent_prev,
-                parent_aux = %event.event.parent_aux,
-                "New event inserted"
-            );
-            if event.event.author == self.self_id {
-                let mut events_self_table = tx.open_table(&crate::events_self::TABLE)?;
-                Database::insert_self_event_id(event.event_id, &mut events_self_table)?;
+        if let InsertEventOutcome::Inserted {
+            was_missing,
+            is_deleted,
+            deleted_parent,
+            ref deleted_parent_content,
+            ..
+        } = insert_event_outcome
+        {
+            if is_deleted {
+                info!(target: LOG_TARGET,
+                    event_id = %event.event_id,
+                    author = %event.event.author,
+                    parent_prev = %event.event.parent_prev,
+                    parent_aux = %event.event.parent_aux,
+                    "Ignoring already deleted event"
+                );
+            } else {
+                info!(target: LOG_TARGET,
+                    event_id = %event.event_id,
+                    author = %event.event.author,
+                    parent_prev = %event.event.parent_prev,
+                    parent_aux = %event.event.parent_aux,
+                    "New event inserted"
+                );
+                if event.event.author == self.self_id {
+                    let mut events_self_table = tx.open_table(&crate::events_self::TABLE)?;
+                    Database::insert_self_event_id(event.event_id, &mut events_self_table)?;
 
-                if !was_missing {
-                    info!(target: LOG_TARGET, event_id = %event.event_id, "New self head");
+                    if !was_missing {
+                        info!(target: LOG_TARGET, event_id = %event.event_id, "New self head");
 
-                    let sender = self.self_head_updated.clone();
-                    let event_id = event.event_id.into();
-                    tx.on_commit(move || {
-                        let _ = sender.send(Some(event_id));
-                    });
+                        let sender = self.self_head_updated.clone();
+                        let event_id = event.event_id.into();
+                        tx.on_commit(move || {
+                            let _ = sender.send(Some(event_id));
+                        });
+                    }
                 }
+            }
+
+            if let Some(content) = deleted_parent_content {
+                let event_id = deleted_parent.expect("Must have the deleted event id");
+                let event = events_tbl
+                    .get(&event_id)?
+                    .expect("Must have the event")
+                    .value();
+                let verified_event = VerifiedEvent::assume_verified_from_signed(event.signed);
+                let verified_event_content =
+                    VerifiedEventContent::assume_verified(verified_event, content.clone());
+                self.revert_event_content_tx(&verified_event_content, tx)?;
             }
         }
 
@@ -408,6 +437,15 @@ impl Database {
         if content_added {
             self.process_event_content_inserted_tx(event_content, tx)?;
         }
+        Ok(())
+    }
+
+    pub fn revert_event_content_tx(
+        &self,
+        // event_id: ShortEventId,
+        _event_content: &VerifiedEventContent,
+        _tx: &WriteTransactionCtx,
+    ) -> DbResult<()> {
         Ok(())
     }
 
@@ -509,7 +547,7 @@ impl Database {
                                     img_mime: content.img_mime,
                                     img: content.img,
                                 },
-                                &mut tx.open_table(&crate::ids_social_profile::TABLE)?,
+                                &mut tx.open_table(&crate::social_profile::TABLE)?,
                             )?;
                         }
                         Err(err) => {
@@ -633,7 +671,7 @@ impl Database {
 
     pub async fn get_social_profile(&self, id: RostraId) -> Option<IdSocialProfileRecord> {
         self.read_with(|tx| {
-            let events_heads = tx.open_table(&ids_social_profile::TABLE)?;
+            let events_heads = tx.open_table(&social_profile::TABLE)?;
 
             Self::get_social_profile_tx(id, &events_heads)
         })
@@ -689,7 +727,8 @@ pub enum InsertEventOutcome {
         /// Note, if the parent event was marked for deletion, but it was not
         /// processed yet, this will not be set, and instead `is_deleted` will
         /// be set to true, when the deleted parent is processed.
-        deleted_parent_content: Option<ShortEventId>,
+        deleted_parent: Option<ShortEventId>,
+        deleted_parent_content: Option<EventContent>,
 
         /// Ids of parents storage was not aware of yet, so they are now marked
         /// as "missing"
@@ -697,6 +736,28 @@ pub enum InsertEventOutcome {
     },
 }
 
+impl InsertEventOutcome {
+    fn validate(self) -> Self {
+        if let InsertEventOutcome::Inserted {
+            was_missing,
+            is_deleted,
+            deleted_parent,
+            deleted_parent_content,
+            ..
+        } = &self
+        {
+            if *is_deleted {
+                // Can't be missing if it was already deleted
+                assert!(!was_missing);
+            }
+
+            if deleted_parent_content.is_some() {
+                assert!(deleted_parent.is_some());
+            }
+        }
+        self
+    }
+}
 pub enum ProcessEventState {
     New,
     Existing,

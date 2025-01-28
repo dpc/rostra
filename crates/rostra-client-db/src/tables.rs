@@ -41,19 +41,27 @@ def_table! {
 
 def_table! {
     /// Mapping from shorttened to full `RostraId`
+    ///
+    /// We use [`ShortRostraId`] in the most massive tables, where extra lookup
+    /// to a full [`RostraId`] doesn't matter, to save space.
     ids_full: ShortRostraId => RestRostraId
 }
-def_table!(ids_social_profile: RostraId => Latest<IdSocialProfileRecord>);
 def_table!(ids_followees: (RostraId, RostraId) => IdsFolloweesRecord);
 def_table!(ids_followers: (RostraId, RostraId) => IdsFollowersRecord);
 def_table!(ids_unfollowed: (RostraId, RostraId) => IdsUnfollowedRecord);
 def_table!(ids_personas: (RostraId, PersonaId) => IdsPersonaRecord);
-def_table!(events_by_time: (Timestamp, ShortEventId) => ());
+
+// EVENTS
 def_table!(events: ShortEventId => EventRecord);
-def_table!(events_content: ShortEventId => event::EventContentStateOwned);
-def_table!(events_self: ShortEventId => ());
 def_table!(events_missing: (RostraId, ShortEventId) => EventsMissingRecord);
 def_table!(events_heads: (RostraId, ShortEventId) => EventsHeadsTableRecord);
+def_table!(events_self: ShortEventId => ());
+def_table!(events_content: ShortEventId => event::EventContentStateOwned);
+def_table!(events_by_time: (Timestamp, ShortEventId) => ());
+
+// SOCIAL
+def_table!(social_profile: RostraId => Latest<IdSocialProfileRecord>);
+def_table!(social_comment: (ShortEventId, Timestamp, ShortEventId)=> ());
 
 #[derive(Debug, Encode, Decode, Clone)]
 pub struct Latest<T> {

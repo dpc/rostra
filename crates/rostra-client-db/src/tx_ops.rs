@@ -4,7 +4,7 @@ use std::collections::{HashMap, HashSet};
 use ids::{IdsFollowersRecord, IdsUnfollowedRecord};
 use rand::{thread_rng, Rng as _};
 use redb_bincode::{ReadableTable, Table};
-use rostra_core::event::{content, SignedEvent, VerifiedEvent, VerifiedEventContent};
+use rostra_core::event::{content, EventContent, SignedEvent, VerifiedEvent, VerifiedEventContent};
 use rostra_core::id::{RostraId, ToShort as _};
 use rostra_core::{ShortEventId, Timestamp};
 use tables::event::{EventContentState, EventsMissingRecord};
@@ -20,7 +20,7 @@ use super::{
     InsertEventOutcome, WriteTransactionCtx,
 };
 use crate::{
-    ids_full, ids_social_profile, DbVersionTooHighSnafu, IdSocialProfileRecord, Latest, LOG_TARGET,
+    ids_full, social_profile, DbVersionTooHighSnafu, IdSocialProfileRecord, Latest, LOG_TARGET,
 };
 
 impl Database {
@@ -28,7 +28,7 @@ impl Database {
         tx.open_table(&db_version::TABLE)?;
         tx.open_table(&ids_self::TABLE)?;
         tx.open_table(&ids_full::TABLE)?;
-        tx.open_table(&ids_social_profile::TABLE)?;
+        tx.open_table(&social_profile::TABLE)?;
         tx.open_table(&ids_followers::TABLE)?;
         tx.open_table(&ids_followees::TABLE)?;
         tx.open_table(&ids_unfollowed::TABLE)?;
@@ -153,6 +153,8 @@ impl Database {
         };
 
         let mut deleted_parent = None;
+
+        let mut deleted_parent_content: Option<EventContent> = None;
         let mut missing_parents = vec![];
 
         for (parent_id, parent_is_aux) in parent_ids {
@@ -164,12 +166,18 @@ impl Database {
             if let Some(_parent_event) = parent_event {
                 if event.is_delete_parent_aux_content_set() && parent_is_aux {
                     deleted_parent = Some(parent_id);
-                    events_content_table.insert(
-                        &parent_id,
-                        &EventContentState::Deleted {
-                            deleted_by: event_id,
-                        },
-                    )?;
+                    deleted_parent_content = events_content_table
+                        .insert(
+                            &parent_id,
+                            &EventContentState::Deleted {
+                                deleted_by: event_id,
+                            },
+                        )?
+                        .and_then(|deleted_content| match deleted_content.value() {
+                            EventContentState::Present(cow) => Some(cow.into_owned()),
+                            EventContentState::Deleted { deleted_by: _ } => None,
+                            EventContentState::Pruned => None,
+                        });
                 }
             } else {
                 // we do not have this parent yet, so we mark it as missing
@@ -201,9 +209,11 @@ impl Database {
         Ok(InsertEventOutcome::Inserted {
             was_missing,
             is_deleted,
-            deleted_parent_content: deleted_parent,
+            deleted_parent,
+            deleted_parent_content,
             missing_parents,
-        })
+        }
+        .validate())
     }
 
     #[allow(clippy::needless_lifetimes)]
@@ -432,7 +442,7 @@ impl Database {
 
     pub(crate) fn get_social_profile_tx(
         id: RostraId,
-        table: &impl ids_social_profile::ReadableTable,
+        table: &impl social_profile::ReadableTable,
     ) -> DbResult<Option<IdSocialProfileRecord>> {
         Ok(table.get(&id)?.map(|v| v.value().inner))
     }

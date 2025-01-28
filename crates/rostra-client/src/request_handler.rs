@@ -18,7 +18,7 @@ use tokio::sync::watch;
 use tracing::{debug, info, instrument};
 
 use crate::client::Client;
-use crate::{ClientHandle, ClientRefError, ClientStorageError};
+use crate::{ClientHandle, ClientRefError, ClientStorageError, ClientStorageSnafu};
 
 const LOG_TARGET: &str = "rostra::req_handler";
 
@@ -29,7 +29,6 @@ pub enum IncomingConnectionError {
         #[snafu(implicit)]
         location: Location,
     },
-    #[snafu(transparent)]
     Rpc {
         source: RpcError,
         #[snafu(implicit)]
@@ -43,8 +42,6 @@ pub enum IncomingConnectionError {
     #[snafu(transparent)]
     Db {
         source: DbError,
-        #[snafu(implicit)]
-        location: Location,
     },
     // TODO: more details
     InvalidRequest {
@@ -67,14 +64,10 @@ pub enum IncomingConnectionError {
     #[snafu(transparent)]
     ClientStorage {
         source: ClientStorageError,
-        #[snafu(implicit)]
-        location: Location,
     },
     #[snafu(transparent)]
     ClientRefError {
         source: ClientRefError,
-        #[snafu(implicit)]
-        location: Location,
     },
 }
 pub type IncomingConnectionResult<T> = std::result::Result<T, IncomingConnectionError>;
@@ -139,7 +132,9 @@ impl RequestHandler {
 
         loop {
             let (send, mut recv) = conn.accept_bi().await.context(ConnectionSnafu)?;
-            let (id, req_msg) = Connection::read_request_raw(&mut recv).await?;
+            let (id, req_msg) = Connection::read_request_raw(&mut recv)
+                .await
+                .context(RpcSnafu)?;
 
             match id {
                 RpcId::PING => {
@@ -168,8 +163,12 @@ impl RequestHandler {
         mut send: iroh::endpoint::SendStream,
     ) -> Result<(), IncomingConnectionError> {
         let req = PingRequest::decode_whole::<MAX_REQUEST_SIZE>(&req_msg).context(DecodingSnafu)?;
-        Connection::write_success_return_code(&mut send).await?;
-        Connection::write_message(&mut send, &PingResponse(req.0)).await?;
+        Connection::write_success_return_code(&mut send)
+            .await
+            .context(RpcSnafu)?;
+        Connection::write_message(&mut send, &PingResponse(req.0))
+            .await
+            .context(RpcSnafu)?;
         Ok(())
     }
 
@@ -191,7 +190,8 @@ impl RequestHandler {
             // accept
         } else {
             Connection::write_return_code(&mut send, FeedEventResponse::RETURN_CODE_DOES_NOT_NEED)
-                .await?;
+                .await
+                .context(RpcSnafu)?;
             return Err("Author not needed".into()).context(InvalidRequestSnafu);
         }
         let event_id = event.compute_id();
@@ -208,7 +208,8 @@ impl RequestHandler {
                     &mut send,
                     FeedEventResponse::RETURN_CODE_ALREADY_HAVE,
                 )
-                .await?;
+                .await
+                .context(RpcSnafu)?;
             }
 
             if client.does_have_event(event_id).await {
@@ -216,16 +217,22 @@ impl RequestHandler {
                     &mut send,
                     FeedEventResponse::RETURN_CODE_ALREADY_HAVE,
                 )
-                .await?;
+                .await
+                .context(RpcSnafu)?;
                 return Ok(());
             }
         }
-        Connection::write_success_return_code(&mut send).await?;
-        Connection::write_message(&mut send, &FeedEventResponse).await?;
+        Connection::write_success_return_code(&mut send)
+            .await
+            .context(RpcSnafu)?;
+        Connection::write_message(&mut send, &FeedEventResponse)
+            .await
+            .context(RpcSnafu)?;
 
         let event_content = EventContent::from(
             Connection::read_bao_content(&mut read, event.content_len.into(), event.content_hash)
-                .await?,
+                .await
+                .context(RpcSnafu)?,
         );
 
         {
@@ -239,7 +246,9 @@ impl RequestHandler {
                 .await?;
         }
 
-        Connection::write_success_return_code(&mut send).await?;
+        Connection::write_success_return_code(&mut send)
+            .await
+            .context(RpcSnafu)?;
 
         Ok(())
     }
@@ -258,9 +267,13 @@ impl RequestHandler {
 
         let event = storage.get_event(event_id).await;
 
-        Connection::write_success_return_code(&mut send).await?;
+        Connection::write_success_return_code(&mut send)
+            .await
+            .context(RpcSnafu)?;
 
-        Connection::write_message(&mut send, &GetEventResponse(event.map(|e| e.signed))).await?;
+        Connection::write_message(&mut send, &GetEventResponse(event.map(|e| e.signed)))
+            .await
+            .context(RpcSnafu)?;
 
         Ok(())
     }
@@ -280,9 +293,13 @@ impl RequestHandler {
 
         let content = storage.get_event_content(event_id).await;
 
-        Connection::write_success_return_code(&mut send).await?;
+        Connection::write_success_return_code(&mut send)
+            .await
+            .context(RpcSnafu)?;
 
-        Connection::write_message(&mut send, &GetEventContentResponse(content.is_some())).await?;
+        Connection::write_message(&mut send, &GetEventContentResponse(content.is_some()))
+            .await
+            .context(RpcSnafu)?;
 
         if let Some(content) = content {
             let event = storage
@@ -294,7 +311,8 @@ impl RequestHandler {
                 content.as_ref(),
                 event.signed.event.content_hash,
             )
-            .await?;
+            .await
+            .context(RpcSnafu)?;
         }
 
         Ok(())
@@ -310,7 +328,9 @@ impl RequestHandler {
             WaitHeadUpdateRequest::decode_whole::<MAX_REQUEST_SIZE>(&req_msg)
                 .context(DecodingSnafu)?;
 
-        Connection::write_success_return_code(&mut send).await?;
+        Connection::write_success_return_code(&mut send)
+            .await
+            .context(RpcSnafu)?;
 
         // Note: do not keep storage around
         let mut head_updated = self.client.storage()??.self_head_subscribe();
@@ -325,7 +345,7 @@ impl RequestHandler {
             head_updated
                 .changed()
                 .await
-                .map_err(|_| ClientStorageError)?;
+                .map_err(|_| ClientStorageSnafu.build())?;
         }
 
         Connection::write_message(
@@ -337,7 +357,8 @@ impl RequestHandler {
                     .expect("Must have at least one element"),
             ),
         )
-        .await?;
+        .await
+        .context(RpcSnafu)?;
         Ok(())
     }
 }

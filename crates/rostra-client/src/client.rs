@@ -23,7 +23,7 @@ use rostra_p2p::RpcError;
 use rostra_p2p_api::ROSTRA_P2P_V0_ALPN;
 use rostra_util_error::FmtCompact as _;
 use rostra_util_fmt::AsFmtOption as _;
-use snafu::{OptionExt as _, ResultExt as _, Snafu};
+use snafu::{Location, OptionExt as _, ResultExt as _, Snafu};
 use tokio::sync::watch;
 use tokio::time::Instant;
 use tracing::debug;
@@ -41,7 +41,11 @@ use crate::request_handler::RequestHandler;
 use crate::LOG_TARGET;
 
 #[derive(Debug, Snafu)]
-pub struct ClientRefError;
+#[snafu(visibility(pub))]
+pub struct ClientRefError {
+    #[snafu(implicit)]
+    location: Location,
+}
 
 pub type ClientRefResult<T> = Result<T, ClientRefError>;
 
@@ -138,7 +142,11 @@ pub struct Client {
 
 #[derive(Debug, Snafu)]
 #[snafu(display("Client storage not available"))]
-pub struct ClientStorageError;
+#[snafu(visibility(pub))]
+pub struct ClientStorageError {
+    #[snafu(implicit)]
+    location: Location,
+}
 
 pub type ClientStorageResult<T> = result::Result<T, ClientStorageError>;
 
@@ -471,7 +479,7 @@ impl Client {
         let verified_event = VerifiedEvent::verify_signed(self.id, signed_event)
             .expect("Can't fail to verify self-created event");
         let verified_event_content =
-            rostra_core::event::VerifiedEventContent::verify(verified_event.clone(), content)
+            rostra_core::event::VerifiedEventContent::verify(verified_event, content)
                 .expect("Can't fail to verify self-created content");
         let _ = storage
             .process_event_with_content(&verified_event_content)

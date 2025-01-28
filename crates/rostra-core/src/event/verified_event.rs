@@ -14,7 +14,7 @@ use crate::{EventId, ShortEventId};
 /// * `sig` valid for `event.author`
 /// * if `content` is `Some`, matches `event.content_hash` and
 ///   `event.content_len`
-#[derive(Clone, Debug)]
+#[derive(Copy, Clone, Debug)]
 pub struct VerifiedEvent {
     pub event_id: EventId,
     pub event: Event,
@@ -78,6 +78,15 @@ impl VerifiedEvent {
         })
     }
 
+    pub fn assume_verified_from_signed(SignedEvent { event, sig }: SignedEvent) -> Self {
+        debug_assert!(VerifiedEvent::verify_received_as_is(event, sig).is_ok());
+        Self {
+            event_id: event.compute_id(),
+            event,
+            sig,
+        }
+    }
+
     pub fn verify_signed(
         author: RostraId,
         SignedEvent { event, sig }: SignedEvent,
@@ -96,5 +105,9 @@ impl VerifiedEventContent {
         }
 
         Ok(Self { event, content })
+    }
+    pub fn assume_verified(event: VerifiedEvent, content: EventContent) -> Self {
+        debug_assert!(VerifiedEventContent::verify(event, content.clone()).is_ok());
+        Self { event, content }
     }
 }
