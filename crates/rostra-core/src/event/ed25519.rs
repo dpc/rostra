@@ -20,18 +20,14 @@ impl Event {
         SignedEvent { event: self, sig }
     }
 
-    pub fn verified_signed_by(
-        &self,
-        sig: EventSignature,
-        id: RostraId,
-    ) -> Result<(), SignatureError> {
+    pub fn verify_signature(&self, sig: EventSignature) -> Result<(), SignatureError> {
         let encoded =
             bincode::encode_to_vec(self, STD_BINCODE_CONFIG).expect("Can't fail to encode");
 
-        Self::verified_signed_by_raw(&encoded, sig, id)
+        Self::verify_signature_raw(&encoded, sig, self.author)
     }
 
-    pub fn verified_signed_by_raw(
+    pub fn verify_signature_raw(
         bytes: &[u8],
         sig: EventSignature,
         id: RostraId,

@@ -21,8 +21,40 @@ pub use verified_event::*;
 
 use crate::id::RostraId;
 use crate::{
-    define_array_type_no_serde, ContentHash, MsgLen, NullableShortEventId, TimestampFixed,
+    define_array_type_no_serde, ContentHash, MsgLen, NullableShortEventId, ShortEventId, Timestamp,
+    TimestampFixed,
 };
+
+/// Convenience extension trait to unify getting event data from all versions of
+/// storing events
+pub trait EventExt {
+    fn event(&self) -> &Event;
+
+    fn author(&self) -> RostraId {
+        self.event().author
+    }
+    fn kind(&self) -> EventKind {
+        self.event().kind
+    }
+    fn timestamp(&self) -> Timestamp {
+        self.event().timestamp.into()
+    }
+    fn content_hash(&self) -> ContentHash {
+        self.event().content_hash
+    }
+    fn parent_prev(&self) -> Option<ShortEventId> {
+        self.event().parent_prev.into()
+    }
+    fn parent_aux(&self) -> Option<ShortEventId> {
+        self.event().parent_aux.into()
+    }
+    fn content_len(&self) -> u32 {
+        self.event().content_len.into()
+    }
+    fn is_delete_parent_aux_content_set(&self) -> bool {
+        self.event().is_delete_parent_aux_content_set()
+    }
+}
 
 /// An even (header)
 ///
@@ -126,17 +158,52 @@ impl Event {
         self.flags & Self::DELETE_PARENT_AUX_CONTENT_FLAG != 0
     }
 }
+
+impl EventExt for Event {
+    fn event(&self) -> &Event {
+        self
+    }
+}
+
 #[cfg_attr(feature = "serde", derive(::serde::Serialize, ::serde::Deserialize))]
 #[cfg_attr(feature = "bincode", derive(::bincode::Encode, ::bincode::Decode))]
 #[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
 pub struct PersonaId(pub u32);
 
+/// An [`Event`] along with a [`EventSignature`]
+///
+/// Notably: not verified yet be any means.
 #[cfg_attr(feature = "serde", derive(::serde::Serialize, ::serde::Deserialize))]
 #[cfg_attr(feature = "bincode", derive(::bincode::Encode, ::bincode::Decode))]
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 pub struct SignedEvent {
-    pub event: Event,
-    pub sig: EventSignature,
+    event: Event,
+    sig: EventSignature,
+}
+
+impl SignedEvent {
+    pub fn unverified(event: Event, sig: EventSignature) -> Self {
+        Self { event, sig }
+    }
+
+    pub fn sig(&self) -> EventSignature {
+        self.sig
+    }
+}
+
+impl EventExt for SignedEvent {
+    fn event(&self) -> &Event {
+        &self.event
+    }
+}
+
+impl From<VerifiedEvent> for SignedEvent {
+    fn from(event: VerifiedEvent) -> Self {
+        Self {
+            event: event.event,
+            sig: event.sig,
+        }
+    }
 }
 
 define_array_type_no_serde!(

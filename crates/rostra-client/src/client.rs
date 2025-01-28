@@ -14,7 +14,8 @@ use itertools::Itertools as _;
 use pkarr::PkarrClient;
 use rostra_client_db::{Database, DbResult, IdsFolloweesRecord, IdsFollowersRecord};
 use rostra_core::event::{
-    content_kind, Event, EventKind, PersonaId, SignedEvent, VerifiedEvent, VerifiedEventContent,
+    content_kind, Event, EventExt as _, EventKind, PersonaId, SignedEvent, VerifiedEvent,
+    VerifiedEventContent,
 };
 use rostra_core::id::{RostraId, RostraIdSecretKey, ToShort as _};
 use rostra_core::ShortEventId;
@@ -588,7 +589,7 @@ impl Client {
                                 Connection::write_bao_content(
                                     send,
                                     body.as_bytes(),
-                                    signed_event.event.content_hash,
+                                    signed_event.content_hash(),
                                 )
                                 .await?;
                                 Ok(())

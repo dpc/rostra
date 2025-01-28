@@ -2,7 +2,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use rostra_client_db::{Database, IdsFollowersRecord};
-use rostra_core::event::{EventContent, SignedEvent};
+use rostra_core::event::{EventContent, EventExt as _, SignedEvent};
 use rostra_core::id::{RostraId, ToShort as _};
 use rostra_core::ShortEventId;
 use rostra_p2p::connection::{Connection, FeedEventRequest};
@@ -123,7 +123,7 @@ impl HeadUpdateBroadcaster {
                     Connection::write_bao_content(
                         send,
                         event_content.as_ref(),
-                        signed_event.event.content_hash,
+                        signed_event.content_hash(),
                     )
                     .await?;
                     Ok(())

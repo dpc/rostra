@@ -2,7 +2,7 @@ use convi::CastFrom;
 use ed25519_dalek::SignatureError;
 use snafu::{ResultExt as _, Snafu};
 
-use super::{Event, EventContent, EventSignature, SignedEvent};
+use super::{Event, EventContent, EventExt, EventSignature, SignedEvent};
 use crate::id::RostraId;
 use crate::{EventId, ShortEventId};
 
@@ -21,10 +21,22 @@ pub struct VerifiedEvent {
     pub sig: EventSignature,
 }
 
+impl EventExt for VerifiedEvent {
+    fn event(&self) -> &Event {
+        &self.event
+    }
+}
+
 #[derive(Clone, Debug)]
 pub struct VerifiedEventContent {
     pub event: VerifiedEvent,
     pub content: EventContent,
+}
+
+impl EventExt for VerifiedEventContent {
+    fn event(&self) -> &Event {
+        &self.event.event
+    }
 }
 
 #[derive(Debug, Snafu)]
@@ -39,7 +51,7 @@ pub type VerifiedEventResult<T> = Result<T, VerifiedEventError>;
 
 impl VerifiedEvent {
     /// Verify event that was asked for by `(author, event_id)`
-    pub fn verify_queried(
+    pub fn verify_response(
         author: RostraId,
         event_id: impl Into<ShortEventId>,
         event: Event,
@@ -54,9 +66,7 @@ impl VerifiedEvent {
             return EventIdMismatchSnafu.fail();
         }
 
-        event
-            .verified_signed_by(sig, event.author)
-            .context(SignatureInvalidSnafu)?;
+        event.verify_signature(sig).context(SignatureInvalidSnafu)?;
 
         Ok(Self {
             event_id,
@@ -66,10 +76,10 @@ impl VerifiedEvent {
     }
 
     /// Verify event received event
-    pub fn verify_received_as_is(event: Event, sig: EventSignature) -> VerifiedEventResult<Self> {
-        event
-            .verified_signed_by(sig, event.author)
-            .context(SignatureInvalidSnafu)?;
+    pub fn verify_received_as_is(
+        SignedEvent { event, sig }: SignedEvent,
+    ) -> VerifiedEventResult<Self> {
+        event.verify_signature(sig).context(SignatureInvalidSnafu)?;
 
         Ok(Self {
             event_id: event.compute_id(),
@@ -79,7 +89,9 @@ impl VerifiedEvent {
     }
 
     pub fn assume_verified_from_signed(SignedEvent { event, sig }: SignedEvent) -> Self {
-        debug_assert!(VerifiedEvent::verify_received_as_is(event, sig).is_ok());
+        debug_assert!(
+            VerifiedEvent::verify_received_as_is(SignedEvent::unverified(event, sig)).is_ok()
+        );
         Self {
             event_id: event.compute_id(),
             event,
@@ -91,7 +103,7 @@ impl VerifiedEvent {
         author: RostraId,
         SignedEvent { event, sig }: SignedEvent,
     ) -> VerifiedEventResult<Self> {
-        Self::verify_queried(author, event.compute_id(), event, sig)
+        Self::verify_response(author, event.compute_id(), event, sig)
     }
 }
 

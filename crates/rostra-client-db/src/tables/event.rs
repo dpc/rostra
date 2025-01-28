@@ -1,7 +1,7 @@
 use std::borrow::Cow;
 
 use bincode::{Decode, Encode};
-use rostra_core::event::{EventContentUnsized, SignedEvent};
+use rostra_core::event::{EventContentUnsized, EventExt, SignedEvent};
 use rostra_core::ShortEventId;
 
 #[derive(Debug, Encode, Decode, Clone)]
@@ -22,6 +22,12 @@ pub type EventContentStateOwned = EventContentState<'static>;
 #[derive(Debug, Encode, Decode, Clone)]
 pub struct EventRecord {
     pub signed: SignedEvent,
+}
+
+impl EventExt for EventRecord {
+    fn event(&self) -> &rostra_core::event::Event {
+        self.signed.event()
+    }
 }
 
 #[derive(Decode, Encode, Debug)]

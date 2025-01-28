@@ -80,7 +80,7 @@ async fn test_store_event() -> BoxedErrorResult<()> {
             for _ in 0..2 {
                 info!(event_id = %event.event_id, "Inserting");
                 Database::insert_event_tx(
-                    &event,
+                    event,
                     &mut ids_full_tbl,
                     &mut events_table,
                     &mut events_by_time_table,
@@ -178,7 +178,7 @@ async fn test_store_deleted_event() -> BoxedErrorResult<()> {
             for _ in 0..2 {
                 info!(event_id = %event.event_id, "Inserting");
                 Database::insert_event_tx(
-                    &event,
+                    event,
                     &mut ids_full_tbl,
                     &mut events_table,
                     &mut events_by_time_table,

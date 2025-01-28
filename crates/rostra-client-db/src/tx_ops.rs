@@ -5,7 +5,7 @@ use ids::{IdsFollowersRecord, IdsUnfollowedRecord};
 use rand::{thread_rng, Rng as _};
 use redb_bincode::{ReadableTable, Table};
 use rostra_core::event::{
-    content_kind, EventContent, SignedEvent, VerifiedEvent, VerifiedEventContent,
+    content_kind, EventContent, EventExt as _, VerifiedEvent, VerifiedEventContent,
 };
 use rostra_core::id::{RostraId, ToShort as _};
 use rostra_core::{ShortEventId, Timestamp};
@@ -103,11 +103,7 @@ impl Database {
     ///
     /// Return `true`
     pub fn insert_event_tx(
-        VerifiedEvent {
-            event_id,
-            event,
-            sig,
-        }: &VerifiedEvent,
+        event: VerifiedEvent,
         ids_full_t: &mut ids_full::Table,
         events_table: &mut events::Table,
         events_by_time_table: &mut events_by_time::Table,
@@ -115,14 +111,14 @@ impl Database {
         events_missing_table: &mut events_missing::Table,
         events_heads_table: &mut events_heads::Table,
     ) -> DbResult<InsertEventOutcome> {
-        let author = event.author;
-        let event_id = ShortEventId::from(*event_id);
+        let author = event.author();
+        let event_id = event.event_id.to_short();
 
         if events_table.get(&event_id)?.is_some() {
             return Ok(InsertEventOutcome::AlreadyPresent);
         }
 
-        let (id_short, id_rest) = event.author.split();
+        let (id_short, id_rest) = event.author().split();
         ids_full_t.insert(&id_short, &id_rest)?;
 
         let (was_missing, is_deleted) = if let Some(prev_missing) = events_missing_table
@@ -148,10 +144,10 @@ impl Database {
 
         // When both parents point at same thing, process only one: one that can
         // be responsible for deletion.
-        let parent_ids = if event.parent_aux == event.parent_prev {
-            vec![(event.parent_aux, true)]
+        let parent_ids = if event.parent_aux() == event.parent_prev() {
+            vec![(event.parent_aux(), true)]
         } else {
-            vec![(event.parent_aux, true), (event.parent_prev, false)]
+            vec![(event.parent_aux(), true), (event.parent_prev(), false)]
         };
 
         let mut deleted_parent = None;
@@ -160,7 +156,7 @@ impl Database {
         let mut missing_parents = vec![];
 
         for (parent_id, parent_is_aux) in parent_ids {
-            let Some(parent_id) = parent_id.into() else {
+            let Some(parent_id) = parent_id else {
                 continue;
             };
 
@@ -200,13 +196,10 @@ impl Database {
         events_table.insert(
             &event_id,
             &EventRecord {
-                signed: SignedEvent {
-                    event: *event,
-                    sig: *sig,
-                },
+                signed: event.into(),
             },
         )?;
-        events_by_time_table.insert(&(event.timestamp.into(), event_id), &())?;
+        events_by_time_table.insert(&(event.timestamp(), event_id), &())?;
 
         Ok(InsertEventOutcome::Inserted {
             was_missing,

@@ -1,5 +1,5 @@
 use bincode::{Decode, Encode};
-use rostra_core::event::{content_kind, Event, EventKind};
+use rostra_core::event::{content_kind, Event, EventExt as _, EventKind};
 use rostra_core::{ShortEventId, Timestamp};
 use serde::{Deserialize, Serialize};
 use tracing::debug;
@@ -50,7 +50,7 @@ impl Database {
                     continue;
                 };
 
-                if e_record.signed.event.kind != EventKind::SOCIAL_POST {
+                if e_record.kind() != EventKind::SOCIAL_POST {
                     continue;
                 }
 
@@ -68,12 +68,12 @@ impl Database {
                     continue;
                 };
 
-                debug_assert_eq!(Timestamp::from(e_record.signed.event.timestamp), ts);
+                debug_assert_eq!(e_record.timestamp(), ts);
 
                 ret.push(EventPaginationRecord {
                     ts,
                     event_id,
-                    event: e_record.signed.event,
+                    event: *e_record.event(),
                     content: social_post,
                 });
 

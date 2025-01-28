@@ -4,7 +4,7 @@ use std::sync::Arc;
 use iroh::endpoint::Incoming;
 use iroh::Endpoint;
 use rostra_client_db::{DbError, IdsFolloweesRecord};
-use rostra_core::event::{EventContent, VerifiedEvent, VerifiedEventContent};
+use rostra_core::event::{EventContent, EventExt as _, VerifiedEvent, VerifiedEventContent};
 use rostra_core::id::RostraId;
 use rostra_p2p::connection::{
     Connection, FeedEventRequest, FeedEventResponse, GetEventContentRequest,
@@ -46,11 +46,6 @@ pub enum IncomingConnectionError {
     // TODO: more details
     InvalidRequest {
         source: BoxedError,
-        #[snafu(implicit)]
-        location: Location,
-    },
-    InvalidSignature {
-        source: ed25519_dalek::SignatureError,
         #[snafu(implicit)]
         location: Location,
     },
@@ -178,15 +173,16 @@ impl RequestHandler {
         mut send: iroh::endpoint::SendStream,
         mut read: iroh::endpoint::RecvStream,
     ) -> Result<(), IncomingConnectionError> {
-        let FeedEventRequest(rostra_core::event::SignedEvent { event, sig }) =
+        let FeedEventRequest(event) =
             FeedEventRequest::decode_whole::<MAX_REQUEST_SIZE>(&req_msg).context(DecodingSnafu)?;
-
-        let verified_event = VerifiedEvent::verify_received_as_is(event, sig)
-            .boxed()
-            .context(InvalidRequestSnafu)?;
         let our_id = self.our_id;
 
-        if event.author == our_id || self.self_followees_rx.borrow().contains_key(&event.author) {
+        if event.author() == our_id
+            || self
+                .self_followees_rx
+                .borrow()
+                .contains_key(&event.author())
+        {
             // accept
         } else {
             Connection::write_return_code(&mut send, FeedEventResponse::RETURN_CODE_DOES_NOT_NEED)
@@ -194,16 +190,17 @@ impl RequestHandler {
                 .context(RpcSnafu)?;
             return Err("Author not needed".into()).context(InvalidRequestSnafu);
         }
-        let event_id = event.compute_id();
-        event
-            .verified_signed_by(sig, event.author)
-            .context(InvalidSignatureSnafu)?;
 
+        let event = VerifiedEvent::verify_received_as_is(event)
+            .boxed()
+            .context(InvalidRequestSnafu)?;
         {
             let client = self.client.app_ref_opt().context(ExitingSnafu)?;
 
-            if client.event_size_limit() < u32::from(event.content_len) {
-                client.store_event_too_large(event_id, event).await?;
+            if client.event_size_limit() < event.content_len() {
+                client
+                    .store_event_too_large(event.event_id, *event.event())
+                    .await?;
                 Connection::write_return_code(
                     &mut send,
                     FeedEventResponse::RETURN_CODE_ALREADY_HAVE,
@@ -212,7 +209,7 @@ impl RequestHandler {
                 .context(RpcSnafu)?;
             }
 
-            if client.does_have_event(event_id).await {
+            if client.does_have_event(event.event_id).await {
                 Connection::write_return_code(
                     &mut send,
                     FeedEventResponse::RETURN_CODE_ALREADY_HAVE,
@@ -230,19 +227,19 @@ impl RequestHandler {
             .context(RpcSnafu)?;
 
         let event_content = EventContent::from(
-            Connection::read_bao_content(&mut read, event.content_len.into(), event.content_hash)
+            Connection::read_bao_content(&mut read, event.content_len(), event.content_hash())
                 .await
                 .context(RpcSnafu)?,
         );
 
         {
             let client = self.client.app_ref_opt().context(ExitingSnafu)?;
-            let verified_content = VerifiedEventContent::verify(verified_event, event_content)
+            let verified_content = VerifiedEventContent::verify(event, event_content)
                 .boxed()
                 .context(InvalidRequestSnafu)?;
 
             client
-                .store_event_with_content(event_id, &verified_content)
+                .store_event_with_content(event.event_id, &verified_content)
                 .await?;
         }
 
@@ -306,13 +303,9 @@ impl RequestHandler {
                 .get_event(event_id)
                 .await
                 .expect("Must have event if we have content");
-            Connection::write_bao_content(
-                &mut send,
-                content.as_ref(),
-                event.signed.event.content_hash,
-            )
-            .await
-            .context(RpcSnafu)?;
+            Connection::write_bao_content(&mut send, content.as_ref(), event.content_hash())
+                .await
+                .context(RpcSnafu)?;
         }
 
         Ok(())

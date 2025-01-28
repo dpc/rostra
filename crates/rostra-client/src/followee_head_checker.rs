@@ -3,7 +3,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use rostra_client_db::{Database, IdsFolloweesRecord, InsertEventOutcome};
-use rostra_core::event::{VerifiedEvent, VerifiedEventContent};
+use rostra_core::event::{EventExt as _, VerifiedEvent, VerifiedEventContent};
 use rostra_core::id::RostraId;
 use rostra_core::ShortEventId;
 use rostra_util::is_rostra_dev_mode_set;
@@ -146,7 +146,7 @@ impl FolloweeHeadChecker {
             let Some(event) = event else {
                 continue;
             };
-            let event = VerifiedEvent::verify_queried(id, event_id, event.event, event.sig)
+            let event = VerifiedEvent::verify_response(id, event_id, *event.event(), event.sig())
                 .whatever_context("Invalid event received")?;
 
             let (insert_outcome, process_state) = storage.process_event(&event).await;
@@ -162,11 +162,7 @@ impl FolloweeHeadChecker {
 
             if storage.wants_content(event_id, process_state).await {
                 let content = conn
-                    .get_event_content(
-                        event_id,
-                        event.event.content_len.into(),
-                        event.event.content_hash,
-                    )
+                    .get_event_content(event_id, event.content_len(), event.content_hash())
                     .await
                     .whatever_context("Failed to download peer data")?;
 

@@ -328,7 +328,7 @@ impl Database {
         let mut ids_full_tbl = tx.open_table(&ids_full::TABLE)?;
 
         let insert_event_outcome = Database::insert_event_tx(
-            event,
+            *event,
             &mut ids_full_tbl,
             &mut events_tbl,
             &mut events_by_time_tbl,
