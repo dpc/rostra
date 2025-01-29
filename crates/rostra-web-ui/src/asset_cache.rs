@@ -3,6 +3,7 @@ use std::future::ready;
 use std::io::{self, Write as _};
 use std::path::{self, PathBuf};
 use std::string::String;
+use std::sync::LazyLock;
 
 use axum::extract::Path;
 use bytes::Bytes;
@@ -10,7 +11,7 @@ use futures::stream::{BoxStream, StreamExt};
 use rostra_util_error::WhateverResult;
 use snafu::{OptionExt as _, ResultExt as _};
 use tokio_stream::wrappers::ReadDirStream;
-use tracing::info;
+use tracing::{debug, info};
 
 use crate::LOG_TARGET;
 
@@ -77,15 +78,26 @@ impl AssetCache {
                         .whatever_context("Could not read file")?;
 
                     let compressed = match ext {
-                        "css" | "js" | "svg" => Some(compress_data(&raw)),
+                        "css" | "js" | "svg" | "json" => Some(compress_data(&raw)),
                         _ => None,
-                    };
+                    }
+                    .map(Bytes::from);
 
                     Ok(Some((
                         filename.to_string(),
                         StaticAsset {
                             path: stored_path,
-                            raw: Bytes::from(raw),
+                            raw: if let Some(compressed) = compressed.as_ref() {
+                                // if we have compressed copy, don't store raw data
+                                // decompress the raw one one the fly if anyone actually asks
+                                let compressed = compressed.clone();
+                                LazyLock::new(Box::new(move || {
+                                    debug!(target: LOG_TARGET, "Decompressing raw data from compressed version");
+                                    Bytes::from(decompress_data(&compressed))
+                                }))
+                            } else {
+                                LazyLock::new(Box::new(|| Bytes::from(raw)))
+                            },
                             compressed: compressed.map(Bytes::from),
                         },
                     )))
@@ -120,8 +132,8 @@ impl AssetCache {
 #[derive(Debug)]
 pub struct StaticAsset {
     pub path: String,
-    pub raw: Bytes,
     pub compressed: Option<Bytes>,
+    pub raw: LazyLock<Bytes, Box<dyn FnOnce() -> Bytes + Send>>,
 }
 
 impl StaticAsset {
@@ -156,6 +168,17 @@ fn compress_data(input: &[u8]) -> Vec<u8> {
     bytes
 }
 
+fn decompress_data(input: &[u8]) -> Vec<u8> {
+    let mut bytes = vec![];
+
+    let mut writer = brotli::DecompressorWriter::new(&mut bytes, 4096);
+
+    writer.write_all(input).expect("Can't fail");
+
+    drop(writer);
+
+    bytes
+}
 // async fn read_dir_stream(dir: impl AsRef<path::Path>) -> impl Stream<Item =
 // io::Result<PathBuf>> {
 fn read_dir_stream(dir: PathBuf) -> BoxStream<'static, io::Result<PathBuf>> {

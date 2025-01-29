@@ -80,16 +80,13 @@ pub fn static_file_handler(state: SharedState) -> Router {
                                 str.split(',').any(|s| s.trim() == "br")
                             });
 
-                    let content = if accepts_brotli {
-                        if let Some(compressed) = asset.compressed.as_ref() {
+                    let content = match (accepts_brotli, asset.compressed.as_ref()) {
+                        (true, Some(compressed)) => {
                             resp_headers.insert(CONTENT_ENCODING, HeaderValue::from_static("br"));
 
                             compressed.clone()
-                        } else {
-                            asset.raw.clone()
                         }
-                    } else {
-                        asset.raw.clone()
+                        _ => asset.raw.clone(),
                     };
 
                     (resp_headers, content).into_response()
