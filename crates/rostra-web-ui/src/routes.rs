@@ -4,6 +4,8 @@ mod self_account;
 mod timeline;
 mod unlock;
 
+use std::sync::Arc;
+
 use axum::body::Body;
 use axum::extract::{FromRequest, Path, Request, State};
 use axum::http::header::{self, ACCEPT_ENCODING, CONTENT_ENCODING, CONTENT_TYPE};
@@ -16,6 +18,7 @@ use maud::Markup;
 
 use super::error::{RequestError, UserErrorResponse};
 use super::SharedState;
+use crate::asset_cache::AssetCache;
 
 #[derive(Clone, Debug)]
 #[must_use]
@@ -47,71 +50,66 @@ where
     }
 }
 
-pub fn static_file_handler(state: SharedState) -> Router {
-    Router::new()
-        .route(
-            "/{*file}",
-            get(
-                |state: State<SharedState>, path: Path<String>, req_headers: HeaderMap| async move {
-                    let Some(asset) = state.assets.get_from_path(&path) else {
-                        return StatusCode::NOT_FOUND.into_response();
-                    };
+pub fn static_file_handler(assets: AssetCache) -> Router {
+    let assets = Arc::new(assets);
+    Router::new().route(
+        "/{*file}",
+        get(
+            // |state: State<SharedState>, path: Path<String>, req_headers: HeaderMap| async move {
+            |path: Path<String>, req_headers: HeaderMap| async move {
+                let Some(asset) = assets.get_from_path(&path) else {
+                    return StatusCode::NOT_FOUND.into_response();
+                };
 
-                    let mut resp_headers = HeaderMap::new();
+                let mut resp_headers = HeaderMap::new();
 
-                    // We set the content type explicitly here as it will otherwise
-                    // be inferred as an `octet-stream`
-                    resp_headers.insert(
-                        CONTENT_TYPE,
-                        HeaderValue::from_static(
-                            asset.content_type().unwrap_or("application/octet-stream"),
-                        ),
-                    );
+                // We set the content type explicitly here as it will otherwise
+                // be inferred as an `octet-stream`
+                resp_headers.insert(
+                    CONTENT_TYPE,
+                    HeaderValue::from_static(
+                        asset.content_type().unwrap_or("application/octet-stream"),
+                    ),
+                );
 
-                    let accepts_brotli =
-                        req_headers
-                            .get_all(ACCEPT_ENCODING)
-                            .into_iter()
-                            .any(|encodings| {
-                                let Ok(str) = encodings.to_str() else {
-                                    return false;
-                                };
+                let accepts_brotli =
+                    req_headers
+                        .get_all(ACCEPT_ENCODING)
+                        .into_iter()
+                        .any(|encodings| {
+                            let Ok(str) = encodings.to_str() else {
+                                return false;
+                            };
 
-                                str.split(',').any(|s| s.trim() == "br")
-                            });
+                            str.split(',').any(|s| s.trim() == "br")
+                        });
 
-                    let content = match (accepts_brotli, asset.compressed.as_ref()) {
-                        (true, Some(compressed)) => {
-                            resp_headers.insert(CONTENT_ENCODING, HeaderValue::from_static("br"));
+                let content = match (accepts_brotli, asset.compressed.as_ref()) {
+                    (true, Some(compressed)) => {
+                        resp_headers.insert(CONTENT_ENCODING, HeaderValue::from_static("br"));
 
-                            compressed.clone()
-                        }
-                        _ => asset.raw.clone(),
-                    };
+                        compressed.clone()
+                    }
+                    _ => asset.raw.clone(),
+                };
 
-                    (resp_headers, content).into_response()
-                },
-            ),
-        )
-        .layer(middleware::from_fn(cache_control))
-        .with_state(state)
+                (resp_headers, content).into_response()
+            },
+        ),
+    )
 }
 
 pub async fn cache_control(request: Request, next: Next) -> Response {
     let mut response = next.run(request).await;
 
     if let Some(content_type) = response.headers().get(CONTENT_TYPE) {
-        const CACHEABLE_CONTENT_TYPES: &[(&str, u32)] = &[
-            ("image/svg+xml", 60),
-            ("text/css", 60 * 60 * 24),
-            ("application/javascript", 60 * 60 * 24),
-        ];
+        const NON_CACHEABLE_CONTENT_TYPES: &[&str] = &["text/html"];
 
-        if let Some(&(_, secs)) = CACHEABLE_CONTENT_TYPES
+        if NON_CACHEABLE_CONTENT_TYPES
             .iter()
-            .find(|&(ct, _)| content_type.as_bytes().starts_with(ct.as_bytes()))
+            .all(|&ct| !content_type.as_bytes().starts_with(ct.as_bytes()))
         {
-            let value = format!("public, max-age={}", secs);
+            let value = format!("public, max-age={}", 24 * 60 * 60);
 
             if let Ok(value) = HeaderValue::from_str(&value) {
                 response.headers_mut().insert("cache-control", value);

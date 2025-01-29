@@ -1,4 +1,4 @@
-mod asset_cache;
+pub(crate) mod asset_cache;
 mod error;
 mod fragment;
 pub mod html_utils;
@@ -16,12 +16,14 @@ use std::{io, result};
 use asset_cache::AssetCache;
 use axum::http::header::{ACCEPT, CONTENT_TYPE};
 use axum::http::{HeaderName, HeaderValue, Method};
-use axum::Router;
+use axum::{middleware, Router};
 use rostra_client::error::{IdSecretReadError, InitError};
 use rostra_client::{Client, ClientHandle, ClientRefError};
 use rostra_client_db::{Database, DbError};
 use rostra_core::id::{RostraId, RostraIdSecretKey};
+use rostra_util::is_rostra_dev_mode_set;
 use rostra_util_error::{BoxedError, WhateverResult};
+use routes::cache_control;
 use snafu::{ResultExt as _, Snafu, Whatever};
 use tokio::net::{TcpListener, TcpSocket};
 use tokio::signal;
@@ -106,7 +108,6 @@ pub type UiStateClientUnlockResult<T> = result::Result<T, UiStateClientUnlockErr
 
 pub struct UiState {
     client: tokio::sync::RwLock<HashMap<RostraId, Arc<Client>>>,
-    pub assets: AssetCache,
     opts: Opts,
 }
 
@@ -158,6 +159,7 @@ pub struct Server {
     listener: TcpListener,
 
     state: SharedState,
+    assets: Option<AssetCache>,
     opts: Opts,
 }
 
@@ -199,11 +201,16 @@ impl Server {
     pub async fn init(opts: Opts) -> ServerResult<Server> {
         let listener = Self::get_listener(&opts).await?;
 
-        let assets = AssetCache::load_files(&opts.assets_dir)
-            .await
-            .context(AssetsLoadSnafu)?;
+        // Todo: allow disabling with a cmdline flag too?
+        let assets = if is_rostra_dev_mode_set() {
+            None
+        } else {
+            AssetCache::load_files(&opts.assets_dir)
+                .await
+                .context(AssetsLoadSnafu)?
+                .into()
+        };
         let state = Arc::new(UiState {
-            assets,
             client: tokio::sync::RwLock::new(HashMap::new()),
             opts: opts.clone(),
         });
@@ -224,6 +231,7 @@ impl Server {
             listener,
             state,
             opts,
+            assets,
         })
     }
 
@@ -253,13 +261,13 @@ impl Server {
     pub async fn run(self) -> ServerResult<()> {
         let mut router = Router::new().merge(routes::route_handler(self.state.clone()));
 
-        if std::env::var("ROSTRA_DEV_MODE").is_ok() {
+        if let Some(assets) = self.assets {
+            router = router.nest("/assets", routes::static_file_handler(assets));
+        } else {
             router = router.nest_service(
                 "/assets",
                 ServeDir::new(format!("{}/assets", env!("CARGO_MANIFEST_DIR"))),
             );
-        } else {
-            router = router.nest("/assets", routes::static_file_handler(self.state.clone()));
         }
 
         let session_store = MemoryStore::default();
@@ -267,10 +275,11 @@ impl Server {
             .with_expiry(Expiry::OnInactivity(time::Duration::minutes(30)));
 
         info!("Starting server");
-        let listen = self.addr()?;
+        let listen = self.listener.local_addr()?;
         axum::serve(
             self.listener,
             router
+                .layer(middleware::from_fn(cache_control))
                 .layer(session_layer)
                 .layer(cors_layer(&self.opts, listen)?)
                 .layer(compression_layer())
