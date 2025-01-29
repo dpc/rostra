@@ -8,12 +8,17 @@ use rostra_core::id::{RostraId, ToShort as _};
 use rostra_core::ShortEventId;
 use serde::Deserialize;
 
+use super::unlock::session::AuthenticatedUser;
 use super::Maud;
 use crate::error::RequestResult;
+use crate::html_utils::submit_on_ctrl_enter;
 use crate::{SharedState, UiState};
 
-pub async fn get_self_account_edit(state: State<SharedState>) -> RequestResult<impl IntoResponse> {
-    Ok(Maud(state.render_profile_edit_form().await?))
+pub async fn get_self_account_edit(
+    state: State<SharedState>,
+    session: AuthenticatedUser,
+) -> RequestResult<impl IntoResponse> {
+    Ok(Maud(state.render_profile_edit_form(&session).await?))
 }
 
 #[derive(Deserialize)]
@@ -24,16 +29,17 @@ pub struct EditInput {
 
 pub async fn post_self_account_edit(
     state: State<SharedState>,
+    session: AuthenticatedUser,
     Form(form): Form<EditInput>,
 ) -> RequestResult<impl IntoResponse> {
     state
-        .client()
+        .client(session.id())
         .await?
         .client_ref()?
         .post_social_profile_update(form.name, form.bio)
         .await?;
 
-    Ok(Maud(state.render_self_profile_summary().await?))
+    Ok(Maud(state.render_self_profile_summary(&session).await?))
 }
 
 impl UiState {
@@ -60,8 +66,11 @@ impl UiState {
         "/assets/icons/circle-user.svg".into()
     }
 
-    pub async fn render_self_profile_summary(&self) -> RequestResult<Markup> {
-        let client = self.client().await?;
+    pub async fn render_self_profile_summary(
+        &self,
+        user: &AuthenticatedUser,
+    ) -> RequestResult<Markup> {
+        let client = self.client(user.id()).await?;
         let self_id = client.client_ref()?.rostra_id();
         let self_profile = self
             .get_social_profile(self_id, &client.client_ref()?)
@@ -95,13 +104,13 @@ impl UiState {
                     div ."m-selfAccount__buttons" {
                         button
                             ."m-selfAccount__copyButton"
-                            data-value=(self.client().await?.client_ref()?.rostra_id()) onclick="copyIdToClipboard(event)"  {
+                            data-value=(self.client(user.id()).await?.client_ref()?.rostra_id()) onclick="copyIdToClipboard(event)"  {
                                 span ."m-selfAccount__copyButtonIcon" width="1rem" height="1rem" {}
                                 "RostraId"
                             }
                         button
                             ."m-selfAccount__editButton"
-                            data-value=(self.client().await?.client_ref()?.rostra_id())
+                            data-value=(self.client(user.id()).await?.client_ref()?.rostra_id())
                             hx-get="/ui/self/edit"
                             hx-target="closest .m-selfAccount"
                             hx-swap="outerHTML"
@@ -115,8 +124,11 @@ impl UiState {
         })
     }
 
-    pub async fn render_profile_edit_form(&self) -> RequestResult<Markup> {
-        let client = self.client().await?;
+    pub async fn render_profile_edit_form(
+        &self,
+        user: &AuthenticatedUser,
+    ) -> RequestResult<Markup> {
+        let client = self.client(user.id()).await?;
         let client_ref = client.client_ref()?;
         let self_profile = self
             .get_social_profile(client_ref.rostra_id(), &client_ref)
@@ -154,6 +166,7 @@ impl UiState {
                     }
                 }
             }
+            (submit_on_ctrl_enter(".m-selfAccount", ".m-selfAccount__bio"))
         })
     }
 }

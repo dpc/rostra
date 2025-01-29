@@ -19,6 +19,7 @@ button {
   display: flex;
   width: 100%;
   height: 100vh;
+  overflow: auto;
 }
 
 .o-navBar {
@@ -27,6 +28,9 @@ button {
   flex-direction: column;
   gap: 10pt;
   padding: 5pt;
+  position: sticky;
+  top: 0;
+  align-self: start;
 }
 
 .o-navBar__list {

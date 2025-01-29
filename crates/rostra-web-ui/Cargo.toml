@@ -29,6 +29,8 @@ rostra-util-error = { workspace = true }
 tokio = { workspace = true }
 tokio-stream = { workspace = true, features = ["fs"] }
 tower-http = { workspace = true, features = ["cors", "compression-br", "fs"] }
+tower-sessions = { workspace = true }
 tracing = { workspace = true }
+time = { workspace = true }
 serde_json = { workspace = true }
 serde = { workspace = true }

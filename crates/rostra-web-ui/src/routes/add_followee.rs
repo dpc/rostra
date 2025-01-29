@@ -5,6 +5,7 @@ use maud::{html, Markup};
 use rostra_core::id::RostraId;
 use serde::Deserialize;
 
+use super::unlock::session::AuthenticatedUser;
 use super::Maud;
 use crate::error::RequestResult;
 use crate::{SharedState, UiState};
@@ -16,10 +17,11 @@ pub struct Input {
 
 pub async fn add_followee(
     state: State<SharedState>,
+    session: AuthenticatedUser,
     Form(form): Form<Input>,
 ) -> RequestResult<impl IntoResponse> {
     state
-        .client()
+        .client(session.id())
         .await?
         .client_ref()?
         .follow(form.rostra_id)

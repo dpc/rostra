@@ -75,9 +75,11 @@ rostra-web-ui = { path = "crates/rostra-web-ui" }
 serde = "1.0.216"
 serde_json = "1.0.134"
 snafu = { version = "0.8.5", features = ["rust_1_81"] }
+time = "0.3.36"
 tokio = { version = "1.42.0", features = ["macros"] }
 tokio-stream = "*"
 tower-http = "0.5"
+tower-sessions = "0.14.0"
 tracing = "0.1.41"
 tracing-subscriber = { version = "0.3.19", features = ["env-filter"] }
 z32 = "1.1.1"
@@ -95,6 +97,10 @@ opt-level = 1
 ring = { opt-level = 2 }
 ed25519 = { opt-level = 2 }
 ed25519-dalek = { opt-level = 2 }
+brotli = { opt-level = 2 }
+brotli-decompressor = { opt-level = 2 }
+data-encoding = { opt-level = 2 }
+tokio = { opt-level = 2 }
 
 [profile.ci]
 inherits = "dev"

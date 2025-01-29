@@ -90,7 +90,7 @@ impl AssetCache {
                         },
                     )))
                 })
-                .buffered(8)
+                .buffered(16)
                 .filter_map(
                     |res_opt: WhateverResult<std::option::Option<(String, StaticAsset)>>| {
                         ready(res_opt.transpose())

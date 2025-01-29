@@ -12,24 +12,40 @@ use rostra_util_error::FmtCompact as _;
 use tracing::debug;
 
 use super::super::error::RequestResult;
+use super::unlock::session::AuthenticatedUser;
 use super::Maud;
 use crate::{SharedState, UiState, LOG_TARGET};
 
-pub async fn get(state: State<SharedState>) -> RequestResult<impl IntoResponse> {
-    Ok(Maud(state.timeline_page().await?))
+pub async fn get(
+    state: State<SharedState>,
+    _user: AuthenticatedUser,
+    session: AuthenticatedUser,
+) -> RequestResult<impl IntoResponse> {
+    Ok(Maud(state.timeline_page(&session).await?))
 }
 
-pub async fn get_updates(state: State<SharedState>, ws: WebSocketUpgrade) -> impl IntoResponse {
+pub async fn get_updates(
+    state: State<SharedState>,
+    ws: WebSocketUpgrade,
+    session: AuthenticatedUser,
+) -> impl IntoResponse {
     ws.on_upgrade(|ws| async move {
-        let _ = state.handle_get_updates(ws).await.inspect_err(|err| {
-            debug!(target: LOG_TARGET, err=%err.fmt_compact(), "WS handler failed");
-        });
+        let _ = state
+            .handle_get_updates(ws, &session)
+            .await
+            .inspect_err(|err| {
+                debug!(target: LOG_TARGET, err=%err.fmt_compact(), "WS handler failed");
+            });
     })
 }
 
 impl UiState {
-    async fn handle_get_updates(&self, mut ws: WebSocket) -> RequestResult<()> {
-        let client = self.client().await?;
+    async fn handle_get_updates(
+        &self,
+        mut ws: WebSocket,
+        user: &AuthenticatedUser,
+    ) -> RequestResult<()> {
+        let client = self.client(user.id()).await?;
         let self_id = client.client_ref()?.rostra_id();
         let Some(mut new_posts) = client.client_ref()?.new_content_subscribe() else {
             pending::<()>().await;
@@ -69,12 +85,12 @@ impl UiState {
         Ok(())
     }
 
-    pub async fn timeline_page(&self) -> RequestResult<Markup> {
+    pub async fn timeline_page(&self, user: &AuthenticatedUser) -> RequestResult<Markup> {
         let content = html! {
             nav ."o-navBar" hx-ext="ws" ws-connect="/ui/timeline/updates" {
 
                 div ."o-navBar__selfAccount" {
-                    (self.render_self_profile_summary().await?)
+                    (self.render_self_profile_summary(user).await?)
                 }
 
                 (self.new_post_form(None))
@@ -90,12 +106,12 @@ impl UiState {
 
             main ."o-mainBar" {
                 (self.new_posts_alert(false, 0))
-                (self.main_bar_timeline().await?)
+                (self.main_bar_timeline(user).await?)
             }
 
         };
 
-        self.html_page("You're Rostra!", content).await
+        self.render_html_page("You're Rostra!", content).await
     }
 
     pub fn new_posts_alert(&self, visible: bool, count: u64) -> Markup {
@@ -116,12 +132,12 @@ impl UiState {
         }
     }
 
-    pub async fn main_bar_timeline(&self) -> RequestResult<Markup> {
-        let client = self.client().await?;
+    pub async fn main_bar_timeline(&self, user: &AuthenticatedUser) -> RequestResult<Markup> {
+        let client = self.client(user.id()).await?;
         let client_ref = client.client_ref()?;
 
         let posts = self
-            .client()
+            .client(user.id())
             .await?
             .storage()??
             .paginate_social_posts_rev(None, 100)

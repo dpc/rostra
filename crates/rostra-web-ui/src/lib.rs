@@ -1,8 +1,11 @@
 mod asset_cache;
 mod error;
 mod fragment;
+pub mod html_utils;
+pub mod is_htmx;
 mod routes;
 
+use std::collections::HashMap;
 use std::net::{AddrParseError, SocketAddr};
 use std::path::{Path, PathBuf};
 use std::str::FromStr as _;
@@ -17,7 +20,7 @@ use axum::Router;
 use rostra_client::error::{IdSecretReadError, InitError};
 use rostra_client::{Client, ClientHandle, ClientRefError};
 use rostra_client_db::{Database, DbError};
-use rostra_core::id::RostraIdSecretKey;
+use rostra_core::id::{RostraId, RostraIdSecretKey};
 use rostra_util_error::{BoxedError, WhateverResult};
 use snafu::{ResultExt as _, Snafu, Whatever};
 use tokio::net::{TcpListener, TcpSocket};
@@ -27,6 +30,7 @@ use tower_http::compression::CompressionLayer;
 use tower_http::cors::CorsLayer;
 use tower_http::services::ServeDir;
 use tower_http::CompressionLevel;
+use tower_sessions::{Expiry, MemoryStore, SessionManagerLayer};
 use tracing::info;
 
 const LOG_TARGET: &str = "rostra::web_ui";
@@ -101,36 +105,37 @@ pub enum UiStateClientUnlockError {
 pub type UiStateClientUnlockResult<T> = result::Result<T, UiStateClientUnlockError>;
 
 pub struct UiState {
-    client: tokio::sync::RwLock<Option<Arc<Client>>>,
+    client: tokio::sync::RwLock<HashMap<RostraId, Arc<Client>>>,
     pub assets: AssetCache,
     opts: Opts,
 }
 
 impl UiState {
-    pub async fn client(&self) -> UiStateClientResult<ClientHandle> {
-        if let Some(read) = self.client.read().await.as_ref() {
+    pub async fn client(&self, id: RostraId) -> UiStateClientResult<ClientHandle> {
+        if let Some(read) = self.client.read().await.get(&id) {
             Ok(read.handle())
         } else {
             ClientNotLoadedSnafu.fail()
         }
     }
 
-    pub async fn unlock(&self, mnemonic: &str) -> UiStateClientUnlockResult<()> {
+    pub async fn unlock(&self, mnemonic: &str) -> UiStateClientUnlockResult<RostraIdSecretKey> {
         let secret_id = RostraIdSecretKey::from_str(mnemonic)
             .boxed()
             .context(InvalidMnemonicSnafu)?;
-        self.unlock_secret(secret_id).await
+        self.unlock_secret(secret_id).await?;
+        Ok(secret_id)
     }
     pub async fn unlock_secret(
         &self,
         secret_id: RostraIdSecretKey,
     ) -> UiStateClientUnlockResult<()> {
         let mut write = self.client.write().await;
-        if write.is_some() {
-            return AlreadyLoadedSnafu.fail();
+        let self_id = secret_id.id();
+        if write.get(&self_id).is_some() {
+            return Ok(());
         }
 
-        let self_id = secret_id.id();
         let client = Client::builder()
             .id_secret(secret_id)
             .db(Database::open(
@@ -143,7 +148,7 @@ impl UiState {
             .await
             .context(InitSnafu)?;
 
-        *write = Some(client);
+        write.insert(self_id, client);
         Ok(())
     }
 }
@@ -199,7 +204,7 @@ impl Server {
             .context(AssetsLoadSnafu)?;
         let state = Arc::new(UiState {
             assets,
-            client: tokio::sync::RwLock::new(None),
+            client: tokio::sync::RwLock::new(HashMap::new()),
             opts: opts.clone(),
         });
 
@@ -257,11 +262,16 @@ impl Server {
             router = router.nest("/assets", routes::static_file_handler(self.state.clone()));
         }
 
+        let session_store = MemoryStore::default();
+        let session_layer = SessionManagerLayer::new(session_store)
+            .with_expiry(Expiry::OnInactivity(time::Duration::minutes(30)));
+
         info!("Starting server");
         let listen = self.addr()?;
         axum::serve(
             self.listener,
             router
+                .layer(session_layer)
                 .layer(cors_layer(&self.opts, listen)?)
                 .layer(compression_layer())
                 .into_make_service_with_connect_info::<SocketAddr>(),

@@ -1,7 +1,8 @@
-use axum::http::StatusCode;
+use axum::http::{HeaderName, HeaderValue, StatusCode};
 use axum::response::{IntoResponse, Redirect, Response};
 use rostra_client::error::PostError;
 use rostra_client::{ClientRefError, ClientStorageError};
+use rostra_util_error::BoxedError;
 use serde::Serialize;
 use snafu::Snafu;
 use tracing::info;
@@ -41,6 +42,12 @@ pub enum RequestError {
     ClientStorage { source: ClientStorageError },
     #[snafu(transparent)]
     PostError { source: PostError },
+    #[snafu(visibility(pub(crate)))]
+    Other { source: BoxedError },
+    #[snafu(visibility(pub(crate)))]
+    InternalServerError { msg: &'static str },
+    #[snafu(visibility(pub(crate)))]
+    LoginRequired,
 }
 pub type RequestResult<T> = std::result::Result<T, RequestError>;
 
@@ -48,20 +55,36 @@ impl IntoResponse for RequestError {
     fn into_response(self) -> Response {
         info!(err=%self, "Request Error");
 
-        let (status_code, message) =
-            if let Some(user_err) = root_cause(&self).downcast_ref::<UserRequestError>() {
-                return user_err.into_response();
-            } else {
-                match self {
-                    RequestError::StateClient { .. } => {
-                        return Redirect::temporary("/ui/unlock").into_response();
-                    }
-                    _ => (
-                        StatusCode::INTERNAL_SERVER_ERROR,
-                        "Internal Service Error".to_owned(),
-                    ),
+        let (status_code, message) = if let Some(user_err) =
+            root_cause(&self).downcast_ref::<UserRequestError>()
+        {
+            return user_err.into_response();
+        } else {
+            match self {
+                RequestError::StateClient { .. } => {
+                    return Redirect::temporary("/ui/unlock").into_response();
                 }
-            };
+                RequestError::LoginRequired => {
+                    let headers = [
+                        (
+                            HeaderName::from_static("hx-redirect"),
+                            HeaderValue::from_static("/ui/unlock"),
+                        ),
+                        (
+                            HeaderName::from_static("location"),
+                            HeaderValue::from_static("/ui/unlock"),
+                        ),
+                    ];
+                    return (StatusCode::SEE_OTHER, headers).into_response();
+
+                    // return Redirect::temporary("/ui/unlock").into_response();
+                }
+                _ => (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "Internal Service Error".to_owned(),
+                ),
+            }
+        };
 
         (status_code, AppJson(UserErrorResponse { message })).into_response()
     }
