@@ -138,7 +138,7 @@ impl UiState {
                             type="password"
                             name="password"
                             autocomplete="current-password"
-                            placeholder="mnemonic"
+                            placeholder="mnemonic (optional in read-only mode)"
                             value=(current_mnemonic)
                             { }
                         button ."unlockScreen__unlockButton"

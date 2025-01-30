@@ -197,7 +197,7 @@ button {
 }
 
 .m-selfAccount__editButtonIcon {
-  background: url('/assets/icons/id-card.svg') center/contain no-repeat;
+  background: url('/assets/icons/pen-to-square.svg') center/contain no-repeat;
   width: 1rem;
   height: 1rem;
   display: inline-block;

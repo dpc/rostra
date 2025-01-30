@@ -69,18 +69,14 @@
           }
         );
 
-        rostra-wrapper = pkgs.writeShellScriptBin "rostra" ''
-          if [ -z "$1" ]; then
-            ${multiBuild.rostra}/bin/rostra web-ui
-          else
-            ${multiBuild.rostra}/bin/rostra "$@"
-          fi
+        rostra-web = pkgs.writeShellScriptBin "rostra-web" ''
+          ${multiBuild.rostra}/bin/rostra web-ui "$@"
         '';
       in
       {
         packages = {
-          default = rostra-wrapper;
-          rostra-raw = multiBuild.rostra;
+          default = rostra-web;
+          rostra = multiBuild.rostra;
         };
 
         legacyPackages = multiBuild;
