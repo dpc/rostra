@@ -122,15 +122,16 @@ impl UiState {
                     }
                     div ."o-unlockScreen__header"  {
                         h4 { "Unlock Rostra account" }
-                        p { "Paste existing RostraId, secret passphrase or both to unlock your account."}
-                        p { "Use Random button to generate new account."}
-                        p { "Make sure to save your account information."}
+                        p { "Provide existing RostraId, secret passphrase or both to unlock your identity."}
+                        p { "Use Random button to generate new identity."}
+                        p { "Make sure to save your identity information."}
                     }
                     div."o-unlockScreen__idLine" {
                         input ."o-unlockScreen__id"
                             type="username"
                             name="username"
-                            placeholder="RostraId"
+                            placeholder="Id..."
+                            title="Id is a single, long string of characters encoding your public identifier"
                             value=(current_rostra_id.map(|id| id.to_string()).unwrap_or_default())
                             {}
                         button ."o-unlockScreen__unlockButton u-button"
@@ -146,7 +147,8 @@ impl UiState {
                             type="password"
                             name="password"
                             autocomplete="current-password"
-                            placeholder="mnemonic (optional in read-only mode)"
+                            placeholder="Mnemonic... (optional in read-only mode)"
+                            title="Mnemonic is 12 words passphrase encoding secret key of your identity"
                             value=(current_mnemonic)
                             { }
                         button
