@@ -1,6 +1,8 @@
 
 :root {
  --background-border-color: rgb(217, 217, 232);
+ --link-color: oklch(33.68% 0.1567 257.82);
+ --link-hover-color: oklch(33.68% 0.1567 351.52);
 }
 
 * { margin: 0; padding: 0; box-sizing: border-box; }
@@ -11,9 +13,56 @@ body {
 
 pre { font-family: monospace; }
 
-button {
-  padding: 0.1rem .25rem;
+a {
+  color: var(--link-color);
+  text-decoration: none;
+  position: relative;
+  transition: color 0.2s;
+}
+
+/* Underline effect on hover */
+a::after {
+  content: '';
+  position: absolute;
+  width: 100%;
+  height: 1px;
+  bottom: -2px;
+  left: 0;
+  background-color: currentColor;
+  transform: scaleX(0);
+  transition: transform 0.2s;
+}
+
+a:hover {
+  color: var(--link-hover-color);  /* Darker blue */
+}
+
+a:hover::after {
+  transform: scaleX(1);
+}
+
+
+/* Active/clicked state */
+a:active {
+  color: red;  /* Very dark blue */
+}
+
+.u-button {
+  align-items: center;
+  display: flex;
+  gap: 0.5rem;
   min-width: 5rem;
+  padding: 0.1rem .25rem;
+}
+
+.u-buttonIcon {
+  width: 1rem;
+  height: 1rem;
+  display: inline-block;
+}
+
+[disabled] > .u-buttonIcon {
+  opacity: 0.6;
 }
 
 .o-pageLayout {
@@ -41,6 +90,10 @@ button {
 
 .o-navBar__item {
   display: block;
+}
+
+.o-navBar__header {
+  font-weight: bold;
 }
 
 .o-mainBar {
@@ -176,9 +229,6 @@ button {
 
 .m-selfAccount__copyButtonIcon {
   background: url('/assets/icons/id-card.svg') center/contain no-repeat;
-  width: 1rem;
-  height: 1rem;
-  display: inline-block;
 }
 
 .m-selfAccount__copyButton:hover .m-selfAccount__copyButtonIcon {
@@ -198,9 +248,6 @@ button {
 
 .m-selfAccount__editButtonIcon {
   background: url('/assets/icons/pen-to-square.svg') center/contain no-repeat;
-  width: 1rem;
-  height: 1rem;
-  display: inline-block;
 }
 
 .m-selfAccount__saveButton {
@@ -212,9 +259,6 @@ button {
 
 .m-selfAccount__saveButtonIcon {
   background: url('/assets/icons/upload.svg') center/contain no-repeat;
-  width: 1rem;
-  height: 1rem;
-  display: inline-block;
 }
 
 .m-selfAccount__logoutButton {
@@ -226,9 +270,6 @@ button {
 
 .m-selfAccount__logoutButtonIcon {
   background: url('/assets/icons/arrow-right-from-bracket.svg') center/contain no-repeat;
-  width: 1rem;
-  height: 1rem;
-  display: inline-block;
 }
 
 .m-newPostForm {
@@ -262,9 +303,6 @@ button {
 
 .m-newPostForm__postButtonIcon {
   background: url('/assets/icons/upload.svg') center/contain no-repeat;
-  width: 1rem;
-  height: 1rem;
-  display: inline-block;
 }
 
 .m-addFolloweeForm {
@@ -281,20 +319,13 @@ button {
 }
 
 .m-addFolloweeForm__followButton {
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
-  padding: 0.1rem .25rem;
 }
 
 .m-addFolloweeForm__followButtonIcon {
   background: url('/assets/icons/upload.svg') center/contain no-repeat;
-  width: 1rem;
-  height: 1rem;
-  display: inline-block;
 }
 
-.unlockScreen {
+.o-unlockScreen {
   display: flex;
   flex-direction: column;
   justify-content: center;
@@ -303,7 +334,7 @@ button {
   min-width: 100vw;
 }
 
-.unlockScreen__form {
+.o-unlockScreen__form {
   padding: 2rem;
   background: white;
   border-radius: 8px;
@@ -314,27 +345,45 @@ button {
   gap: .5rem;
 }
 
-.unlockScreen__header > * {
+.o-unlockScreen__header > * {
   padding-top: 4pt;
   padding-bottom: 4pt;
 }
 
-.unlockScreen__fakeUsername {
+.o-unlockScreen__fakeUsername {
   display: none;
 }
 
-.unlockScreen__unlockLine {
+.o-unlockScreen__idLine {
+  display: flex;
+  gap: 5pt;
+}
+.o-unlockScreen__id {
+  flex-grow: 1;
+}
+
+.o-unlockScreen__mnemonicLine {
   display: flex;
   gap: 5pt;
 }
 
-.unlockScreen__mnemonic {
-  width: 100%;
+.o-unlockScreen__mnemonic {
+  flex-grow: 1;
 }
 
-.unlockScreen__unlockButton {
-  width: 5rem;
+.o-unlockScreen__unlockLine {
+  display: flex;
+  gap: 5pt;
 }
-.unlockScreen__generateButton {
-  width: 5rem;
+
+.o-unlockScreen__unlockButtonIcon {
+  background: url('/assets/icons/right-to-bracket.svg') center/contain no-repeat;
+}
+
+.o-unlockScreen__roButtonIcon {
+  background: url('/assets/icons/circle-xmark.svg') center/contain no-repeat;
+}
+
+.o-unlockScreen__generateButtonIcon {
+  background: url('/assets/icons/dice.svg') center/contain no-repeat;
 }

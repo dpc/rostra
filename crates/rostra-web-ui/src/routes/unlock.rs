@@ -82,7 +82,7 @@ pub async fn post_unlock(
                     Some(form.rostra_id),
                     &form.mnemonic,
                     html! {
-                        span ."unlockScreen_notice" { (e)}
+                        span ."o-unlockScreen_notice" { (e)}
                     },
                 )
                 .await?,
@@ -113,50 +113,72 @@ impl UiState {
         let random_rostra_id = random_rostra_id_secret.id().to_string();
         let notification = notification.into();
         let content = html! {
-            div ."unlockScreen" {
+            div ."o-unlockScreen" {
 
-                form ."unlockScreen__form"
+                form ."o-unlockScreen__form"
                     autocomplete="on" {
                     @if let Some(n) = notification {
                         (n)
                     }
-                    // some browsers might refuse to save if there's no "username"
-                    div ."unlockScreen__header"  {
-
-                        h4 { "Welcome to Rostra!" }
-                        p { "To use Rostra you need to paste an existing mnemonic or generate a new one."}
-                        p { "Make sure you save it in your browser's password manager and make a backup."}
+                    div ."o-unlockScreen__header"  {
+                        h4 { "Unlock Rostra account" }
+                        p { "Paste existing RostraId, secret passphrase or both to unlock your account."}
+                        p { "Use Random button to generate new account."}
+                        p { "Make sure to save your account information."}
                     }
-                    input ."unlockScreen__rostraId"
-                        type="username"
-                        name="username"
-                        placeholder="RostraId"
-                        value=(current_rostra_id.map(|id| id.to_string()).unwrap_or_default())
-                        {}
-                    div."unlockScreen__unlockLine" {
-                        input ."unlockScreen__mnemonic"
+                    div."o-unlockScreen__idLine" {
+                        input ."o-unlockScreen__id"
+                            type="username"
+                            name="username"
+                            placeholder="RostraId"
+                            value=(current_rostra_id.map(|id| id.to_string()).unwrap_or_default())
+                            {}
+                        button ."o-unlockScreen__unlockButton u-button"
+                            type="submit"
+                            hx-target="closest .o-unlockScreen"
+                            hx-post="/ui/unlock" {
+                                span ."o-unlockScreen__unlockButtonIcon u-buttonIcon" width="1rem" height="1rem" {}
+                                "Unlock"
+                            }
+                    }
+                    div."o-unlockScreen__mnemonicLine" {
+                        input ."o-unlockScreen__mnemonic"
                             type="password"
                             name="password"
                             autocomplete="current-password"
                             placeholder="mnemonic (optional in read-only mode)"
                             value=(current_mnemonic)
                             { }
-                        button ."unlockScreen__unlockButton"
-                            type="submit"
-                            hx-target="closest .unlockScreen"
-                            hx-post="/ui/unlock"
-                            { "Unlock" }
+                        button
+                            type="button" // do not submit the form!
+                            ."o-unlockScreen__roButton u-button"
+                            onclick=(
+                                r#"
+                                    document.querySelector('.o-unlockScreen__mnemonic').value = '';
+                                "#
+                            )
+                            title="Clear the mnemonic to unlock in a read-only mode"
+                            {
+                                span ."o-unlockScreen__roButtonIcon u-buttonIcon" width="1rem" height="1rem" {}
+                                "Read-only"
+                            }
                     }
-                    button
-                        type="button" // do not submit the form!
-                        ."unlockScreen__generateButton"
-                        onclick=(
-                            format!(r#"
-                                document.querySelector('.unlockScreen__rostraId').value = '{}';
-                                document.querySelector('.unlockScreen__mnemonic').value = '{}';
-                            "#, random_rostra_id, random_mnemonic)
-                        )
-                        { "Generate" }
+                    div."o-unlockScreen__unlockLine" {
+                        button
+                            type="button" // do not submit the form!
+                            ."o-unlockScreen__generateButton u-button"
+                            onclick=(
+                                format!(r#"
+                                    document.querySelector('.o-unlockScreen__rostraId').value = '{}';
+                                    document.querySelector('.o-unlockScreen__mnemonic').value = '{}';
+                                "#, random_rostra_id, random_mnemonic)
+                            )
+                            title="Generate a random account."
+                            {
+                                span ."o-unlockScreen__generateButtonIcon u-buttonIcon" width="1rem" height="1rem" {}
+                                "Random"
+                            }
+                    }
                 }
             }
         };

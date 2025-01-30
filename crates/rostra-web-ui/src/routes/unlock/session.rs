@@ -13,6 +13,7 @@ pub struct AuthenticatedUser {
     id: RostraId,
     id_secret: Option<RostraIdSecretKey>,
 }
+
 impl AuthenticatedUser {
     pub(crate) fn id(&self) -> RostraId {
         self.id
@@ -28,8 +29,29 @@ impl AuthenticatedUser {
             id_secret: secret_key,
         }
     }
+    pub(crate) fn ro_mode(&self) -> RoMode {
+        if self.id_secret.is_some() {
+            RoMode::Rw
+        } else {
+            RoMode::Ro
+        }
+    }
 }
 
+#[derive(Copy, Clone, Debug)]
+pub enum RoMode {
+    Ro,
+    Rw,
+}
+
+impl RoMode {
+    pub fn to_disabled(self) -> bool {
+        match self {
+            RoMode::Ro => true,
+            RoMode::Rw => false,
+        }
+    }
+}
 // impl Guest {
 //     const GUEST_DATA_KEY: &'static str = "guest_data";
 

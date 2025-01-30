@@ -50,8 +50,8 @@ impl UiState {
                     name="rostra_id"
                     autocomplete="off"
                     {}
-                button ."m-addFolloweeForm__followButton" {
-                    span ."m-addFolloweeForm__followButtonIcon" width="1rem" height="1rem" {}
+                button ."m-addFolloweeForm__followButton u-button" {
+                    span ."m-addFolloweeForm__followButtonIcon u-buttonIcon" width="1rem" height="1rem" {}
                     "Follow"
                 }
             }

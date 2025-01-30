@@ -6,7 +6,7 @@ use serde::Deserialize;
 
 use super::super::error::RequestResult;
 use super::super::SharedState;
-use super::unlock::session::AuthenticatedUser;
+use super::unlock::session::{AuthenticatedUser, RoMode};
 use super::Maud;
 use crate::html_utils::{re_typeset_mathjax, submit_on_ctrl_enter};
 use crate::UiState;
@@ -27,11 +27,14 @@ pub async fn post_new_post(
         .social_post(session.id_secret()?, form.content.clone())
         .await?;
 
-    let clean_form = state.new_post_form(html! {
-        div {
-            p { "Posted!" }
-        }
-    });
+    let clean_form = state.new_post_form(
+        html! {
+            div {
+                p { "Posted!" }
+            }
+        },
+        session.ro_mode(),
+    );
     Ok(Maud(html! {
 
         (clean_form)
@@ -76,7 +79,7 @@ pub async fn get_post_preview(
 }
 
 impl UiState {
-    pub fn new_post_form(&self, notification: impl Into<Option<Markup>>) -> Markup {
+    pub fn new_post_form(&self, notification: impl Into<Option<Markup>>, ro: RoMode) -> Markup {
         let notification = notification.into();
         html! {
             form ."m-newPostForm"
@@ -84,7 +87,12 @@ impl UiState {
                 hx-swap="outerHTML"
             {
                 textarea ."m-newPostForm__content"
-                    placeholder="What's on your mind?"
+                    placeholder=(
+                        if ro.to_disabled() {
+                            "Read-Only mode."
+                        } else {
+                          "What's on your mind?"
+                        })
                     dir="auto"
                     name="content"
                     hx-post="/ui/post/preview"
@@ -95,14 +103,18 @@ impl UiState {
                     hx-preserve="false"
                     autocomplete="off"
                     autofocus
+                    disabled[ro.to_disabled()]
                     {}
                 div ."m-newPostForm__footer" {
                     @if let Some(n) = notification {
                         (n)
                     }
                     a href="https://htmlpreview.github.io/?https://github.com/jgm/djot/blob/master/doc/syntax.html" target="_blank" { "Formatting" }
-                    button ."m-newPostForm__postButton" type="submit" {
-                        span ."m-newPostForm__postButtonIcon" width="1rem" height="1rem" {}
+                    button ."m-newPostForm__postButton u-button"
+                        disabled[ro.to_disabled()]
+                        type="submit"
+                    {
+                        span ."m-newPostForm__postButtonIcon u-buttonIcon" width="1rem" height="1rem" {}
                         "Post"
                     }
                 }

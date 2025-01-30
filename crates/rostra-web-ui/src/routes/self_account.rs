@@ -8,7 +8,7 @@ use rostra_core::id::{RostraId, ToShort as _};
 use rostra_core::ShortEventId;
 use serde::Deserialize;
 
-use super::unlock::session::AuthenticatedUser;
+use super::unlock::session::{AuthenticatedUser, RoMode};
 use super::Maud;
 use crate::error::RequestResult;
 use crate::html_utils::submit_on_ctrl_enter;
@@ -39,7 +39,11 @@ pub async fn post_self_account_edit(
         .post_social_profile_update(session.id_secret()?, form.name, form.bio)
         .await?;
 
-    Ok(Maud(state.render_self_profile_summary(&session).await?))
+    Ok(Maud(
+        state
+            .render_self_profile_summary(&session, session.ro_mode())
+            .await?,
+    ))
 }
 
 impl UiState {
@@ -69,6 +73,7 @@ impl UiState {
     pub async fn render_self_profile_summary(
         &self,
         user: &AuthenticatedUser,
+        ro: RoMode,
     ) -> RequestResult<Markup> {
         let client = self.client(user.id()).await?;
         let self_id = client.client_ref()?.rostra_id();
@@ -103,25 +108,26 @@ impl UiState {
                     span ."m-selfAccount__displayName" { (self_profile.display_name) }
                     div ."m-selfAccount__buttons" {
                         button
-                            ."m-selfAccount__copyButton"
+                            ."m-selfAccount__copyButton u-button"
                             data-value=(self.client(user.id()).await?.client_ref()?.rostra_id()) onclick="copyIdToClipboard(event)"  {
-                                span ."m-selfAccount__copyButtonIcon" width="1rem" height="1rem" {}
+                                span ."m-selfAccount__copyButtonIcon u-buttonIcon" width="1rem" height="1rem" {}
                                 "RostraId"
                             }
                         button
-                            ."m-selfAccount__editButton"
+                            ."m-selfAccount__editButton u-button"
                             hx-get="/ui/self/edit"
                             hx-target="closest .m-selfAccount"
                             hx-swap="outerHTML"
+                            disabled[ro.to_disabled()]
                             {
-                                span ."m-selfAccount__editButtonIcon" width="1rem" height="1rem" {}
+                                span ."m-selfAccount__editButtonIcon u-buttonIcon" width="1rem" height="1rem" {}
                                 "Edit"
                             }
                         button
-                            ."m-selfAccount__logoutButton"
+                            ."m-selfAccount__logoutButton u-button"
                             hx-get="/ui/unlock/logout"
                             {
-                                span ."m-selfAccount__logoutButtonIcon" width="1rem" height="1rem" {}
+                                span ."m-selfAccount__logoutButtonIcon u-buttonIcon" width="1rem" height="1rem" {}
                                 "Logout"
                             }
                     }

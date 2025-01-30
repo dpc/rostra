@@ -90,19 +90,18 @@ impl UiState {
             nav ."o-navBar" hx-ext="ws" ws-connect="/ui/timeline/updates" {
 
                 div ."o-navBar__selfAccount" {
-                    (self.render_self_profile_summary(user).await?)
+                    (self.render_self_profile_summary(user, user.ro_mode()).await?)
                 }
 
-                (self.new_post_form(None))
+                (self.new_post_form(None, user.ro_mode()))
 
                 (self.render_add_followee_form(None))
 
                 div ."o-navBar__list" {
-                    span ."o-navBar_header" { "Rostra:" }
-                    a ."o-navBar__item" href="https://github.com/dpc/rostra" { "Github" }
-                    a ."o-navBar__item" href="https://github.com/dpc/rostra/discussions" { "Forum" }
+                    span ."o-navBar__header" { "Rostra:" }
+                    a ."o-navBar__item" href="https://github.com/dpc/rostra/discussions" { "Support" }
                     a ."o-navBar__item" href="https://github.com/dpc/rostra/wiki" { "Wiki" }
-                    // a ."o-navBar__item" href="/" { "Something" }
+                    a ."o-navBar__item" href="https://github.com/dpc/rostra" { "Github" }
                 }
             }
 
