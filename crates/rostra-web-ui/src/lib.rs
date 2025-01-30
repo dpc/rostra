@@ -5,7 +5,6 @@ pub mod html_utils;
 pub mod is_htmx;
 mod routes;
 
-use std::collections::HashMap;
 use std::net::{AddrParseError, SocketAddr};
 use std::path::{Path, PathBuf};
 use std::str::FromStr as _;
@@ -17,14 +16,15 @@ use asset_cache::AssetCache;
 use axum::http::header::{ACCEPT, CONTENT_TYPE};
 use axum::http::{HeaderName, HeaderValue, Method};
 use axum::{middleware, Router};
-use rostra_client::error::{IdSecretReadError, InitError};
-use rostra_client::{Client, ClientHandle, ClientRefError};
-use rostra_client_db::{Database, DbError};
+use rostra_client::error::{ActivateError, IdSecretReadError, InitError};
+use rostra_client::multiclient::{MultiClient, MultiClientError};
+use rostra_client::{ClientHandle, ClientRefError};
+use rostra_client_db::DbError;
 use rostra_core::id::{RostraId, RostraIdSecretKey};
 use rostra_util::is_rostra_dev_mode_set;
 use rostra_util_error::{BoxedError, WhateverResult};
 use routes::cache_control;
-use snafu::{ResultExt as _, Snafu, Whatever};
+use snafu::{ensure, ResultExt as _, Snafu, Whatever};
 use tokio::net::{TcpListener, TcpSocket};
 use tokio::signal;
 use tower_http::compression::predicate::SizeAbove;
@@ -34,6 +34,8 @@ use tower_http::services::ServeDir;
 use tower_http::CompressionLevel;
 use tower_sessions::{Expiry, MemoryStore, SessionManagerLayer};
 use tracing::info;
+
+pub const UI_ROOT_PATH: &str = "/ui";
 
 const LOG_TARGET: &str = "rostra::web_ui";
 
@@ -89,7 +91,7 @@ pub type UiStateClientResult<T> = result::Result<T, UiStateClientError>;
 
 #[derive(Debug, Snafu)]
 pub enum UiStateClientUnlockError {
-    AlreadyLoaded,
+    IdMismatch,
     InvalidMnemonic {
         source: BoxedError,
     },
@@ -103,54 +105,50 @@ pub enum UiStateClientUnlockError {
     Init {
         source: InitError,
     },
+    #[snafu(transparent)]
+    MultiClient {
+        source: MultiClientError,
+    },
+    #[snafu(transparent)]
+    MultiClientActivate {
+        source: ActivateError,
+    },
 }
 pub type UiStateClientUnlockResult<T> = result::Result<T, UiStateClientUnlockError>;
 
 pub struct UiState {
-    client: tokio::sync::RwLock<HashMap<RostraId, Arc<Client>>>,
-    opts: Opts,
+    clients: MultiClient,
 }
 
 impl UiState {
     pub async fn client(&self, id: RostraId) -> UiStateClientResult<ClientHandle> {
-        if let Some(read) = self.client.read().await.get(&id) {
-            Ok(read.handle())
+        if let Some(handle) = self.clients.get(id).await {
+            Ok(handle)
         } else {
             ClientNotLoadedSnafu.fail()
         }
     }
 
-    pub async fn unlock(&self, mnemonic: &str) -> UiStateClientUnlockResult<RostraIdSecretKey> {
-        let secret_id = RostraIdSecretKey::from_str(mnemonic)
-            .boxed()
-            .context(InvalidMnemonicSnafu)?;
-        self.unlock_secret(secret_id).await?;
-        Ok(secret_id)
-    }
-    pub async fn unlock_secret(
+    pub async fn unlock(
         &self,
-        secret_id: RostraIdSecretKey,
-    ) -> UiStateClientUnlockResult<()> {
-        let mut write = self.client.write().await;
-        let self_id = secret_id.id();
-        if write.get(&self_id).is_some() {
-            return Ok(());
-        }
+        rostra_id: RostraId,
+        mnemonic: &str,
+    ) -> UiStateClientUnlockResult<Option<RostraIdSecretKey>> {
+        let res = if mnemonic.trim().is_empty() {
+            self.clients.load(rostra_id).await?;
+            None
+        } else {
+            let secret_id = RostraIdSecretKey::from_str(mnemonic)
+                .boxed()
+                .context(InvalidMnemonicSnafu)?;
 
-        let client = Client::builder()
-            .id_secret(secret_id)
-            .db(Database::open(
-                Database::mk_db_path(&self.opts.data_dir, self_id).await?,
-                self_id,
-            )
-            .await
-            .context(DatabaseSnafu)?)
-            .build()
-            .await
-            .context(InitSnafu)?;
+            ensure!(secret_id.id() == rostra_id, IdMismatchSnafu);
+            let client = self.clients.load(rostra_id).await?;
+            client.unlock_active(secret_id)?;
 
-        write.insert(self_id, client);
-        Ok(())
+            Some(secret_id)
+        };
+        Ok(res)
     }
 }
 
@@ -198,7 +196,7 @@ pub enum WebUiServerError {
 
 pub type ServerResult<T> = std::result::Result<T, WebUiServerError>;
 impl Server {
-    pub async fn init(opts: Opts) -> ServerResult<Server> {
+    pub async fn init(opts: Opts, clients: MultiClient) -> ServerResult<Server> {
         let listener = Self::get_listener(&opts).await?;
 
         // Todo: allow disabling with a cmdline flag too?
@@ -210,21 +208,7 @@ impl Server {
                 .context(AssetsLoadSnafu)?
                 .into()
         };
-        let state = Arc::new(UiState {
-            client: tokio::sync::RwLock::new(HashMap::new()),
-            opts: opts.clone(),
-        });
-
-        if let Some(secret_file) = opts.secret_file.clone() {
-            let secret_id = Client::read_id_secret(&secret_file)
-                .await
-                .context(SecretSnafu)?;
-
-            state
-                .unlock_secret(secret_id)
-                .await
-                .context(SecretUnlockSnafu)?;
-        };
+        let state = Arc::new(UiState { clients });
 
         info!("Listening on {}", listener.local_addr()?);
         Ok(Self {
@@ -259,6 +243,13 @@ impl Server {
     }
 
     pub async fn run(self) -> ServerResult<()> {
+        let listen = self.listener.local_addr()?;
+        info!(
+            target: LOG_TARGET,
+            addr = %listen,
+            origin = %self.opts.cors_origin_url_str(listen),
+            "Starting server"
+        );
         let mut router = Router::new().merge(routes::route_handler(self.state.clone()));
 
         if let Some(assets) = self.assets {
@@ -274,8 +265,6 @@ impl Server {
         let session_layer = SessionManagerLayer::new(session_store)
             .with_expiry(Expiry::OnInactivity(time::Duration::minutes(30)));
 
-        info!("Starting server");
-        let listen = self.listener.local_addr()?;
         axum::serve(
             self.listener,
             router
@@ -307,7 +296,7 @@ fn cors_layer(opts: &Opts, listen: SocketAddr) -> ServerResult<CorsLayer> {
         .allow_credentials(true)
         .allow_headers([ACCEPT, CONTENT_TYPE, HeaderName::from_static("csrf-token")])
         .max_age(Duration::from_secs(86400))
-        .allow_origin(opts.cors_origin(listen).context(CorsSnafu)?)
+        .allow_origin(opts.cors_origin_url_header(listen).context(CorsSnafu)?)
         .allow_methods([
             Method::GET,
             Method::POST,
@@ -320,10 +309,18 @@ fn cors_layer(opts: &Opts, listen: SocketAddr) -> ServerResult<CorsLayer> {
 }
 
 impl Opts {
-    pub fn cors_origin(&self, listen: SocketAddr) -> WhateverResult<HeaderValue> {
+    pub fn cors_origin_url_str(&self, listen: SocketAddr) -> String {
         self.cors_origin
             .clone()
             .unwrap_or_else(|| format!("http://{}", listen))
+    }
+    pub fn cors_origin_domain_str(&self, listen: SocketAddr) -> String {
+        self.cors_origin
+            .clone()
+            .unwrap_or_else(|| format!("{listen}"))
+    }
+    pub fn cors_origin_url_header(&self, listen: SocketAddr) -> WhateverResult<HeaderValue> {
+        self.cors_origin_url_str(listen)
             .parse()
             .whatever_context("cors_origin does not parse as an http value")
     }

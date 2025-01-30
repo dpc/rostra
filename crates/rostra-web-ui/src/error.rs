@@ -48,6 +48,8 @@ pub enum RequestError {
     InternalServerError { msg: &'static str },
     #[snafu(visibility(pub(crate)))]
     LoginRequired,
+    #[snafu(visibility(pub(crate)))]
+    SecretKeyMissing,
 }
 pub type RequestResult<T> = std::result::Result<T, RequestError>;
 

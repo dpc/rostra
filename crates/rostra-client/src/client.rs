@@ -4,6 +4,8 @@ use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 use std::option::Option;
 use std::path::Path;
 use std::str::FromStr as _;
+use std::sync::atomic::AtomicBool;
+use std::sync::atomic::Ordering::SeqCst;
 use std::sync::{Arc, Weak};
 use std::time::Duration;
 use std::{ops, result};
@@ -24,20 +26,20 @@ use rostra_p2p::RpcError;
 use rostra_p2p_api::ROSTRA_P2P_V0_ALPN;
 use rostra_util_error::FmtCompact as _;
 use rostra_util_fmt::AsFmtOption as _;
-use snafu::{Location, OptionExt as _, ResultExt as _, Snafu};
+use snafu::{ensure, Location, OptionExt as _, ResultExt as _, Snafu};
 use tokio::sync::{broadcast, watch};
 use tokio::time::Instant;
 use tracing::debug;
 
 use super::{get_rrecord_typed, take_first_ok_some, RRECORD_HEAD_KEY, RRECORD_P2P_KEY};
 use crate::error::{
-    ConnectIrohSnafu, ConnectResult, IdResolveError, IdResolveResult, IdSecretReadResult,
-    InitIrohClientSnafu, InitPkarrClientSnafu, InitResult, InvalidIdSnafu, IoSnafu, IrohResult,
-    MissingTicketSnafu, NotFoundSnafu, ParsingSnafu, PkarrResolveSnafu, PostResult, RRecordSnafu,
-    ResolveSnafu,
+    ActivateResult, ConnectIrohSnafu, ConnectResult, IdResolveError, IdResolveResult,
+    IdSecretReadResult, InitIrohClientSnafu, InitPkarrClientSnafu, InitResult, InvalidIdSnafu,
+    IoSnafu, IrohResult, MissingTicketSnafu, NotFoundSnafu, ParsingSnafu, PkarrResolveSnafu,
+    PostResult, RRecordSnafu, ResolveSnafu, SecretMismatchSnafu,
 };
 use crate::id::{CompactTicket, IdPublishedData, IdResolvedData};
-use crate::id_publisher::IdPublisher;
+use crate::id_publisher::PkarrIdPublisher;
 use crate::request_handler::RequestHandler;
 use crate::LOG_TARGET;
 
@@ -126,7 +128,6 @@ pub struct Client {
 
     /// Our main identity (pkarr/ed25519_dalek keypair)
     pub(crate) id: RostraId,
-    pub(crate) id_secret: RostraIdSecretKey,
 
     db: Option<Arc<Database>>,
 
@@ -139,6 +140,8 @@ pub struct Client {
     /// A watch-channel that can be used to notify some tasks manually to check
     /// for updates again
     check_for_updates_tx: watch::Sender<()>,
+
+    active: AtomicBool,
 }
 
 #[derive(Debug, Snafu)]
@@ -155,14 +158,10 @@ pub type ClientStorageResult<T> = result::Result<T, ClientStorageError>;
 impl Client {
     #[builder(finish_fn(name = "build"))]
     pub async fn new(
-        id_secret: Option<RostraIdSecretKey>,
+        #[builder(start_fn)] id: RostraId,
         #[builder(default = true)] start_request_handler: bool,
-        #[builder(default = true)] start_id_publisher: bool,
         db: Option<Database>,
     ) -> InitResult<Arc<Self>> {
-        let id_secret = id_secret.unwrap_or_else(RostraIdSecretKey::generate);
-        let id = id_secret.id();
-
         debug!(id = %id.try_fmt(), "Rostra Client");
         let is_mode_full = db.is_some();
 
@@ -185,21 +184,17 @@ impl Client {
 
         let client = Arc::new_cyclic(|client| Self {
             handle: client.clone().into(),
-            id_secret,
             endpoint,
             pkarr_client,
             pkarr_client_relay,
             db: db.map(Into::into),
             id,
             check_for_updates_tx,
+            active: AtomicBool::new(false),
         });
 
         if start_request_handler {
             client.start_request_handler();
-        }
-
-        if start_id_publisher {
-            client.start_id_publisher();
         }
 
         if is_mode_full {
@@ -216,6 +211,16 @@ impl Client {
 impl Client {
     pub fn rostra_id(&self) -> RostraId {
         self.id
+    }
+
+    pub fn unlock_active(&self, id_secret: RostraIdSecretKey) -> ActivateResult<()> {
+        ensure!(self.id == id_secret.id(), SecretMismatchSnafu);
+
+        if !self.active.swap(true, SeqCst) {
+            self.start_pkarr_id_publisher(id_secret);
+        }
+
+        Ok(())
     }
 
     pub async fn connect(&self, id: RostraId) -> ConnectResult<Connection> {
@@ -260,8 +265,8 @@ impl Client {
         Ok(ep)
     }
 
-    pub(crate) fn start_id_publisher(&self) {
-        tokio::spawn(IdPublisher::new(self, self.id_secret).run());
+    pub(crate) fn start_pkarr_id_publisher(&self, secret_id: RostraIdSecretKey) {
+        tokio::spawn(PkarrIdPublisher::new(self, secret_id).run());
     }
 
     pub(crate) fn start_request_handler(&self) {
@@ -454,6 +459,7 @@ impl Client {
     #[builder]
     pub async fn publish_event<C>(
         &self,
+        #[builder(start_fn)] id_secret: RostraIdSecretKey,
         #[builder(start_fn)] content: C,
         replace: Option<ShortEventId>,
     ) -> PostResult<()>
@@ -481,7 +487,7 @@ impl Client {
             .maybe_parent_aux(aux_event)
             .maybe_delete(replace)
             .build()
-            .signed_by(self.id_secret);
+            .signed_by(id_secret);
 
         let verified_event = VerifiedEvent::verify_signed(self.id, signed_event)
             .expect("Can't fail to verify self-created event");
@@ -495,16 +501,20 @@ impl Client {
         Ok(())
     }
 
-    pub async fn social_post(&self, body: String) -> PostResult<()> {
-        self.publish_event(content_kind::SocialPost {
-            djot_content: body,
-            persona: PersonaId(0),
-        })
+    pub async fn social_post(&self, id_secret: RostraIdSecretKey, body: String) -> PostResult<()> {
+        self.publish_event(
+            id_secret,
+            content_kind::SocialPost {
+                djot_content: body,
+                persona: PersonaId(0),
+            },
+        )
         .call()
         .await
     }
     pub async fn post_social_profile_update(
         &self,
+        id_secret: RostraIdSecretKey,
         display_name: String,
         bio: String,
     ) -> PostResult<()> {
@@ -516,27 +526,37 @@ impl Client {
         } else {
             None
         };
-        self.publish_event(content_kind::SocialProfileUpdate {
-            display_name,
-            bio,
-            img_mime: "".into(),
-            img: vec![],
-        })
+        self.publish_event(
+            id_secret,
+            content_kind::SocialProfileUpdate {
+                display_name,
+                bio,
+                img_mime: "".into(),
+                img: vec![],
+            },
+        )
         .maybe_replace(existing)
         .call()
         .await
     }
 
-    pub async fn follow(&self, followee: RostraId) -> PostResult<()> {
-        self.publish_event(content_kind::Follow {
-            followee,
-            persona: PersonaId(0),
-        })
+    pub async fn follow(&self, id_secret: RostraIdSecretKey, followee: RostraId) -> PostResult<()> {
+        self.publish_event(
+            id_secret,
+            content_kind::Follow {
+                followee,
+                persona: PersonaId(0),
+            },
+        )
         .call()
         .await
     }
 
-    pub async fn publish_omni_tbd(&self, body: String) -> PostResult<()> {
+    pub async fn publish_omni_tbd(
+        &self,
+        id_secret: RostraIdSecretKey,
+        body: String,
+    ) -> PostResult<()> {
         pub(crate) const ACTIVE_RESERVATION_TIMEOUT: Duration = Duration::from_secs(120);
         let mut known_head = None;
         let mut active_reservation: Option<(CompactTicket, Instant)> = None;
@@ -578,7 +598,7 @@ impl Client {
                             .kind(EventKind::SOCIAL_POST)
                             .content(&body.as_bytes().to_owned().into())
                             .build()
-                            .signed_by(self.id_secret)
+                            .signed_by(id_secret)
                     }));
 
                     let signed_event = signed_event.expect("Must be set by now");

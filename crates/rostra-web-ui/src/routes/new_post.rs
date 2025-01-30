@@ -23,7 +23,9 @@ pub async fn post_new_post(
 ) -> RequestResult<impl IntoResponse> {
     let client_handle = state.client(session.id()).await?;
     let client_ref = client_handle.client_ref()?;
-    client_ref.social_post(form.content.clone()).await?;
+    client_ref
+        .social_post(session.id_secret()?, form.content.clone())
+        .await?;
 
     let clean_form = state.new_post_form(html! {
         div {

@@ -36,7 +36,7 @@ pub async fn post_self_account_edit(
         .client(session.id())
         .await?
         .client_ref()?
-        .post_social_profile_update(form.name, form.bio)
+        .post_social_profile_update(session.id_secret()?, form.name, form.bio)
         .await?;
 
     Ok(Maud(state.render_self_profile_summary(&session).await?))
@@ -110,13 +110,19 @@ impl UiState {
                             }
                         button
                             ."m-selfAccount__editButton"
-                            data-value=(self.client(user.id()).await?.client_ref()?.rostra_id())
                             hx-get="/ui/self/edit"
                             hx-target="closest .m-selfAccount"
                             hx-swap="outerHTML"
                             {
                                 span ."m-selfAccount__editButtonIcon" width="1rem" height="1rem" {}
                                 "Edit"
+                            }
+                        button
+                            ."m-selfAccount__logoutButton"
+                            hx-get="/ui/unlock/logout"
+                            {
+                                span ."m-selfAccount__logoutButtonIcon" width="1rem" height="1rem" {}
+                                "Logout"
                             }
                     }
                 }

@@ -136,7 +136,7 @@ pub fn route_handler(state: SharedState) -> Router {
         .route("/ui/post", post(new_post::post_new_post))
         .route("/ui/post/preview", post(new_post::get_post_preview))
         .route("/ui/followee", post(add_followee::add_followee))
-        .route("/ui/unlock", get(unlock::get).post(unlock::post))
+        .route("/ui/unlock", get(unlock::get).post(unlock::post_unlock))
         .route("/ui/unlock/logout", get(unlock::get).post(unlock::logout))
         .route("/ui/unlock/random", get(unlock::get_random))
         .route("/ui/timeline/updates", get(timeline::get_updates))

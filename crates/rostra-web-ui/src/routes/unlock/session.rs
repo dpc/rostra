@@ -4,15 +4,29 @@ use rostra_core::id::{RostraId, RostraIdSecretKey};
 use serde::{Deserialize, Serialize};
 use tower_sessions::Session;
 
-use crate::error::{InternalServerSnafu, LoginRequiredSnafu, RequestError};
+use crate::error::{
+    InternalServerSnafu, LoginRequiredSnafu, RequestError, RequestResult, SecretKeyMissingSnafu,
+};
 
 #[derive(Clone, Deserialize, Serialize)]
 pub struct AuthenticatedUser {
-    pub secret_key: RostraIdSecretKey,
+    id: RostraId,
+    id_secret: Option<RostraIdSecretKey>,
 }
 impl AuthenticatedUser {
     pub(crate) fn id(&self) -> RostraId {
-        self.secret_key.id()
+        self.id
+    }
+
+    pub(crate) fn id_secret(&self) -> RequestResult<RostraIdSecretKey> {
+        self.id_secret.ok_or_else(|| SecretKeyMissingSnafu.build())
+    }
+
+    pub(crate) fn new(rostra_id: RostraId, secret_key: Option<RostraIdSecretKey>) -> Self {
+        Self {
+            id: rostra_id,
+            id_secret: secret_key,
+        }
     }
 }
 

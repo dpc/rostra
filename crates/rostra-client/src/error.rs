@@ -3,7 +3,8 @@ use std::io;
 use pkarr::dns::SimpleDnsError;
 use rostra_client_db::DbError;
 use rostra_core::id::RostraIdSecretKeyError;
-use snafu::{Snafu, Whatever};
+use rostra_util_error::BoxedError;
+use snafu::Snafu;
 
 /// Meh alias
 pub type IrohError = anyhow::Error;
@@ -21,6 +22,14 @@ pub enum InitError {
 }
 
 pub type InitResult<T> = std::result::Result<T, InitError>;
+
+#[derive(Debug, Snafu)]
+#[snafu(visibility(pub(crate)))]
+pub enum ActivateError {
+    SecretMismatch,
+}
+
+pub type ActivateResult<T> = std::result::Result<T, ActivateError>;
 
 #[derive(Debug, Snafu)]
 #[snafu(visibility(pub(crate)))]
@@ -77,7 +86,7 @@ pub enum PostError {
     #[snafu(transparent)]
     Resolve { source: IdResolveError },
     #[snafu(display("Encoding error: {source}"))]
-    Encode { source: Whatever },
+    Encode { source: BoxedError },
 }
 
 pub type PostResult<T> = std::result::Result<T, PostError>;

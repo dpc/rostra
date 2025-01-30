@@ -24,7 +24,7 @@ pub async fn add_followee(
         .client(session.id())
         .await?
         .client_ref()?
-        .follow(form.rostra_id)
+        .follow(session.id_secret()?, form.rostra_id)
         .await?;
     Ok(Maud(state.add_followee_form(html! {
     div {

@@ -5,6 +5,8 @@ mod head_update_broadcaster;
 mod id_publisher;
 mod request_handler;
 
+pub mod multiclient;
+
 pub mod id;
 
 use std::str::FromStr;

@@ -22,7 +22,7 @@ pub fn publishing_interval() -> Duration {
     Duration::from_secs(60)
 }
 
-pub struct IdPublisher {
+pub struct PkarrIdPublisher {
     app: crate::client::ClientHandle,
     pkarr_client: Arc<pkarr::PkarrClientAsync>,
     pkarr_client_relay: Arc<pkarr::PkarrRelayClientAsync>,
@@ -30,7 +30,7 @@ pub struct IdPublisher {
     self_head_rx: Option<watch::Receiver<Option<ShortEventId>>>,
 }
 
-impl IdPublisher {
+impl PkarrIdPublisher {
     fn self_id(&self) -> RostraId {
         RostraId::from(self.keypair.public_key())
     }
@@ -80,7 +80,7 @@ impl IdPublishedData {
     }
 }
 
-impl IdPublisher {
+impl PkarrIdPublisher {
     pub fn new(client: &Client, id_secret: RostraIdSecretKey) -> Self {
         debug!(target: LOG_TARGET, pkarr_id = %id_secret.id(), "Starting ID publishing task" );
         Self {

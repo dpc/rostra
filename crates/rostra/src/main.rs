@@ -8,6 +8,7 @@ use cli::{make_web_opts, Opts};
 use duct::cmd;
 use futures::future::pending;
 use rostra_client::error::{ConnectError, IdResolveError, IdSecretReadError, InitError, PostError};
+use rostra_client::multiclient::MultiClient;
 use rostra_client::Client;
 use rostra_client_db::DbError;
 use rostra_core::id::RostraIdSecretKey;
@@ -71,14 +72,18 @@ async fn handle_cmd(opts: Opts) -> CliResult<serde_json::Value> {
     Ok(match opts.cmd {
         cli::OptsCmd::Dev(cmd) => match cmd {
             cli::DevCmd::ResolveId { id } => {
-                let client = Client::builder().build().await.context(InitSnafu)?;
+                let client = Client::builder(id).build().await.context(InitSnafu)?;
 
                 let out = client.resolve_id_data(id).await.context(ResolveSnafu)?;
 
                 serde_json::to_value(out).expect("Can't fail")
             }
             cli::DevCmd::Test => {
-                let client = Client::builder().build().await.context(InitSnafu)?;
+                let id_secret = RostraIdSecretKey::generate();
+                let client = Client::builder(id_secret.id())
+                    .build()
+                    .await
+                    .context(InitSnafu)?;
 
                 loop {
                     let rostra_id = client.rostra_id();
@@ -118,9 +123,8 @@ async fn handle_cmd(opts: Opts) -> CliResult<serde_json::Value> {
                             .context(RpcSnafu)
                     }
                 }
-                let client = Client::builder()
+                let client = Client::builder(id)
                     .start_request_handler(false)
-                    .start_id_publisher(false)
                     .build()
                     .await
                     .context(InitSnafu)?;
@@ -156,16 +160,13 @@ async fn handle_cmd(opts: Opts) -> CliResult<serde_json::Value> {
         },
         cli::OptsCmd::Serve { secret_file } => {
             let secret_id = if let Some(secret_file) = secret_file {
-                Some(
-                    Client::read_id_secret(&secret_file)
-                        .await
-                        .context(SecretSnafu)?,
-                )
+                Client::read_id_secret(&secret_file)
+                    .await
+                    .context(SecretSnafu)?
             } else {
-                None
+                unimplemented!()
             };
-            let _client = Client::builder()
-                .maybe_id_secret(secret_id)
+            let _client = Client::builder(secret_id.id())
                 .build()
                 .await
                 .context(InitSnafu)?;
@@ -173,7 +174,8 @@ async fn handle_cmd(opts: Opts) -> CliResult<serde_json::Value> {
             pending().await
         }
         cli::OptsCmd::WebUi(ref web_opts) => {
-            let server = Server::init(make_web_opts(opts.global.data_dir(), web_opts))
+            let clients = MultiClient::new(opts.global.data_dir().to_owned());
+            let server = Server::init(make_web_opts(opts.global.data_dir(), web_opts), clients)
                 .await
                 .context(WebUiServerSnafu)?;
 
@@ -208,15 +210,13 @@ async fn handle_cmd(opts: Opts) -> CliResult<serde_json::Value> {
                 .await
                 .context(SecretSnafu)?;
 
-            let client = Client::builder()
-                .id_secret(id_secret)
+            let client = Client::builder(id_secret.id())
                 .start_request_handler(false)
-                .start_id_publisher(false)
                 .build()
                 .await
                 .context(InitSnafu)?;
 
-            client.social_post(body).await?;
+            client.social_post(id_secret, body).await?;
 
             serde_json::Value::Bool(true)
         }

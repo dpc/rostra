@@ -5,7 +5,7 @@ use axum::http::{HeaderName, HeaderValue, StatusCode};
 use axum::response::{IntoResponse, Response};
 use axum::Form;
 use maud::{html, Markup};
-use rostra_core::id::RostraIdSecretKey;
+use rostra_core::id::{RostraId, RostraIdSecretKey};
 use serde::Deserialize;
 use session::{AuthenticatedUser, SESSION_KEY};
 use snafu::ResultExt as _;
@@ -31,45 +31,55 @@ pub async fn get(
         )];
         return Ok((StatusCode::OK, headers).into_response());
     }
-    Ok(Maud(state.unlock_page("", None).await?).into_response())
+    Ok(Maud(state.unlock_page(None, "", None).await?).into_response())
 }
 
 pub async fn get_random(state: State<SharedState>) -> RequestResult<impl IntoResponse> {
+    let random_secret_key = RostraIdSecretKey::generate();
     Ok(Maud(
         state
-            .unlock_page(&RostraIdSecretKey::generate().to_string(), None)
+            .unlock_page(
+                Some(random_secret_key.id()),
+                &random_secret_key.to_string(),
+                None,
+            )
             .await?,
     ))
 }
 
 #[derive(Deserialize)]
 pub struct Input {
-    // Must be password for browsers to offer saving it
+    #[serde(rename = "username")]
+    rostra_id: RostraId,
     #[serde(rename = "password")]
     mnemonic: String,
 }
 
-pub async fn post(
+pub async fn post_unlock(
     state: State<SharedState>,
     session: Session,
     Form(form): Form<Input>,
 ) -> RequestResult<Response> {
-    Ok(match state.unlock(&form.mnemonic).await {
-        Ok(secret_key) => {
+    Ok(match state.unlock(form.rostra_id, &form.mnemonic).await {
+        Ok(secret_key_opt) => {
             session
-                .insert(SESSION_KEY, &AuthenticatedUser { secret_key })
+                .insert(
+                    SESSION_KEY,
+                    &AuthenticatedUser::new(form.rostra_id, secret_key_opt),
+                )
                 .await
                 .boxed()
                 .context(OtherSnafu)?;
             let headers = [(
                 HeaderName::from_static("hx-redirect"),
-                HeaderValue::from_static("/"),
+                HeaderValue::from_static("/ui"),
             )];
             (StatusCode::SEE_OTHER, headers).into_response()
         }
         Err(e) => Maud(
             state
                 .unlock_page(
+                    Some(form.rostra_id),
                     &form.mnemonic,
                     html! {
                         span ."unlockScreen_notice" { (e)}
@@ -86,7 +96,7 @@ pub async fn logout(session: Session) -> RequestResult<impl IntoResponse> {
 
     let headers = [(
         HeaderName::from_static("hx-redirect"),
-        HeaderValue::from_static("/"),
+        HeaderValue::from_static("/ui"),
     )];
     Ok((StatusCode::SEE_OTHER, headers).into_response())
 }
@@ -94,10 +104,13 @@ pub async fn logout(session: Session) -> RequestResult<impl IntoResponse> {
 impl UiState {
     async fn unlock_page(
         &self,
+        current_rostra_id: Option<RostraId>,
         current_mnemonic: &str,
         notification: impl Into<Option<Markup>>,
     ) -> RequestResult<Markup> {
-        let random_mnemonic = &RostraIdSecretKey::generate().to_string();
+        let random_rostra_id_secret = &RostraIdSecretKey::generate();
+        let random_mnemonic = random_rostra_id_secret.to_string();
+        let random_rostra_id = random_rostra_id_secret.id().to_string();
         let notification = notification.into();
         let content = html! {
             div ."unlockScreen" {
@@ -114,17 +127,17 @@ impl UiState {
                         p { "To use Rostra you need to paste an existing mnemonic or generate a new one."}
                         p { "Make sure you save it in your browser's password manager and make a backup."}
                     }
-                    input ."unlockScreen__fakeUsername"
+                    input ."unlockScreen__rostraId"
                         type="username"
-                        value="RostraId"
-                        required
+                        name="username"
+                        placeholder="RostraId"
+                        value=(current_rostra_id.map(|id| id.to_string()).unwrap_or_default())
                         {}
                     div."unlockScreen__unlockLine" {
                         input ."unlockScreen__mnemonic"
                             type="password"
                             name="password"
                             autocomplete="current-password"
-                            required
                             placeholder="mnemonic"
                             value=(current_mnemonic)
                             { }
@@ -137,7 +150,12 @@ impl UiState {
                     button
                         type="button" // do not submit the form!
                         ."unlockScreen__generateButton"
-                        onclick={"document.querySelector('.unlockScreen__mnemonic').value = '" (random_mnemonic) "';"}
+                        onclick=(
+                            format!(r#"
+                                document.querySelector('.unlockScreen__rostraId').value = '{}';
+                                document.querySelector('.unlockScreen__mnemonic').value = '{}';
+                            "#, random_rostra_id, random_mnemonic)
+                        )
                         { "Generate" }
                 }
             }
