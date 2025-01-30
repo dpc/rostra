@@ -88,7 +88,7 @@
         devShells = flakeboxLib.mkShells {
           packages = [ pkgs.jq ];
           shellHook = ''
-            export FLAKEBOX_GIT_LS_TEXT_IGNORE="crates/rostra-web-ui/assets/libs/"
+            export FLAKEBOX_GIT_LS_TEXT_IGNORE="crates/rostra-web-ui/assets/libs/|crates/rostra-web-ui/assets/icons"
           '';
         };
       }
