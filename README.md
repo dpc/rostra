@@ -37,7 +37,7 @@ Status: early, but getting to something usable.
 
 ## More info about Rostra:
 
-# [Architecture overview](./ARCHITECTURE.md)
+* [Architecture overview](./ARCHITECTURE.md)
 * [Design decision](./docs/design.md)
 * [FAQ](/docs/FAQ.md)
 * [Rostra: comparison with other social media projects](/docs/comparison.md)
