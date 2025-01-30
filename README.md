@@ -1,7 +1,5 @@
 # Rostra
 
-Status: early WIP (nothing for the end user to play with yet)
-
 Rostra is a p2p (or rather f2f) social network.
 
 ## Overview
@@ -29,8 +27,9 @@ Rostra is extensible, and can be used for applications other
 than Twitter-like-app, as long as it fits its general
 social-graph-based data model.
 
-Rostra is self-hosting first, and self
 ## Plan
+
+Status: early, but getting to something usable.
 
 * Figure out general idea and architecture (mostly done)
 * Implement data model, p2p rpc, replication, etc.
