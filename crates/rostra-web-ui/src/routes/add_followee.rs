@@ -26,7 +26,7 @@ pub async fn add_followee(
         .client_ref()?
         .follow(session.id_secret()?, form.rostra_id)
         .await?;
-    Ok(Maud(state.add_followee_form(html! {
+    Ok(Maud(state.render_add_followee_form(html! {
     div {
         p { "Followed!" }
     }
@@ -34,7 +34,7 @@ pub async fn add_followee(
 }
 
 impl UiState {
-    pub fn add_followee_form(&self, notification: impl Into<Option<Markup>>) -> Markup {
+    pub fn render_add_followee_form(&self, notification: impl Into<Option<Markup>>) -> Markup {
         let notification = notification.into();
         html! {
             form ."m-addFolloweeForm"
@@ -50,7 +50,10 @@ impl UiState {
                     name="rostra_id"
                     autocomplete="off"
                     {}
-                button ".m-addFolloweeForm__submit" { "Follow" }
+                button ."m-addFolloweeForm__followButton" {
+                    span ."m-addFolloweeForm__followButtonIcon" width="1rem" height="1rem" {}
+                    "Follow"
+                }
             }
         }
     }

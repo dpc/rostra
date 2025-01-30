@@ -13,6 +13,7 @@ pre { font-family: monospace; }
 
 button {
   padding: 0.1rem .25rem;
+  min-width: 5rem;
 }
 
 .o-pageLayout {
@@ -34,7 +35,8 @@ button {
 }
 
 .o-navBar__list {
-  display: block;
+  display: flex;
+  gap: 4pt;
 }
 
 .o-navBar__item {
@@ -251,6 +253,19 @@ button {
   gap: 5pt;
 }
 
+.m-newPostForm__postButton {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.1rem .25rem;
+}
+
+.m-newPostForm__postButtonIcon {
+  background: url('/assets/icons/upload.svg') center/contain no-repeat;
+  width: 1rem;
+  height: 1rem;
+  display: inline-block;
+}
 
 .m-addFolloweeForm {
   display: flex;
@@ -265,6 +280,19 @@ button {
   min-width: 100%;
 }
 
+.m-addFolloweeForm__followButton {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.1rem .25rem;
+}
+
+.m-addFolloweeForm__followButtonIcon {
+  background: url('/assets/icons/upload.svg') center/contain no-repeat;
+  width: 1rem;
+  height: 1rem;
+  display: inline-block;
+}
 
 .unlockScreen {
   display: flex;

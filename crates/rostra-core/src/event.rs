@@ -25,8 +25,8 @@ use crate::{
     TimestampFixed,
 };
 
-/// Convenience extension trait to unify getting event data from all versions of
-/// storing events
+/// Convenience extension trait to unify getting event data from all versions
+/// of [`Event`].
 pub trait EventExt {
     fn event(&self) -> &Event;
 
@@ -56,9 +56,14 @@ pub trait EventExt {
     }
 }
 
-/// An even (header)
+/// An event (header), as encoded on the wire
 ///
-/// Intentionally crafted to be:
+/// The smallest building block of Rostra's data model.
+///
+/// Events chain up to two previous events, forming
+/// a DAG that can be traversed from the present to the past.
+///
+/// Intentionally crafted to be a small and fixed:
 ///
 /// * version + flags + kind = 1 + 1 + 2 = 4
 /// * content_len = 4
@@ -82,8 +87,8 @@ pub struct Event {
     /// Bit flags
     ///
     /// Bit `0` - delete previous event - All well-behaved nodes
-    /// should consider the event from `parent_aux` deleted, and
-    /// delete its content from their storage and record the id of
+    /// should consider the **content** of the event from `parent_aux` deleted,
+    /// and delete itfrom their storage, recording the id of
     /// this event (one that deleted it) instead. The p2p and other
     /// protocols should accommodate such missing events as a core
     /// feature of the protocol and no longer store or return content data.
@@ -95,25 +100,29 @@ pub struct Event {
 
     /// The meaning and interpretation of the content from `content_hash`.
     ///
-    /// This allows clients to filter and download data that they need.
+    /// This allows clients to filter events without inspecting their content.
     pub kind: EventKind,
 
     /// Content length
     ///
     /// Committing to it here, allows clients with storage requirements
     /// to skip data simply too large to bother with.
+    ///
+    /// Must be valid. Clients will simply reject content that doesn't
+    /// match **both** `content_hash` and `content_len`.
     pub content_len: MsgLen,
 
-    /// Timestamp of the message
+    /// Timestamp of the message, in a fixed-sized encoding.
     pub timestamp: TimestampFixed,
 
-    /// Unused, reserved for future use, timestamp maybe? (8B)
+    /// Unused, reserved for future use, must be set to `0`s, ignored on
+    /// receiving.
     pub padding: [u8; 16],
 
     /// Public id of the creator of the message
     pub author: RostraId,
 
-    /// Previous EventId, to form a kind-of-a-chain (actually DAG).
+    /// Previous [`EventId`], to form a kind-of-a-chain (actually DAG).
     ///
     /// It is supposed to be the *latest* `EventID` known to the client
     /// to allow traversing events (almost) in order.
@@ -126,19 +135,19 @@ pub struct Event {
 
     /// Auxiliary parent
     ///
-    /// With some `flags` and `kind`s it is meant to point at the `EventId`
-    /// used for replacement, attachment, or some other special meaning, as
+    /// With some `flags` and `kind`s it can point at a past [`Event`]
+    /// with special meaning or function, as
     /// opposed to the `parent_event` which is always about exact ordering.
     ///
     /// In all cases used to potentially merge divergent chains
     /// into one DAG. Also, by pointing at some much older `EventId`
-    /// it allows fetching older events, without traversing
+    /// it allows fetching older events without traversing
     /// the DAG/chain one by one, potentially suffering latency
     /// of getting the data serially.
     ///
     /// Well behaved clients should try to make it point somewhat
     /// older event, to help it act as a skiplist. A random event
-    /// might be easy to implement.
+    /// should be easy to implement and recommended.
     ///
     /// `EventID::ZERO` means "None", and is valid, e.g. in
     /// cases where the client does not maintain any history and
@@ -148,6 +157,10 @@ pub struct Event {
     pub parent_aux: NullableShortEventId,
 
     /// Blake3 hash of the content
+    ///
+    /// The [`EventContent`] is used to store and interpret
+    /// the actual content, and is stored and transmitted outside
+    /// of the [`Event`] itself to decouple them.
     pub content_hash: ContentHash,
 }
 

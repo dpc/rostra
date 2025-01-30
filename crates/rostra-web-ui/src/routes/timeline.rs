@@ -95,11 +95,13 @@ impl UiState {
 
                 (self.new_post_form(None))
 
-                (self.add_followee_form(None))
+                (self.render_add_followee_form(None))
 
                 div ."o-navBar__list" {
                     span ."o-navBar_header" { "Rostra:" }
                     a ."o-navBar__item" href="https://github.com/dpc/rostra" { "Github" }
+                    a ."o-navBar__item" href="https://github.com/dpc/rostra/discussions" { "Forum" }
+                    a ."o-navBar__item" href="https://github.com/dpc/rostra/wiki" { "Wiki" }
                     // a ."o-navBar__item" href="/" { "Something" }
                 }
             }

@@ -101,7 +101,10 @@ impl UiState {
                         (n)
                     }
                     a href="https://htmlpreview.github.io/?https://github.com/jgm/djot/blob/master/doc/syntax.html" target="_blank" { "Formatting" }
-                    button ".m-newPostForm__submit" type="submit" { "Post" }
+                    button ."m-newPostForm__postButton" type="submit" {
+                        span ."m-newPostForm__postButtonIcon" width="1rem" height="1rem" {}
+                        "Post"
+                    }
                 }
             }
             (submit_on_ctrl_enter(".m-newPostForm", ".m-newPostForm__content"))

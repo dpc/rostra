@@ -26,10 +26,13 @@ impl AsRef<[u8]> for EventContentUnsized {
         &self.0
     }
 }
+
 /// Content associated with the event before deserializing
 ///
-/// Before semantic meaning of event is processed, it's content is just a bunch
-/// of bytes.
+/// Before semantic meaning of an event is processed, it's content is just a
+/// bunch of bytes.
+///
+/// Look for [`super::content_kind::EventContentKind`]
 #[derive(Clone, Debug)]
 #[cfg_attr(feature = "bincode", derive(::bincode::Encode, ::bincode::Decode))]
 pub struct EventContent(

@@ -153,7 +153,12 @@ impl ShortEventId {
     pub const MAX: Self = Self([0xffu8; 16]);
 }
 
-define_array_type_public!(struct ContentHash, 32);
+define_array_type_public!(
+    /// Blake3 hash of a payload
+    ///
+    /// For actual content, see [`EventContent`]
+    struct ContentHash, 32
+);
 impl_base32_str!(ContentHash);
 
 impl From<blake3::Hash> for ContentHash {

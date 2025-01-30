@@ -4,10 +4,19 @@ use super::{EventContent, EventKind, PersonaId};
 use crate::id::RostraId;
 use crate::ShortEventId;
 
+/// Extension trait for deserializing content
 #[cfg(feature = "serde")]
 pub trait EventContentKind: ::serde::Serialize + ::serde::de::DeserializeOwned {
+    /// The [`EventKind`] corresponding to this content kind
     const KIND: EventKind;
 
+    /// Deserialize cbor-encoded content
+    ///
+    /// Most content will be deserialized a cbor, as it's:
+    ///
+    /// * self-describing, so flexible to evolve while maintaining compatibility
+    /// * roughly-compatible with JSON, making it easy to transform to JSON form
+    ///   for external APIs and such.
     fn serialize_cbor(&self) -> EventContent {
         let mut buf = Vec::with_capacity(128);
         ciborium::into_writer(self, &mut buf).expect("Can't fail");
