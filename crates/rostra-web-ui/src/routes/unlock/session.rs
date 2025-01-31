@@ -9,12 +9,12 @@ use crate::error::{
 };
 
 #[derive(Clone, Deserialize, Serialize)]
-pub struct AuthenticatedUser {
+pub struct UserSession {
     id: RostraId,
     id_secret: Option<RostraIdSecretKey>,
 }
 
-impl AuthenticatedUser {
+impl UserSession {
     pub(crate) fn id(&self) -> RostraId {
         self.id
     }
@@ -82,7 +82,7 @@ impl RoMode {
 
 pub const SESSION_KEY: &str = "rostra_id";
 
-impl<S> FromRequestParts<S> for AuthenticatedUser
+impl<S> FromRequestParts<S> for UserSession
 where
     S: Send + Sync,
 {
@@ -96,7 +96,7 @@ where
             .await
             .map_err(|(_, msg)| InternalServerSnafu { msg }.build())?;
 
-        let user: AuthenticatedUser = session
+        let user: UserSession = session
             .get(SESSION_KEY)
             .await
             .map_err(|_| {

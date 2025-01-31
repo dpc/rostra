@@ -1,4 +1,5 @@
 use core::fmt;
+use std::str::FromStr;
 
 use snafu::Snafu;
 
@@ -110,5 +111,57 @@ impl ToShort for EventId {
 
     fn to_short(self) -> Self::ShortId {
         self.into()
+    }
+}
+
+/// Full, external event id
+///
+/// Combination of [`crate::RostraId`] of the author and [`crate::ShortEventId`]
+/// of the [`crate::Event`] that makes it possible to possibly fetch the event
+/// by anyone.
+///
+/// Encoded as a concatenation/tuple of the two.
+#[cfg_attr(feature = "bincode", derive(::bincode::Encode, ::bincode::Decode))]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct ExternalEventId((RostraId, ShortEventId));
+
+impl ExternalEventId {
+    pub fn new(rostra_id: RostraId, event_id: impl Into<ShortEventId>) -> Self {
+        Self((rostra_id, event_id.into()))
+    }
+    pub fn rostra_id(self) -> RostraId {
+        self.0 .0
+    }
+
+    pub fn event_id(self) -> ShortEventId {
+        self.0 .1
+    }
+}
+#[derive(Debug, Snafu)]
+pub enum ExternalEventIdParseError {
+    InvalidParts,
+    RostraId,
+    EventId,
+}
+
+impl FromStr for ExternalEventId {
+    type Err = ExternalEventIdParseError;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        let Some((author, event)) = s.split_once('-') else {
+            return InvalidPartsSnafu.fail();
+        };
+
+        Ok(ExternalEventId::new(
+            RostraId::from_str(author).map_err(|_| RostraIdSnafu.build())?,
+            ShortEventId::from_str(event).map_err(|_| EventIdSnafu.build())?,
+        ))
+    }
+}
+
+impl fmt::Display for ExternalEventId {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        // Dash was picked because it well uurlencodes and such
+        f.write_fmt(format_args!("{}-{}", self.0 .0, self.0 .1))
     }
 }

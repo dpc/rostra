@@ -8,26 +8,27 @@ use maud::{html, Markup, PreEscaped};
 use rostra_client::ClientRef;
 use rostra_core::event::EventKind;
 use rostra_core::id::RostraId;
+use rostra_core::{ExternalEventId, ShortEventId};
 use rostra_util_error::FmtCompact as _;
 use tracing::debug;
 
 use super::super::error::RequestResult;
-use super::unlock::session::AuthenticatedUser;
+use super::unlock::session::{RoMode, UserSession};
 use super::Maud;
 use crate::{SharedState, UiState, LOG_TARGET};
 
 pub async fn get(
     state: State<SharedState>,
-    _user: AuthenticatedUser,
-    session: AuthenticatedUser,
+    _user: UserSession,
+    session: UserSession,
 ) -> RequestResult<impl IntoResponse> {
-    Ok(Maud(state.timeline_page(&session).await?))
+    Ok(Maud(state.render_timeline_page(&session).await?))
 }
 
 pub async fn get_updates(
     state: State<SharedState>,
     ws: WebSocketUpgrade,
-    session: AuthenticatedUser,
+    session: UserSession,
 ) -> impl IntoResponse {
     ws.on_upgrade(|ws| async move {
         let _ = state
@@ -40,11 +41,7 @@ pub async fn get_updates(
 }
 
 impl UiState {
-    async fn handle_get_updates(
-        &self,
-        mut ws: WebSocket,
-        user: &AuthenticatedUser,
-    ) -> RequestResult<()> {
+    async fn handle_get_updates(&self, mut ws: WebSocket, user: &UserSession) -> RequestResult<()> {
         let client = self.client(user.id()).await?;
         let self_id = client.client_ref()?.rostra_id();
         let Some(mut new_posts) = client.client_ref()?.new_content_subscribe() else {
@@ -74,7 +71,7 @@ impl UiState {
             let _ = ws
                 .send(
                     html! {
-                        (self.new_posts_alert(true, count))
+                        (self.render_new_posts_alert(true, count))
                     }
                     .into_string()
                     .into(),
@@ -85,7 +82,7 @@ impl UiState {
         Ok(())
     }
 
-    pub async fn timeline_page(&self, user: &AuthenticatedUser) -> RequestResult<Markup> {
+    pub async fn render_timeline_page(&self, user: &UserSession) -> RequestResult<Markup> {
         let content = html! {
             nav ."o-navBar" hx-ext="ws" ws-connect="/ui/timeline/updates" {
 
@@ -106,7 +103,7 @@ impl UiState {
             }
 
             main ."o-mainBar" {
-                (self.new_posts_alert(false, 0))
+                (self.render_new_posts_alert(false, 0))
                 (self.main_bar_timeline(user).await?)
             }
 
@@ -115,7 +112,7 @@ impl UiState {
         self.render_html_page("You're Rostra!", content).await
     }
 
-    pub fn new_posts_alert(&self, visible: bool, count: u64) -> Markup {
+    pub fn render_new_posts_alert(&self, visible: bool, count: u64) -> Markup {
         html! {
             a ."o-mainBar__newPostsAlert"
                 ."-hidden"[!visible]
@@ -133,7 +130,7 @@ impl UiState {
         }
     }
 
-    pub async fn main_bar_timeline(&self, user: &AuthenticatedUser) -> RequestResult<Markup> {
+    pub async fn main_bar_timeline(&self, user: &UserSession) -> RequestResult<Markup> {
         let client = self.client(user.id()).await?;
         let client_ref = client.client_ref()?;
 
@@ -148,7 +145,13 @@ impl UiState {
                 div ."o-mainBarTimeline__item -preview -empty" { }
                 @for post in posts {
                     div ."o-mainBarTimeline__item" {
-                        (self.post_overview(&client_ref, post.event.author, &post.content.djot_content).await?)
+                        (self.post_overview(
+                            &client_ref,
+                            post.event.author,
+                            Some(post.event_id),
+                            &post.content.djot_content,
+                            user.ro_mode()
+                        ).await?)
                     }
                 }
             }
@@ -159,12 +162,15 @@ impl UiState {
         &self,
         client: &ClientRef<'_>,
         author: RostraId,
+        event_id: Option<ShortEventId>,
         content: &str,
+        ro: RoMode,
     ) -> RequestResult<Markup> {
+        let external_event_id = event_id.map(|e| ExternalEventId::new(author, e));
         let user_profile = self.get_social_profile(author, client).await?;
 
-        let content_html =
-            jotdown::html::render_to_string(jotdown::Parser::new(content).map(|e| match e {
+        let post_content_rendered = PreEscaped(jotdown::html::render_to_string(
+            jotdown::Parser::new(content).map(|e| match e {
                 jotdown::Event::Start(jotdown::Container::RawBlock { format }, attrs)
                     if format == "html" =>
                 {
@@ -176,11 +182,12 @@ impl UiState {
                     jotdown::Event::End(jotdown::Container::CodeBlock { language: format })
                 }
                 e => e,
-            }));
+            }),
+        ));
         Ok(html! {
             article ."m-postOverview" {
                 div ."m-postOverview__main" {
-                    img ."m-postOverview__userImage"
+                    img ."m-postOverview__userImage u-userImage"
                         src="/assets/icons/circle-user.svg"
                         width="32pt"
                         height="32pt"
@@ -193,14 +200,25 @@ impl UiState {
 
                         div ."m-postOverview__content" {
                             p {
-                                (PreEscaped(content_html))
+                                (post_content_rendered)
                             }
                         }
                     }
+
                 }
 
-                div ."m-postOverview__buttonBar"{
-                    // "Buttons here"
+                @if let Some(ext_event_id) = external_event_id {
+                    div ."m-postOverview__buttonBar" {
+                            button ."m-postOverview__replyToButton u-button"
+                                disabled[ro.to_disabled()]
+                                hx-get={"/ui/post/reply_to?reply_to="(ext_event_id)}
+                                hx-target=".m-newPostForm__replyToLine"
+                                hx-swap="outerHTML"
+                            {
+                                span ."m-postOverview__replyToButtonIcon u-buttonIcon" width="1rem" height="1rem" {}
+                                "Reply"
+                            }
+                    }
                 }
             }
         })

@@ -8,7 +8,7 @@ use rostra_core::id::{RostraId, ToShort as _};
 use rostra_core::ShortEventId;
 use serde::Deserialize;
 
-use super::unlock::session::{AuthenticatedUser, RoMode};
+use super::unlock::session::{RoMode, UserSession};
 use super::Maud;
 use crate::error::RequestResult;
 use crate::html_utils::submit_on_ctrl_enter;
@@ -16,7 +16,7 @@ use crate::{SharedState, UiState};
 
 pub async fn get_self_account_edit(
     state: State<SharedState>,
-    session: AuthenticatedUser,
+    session: UserSession,
 ) -> RequestResult<impl IntoResponse> {
     Ok(Maud(state.render_profile_edit_form(&session).await?))
 }
@@ -29,7 +29,7 @@ pub struct EditInput {
 
 pub async fn post_self_account_edit(
     state: State<SharedState>,
-    session: AuthenticatedUser,
+    session: UserSession,
     Form(form): Form<EditInput>,
 ) -> RequestResult<impl IntoResponse> {
     state
@@ -72,7 +72,7 @@ impl UiState {
 
     pub async fn render_self_profile_summary(
         &self,
-        user: &AuthenticatedUser,
+        user: &UserSession,
         ro: RoMode,
     ) -> RequestResult<Markup> {
         let client = self.client(user.id()).await?;
@@ -98,7 +98,7 @@ impl UiState {
                     "#
                     ))
                 }
-                img ."m-selfAccount__userImage"
+                img ."m-selfAccount__userImage u-userImage"
                     src=(self.self_avatar_url().await)
                     width="32pt"
                     height="32pt"
@@ -136,10 +136,7 @@ impl UiState {
         })
     }
 
-    pub async fn render_profile_edit_form(
-        &self,
-        user: &AuthenticatedUser,
-    ) -> RequestResult<Markup> {
+    pub async fn render_profile_edit_form(&self, user: &UserSession) -> RequestResult<Markup> {
         let client = self.client(user.id()).await?;
         let client_ref = client.client_ref()?;
         let self_profile = self

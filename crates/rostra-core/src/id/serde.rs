@@ -1,7 +1,7 @@
 use std::fmt::{self};
 use std::str::FromStr;
 
-use super::{RostraId, RostraIdSecretKey, RostraIdSecretKeyError};
+use super::{ExternalEventId, RostraId, RostraIdSecretKey, RostraIdSecretKeyError};
 
 impl fmt::Display for RostraId {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -94,5 +94,26 @@ impl FromStr for RostraIdSecretKey {
             return Err(("Invalid length").to_string().into());
         }
         Ok(Self(bytes.try_into().expect("Just checked length")))
+    }
+}
+
+// Add these to use FromStr/Display for serde:
+impl serde::Serialize for ExternalEventId {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        serializer.collect_str(self)
+    }
+}
+
+impl<'de> serde::Deserialize<'de> for ExternalEventId {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        String::deserialize(deserializer)?
+            .parse()
+            .map_err(serde::de::Error::custom)
     }
 }

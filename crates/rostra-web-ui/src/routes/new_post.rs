@@ -1,30 +1,33 @@
-use axum::extract::State;
+use axum::extract::{Query, State};
 use axum::response::IntoResponse;
 use axum::Form;
 use maud::{html, Markup};
+use rostra_core::id::ToShort as _;
+use rostra_core::ExternalEventId;
 use serde::Deserialize;
 
 use super::super::error::RequestResult;
 use super::super::SharedState;
-use super::unlock::session::{AuthenticatedUser, RoMode};
+use super::unlock::session::{RoMode, UserSession};
 use super::Maud;
 use crate::html_utils::{re_typeset_mathjax, submit_on_ctrl_enter};
 use crate::UiState;
 
 #[derive(Deserialize)]
 pub struct Input {
+    reply_to: Option<ExternalEventId>,
     content: String,
 }
 
 pub async fn post_new_post(
     state: State<SharedState>,
-    session: AuthenticatedUser,
+    session: UserSession,
     Form(form): Form<Input>,
 ) -> RequestResult<impl IntoResponse> {
     let client_handle = state.client(session.id()).await?;
     let client_ref = client_handle.client_ref()?;
-    client_ref
-        .social_post(session.id_secret()?, form.content.clone())
+    let event = client_ref
+        .social_post(session.id_secret()?, form.content.clone(), form.reply_to)
         .await?;
 
     let clean_form = state.new_post_form(
@@ -47,7 +50,7 @@ pub async fn post_new_post(
         // Insert new post at the top of the timeline, where the preview we just cleared was.
         div hx-swap-oob="afterend: .o-mainBarTimeline__item.-preview" {
             div ."o-mainBarTimeline__item" {
-                (state.post_overview(&client_ref, client_ref.rostra_id(), &form.content).await?)
+                (state.post_overview(&client_ref, client_ref.rostra_id(), Some(event.event_id.to_short()), &form.content, session.ro_mode()).await?)
             }
         }
         (re_typeset_mathjax())
@@ -57,7 +60,7 @@ pub async fn post_new_post(
 
 pub async fn get_post_preview(
     state: State<SharedState>,
-    session: AuthenticatedUser,
+    session: UserSession,
     Form(form): Form<Input>,
 ) -> RequestResult<impl IntoResponse> {
     let client = state.client(session.id()).await?;
@@ -69,7 +72,7 @@ pub async fn get_post_preview(
                 // all the way to the top, we actually want the parent of a parent.
                 "hx-on::load"="this.parentNode.parentNode.scrollIntoView()" {
 
-                (state.post_overview(&client.client_ref()?, self_id, &form.content).await?)
+                (state.post_overview(&client.client_ref()?, self_id, None, &form.content, session.ro_mode()).await?)
                 (re_typeset_mathjax())
             }
         } @else {
@@ -78,7 +81,40 @@ pub async fn get_post_preview(
     }))
 }
 
+#[derive(Deserialize)]
+pub struct ReplyToInput {
+    reply_to: Option<ExternalEventId>,
+}
+
+pub async fn get_reply_to(
+    state: State<SharedState>,
+    _session: UserSession,
+    Query(form): Query<ReplyToInput>,
+) -> RequestResult<impl IntoResponse> {
+    Ok(Maud(state.render_reply_to_line(form.reply_to)))
+}
 impl UiState {
+    fn render_reply_to_line(&self, reply_to: Option<ExternalEventId>) -> Markup {
+        html! {
+            div ."m-newPostForm__replyToLine" {
+                @if let Some(reply_to) = reply_to {
+                    p ."m-newPostForm__replyToLabel" {
+                        span ."m-newPostForm__replyToText" { "Reply to: " }
+                        (reply_to.rostra_id().to_short())
+                    }
+
+                input ."m-newPostForm__replyTo"
+                    type="hidden"
+                    name="reply_to"
+                    autocomplete="off"
+                    value=(reply_to)
+                    readonly
+                    {}
+                }
+            }
+        }
+    }
+
     pub fn new_post_form(&self, notification: impl Into<Option<Markup>>, ro: RoMode) -> Markup {
         let notification = notification.into();
         html! {
@@ -86,6 +122,7 @@ impl UiState {
                 hx-post="/ui/post"
                 hx-swap="outerHTML"
             {
+                (self.render_reply_to_line(None))
                 textarea ."m-newPostForm__content"
                     placeholder=(
                         if ro.to_disabled() {

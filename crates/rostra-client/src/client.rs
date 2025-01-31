@@ -20,7 +20,7 @@ use rostra_core::event::{
     VerifiedEventContent,
 };
 use rostra_core::id::{RostraId, RostraIdSecretKey, ToShort as _};
-use rostra_core::ShortEventId;
+use rostra_core::{ExternalEventId, ShortEventId};
 use rostra_p2p::connection::{Connection, FeedEventRequest, FeedEventResponse};
 use rostra_p2p::RpcError;
 use rostra_p2p_api::ROSTRA_P2P_V0_ALPN;
@@ -462,7 +462,7 @@ impl Client {
         #[builder(start_fn)] id_secret: RostraIdSecretKey,
         #[builder(start_fn)] content: C,
         replace: Option<ShortEventId>,
-    ) -> PostResult<()>
+    ) -> PostResult<VerifiedEvent>
     where
         C: content_kind::EventContentKind,
     {
@@ -498,15 +498,21 @@ impl Client {
             .process_event_with_content(&verified_event_content)
             .await;
 
-        Ok(())
+        Ok(verified_event)
     }
 
-    pub async fn social_post(&self, id_secret: RostraIdSecretKey, body: String) -> PostResult<()> {
+    pub async fn social_post(
+        &self,
+        id_secret: RostraIdSecretKey,
+        body: String,
+        reply_to: Option<ExternalEventId>,
+    ) -> PostResult<VerifiedEvent> {
         self.publish_event(
             id_secret,
             content_kind::SocialPost {
                 djot_content: body,
                 persona: PersonaId(0),
+                reply_to,
             },
         )
         .call()
@@ -517,7 +523,7 @@ impl Client {
         id_secret: RostraIdSecretKey,
         display_name: String,
         bio: String,
-    ) -> PostResult<()> {
+    ) -> PostResult<VerifiedEvent> {
         let existing = if let Ok(storage) = self.storage() {
             storage
                 .get_social_profile(self.rostra_id())
@@ -540,7 +546,11 @@ impl Client {
         .await
     }
 
-    pub async fn follow(&self, id_secret: RostraIdSecretKey, followee: RostraId) -> PostResult<()> {
+    pub async fn follow(
+        &self,
+        id_secret: RostraIdSecretKey,
+        followee: RostraId,
+    ) -> PostResult<VerifiedEvent> {
         self.publish_event(
             id_secret,
             content_kind::Follow {

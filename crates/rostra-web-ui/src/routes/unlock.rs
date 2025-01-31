@@ -7,7 +7,7 @@ use axum::Form;
 use maud::{html, Markup};
 use rostra_core::id::{RostraId, RostraIdSecretKey};
 use serde::Deserialize;
-use session::{AuthenticatedUser, SESSION_KEY};
+use session::{UserSession, SESSION_KEY};
 use snafu::ResultExt as _;
 use tower_sessions::Session;
 
@@ -65,7 +65,7 @@ pub async fn post_unlock(
             session
                 .insert(
                     SESSION_KEY,
-                    &AuthenticatedUser::new(form.rostra_id, secret_key_opt),
+                    &UserSession::new(form.rostra_id, secret_key_opt),
                 )
                 .await
                 .boxed()

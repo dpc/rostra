@@ -2,7 +2,7 @@ use std::collections::BTreeSet;
 
 use super::{EventContent, EventKind, PersonaId};
 use crate::id::RostraId;
-use crate::ShortEventId;
+use crate::{ExternalEventId, ShortEventId};
 
 /// Extension trait for deserializing content
 #[cfg(feature = "serde")]
@@ -51,6 +51,8 @@ pub struct SocialPost {
     pub persona: PersonaId,
     #[serde(rename = "c")]
     pub djot_content: String,
+    #[serde(rename = "r")]
+    pub reply_to: Option<ExternalEventId>,
 }
 
 impl EventContentKind for SocialPost {
@@ -100,21 +102,4 @@ pub struct SocialProfileUpdate {
 
 impl EventContentKind for SocialProfileUpdate {
     const KIND: EventKind = EventKind::SOCIAL_PROFILE_UPDATE;
-}
-
-#[cfg_attr(feature = "serde", derive(::serde::Serialize, ::serde::Deserialize))]
-#[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
-pub struct SocialComment {
-    #[serde(rename = "i")]
-    pub rostra_id: RostraId,
-    #[serde(rename = "e")]
-    pub event_id: ShortEventId,
-    #[serde(rename = "p")]
-    pub persona: PersonaId,
-    #[serde(rename = "c")]
-    pub djot_content: String,
-}
-
-impl EventContentKind for SocialComment {
-    const KIND: EventKind = EventKind::SOCIAL_COMMENT;
 }

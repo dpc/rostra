@@ -61,19 +61,25 @@ a:active {
   display: inline-block;
 }
 
+.u-userImage {
+  width: 32pt;
+  height: 32pt;
+  display: inline-block;
+}
+
 [disabled] > .u-buttonIcon {
   opacity: 0.6;
 }
 
 .o-pageLayout {
   display: flex;
-  width: 100%;
-  height: 100vh;
+  justify-content: center;
+  height: 100dvh;
   overflow: auto;
 }
 
 .o-navBar {
-  flex: 1;
+  /* flex: 1; */
   display: flex;
   flex-direction: column;
   gap: 10pt;
@@ -97,8 +103,8 @@ a:active {
 }
 
 .o-mainBar {
-  flex: 3;
-  flex-grow: 3;
+  flex-grow: 1;
+  max-width: 600px;
   padding: 4pt;
 }
 
@@ -110,7 +116,6 @@ a:active {
   background: white;
   padding: 4pt;
   border: 1px solid var(--background-border-color);
-
 }
 
 .o-mainBar__newPostsAlert.-hidden {
@@ -149,10 +154,14 @@ a:active {
 }
 
 .o-sideBar {
-  flex: 1;
+  /* flex: 1; */
   padding: 10pt;
 }
 
+.m-postOverview {
+  min-width: 30rem;
+  max-width: 50rem;
+}
 
 .m-postOverview__main {
   display: flex;
@@ -160,8 +169,6 @@ a:active {
 }
 
 .m-postOverview__userImage {
-  width: 32pt;
-  height: 32pt;
   margin: 2pt;
 }
 
@@ -178,6 +185,12 @@ a:active {
   font-weight: bold;
 }
 
+.m-newPostForm__replyToLabel {
+}
+
+.m-newPostForm__replyToText {
+  font-weight: bold;
+}
 
 .m-postOverview__content {
 }
@@ -187,12 +200,26 @@ a:active {
   margin-bottom: 5pt;
 }
 
+.m-postOverview__buttonBar {
+  display: flex;
+  justify-content: flex-end;
+}
+
+
+.m-postOverview__replyToButtonIcon {
+  background: url('/assets/icons/reply.svg') center/contain no-repeat;
+}
+
 .m-selfAccount {
   display: flex;
   justify-content: flex-start;
   gap: 0.5rem;
   padding-top: 0.5rem;
   padding-bottom: 0.5rem;
+}
+
+.m-selfAccount__userImage {
+  margin: 2pt;
 }
 
 .m-selfAccount__content {
@@ -275,8 +302,12 @@ a:active {
 .m-newPostForm {
   display: flex;
   flex-direction: column;
-  align-items: flex-end;
+  justify-items: flex-end;
   gap: 5pt;
+}
+
+.m-newPostForm__replyToLine {
+  /* display: flex; */
 }
 
 .m-newPostForm__content {

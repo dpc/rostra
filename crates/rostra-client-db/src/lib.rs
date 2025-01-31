@@ -461,15 +461,20 @@ impl Database {
     ) -> DbResult<()> {
         #[allow(clippy::single_match)]
         match event_content.event.event.kind {
-            EventKind::SOCIAL_COMMENT => {
+            EventKind::SOCIAL_POST => {
                     if let Ok(content) = event_content
                         .content
-                        .deserialize_cbor::<content_kind::SocialComment>().inspect_err(|err| {
+                        .deserialize_cbor::<content_kind::SocialPost>().inspect_err(|err| {
                             debug!(target: LOG_TARGET, err = %err.fmt_compact(), "Ignoring malformed SocialComment payload");
                         }) {
-                        let mut social_comment_tbl = tx.open_table(&social_comment::TABLE)?;
 
-                        social_comment_tbl.remove(&(content.event_id, event_content.event.event.timestamp.into(),event_content.event.event_id.to_short()))?;
+                        if let Some(reply_to) = content.reply_to {
+                            let mut social_comment_tbl = tx.open_table(&social_comment::TABLE)?;
+
+                            social_comment_tbl.remove(
+                                &(reply_to.event_id(), event_content.event.event.timestamp.into(),event_content.event.event_id.to_short())
+                                )?;
+                        }
                     }
             }
             _ => {}
@@ -580,15 +585,21 @@ impl Database {
                             )?;
                     }
                 }
-                EventKind::SOCIAL_COMMENT => {
+                EventKind::SOCIAL_POST => {
                     if let Ok(content) = event_content
                         .content
-                        .deserialize_cbor::<content_kind::SocialComment>().inspect_err(|err| {
+                        .deserialize_cbor::<content_kind::SocialPost>().inspect_err(|err| {
                             debug!(target: LOG_TARGET, err = %err.fmt_compact(), "Ignoring malformed SocialComment payload");
                         }) {
-                        let mut social_comment_tbl = tx.open_table(&social_comment::TABLE)?;
+                        if let Some(reply_to) = content.reply_to {
+                            let mut social_comment_tbl = tx.open_table(&social_comment::TABLE)?;
 
-                        social_comment_tbl.insert(&(content.event_id, event_content.event.event.timestamp.into(),event_content.event.event_id.to_short() ), &())?;
+                            social_comment_tbl.insert(
+                                &(reply_to.event_id(), event_content.event.event.timestamp.into(),event_content.event.event_id.to_short()
+                                ),
+                                &()
+                            )?;
+                        }
 
                     }
                 },

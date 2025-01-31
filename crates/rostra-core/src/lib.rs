@@ -12,6 +12,8 @@ pub mod rand;
 /// Because some types can't serde. :/
 pub mod id;
 
+pub use crate::event::Event;
+pub use crate::id::{ExternalEventId, RostraId};
 #[macro_export]
 macro_rules! define_array_type_no_serde {
     (

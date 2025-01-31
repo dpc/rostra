@@ -122,7 +122,7 @@ pub struct Event {
     /// Public id of the creator of the message
     pub author: RostraId,
 
-    /// Previous [`EventId`], to form a kind-of-a-chain (actually DAG).
+    /// Previous [`crate::EventId`], to form a kind-of-a-chain (actually DAG).
     ///
     /// It is supposed to be the *latest* `EventID` known to the client
     /// to allow traversing events (almost) in order.
@@ -246,7 +246,6 @@ impl EventKind {
     pub const SOCIAL_POST: Self = EventKind::from_u16(0x20);
     pub const SOCIAL_LIKE: Self = EventKind::from_u16(0x21);
     pub const SOCIAL_REPOST: Self = EventKind::from_u16(0x22);
-    pub const SOCIAL_COMMENT: Self = EventKind::from_u16(0x23);
     pub const SOCIAL_PROFILE_UPDATE: Self = EventKind::from_u16(0x24);
 
     pub const fn from_u16(value: u16) -> Self {
