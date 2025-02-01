@@ -22,8 +22,8 @@ use super::{
     InsertEventOutcome, WriteTransactionCtx,
 };
 use crate::{
-    ids_full, social_post, social_post_reply, social_profile, DbVersionTooHighSnafu,
-    IdSocialProfileRecord, Latest, LOG_TARGET,
+    ids_full, social_posts, social_posts_by_time, social_posts_reply, social_profiles,
+    DbVersionTooHighSnafu, IdSocialProfileRecord, Latest, SocialPostRecord, LOG_TARGET,
 };
 
 impl Database {
@@ -44,9 +44,10 @@ impl Database {
         tx.open_table(&events_missing::TABLE)?;
         tx.open_table(&events_heads::TABLE)?;
 
-        tx.open_table(&social_profile::TABLE)?;
-        tx.open_table(&social_post::TABLE)?;
-        tx.open_table(&social_post_reply::TABLE)?;
+        tx.open_table(&social_profiles::TABLE)?;
+        tx.open_table(&social_posts::TABLE)?;
+        tx.open_table(&social_posts_by_time::TABLE)?;
+        tx.open_table(&social_posts_reply::TABLE)?;
         Ok(())
     }
 
@@ -291,6 +292,12 @@ impl Database {
         Ok(events_table.get(&event.into())?.map(|r| r.value()))
     }
 
+    pub fn get_social_post_tx(
+        event: impl Into<ShortEventId>,
+        social_posts_table: &impl social_posts::ReadableTable,
+    ) -> DbResult<Option<SocialPostRecord>> {
+        Ok(social_posts_table.get(&event.into())?.map(|r| r.value()))
+    }
     pub fn has_event_tx(
         event: impl Into<ShortEventId>,
         events_table: &impl events::ReadableTable,
@@ -442,7 +449,7 @@ impl Database {
 
     pub(crate) fn get_social_profile_tx(
         id: RostraId,
-        table: &impl social_profile::ReadableTable,
+        table: &impl social_profiles::ReadableTable,
     ) -> DbResult<Option<IdSocialProfileRecord>> {
         Ok(table.get(&id)?.map(|v| v.value().inner))
     }

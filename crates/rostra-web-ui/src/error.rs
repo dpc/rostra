@@ -14,12 +14,15 @@ use crate::UiStateClientError;
 #[derive(Debug, Snafu)]
 pub enum UserRequestError {
     SomethingNotFound,
+    #[snafu(visibility(pub(crate)))]
+    InvalidData,
 }
 
 impl IntoResponse for &UserRequestError {
     fn into_response(self) -> Response {
         let (status_code, message) = match self {
             UserRequestError::SomethingNotFound => (StatusCode::NOT_FOUND, self.to_string()),
+            UserRequestError::InvalidData => (StatusCode::BAD_REQUEST, self.to_string()),
         };
         (status_code, AppJson(UserErrorResponse { message })).into_response()
     }
@@ -50,6 +53,8 @@ pub enum RequestError {
     LoginRequired,
     #[snafu(visibility(pub(crate)))]
     SecretKeyMissing,
+    #[snafu(visibility(pub(crate)))]
+    User { source: UserRequestError },
 }
 pub type RequestResult<T> = std::result::Result<T, RequestError>;
 

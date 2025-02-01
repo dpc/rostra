@@ -60,9 +60,10 @@ def_table!(events_content: ShortEventId => event::EventContentStateOwned);
 def_table!(events_by_time: (Timestamp, ShortEventId) => ());
 
 // SOCIAL
-def_table!(social_profile: RostraId => Latest<IdSocialProfileRecord>);
-def_table!(social_post: (ShortEventId)=> SocialPostRecord);
-def_table!(social_post_reply: (ShortEventId, Timestamp, ShortEventId)=> ());
+def_table!(social_profiles: RostraId => Latest<IdSocialProfileRecord>);
+def_table!(social_posts: (ShortEventId)=> SocialPostRecord);
+def_table!(social_posts_reply: (ShortEventId, Timestamp, ShortEventId)=> ());
+def_table!(social_posts_by_time: (Timestamp, ShortEventId) => ());
 
 #[derive(Debug, Encode, Decode, Clone)]
 pub struct Latest<T> {
@@ -79,7 +80,15 @@ pub struct IdSocialProfileRecord {
     pub img: Vec<u8>,
 }
 
-#[derive(Debug, Encode, Decode, Clone, Default)]
+#[derive(
+    Debug,
+    Encode,
+    Decode,
+    Clone,
+    // Note: needs to be default so we can track number of replies even before we get what was
+    // replied to
+    Default,
+)]
 pub struct SocialPostRecord {
     pub reply_count: u64,
 }

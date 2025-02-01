@@ -1,12 +1,14 @@
 use bincode::{Decode, Encode};
-use rostra_core::event::{content_kind, Event, EventExt as _, EventKind};
-use rostra_core::{ShortEventId, Timestamp};
+use rostra_core::event::{content_kind, EventExt as _};
+use rostra_core::{RostraId, ShortEventId, Timestamp};
 use serde::{Deserialize, Serialize};
-use tracing::debug;
+use tracing::{debug, warn};
 
 use super::Database;
 use crate::event::EventContentState;
-use crate::{events, events_by_time, events_content, LOG_TARGET};
+use crate::{
+    events, events_content, social_posts, social_posts_by_time, social_posts_reply, LOG_TARGET,
+};
 
 #[derive(
     Encode, Decode, Serialize, Deserialize, Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord,
@@ -16,11 +18,12 @@ pub struct EventPaginationCursor {
     event_id: ShortEventId,
 }
 
-pub struct EventPaginationRecord<C> {
+pub struct SocialPostPaginationRecord<C> {
     pub ts: Timestamp,
     pub event_id: ShortEventId,
-    pub event: Event,
+    pub author: RostraId,
     pub content: C,
+    pub reply_count: u64,
 }
 
 impl Database {
@@ -28,35 +31,30 @@ impl Database {
         &self,
         upper_bound: Option<EventPaginationCursor>,
         limit: usize,
-    ) -> Vec<EventPaginationRecord<content_kind::SocialPost>> {
+    ) -> Vec<SocialPostPaginationRecord<content_kind::SocialPost>> {
         let upper_bound = upper_bound
             .map(|b| (b.ts, b.event_id))
             .unwrap_or((Timestamp::MAX, ShortEventId::MAX));
         self.read_with(|tx| {
-            let events_by_time_table = tx.open_table(&events_by_time::TABLE)?;
             let events_table = tx.open_table(&events::TABLE)?;
+            let social_posts_table = tx.open_table(&social_posts::TABLE)?;
+            let social_posts_by_time_table = tx.open_table(&social_posts_by_time::TABLE)?;
             let events_content_table = tx.open_table(&events_content::TABLE)?;
 
             let mut ret = vec![];
 
-            for event in events_by_time_table
+            for event in social_posts_by_time_table
                 .range(&(Timestamp::ZERO, ShortEventId::ZERO)..&upper_bound)?
                 .rev()
             {
                 let (k, _) = event?;
                 let (ts, event_id) = k.value();
 
-                let Some(e_record) = Database::get_event_tx(event_id, &events_table)? else {
-                    continue;
-                };
-
-                if e_record.kind() != EventKind::SOCIAL_POST {
-                    continue;
-                }
 
                 let Some(content_state) =
                     Database::get_event_content_tx(event_id, &events_content_table)?
                 else {
+                    warn!(target: LOG_TARGET, %event_id, "Missing content for a post with social_post_record?!");
                     continue;
                 };
                 let EventContentState::Present(content) = content_state else {
@@ -68,12 +66,87 @@ impl Database {
                     continue;
                 };
 
-                debug_assert_eq!(e_record.timestamp(), ts);
+                let Some(event) = Database::get_event_tx(event_id, &events_table)? else {
+                    warn!(target: LOG_TARGET, %event_id, "Missing event for a post with social_post_record?!");
+                    continue;
+                };
 
-                ret.push(EventPaginationRecord {
+                let social_post_record =
+                    Database::get_social_post_tx(event_id, &social_posts_table)?.unwrap_or_default()
+                ;
+
+                ret.push(SocialPostPaginationRecord {
                     ts,
+                    author: event.author(),
                     event_id,
-                    event: *e_record.event(),
+                    reply_count: social_post_record.reply_count,
+                    content: social_post,
+                });
+
+                if limit <= ret.len() {
+                    break;
+                }
+            }
+
+            Ok(ret)
+        })
+        .await
+        .expect("Storage error")
+    }
+
+    pub async fn paginate_social_post_comments_rev(
+        &self,
+        post_event_id: ShortEventId,
+        upper_bound: Option<EventPaginationCursor>,
+        limit: usize,
+    ) -> Vec<SocialPostPaginationRecord<content_kind::SocialPost>> {
+        let upper_bound = upper_bound
+            .map(|b| (post_event_id, b.ts, b.event_id))
+            .unwrap_or((post_event_id, Timestamp::MAX, ShortEventId::MAX));
+        self.read_with(|tx| {
+            let events_table = tx.open_table(&events::TABLE)?;
+            let social_posts_tbl = tx.open_table(&social_posts::TABLE)?;
+            let social_post_reply_tbl = tx.open_table(&social_posts_reply::TABLE)?;
+            let events_content_table = tx.open_table(&events_content::TABLE)?;
+
+            let mut ret = vec![];
+
+            for event in social_post_reply_tbl
+                .range(&(post_event_id, Timestamp::ZERO, ShortEventId::ZERO)..&upper_bound)?
+                .rev()
+            {
+                let (k, _) = event?;
+                let (_, ts, event_id) = k.value();
+
+
+                let social_post_record = Database::get_social_post_tx(event_id, &social_posts_tbl)?.unwrap_or_default();
+
+                let Some(content_state) =
+                    Database::get_event_content_tx(event_id, &events_content_table)?
+                else {
+                    warn!(target: LOG_TARGET, %event_id, "Missing content for a post with social_post_record?!");
+                    continue;
+                };
+                let EventContentState::Present(content) = content_state else {
+                    debug!(target: LOG_TARGET, %event_id, "Skipping comment without content present");
+                    continue;
+                };
+
+                let Ok(social_post) = content.deserialize_cbor::<content_kind::SocialPost>() else {
+                    debug!(target: LOG_TARGET, %event_id, "Skpping comment with invalid content");
+                    continue;
+                };
+
+                let Some(event) = Database::get_event_tx(event_id, &events_table)? else {
+                    warn!(target: LOG_TARGET, %event_id, "Missing event for a post with social_post_record?!");
+                    continue;
+                };
+
+                ret.push(SocialPostPaginationRecord {
+                    ts,
+                    author: event.author(),
+                    event_id,
+                    reply_count: social_post_record.reply_count,
                     content: social_post,
                 });
 

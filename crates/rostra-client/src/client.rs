@@ -343,6 +343,14 @@ impl Client {
             .map(|storage| storage.new_content_subscribe())
     }
 
+    pub fn new_posts_subscribe(
+        &self,
+    ) -> Option<broadcast::Receiver<(VerifiedEventContent, content_kind::SocialPost)>> {
+        self.db
+            .as_ref()
+            .map(|storage| storage.new_posts_subscribe())
+    }
+
     pub fn check_for_updates_tx_subscribe(&self) -> watch::Receiver<()> {
         self.check_for_updates_tx.subscribe()
     }

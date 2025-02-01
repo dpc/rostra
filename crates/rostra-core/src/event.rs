@@ -183,6 +183,10 @@ impl EventExt for Event {
 #[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
 pub struct PersonaId(pub u32);
 
+pub trait SignedEventExt: EventExt {
+    fn sig(&self) -> EventSignature;
+}
+
 /// An [`Event`] along with a [`EventSignature`]
 ///
 /// Notably: not verified yet be any means.
@@ -207,6 +211,12 @@ impl SignedEvent {
 impl EventExt for SignedEvent {
     fn event(&self) -> &Event {
         &self.event
+    }
+}
+
+impl SignedEventExt for SignedEvent {
+    fn sig(&self) -> EventSignature {
+        self.sig
     }
 }
 

@@ -142,6 +142,10 @@ pub fn route_handler(state: SharedState) -> Router {
         .route("/ui/unlock/random", get(unlock::get_random))
         .route("/ui/timeline/updates", get(timeline::get_updates))
         .route(
+            "/ui/timeline/comments/{event_id}",
+            get(timeline::get_post_comments),
+        )
+        .route(
             "/ui/self/edit",
             get(self_account::get_self_account_edit).post(self_account::post_self_account_edit),
         )

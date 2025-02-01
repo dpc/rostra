@@ -203,9 +203,12 @@ a:active {
 .m-postOverview__buttonBar {
   display: flex;
   justify-content: flex-end;
+  gap: 5pt;
 }
 
-
+.m-postOverview__commentsButtonIcon {
+  background: url('/assets/icons/comment.svg') center/contain no-repeat;
+}
 .m-postOverview__replyToButtonIcon {
   background: url('/assets/icons/reply.svg') center/contain no-repeat;
 }

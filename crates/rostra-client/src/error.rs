@@ -86,6 +86,7 @@ pub enum PostError {
     #[snafu(transparent)]
     Resolve { source: IdResolveError },
     #[snafu(display("Encoding error: {source}"))]
+    #[snafu(visibility(pub))]
     Encode { source: BoxedError },
 }
 

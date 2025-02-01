@@ -1,20 +1,23 @@
 use std::future::pending;
+use std::str::FromStr as _;
 use std::time::Duration;
 
 use axum::extract::ws::WebSocket;
-use axum::extract::{State, WebSocketUpgrade};
+use axum::extract::{Path, State, WebSocketUpgrade};
 use axum::response::IntoResponse;
 use maud::{html, Markup, PreEscaped};
 use rostra_client::ClientRef;
 use rostra_core::event::EventKind;
-use rostra_core::id::RostraId;
+use rostra_core::id::{RostraId, ToShort as _};
 use rostra_core::{ExternalEventId, ShortEventId};
 use rostra_util_error::FmtCompact as _;
+use snafu::ResultExt as _;
 use tracing::debug;
 
 use super::super::error::RequestResult;
 use super::unlock::session::{RoMode, UserSession};
 use super::Maud;
+use crate::error::{InvalidDataSnafu, UserSnafu};
 use crate::{SharedState, UiState, LOG_TARGET};
 
 pub async fn get(
@@ -40,11 +43,23 @@ pub async fn get_updates(
     })
 }
 
+pub async fn get_post_comments(
+    state: State<SharedState>,
+    session: UserSession,
+    // TODO: seems like using `[u8;16]` in path does not work as expected
+    Path(id): Path<String>,
+) -> RequestResult<impl IntoResponse> {
+    let id = ShortEventId::from_str(&id)
+        .map_err(|_| InvalidDataSnafu.build())
+        .context(UserSnafu)?;
+    Ok(Maud(state.render_post_comments(id, &session).await?))
+}
+
 impl UiState {
     async fn handle_get_updates(&self, mut ws: WebSocket, user: &UserSession) -> RequestResult<()> {
         let client = self.client(user.id()).await?;
         let self_id = client.client_ref()?.rostra_id();
-        let Some(mut new_posts) = client.client_ref()?.new_content_subscribe() else {
+        let Some(mut new_posts) = client.client_ref()?.new_posts_subscribe() else {
             pending::<()>().await;
             return Ok(());
         };
@@ -52,7 +67,7 @@ impl UiState {
         let mut count = 0;
 
         loop {
-            let event_content = match new_posts.recv().await {
+            let (event_content, _social_post) = match new_posts.recv().await {
                 Ok(event_content) => event_content,
                 Err(tokio::sync::broadcast::error::RecvError::Closed) => {
                     break;
@@ -107,9 +122,47 @@ impl UiState {
                 (self.main_bar_timeline(user).await?)
             }
 
+            nav ."o-sideBar" {
+
+            }
         };
 
         self.render_html_page("You're Rostra!", content).await
+    }
+
+    pub async fn render_post_comments(
+        &self,
+        post_id: ShortEventId,
+        user: &UserSession,
+    ) -> RequestResult<Markup> {
+        let client = self.client(user.id()).await?;
+        let client_ref = client.client_ref()?;
+
+        let comments = self
+            .client(user.id())
+            .await?
+            .storage()??
+            .paginate_social_post_comments_rev(post_id, None, 100)
+            .await;
+
+        Ok(html! {
+            nav ."o-sideBar" {
+            div ."o-sideBarComments" {
+                @for comment in comments {
+                    div ."o-sideBarComments__item" {
+                        (self.post_overview(
+                            &client_ref,
+                            comment.author,
+                            Some(comment.event_id),
+                            &comment.content.djot_content,
+                            comment.reply_count,
+                            user.ro_mode()
+                        ).await?)
+                    }
+                }
+            }
+            }
+        })
     }
 
     pub fn render_new_posts_alert(&self, visible: bool, count: u64) -> Markup {
@@ -147,9 +200,10 @@ impl UiState {
                     div ."o-mainBarTimeline__item" {
                         (self.post_overview(
                             &client_ref,
-                            post.event.author,
+                            post.author,
                             Some(post.event_id),
                             &post.content.djot_content,
+                            post.reply_count,
                             user.ro_mode()
                         ).await?)
                     }
@@ -164,6 +218,7 @@ impl UiState {
         author: RostraId,
         event_id: Option<ShortEventId>,
         content: &str,
+        reply_count: u64,
         ro: RoMode,
     ) -> RequestResult<Markup> {
         let external_event_id = event_id.map(|e| ExternalEventId::new(author, e));
@@ -209,6 +264,21 @@ impl UiState {
 
                 @if let Some(ext_event_id) = external_event_id {
                     div ."m-postOverview__buttonBar" {
+                            @if reply_count > 0 {
+                                button ."m-postOverview__commentsButton u-button"
+                                    hx-get={"/ui/timeline/comments/"(ext_event_id.event_id().to_short())}
+                                    hx-target=".o-sideBar"
+                                    hx-swap="outerHTML"
+                                {
+                                    span ."m-postOverview__commentsButtonIcon u-buttonIcon" width="1rem" height="1rem" {}
+                                    @if reply_count == 1 {
+                                        ("1 Comment".to_string())
+                                    } @else {
+                                        (format!("{} Comments", reply_count))
+                                    }
+                                }
+                            }
+
                             button ."m-postOverview__replyToButton u-button"
                                 disabled[ro.to_disabled()]
                                 hx-get={"/ui/post/reply_to?reply_to="(ext_event_id)}
@@ -218,6 +288,7 @@ impl UiState {
                                 span ."m-postOverview__replyToButtonIcon u-buttonIcon" width="1rem" height="1rem" {}
                                 "Reply"
                             }
+
                     }
                 }
             }

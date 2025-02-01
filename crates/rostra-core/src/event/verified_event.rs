@@ -2,7 +2,7 @@ use convi::CastFrom;
 use ed25519_dalek::SignatureError;
 use snafu::{ResultExt as _, Snafu};
 
-use super::{Event, EventContent, EventExt, EventSignature, SignedEvent};
+use super::{Event, EventContent, EventExt, EventSignature, SignedEvent, SignedEventExt};
 use crate::id::RostraId;
 use crate::{EventId, ShortEventId};
 
@@ -27,6 +27,12 @@ impl EventExt for VerifiedEvent {
     }
 }
 
+impl SignedEventExt for VerifiedEvent {
+    fn sig(&self) -> EventSignature {
+        self.sig
+    }
+}
+
 #[derive(Clone, Debug)]
 pub struct VerifiedEventContent {
     pub event: VerifiedEvent,
@@ -36,6 +42,12 @@ pub struct VerifiedEventContent {
 impl EventExt for VerifiedEventContent {
     fn event(&self) -> &Event {
         &self.event.event
+    }
+}
+
+impl VerifiedEventContent {
+    pub fn event_id(&self) -> EventId {
+        self.event.event_id
     }
 }
 

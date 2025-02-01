@@ -10,7 +10,8 @@ use std::{io, ops, result};
 pub use ids::{IdsFolloweesRecord, IdsFollowersRecord};
 use redb_bincode::{ReadTransaction, ReadableTable, WriteTransaction};
 use rostra_core::event::{
-    content_kind, EventContent, EventKind, PersonaId, VerifiedEvent, VerifiedEventContent,
+    content_kind, EventContent, EventExt as _, EventKind, PersonaId, VerifiedEvent,
+    VerifiedEventContent,
 };
 use rostra_core::id::{RostraId, ToShort as _};
 use rostra_core::ShortEventId;
@@ -137,6 +138,7 @@ pub struct Database {
     self_followers_updated: watch::Sender<HashMap<RostraId, IdsFollowersRecord>>,
     self_head_updated: watch::Sender<Option<ShortEventId>>,
     new_content_tx: broadcast::Sender<VerifiedEventContent>,
+    new_posts_tx: broadcast::Sender<(VerifiedEventContent, content_kind::SocialPost)>,
 }
 
 impl Database {
@@ -180,6 +182,7 @@ impl Database {
         let (self_followers_updated, _) = watch::channel(self_followers);
         let (self_head_updated, _) = watch::channel(self_head);
         let (new_content_tx, _) = broadcast::channel(100);
+        let (new_posts_tx, _) = broadcast::channel(100);
 
         let s = Self {
             inner,
@@ -189,6 +192,7 @@ impl Database {
             self_followers_updated,
             self_head_updated,
             new_content_tx,
+            new_posts_tx,
         };
 
         Ok(s)
@@ -218,6 +222,11 @@ impl Database {
 
     pub fn new_content_subscribe(&self) -> broadcast::Receiver<VerifiedEventContent> {
         self.new_content_tx.subscribe()
+    }
+    pub fn new_posts_subscribe(
+        &self,
+    ) -> broadcast::Receiver<(VerifiedEventContent, content_kind::SocialPost)> {
+        self.new_posts_tx.subscribe()
     }
 
     pub async fn has_event(&self, event_id: impl Into<ShortEventId>) -> bool {
@@ -391,7 +400,7 @@ impl Database {
                 let verified_event = VerifiedEvent::assume_verified_from_signed(event.signed);
                 let verified_event_content =
                     VerifiedEventContent::assume_verified(verified_event, content.clone());
-                self.revert_event_content_tx(&verified_event_content, tx)?;
+                self.process_event_content_reverted_tx(&verified_event_content, tx)?;
             }
         }
 
@@ -456,43 +465,6 @@ impl Database {
                 }
             })
         }
-        Ok(())
-    }
-
-    pub fn revert_event_content_tx(
-        &self,
-        event_content: &VerifiedEventContent,
-        tx: &WriteTransactionCtx,
-    ) -> DbResult<()> {
-        #[allow(clippy::single_match)]
-        match event_content.event.event.kind {
-            EventKind::SOCIAL_POST => {
-                    if let Ok(content) = event_content
-                        .content
-                        .deserialize_cbor::<content_kind::SocialPost>().inspect_err(|err| {
-                            debug!(target: LOG_TARGET, err = %err.fmt_compact(), "Ignoring malformed SocialComment payload");
-                        }) {
-
-                        if let Some(reply_to) = content.reply_to {
-                            let mut social_reply_tbl = tx.open_table(&social_post_reply::TABLE)?;
-                            let mut social_post_tbl = tx.open_table(&social_post::TABLE)?;
-
-                            social_reply_tbl.remove(
-                                &(reply_to.event_id(), event_content.event.event.timestamp.into(),event_content.event.event_id.to_short())
-                                )?;
-                            let mut social_post_record = social_post_tbl.get(
-                                &reply_to.event_id(),
-                            )?.map(|g| g.value()).unwrap_or_default();
-
-                            social_post_record.reply_count = social_post_record.reply_count.checked_sub(1).context(OverflowSnafu)?;
-
-                            social_post_tbl.insert(&reply_to.event_id(), &social_post_record)?;
-                        }
-                    }
-            }
-            _ => {}
-        }
-
         Ok(())
     }
 
@@ -594,7 +566,7 @@ impl Database {
                                     img_mime: content.img_mime,
                                     img: content.img,
                                 },
-                                &mut tx.open_table(&crate::social_profile::TABLE)?,
+                                &mut tx.open_table(&crate::social_profiles::TABLE)?,
                             )?;
                     }
                 }
@@ -604,12 +576,23 @@ impl Database {
                         .deserialize_cbor::<content_kind::SocialPost>().inspect_err(|err| {
                             debug!(target: LOG_TARGET, err = %err.fmt_compact(), "Ignoring malformed SocialComment payload");
                         }) {
+
+                        let mut social_post_by_time_tbl= tx.open_table(&social_posts_by_time::TABLE)?;
+                        social_post_by_time_tbl.insert(&(event_content.timestamp(), event_content.event_id().to_short()), &())?;
+
+                        tx.on_commit({
+                            let event_content = event_content.clone();
+                            let content = content.clone();
+                            let new_posts_tx = self.new_posts_tx.clone();
+                            move || {
+                            let _ = new_posts_tx.send((event_content.to_owned(), content));
+                        }});
+
                         if let Some(reply_to) = content.reply_to {
-                            let mut social_comment_tbl = tx.open_table(&social_post_reply::TABLE)?;
+                            let mut social_post_tbl= tx.open_table(&social_posts::TABLE)?;
+                            let mut social_post_reply_tbl = tx.open_table(&social_posts_reply::TABLE)?;
 
-                            let mut social_post_tbl= tx.open_table(&social_post::TABLE)?;
-
-                            social_comment_tbl.insert(
+                            social_post_reply_tbl.insert(
                                 &(reply_to.event_id(), event_content.event.event.timestamp.into(),event_content.event.event_id.to_short()
                                 ),
                                 &()
@@ -628,6 +611,47 @@ impl Database {
                 _ => {}
             },
         };
+
+        Ok(())
+    }
+
+    pub fn process_event_content_reverted_tx(
+        &self,
+        event_content: &VerifiedEventContent,
+        tx: &WriteTransactionCtx,
+    ) -> DbResult<()> {
+        #[allow(clippy::single_match)]
+        match event_content.event.event.kind {
+            EventKind::SOCIAL_POST => {
+                if let Ok(content) = event_content
+                    .content
+                    .deserialize_cbor::<content_kind::SocialPost>().inspect_err(|err| {
+                        debug!(target: LOG_TARGET, err = %err.fmt_compact(), "Ignoring malformed SocialComment payload");
+                    }) {
+
+                    let mut social_post_by_time_tbl = tx.open_table(&social_posts_by_time::TABLE)?;
+
+                    social_post_by_time_tbl.remove(&(event_content.timestamp(), event_content.event_id().to_short()))?;
+
+                    if let Some(reply_to) = content.reply_to {
+                        let mut social_reply_tbl = tx.open_table(&social_posts_reply::TABLE)?;
+                        let mut social_post_tbl = tx.open_table(&social_posts::TABLE)?;
+                        social_reply_tbl.remove(
+                        &(reply_to.event_id(), event_content.timestamp(), event_content.event_id().to_short())
+                        )?;
+
+                        let mut social_post_record = social_post_tbl.get(
+                            &reply_to.event_id(),
+                        )?.map(|g| g.value()).unwrap_or_default();
+
+                        social_post_record.reply_count = social_post_record.reply_count.checked_sub(1).context(OverflowSnafu)?;
+
+                        social_post_tbl.insert(&reply_to.event_id(), &social_post_record)?;
+                    }
+                }
+            }
+            _ => {}
+        }
 
         Ok(())
     }
@@ -741,7 +765,7 @@ impl Database {
 
     pub async fn get_social_profile(&self, id: RostraId) -> Option<IdSocialProfileRecord> {
         self.read_with(|tx| {
-            let events_heads = tx.open_table(&social_profile::TABLE)?;
+            let events_heads = tx.open_table(&social_profiles::TABLE)?;
 
             Self::get_social_profile_tx(id, &events_heads)
         })

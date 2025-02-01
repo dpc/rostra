@@ -50,7 +50,14 @@ pub async fn post_new_post(
         // Insert new post at the top of the timeline, where the preview we just cleared was.
         div hx-swap-oob="afterend: .o-mainBarTimeline__item.-preview" {
             div ."o-mainBarTimeline__item" {
-                (state.post_overview(&client_ref, client_ref.rostra_id(), Some(event.event_id.to_short()), &form.content, session.ro_mode()).await?)
+                (state.post_overview(
+                    &client_ref,
+                    client_ref.rostra_id(),
+                    Some(event.event_id.to_short()),
+                    &form.content,
+                    0,
+                    session.ro_mode()
+                ).await?)
             }
         }
         (re_typeset_mathjax())
@@ -72,7 +79,14 @@ pub async fn get_post_preview(
                 // all the way to the top, we actually want the parent of a parent.
                 "hx-on::load"="this.parentNode.parentNode.scrollIntoView()" {
 
-                (state.post_overview(&client.client_ref()?, self_id, None, &form.content, session.ro_mode()).await?)
+                (state.post_overview(
+                    &client.client_ref()?,
+                    self_id,
+                    None,
+                    &form.content,
+                    0,
+                    session.ro_mode()
+                ).await?)
                 (re_typeset_mathjax())
             }
         } @else {
