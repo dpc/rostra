@@ -11,6 +11,9 @@ use std::time::Duration;
 use std::{ops, result};
 
 use backon::Retryable as _;
+use iroh::discovery::dns::DnsDiscovery;
+use iroh::discovery::pkarr::PkarrPublisher;
+use iroh::discovery::ConcurrentDiscovery;
 use iroh::NodeAddr;
 use itertools::Itertools as _;
 use pkarr::PkarrClient;
@@ -249,15 +252,21 @@ impl Client {
         iroh_secret: impl Into<Option<iroh::SecretKey>>,
     ) -> InitResult<iroh::Endpoint> {
         use iroh::{Endpoint, SecretKey};
-
         let secret_key = iroh_secret
             .into()
             .unwrap_or_else(|| SecretKey::generate(&mut rand::thread_rng()));
+
+        let discovery = ConcurrentDiscovery::from_services(vec![
+            Box::new(PkarrPublisher::n0_dns(secret_key.clone())),
+            Box::new(DnsDiscovery::n0_dns()),
+        ]);
+
         // We rely entirely on tickets published by our own publisher
         // for every RostraId via Pkarr, so we don't need discovery
         let ep = Endpoint::builder()
             .secret_key(secret_key)
             .alpns(vec![ROSTRA_P2P_V0_ALPN.to_vec()])
+            .discovery(Box::new(discovery))
             .bind()
             .await
             .context(InitIrohClientSnafu)?;
