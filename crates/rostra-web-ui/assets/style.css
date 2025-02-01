@@ -171,6 +171,15 @@ a:active {
   max-width: 50rem;
 }
 
+.m-postOverview__parent {
+  padding-bottom: 1rem;
+}
+
+.m-postOverview__parent_response {
+  padding-top: 1rem;
+  padding-left: 1rem;
+}
+
 .m-postOverview__main {
   display: flex;
   min-width: 20rem;

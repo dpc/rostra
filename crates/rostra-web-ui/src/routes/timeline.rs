@@ -7,7 +7,8 @@ use axum::extract::{Path, State, WebSocketUpgrade};
 use axum::response::IntoResponse;
 use maud::{html, Markup, PreEscaped};
 use rostra_client::ClientRef;
-use rostra_core::event::EventKind;
+use rostra_client_db::social::SocialPostRecord;
+use rostra_core::event::{EventKind, SocialPost};
 use rostra_core::id::{RostraId, ToShort as _};
 use rostra_core::{ExternalEventId, ShortEventId};
 use rostra_util_error::FmtCompact as _;
@@ -153,9 +154,10 @@ impl UiState {
                         (self.post_overview(
                             &client_ref,
                             comment.author,
+                            None,
                             Some(comment.event_id),
                             &comment.content.djot_content,
-                            comment.reply_count,
+                            Some(comment.reply_count),
                             user.ro_mode()
                         ).await?)
                     }
@@ -198,6 +200,17 @@ impl UiState {
             .storage()??
             .paginate_social_posts_rev(None, 100)
             .await;
+
+        let parents = self
+            .client(user.id())
+            .await?
+            .storage()??
+            .get_posts_by_id(
+                posts
+                    .iter()
+                    .flat_map(|post| post.reply_to.map(|ext_id| ext_id.event_id().to_short())),
+            )
+            .await;
         Ok(html! {
             div ."o-mainBarTimeline" {
                 div ."o-mainBarTimeline__item -preview -empty" { }
@@ -206,9 +219,10 @@ impl UiState {
                         (self.post_overview(
                             &client_ref,
                             post.author,
+                            post.reply_to.map(|reply_to| parents.get(&reply_to.event_id().to_short())),
                             Some(post.event_id),
                             &post.content.djot_content,
-                            post.reply_count,
+                            Some(post.reply_count),
                             user.ro_mode()
                         ).await?)
                     }
@@ -221,9 +235,10 @@ impl UiState {
         &self,
         client: &ClientRef<'_>,
         author: RostraId,
+        reply_to: Option<Option<&SocialPostRecord<SocialPost>>>,
         event_id: Option<ShortEventId>,
         content: &str,
-        reply_count: u64,
+        reply_count: Option<u64>,
         ro: RoMode,
     ) -> RequestResult<Markup> {
         let external_event_id = event_id.map(|e| ExternalEventId::new(author, e));
@@ -244,61 +259,104 @@ impl UiState {
                 e => e,
             }),
         ));
+
+        let post_main = html! {
+            div ."m-postOverview__main" {
+                img ."m-postOverview__userImage u-userImage"
+                    src="/assets/icons/circle-user.svg"
+                    width="32pt"
+                    height="32pt"
+                    { }
+
+                div ."m-postOverview__contentSide" {
+                    header .".m-postOverview__header" {
+                        span ."m-postOverview__username" { (user_profile.display_name) }
+                    }
+
+                    div ."m-postOverview__content" {
+                        p {
+                            (post_content_rendered)
+                        }
+                    }
+                }
+
+            }
+        };
+
+        let button_bar = html! {
+            @if let Some(ext_event_id) = external_event_id {
+                div ."m-postOverview__buttonBar" {
+                    @if let Some(reply_count) = reply_count {
+                    @if reply_count > 0 {
+                        button ."m-postOverview__commentsButton u-button"
+                            hx-get={"/ui/timeline/comments/"(ext_event_id.event_id().to_short())}
+                            hx-target="next .m-postOverview__comments"
+                            hx-swap="outerHTML"
+                        {
+                            span ."m-postOverview__commentsButtonIcon u-buttonIcon" width="1rem" height="1rem" {}
+                            @if reply_count == 1 {
+                                ("1 Comment".to_string())
+                            } @else {
+                                (format!("{} Comments", reply_count))
+                            }
+                        }
+                    }
+
+                    button ."m-postOverview__replyToButton u-button"
+                        disabled[ro.to_disabled()]
+                        hx-get={"/ui/post/reply_to?reply_to="(ext_event_id)}
+                        hx-target=".m-newPostForm__replyToLine"
+                        hx-swap="outerHTML"
+                    {
+                        span ."m-postOverview__replyToButtonIcon u-buttonIcon" width="1rem" height="1rem" {}
+                        "Reply"
+                    }
+                    }
+                }
+            }
+        };
+
         Ok(html! {
             article ."m-postOverview"
                 #{
                     "post-" (event_id.map(|e| e.to_string()).unwrap_or_else(|| "preview".to_string()))
                 } {
-                div ."m-postOverview__main" {
-                    img ."m-postOverview__userImage u-userImage"
-                        src="/assets/icons/circle-user.svg"
-                        width="32pt"
-                        height="32pt"
-                        { }
 
-                    div ."m-postOverview__contentSide" {
-                        header .".m-postOverview__header" {
-                            span ."m-postOverview__username" { (user_profile.display_name) }
-                        }
-
-                        div ."m-postOverview__content" {
-                            p {
-                                (post_content_rendered)
-                            }
-                        }
-                    }
-
-                }
-
-                @if let Some(ext_event_id) = external_event_id {
-                    div ."m-postOverview__buttonBar" {
-                        @if reply_count > 0 {
-                            button ."m-postOverview__commentsButton u-button"
-                                hx-get={"/ui/timeline/comments/"(ext_event_id.event_id().to_short())}
-                                hx-target="next .m-postOverview__comments"
-                                hx-swap="outerHTML"
-                            {
-                                span ."m-postOverview__commentsButtonIcon u-buttonIcon" width="1rem" height="1rem" {}
-                                @if reply_count == 1 {
-                                    ("1 Comment".to_string())
-                                } @else {
-                                    (format!("{} Comments", reply_count))
-                                }
+                    @if let Some(reply_to) = reply_to {
+                        div ."m-postOverview__parent" {
+                            @if let Some(reply_to) = reply_to {
+                                (Box::pin(self.post_overview(
+                                    client,
+                                    reply_to.author,
+                                    None,
+                                    Some(reply_to.event_id),
+                                    &reply_to.content.djot_content,
+                                    // We could display comment button here, but the UX is weird
+                                    None,
+                                    ro
+                                )).await?)
+                            } @else {
+                                p { "Parent missing" }
                             }
                         }
 
-                        button ."m-postOverview__replyToButton u-button"
-                            disabled[ro.to_disabled()]
-                            hx-get={"/ui/post/reply_to?reply_to="(ext_event_id)}
-                            hx-target=".m-newPostForm__replyToLine"
-                            hx-swap="outerHTML"
-                        {
-                            span ."m-postOverview__replyToButtonIcon u-buttonIcon" width="1rem" height="1rem" {}
-                            "Reply"
+                        div ."m-postOverview__parent_response" {
+                            (post_main)
+
+                            (button_bar)
+
+                            div ."m-postOverview__comments -empty" { }
                         }
+
+                    } @else {
+
+                        (post_main)
+
+                        (button_bar)
+
+                        div ."m-postOverview__comments -empty" { }
                     }
-                }
-                div ."m-postOverview__comments -empty" { }
+
             }
         })
     }

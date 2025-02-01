@@ -1,7 +1,7 @@
 use axum::extract::{Query, State};
 use axum::response::IntoResponse;
 use axum::Form;
-use maud::{html, Markup};
+use maud::{html, Markup, PreEscaped};
 use rostra_core::id::ToShort as _;
 use rostra_core::ExternalEventId;
 use serde::Deserialize;
@@ -53,9 +53,11 @@ pub async fn post_new_post(
                 (state.post_overview(
                     &client_ref,
                     client_ref.rostra_id(),
+                    // TODO: get and display as well
+                    None,
                     Some(event.event_id.to_short()),
                     &form.content,
-                    0,
+                    None,
                     session.ro_mode()
                 ).await?)
             }
@@ -83,8 +85,10 @@ pub async fn get_post_preview(
                     &client.client_ref()?,
                     self_id,
                     None,
+                    // TODO: get and display
+                    None,
                     &form.content,
-                    0,
+                    None,
                     session.ro_mode()
                 ).await?)
                 (re_typeset_mathjax())
@@ -102,19 +106,39 @@ pub struct ReplyToInput {
 
 pub async fn get_reply_to(
     state: State<SharedState>,
-    _session: UserSession,
+    session: UserSession,
     Query(form): Query<ReplyToInput>,
 ) -> RequestResult<impl IntoResponse> {
-    Ok(Maud(state.render_reply_to_line(form.reply_to)))
+    let client_handle = state.client(session.id()).await?;
+    let client_ref = client_handle.client_ref()?;
+
+    let display_name = if let Some(reply_to) = form.reply_to {
+        client_ref
+            .storage()?
+            .get_social_profile(reply_to.rostra_id())
+            .await
+            .map(|p| p.display_name)
+    } else {
+        None
+    };
+    Ok(Maud(
+        state.render_reply_to_line(form.reply_to, display_name),
+    ))
 }
 impl UiState {
-    fn render_reply_to_line(&self, reply_to: Option<ExternalEventId>) -> Markup {
+    fn render_reply_to_line(
+        &self,
+        reply_to: Option<ExternalEventId>,
+        reply_to_display_name: Option<String>,
+    ) -> Markup {
         html! {
             div ."m-newPostForm__replyToLine" {
                 @if let Some(reply_to) = reply_to {
                     p ."m-newPostForm__replyToLabel" {
                         span ."m-newPostForm__replyToText" { "Reply to: " }
-                        (reply_to.rostra_id().to_short())
+                        (reply_to_display_name.unwrap_or_else(
+                            || reply_to.rostra_id().to_short().to_string()
+                        ))
                     }
 
                 input ."m-newPostForm__replyTo"
@@ -124,6 +148,10 @@ impl UiState {
                     value=(reply_to)
                     readonly
                     {}
+                }
+                script {
+                    // focus on new post content input
+                    (PreEscaped("document.querySelector('.m-newPostForm__content').focus();"))
                 }
             }
         }
@@ -136,7 +164,7 @@ impl UiState {
                 hx-post="/ui/post"
                 hx-swap="outerHTML"
             {
-                (self.render_reply_to_line(None))
+                (self.render_reply_to_line(None, None))
                 textarea ."m-newPostForm__content"
                     placeholder=(
                         if ro.to_disabled() {
