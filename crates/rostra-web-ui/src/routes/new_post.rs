@@ -151,7 +151,14 @@ impl UiState {
                 }
                 script {
                     // focus on new post content input
-                    (PreEscaped("document.querySelector('.m-newPostForm__content').focus();"))
+                    (PreEscaped(r#"
+                        (function() {
+                            const content = document.querySelector('.m-newPostForm__content');
+                            if (content != null) {
+                                content.focus();
+                            }
+                        })()
+                    "#))
                 }
             }
         }
