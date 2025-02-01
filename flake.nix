@@ -69,13 +69,14 @@
           }
         );
 
-        rostra-web = pkgs.writeShellScriptBin "rostra-web" ''
+        rostra-web-ui = pkgs.writeShellScriptBin "rostra-web-ui" ''
           ${multiBuild.rostra}/bin/rostra web-ui "$@"
         '';
       in
       {
         packages = {
-          default = rostra-web;
+          inherit rostra-web-ui;
+          default = rostra-web-ui;
           rostra = multiBuild.rostra;
         };
 
