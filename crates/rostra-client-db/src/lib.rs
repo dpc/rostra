@@ -15,7 +15,7 @@ use rostra_core::event::{
 use rostra_core::id::{RostraId, ToShort as _};
 use rostra_core::ShortEventId;
 use rostra_util_error::{BoxedError, FmtCompact as _};
-use snafu::{Location, ResultExt as _, Snafu};
+use snafu::{Location, OptionExt as _, ResultExt as _, Snafu};
 use tokio::sync::{broadcast, watch};
 use tokio::task::JoinError;
 use tracing::{debug, info, instrument};
@@ -123,6 +123,7 @@ pub enum DbError {
         #[snafu(implicit)]
         location: Location,
     },
+    Overflow,
 }
 pub type DbResult<T> = std::result::Result<T, DbError>;
 
@@ -191,6 +192,10 @@ impl Database {
         };
 
         Ok(s)
+    }
+
+    pub async fn compact(&mut self) -> Result<bool, redb::CompactionError> {
+        tokio::task::block_in_place(|| self.inner.as_raw_mut().compact())
     }
 
     const MAX_CONTENT_LEN: u32 = 1_000_000u32;
@@ -469,11 +474,19 @@ impl Database {
                         }) {
 
                         if let Some(reply_to) = content.reply_to {
-                            let mut social_comment_tbl = tx.open_table(&social_comment::TABLE)?;
+                            let mut social_reply_tbl = tx.open_table(&social_post_reply::TABLE)?;
+                            let mut social_post_tbl = tx.open_table(&social_post::TABLE)?;
 
-                            social_comment_tbl.remove(
+                            social_reply_tbl.remove(
                                 &(reply_to.event_id(), event_content.event.event.timestamp.into(),event_content.event.event_id.to_short())
                                 )?;
+                            let mut social_post_record = social_post_tbl.get(
+                                &reply_to.event_id(),
+                            )?.map(|g| g.value()).unwrap_or_default();
+
+                            social_post_record.reply_count = social_post_record.reply_count.checked_sub(1).context(OverflowSnafu)?;
+
+                            social_post_tbl.insert(&reply_to.event_id(), &social_post_record)?;
                         }
                     }
             }
@@ -592,13 +605,22 @@ impl Database {
                             debug!(target: LOG_TARGET, err = %err.fmt_compact(), "Ignoring malformed SocialComment payload");
                         }) {
                         if let Some(reply_to) = content.reply_to {
-                            let mut social_comment_tbl = tx.open_table(&social_comment::TABLE)?;
+                            let mut social_comment_tbl = tx.open_table(&social_post_reply::TABLE)?;
+
+                            let mut social_post_tbl= tx.open_table(&social_post::TABLE)?;
 
                             social_comment_tbl.insert(
                                 &(reply_to.event_id(), event_content.event.event.timestamp.into(),event_content.event.event_id.to_short()
                                 ),
                                 &()
                             )?;
+                            let mut social_post_record = social_post_tbl.get(
+                                &reply_to.event_id(),
+                            )?.map(|g| g.value()).unwrap_or_default();
+
+                            social_post_record.reply_count = social_post_record.reply_count.checked_add(1).context(OverflowSnafu)?;
+
+                            social_post_tbl.insert(&reply_to.event_id(), &social_post_record)?;
                         }
 
                     }

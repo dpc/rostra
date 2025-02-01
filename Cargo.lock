@@ -3514,7 +3514,7 @@ dependencies = [
 [[package]]
 name = "redb-bincode"
 version = "0.2.2"
-source = "git+https://github.com/dpc/redb-bincode?rev=a32d6d2bcb62bf92adcdde0dfbe1432d4b5105b6#a32d6d2bcb62bf92adcdde0dfbe1432d4b5105b6"
+source = "git+https://github.com/dpc/redb-bincode?rev=e782cc1e8ddbe688b6baa56fe33aad2843561898#e782cc1e8ddbe688b6baa56fe33aad2843561898"
 dependencies = [
  "bincode",
  "redb",

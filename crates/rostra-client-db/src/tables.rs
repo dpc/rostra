@@ -61,7 +61,8 @@ def_table!(events_by_time: (Timestamp, ShortEventId) => ());
 
 // SOCIAL
 def_table!(social_profile: RostraId => Latest<IdSocialProfileRecord>);
-def_table!(social_comment: (ShortEventId, Timestamp, ShortEventId)=> ());
+def_table!(social_post: (ShortEventId)=> SocialPostRecord);
+def_table!(social_post_reply: (ShortEventId, Timestamp, ShortEventId)=> ());
 
 #[derive(Debug, Encode, Decode, Clone)]
 pub struct Latest<T> {
@@ -76,4 +77,9 @@ pub struct IdSocialProfileRecord {
     pub bio: String,
     pub img_mime: String,
     pub img: Vec<u8>,
+}
+
+#[derive(Debug, Encode, Decode, Clone, Default)]
+pub struct SocialPostRecord {
+    pub reply_count: u64,
 }

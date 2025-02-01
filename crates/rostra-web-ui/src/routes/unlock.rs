@@ -171,7 +171,7 @@ impl UiState {
                             ."o-unlockScreen__generateButton u-button"
                             onclick=(
                                 format!(r#"
-                                    document.querySelector('.o-unlockScreen__rostraId').value = '{}';
+                                    document.querySelector('.o-unlockScreen__id').value = '{}';
                                     document.querySelector('.o-unlockScreen__mnemonic').value = '{}';
                                 "#, random_rostra_id, random_mnemonic)
                             )

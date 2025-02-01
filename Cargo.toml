@@ -95,6 +95,7 @@ opt-level = 1
 
 [profile.dev.package]
 ring = { opt-level = 2 }
+redb = { opt-level = 2 }
 ed25519 = { opt-level = 2 }
 ed25519-dalek = { opt-level = 2 }
 brotli = { opt-level = 2 }
@@ -122,4 +123,4 @@ debug = false
 debug = false
 
 [patch.crates-io]
-redb-bincode = { git = "https://github.com/dpc/redb-bincode", rev = "a32d6d2bcb62bf92adcdde0dfbe1432d4b5105b6" }
+redb-bincode = { git = "https://github.com/dpc/redb-bincode", rev = "e782cc1e8ddbe688b6baa56fe33aad2843561898" }

@@ -22,19 +22,21 @@ use super::{
     InsertEventOutcome, WriteTransactionCtx,
 };
 use crate::{
-    ids_full, social_profile, DbVersionTooHighSnafu, IdSocialProfileRecord, Latest, LOG_TARGET,
+    ids_full, social_post, social_post_reply, social_profile, DbVersionTooHighSnafu,
+    IdSocialProfileRecord, Latest, LOG_TARGET,
 };
 
 impl Database {
     pub(crate) fn init_tables_tx(tx: &WriteTransactionCtx) -> DbResult<()> {
         tx.open_table(&db_version::TABLE)?;
+
         tx.open_table(&ids_self::TABLE)?;
         tx.open_table(&ids_full::TABLE)?;
-        tx.open_table(&social_profile::TABLE)?;
         tx.open_table(&ids_followers::TABLE)?;
         tx.open_table(&ids_followees::TABLE)?;
         tx.open_table(&ids_unfollowed::TABLE)?;
         tx.open_table(&ids_personas::TABLE)?;
+
         tx.open_table(&events::TABLE)?;
         tx.open_table(&events_by_time::TABLE)?;
         tx.open_table(&events_content::TABLE)?;
@@ -42,6 +44,9 @@ impl Database {
         tx.open_table(&events_missing::TABLE)?;
         tx.open_table(&events_heads::TABLE)?;
 
+        tx.open_table(&social_profile::TABLE)?;
+        tx.open_table(&social_post::TABLE)?;
+        tx.open_table(&social_post_reply::TABLE)?;
         Ok(())
     }
 
