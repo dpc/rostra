@@ -18,6 +18,7 @@ use super::super::error::RequestResult;
 use super::unlock::session::{RoMode, UserSession};
 use super::Maud;
 use crate::error::{InvalidDataSnafu, UserSnafu};
+use crate::html_utils::re_typeset_mathjax;
 use crate::{SharedState, UiState, LOG_TARGET};
 
 pub async fn get(
@@ -159,6 +160,12 @@ impl UiState {
                         ).await?)
                     }
                 }
+
+                // Hide the button that created us
+                div hx-swap-oob={"outerHTML: #post-" (post_id) " .m-postOverview__commentsButton"} {
+
+                }
+                (re_typeset_mathjax())
             }
         })
     }
@@ -238,7 +245,10 @@ impl UiState {
             }),
         ));
         Ok(html! {
-            article ."m-postOverview" {
+            article ."m-postOverview"
+                #{
+                    "post-" (event_id.map(|e| e.to_string()).unwrap_or_else(|| "preview".to_string()))
+                } {
                 div ."m-postOverview__main" {
                     img ."m-postOverview__userImage u-userImage"
                         src="/assets/icons/circle-user.svg"

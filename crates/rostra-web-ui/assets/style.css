@@ -20,6 +20,14 @@ a {
   transition: color 0.2s;
 }
 
+blockquote {
+  border-left: 4px solid #e5e7eb;
+  margin: 1.0em 0;
+  padding: 0.5em 0 0.5em 1em;
+  background-color: #f9fafb;
+  color: #4b5563;
+}
+
 /* Underline effect on hover */
 a::after {
   content: '';
@@ -104,7 +112,7 @@ a:active {
 
 .o-mainBar {
   flex-grow: 1;
-  max-width: 600px;
+  max-width: fit-content;
   padding: 4pt;
 }
 
@@ -135,17 +143,17 @@ a:active {
   display: none;
 }
 
+.o-mainBarTimeline__item {
+  padding-top: 10pt;
+  padding-bottom: 10pt;
+}
+  
 .o-mainBarTimeline__item.-preview .m-postOverview {
   opacity: 0.6;
 }
 
 .o-mainBarTimeline > .o-mainBarTimeline__item:not(:last-child) {
   border-bottom: 1px solid var(--background-border-color);
-}
-
-.o-mainBarTimeline__item {
-  padding-top: 4pt;
-  padding-bottom: 4pt;
 }
 
 .o-mainBar__item {
