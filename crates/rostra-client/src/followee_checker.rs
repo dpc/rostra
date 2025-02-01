@@ -29,7 +29,7 @@ impl FolloweeChecker {
     pub async fn run(mut self) {
         let mut interval = tokio::time::interval(Duration::from_secs(30));
 
-        let _previous_followees = {
+        let mut self_followees = {
             let Ok(storage) = self.client.storage() else {
                 return;
             };
@@ -48,24 +48,29 @@ impl FolloweeChecker {
                     if res.is_err() {
                         break;
                     }
+
+                    let Ok(storage) = self.client.storage() else {
+                        break;
+                    };
+
+
+                    let self_followees_new = storage
+                        .expect("Must not start follower checker without storage")
+                        .get_self_followees()
+                        .await;
+
+                    debug!(
+                        target: LOG_TARGET,
+                        // previous_count = previous_followees.len(),
+                        // current_count = current_followees.len(),
+                        new_count = self_followees_new.len(),
+                        "Followee list changed"
+                    );
+
+                    self_followees = self_followees_new;
+
                 }
             }
-
-            let Ok(storage) = self.client.storage() else {
-                break;
-            };
-            let self_followees = storage
-                .expect("Must not start follower checker without storage")
-                .get_self_followees()
-                .await;
-
-            debug!(
-                target: LOG_TARGET,
-                // previous_count = previous_followees.len(),
-                // current_count = current_followees.len(),
-                new_count = self_followees.len(),
-                "Followee list changed"
-            );
 
             // Query only new followees
             for (followee_id, _persona_id) in &self_followees {
