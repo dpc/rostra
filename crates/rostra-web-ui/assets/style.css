@@ -185,6 +185,10 @@ a:active {
   font-weight: bold;
 }
 
+.m-postOverview__comments {
+  padding-left: 1rem;
+}
+
 .m-newPostForm__replyToLabel {
 }
 

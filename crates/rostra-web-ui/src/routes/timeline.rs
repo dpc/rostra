@@ -146,10 +146,9 @@ impl UiState {
             .await;
 
         Ok(html! {
-            nav ."o-sideBar" {
-            div ."o-sideBarComments" {
+            div ."m-postOverview__comments" {
                 @for comment in comments {
-                    div ."o-sideBarComments__item" {
+                    div ."o-postOverview__commentsItem" {
                         (self.post_overview(
                             &client_ref,
                             comment.author,
@@ -160,7 +159,6 @@ impl UiState {
                         ).await?)
                     }
                 }
-            }
             }
         })
     }
@@ -264,33 +262,33 @@ impl UiState {
 
                 @if let Some(ext_event_id) = external_event_id {
                     div ."m-postOverview__buttonBar" {
-                            @if reply_count > 0 {
-                                button ."m-postOverview__commentsButton u-button"
-                                    hx-get={"/ui/timeline/comments/"(ext_event_id.event_id().to_short())}
-                                    hx-target=".o-sideBar"
-                                    hx-swap="outerHTML"
-                                {
-                                    span ."m-postOverview__commentsButtonIcon u-buttonIcon" width="1rem" height="1rem" {}
-                                    @if reply_count == 1 {
-                                        ("1 Comment".to_string())
-                                    } @else {
-                                        (format!("{} Comments", reply_count))
-                                    }
-                                }
-                            }
-
-                            button ."m-postOverview__replyToButton u-button"
-                                disabled[ro.to_disabled()]
-                                hx-get={"/ui/post/reply_to?reply_to="(ext_event_id)}
-                                hx-target=".m-newPostForm__replyToLine"
+                        @if reply_count > 0 {
+                            button ."m-postOverview__commentsButton u-button"
+                                hx-get={"/ui/timeline/comments/"(ext_event_id.event_id().to_short())}
+                                hx-target="next .m-postOverview__comments"
                                 hx-swap="outerHTML"
                             {
-                                span ."m-postOverview__replyToButtonIcon u-buttonIcon" width="1rem" height="1rem" {}
-                                "Reply"
+                                span ."m-postOverview__commentsButtonIcon u-buttonIcon" width="1rem" height="1rem" {}
+                                @if reply_count == 1 {
+                                    ("1 Comment".to_string())
+                                } @else {
+                                    (format!("{} Comments", reply_count))
+                                }
                             }
+                        }
 
+                        button ."m-postOverview__replyToButton u-button"
+                            disabled[ro.to_disabled()]
+                            hx-get={"/ui/post/reply_to?reply_to="(ext_event_id)}
+                            hx-target=".m-newPostForm__replyToLine"
+                            hx-swap="outerHTML"
+                        {
+                            span ."m-postOverview__replyToButtonIcon u-buttonIcon" width="1rem" height="1rem" {}
+                            "Reply"
+                        }
                     }
                 }
+                div ."m-postOverview__comments -empty" { }
             }
         })
     }
