@@ -236,9 +236,31 @@ impl UiState {
             .await;
         Ok(html! {
             div ."o-mainBarTimeline" {
+                div ."o-mainBarTimeline__switches" {
+
+                    label ."o-mainBarTimeline__repliesLabel" for="show-replies" { "Replies" }
+                    label ."o-mainBarTimeline__repliesToggle switch" {
+                        input id="show-replies"
+                        ."o-mainBarTimeline__showReplies"
+                        type="checkbox" checked
+                            onclick="this.closest('.o-mainBarTimeline').classList.toggle('-hideReplies', !this.checked)"
+                        { }
+                        span class="slider round" { }
+                    }
+                    // div {
+                    //     label ."o-mainBarTimeline__hideRepliesLabel"
+                    //         for="hide-replies"
+                    //     { "Hide comments: " }
+                    //     input ."o-mainBarTimeline__hideRepliesCheckbox"
+                    //         type="checkbox" id="hide-replies" name="hide-replies"
+                    //     {}
+                    // }
+                }
                 div ."o-mainBarTimeline__item -preview -empty" { }
                 @for post in &posts {
-                    div ."o-mainBarTimeline__item" {
+                    div ."o-mainBarTimeline__item"
+                    ."-reply"[post.reply_to.is_some()]
+                    {
                         (self.post_overview(
                             &client_ref,
                             post.author,
@@ -258,6 +280,15 @@ impl UiState {
                         hx-swap="outerHTML"
                     { }
                 }
+            }
+            script {
+                (PreEscaped(r#"
+                    document.querySelector('.o-mainBarTimeline')
+                        .classList.toggle(
+                            '-hideReplies',
+                            !document.querySelector('.o-mainBarTimeline__showReplies').checked
+                        );
+                "#))
             }
         })
     }
@@ -326,9 +357,9 @@ impl UiState {
                         {
                             span ."m-postOverview__commentsButtonIcon u-buttonIcon" width="1rem" height="1rem" {}
                             @if reply_count == 1 {
-                                ("1 Comment".to_string())
+                                ("1 Reply".to_string())
                             } @else {
-                                (format!("{} Comments", reply_count))
+                                (format!("{} Replies", reply_count))
                             }
                         }
                     }
