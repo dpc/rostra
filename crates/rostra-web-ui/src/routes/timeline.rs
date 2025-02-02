@@ -293,6 +293,7 @@ impl UiState {
         })
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub async fn post_overview(
         &self,
         client: &ClientRef<'_>,
