@@ -1,5 +1,7 @@
 ## Rostra: Non-technical design
 
+For technical design, please see [../ARCHITECTURE.md].
+
 ### F2F
 
 In my mind the biggest problem with online social networks is the abuse protection.

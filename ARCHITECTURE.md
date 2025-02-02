@@ -5,7 +5,7 @@
 In Rostra all data is propagated in forms of `Event`s.
 The events are a tiny fixed-sized packet, that
 is being signed over by the author. Cryptographic hash of
-the [`Event`] is an `EventId` and uniquely identifies the event.
+the `Event` is an `EventId` and uniquely identifies the event.
 
 Among some other minor things, `Event` includes `EventId`s of
 up to two previous `Event`s
@@ -16,11 +16,11 @@ to the later events. Among other benefits, this allows seamless
 multi-device use - any disjoint parts of the history can get
 "stitched together" with any newer event pointing to both.
 
-The [`Event`] also includes `ContentHash` - a cryptographic hash
+The `Event` also includes `ContentHash` - a cryptographic hash
 of the actually payload carried.
 
-This defers data synchronization, and allows selective (incremental, partial, etc)
-data synchronization.
+This defers the need to download the bulkd of data, and allows
+selective (incremental, partial, etc) data replication.
 
 ## Network architecture
 
