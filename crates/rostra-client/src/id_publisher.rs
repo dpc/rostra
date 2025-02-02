@@ -82,7 +82,7 @@ impl IdPublishedData {
 
 impl PkarrIdPublisher {
     pub fn new(client: &Client, id_secret: RostraIdSecretKey) -> Self {
-        debug!(target: LOG_TARGET, pkarr_id = %id_secret.id(), "Starting ID publishing task" );
+        debug!(target: LOG_TARGET, pkarr_id = %id_secret.id().to_z32_string(), "Starting ID publishing task" );
         Self {
             app: client.handle(),
             keypair: id_secret.into(),
