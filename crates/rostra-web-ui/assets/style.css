@@ -14,7 +14,6 @@ body {
   font-family: sans-serif;
 }
 
-pre { font-family: monospace; }
 
 a {
   color: var(--link-color);
@@ -29,6 +28,17 @@ blockquote {
   padding: 0.5rem 0.5rem 0.5rem 1rem;
   background-color: var(--quote-background-color);
   color: #4b5563;
+}
+
+
+pre,
+code {
+  background: #f5f5f5;
+  border-radius: 6px;
+  padding: 4px 6px;
+  font-size: 1rem;
+  font-family: monospace;
+  background-clip: white;
 }
 
 /* Underline effect on hover */
