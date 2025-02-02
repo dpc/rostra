@@ -2,7 +2,8 @@ use std::collections::HashMap;
 
 use bincode::{Decode, Encode};
 use rostra_core::event::{content_kind, EventExt as _};
-use rostra_core::{ExternalEventId, RostraId, ShortEventId, Timestamp};
+use rostra_core::id::RostraId;
+use rostra_core::{ExternalEventId, ShortEventId, Timestamp};
 use serde::{Deserialize, Serialize};
 use tracing::{debug, warn};
 
@@ -16,8 +17,8 @@ use crate::{
     Encode, Decode, Serialize, Deserialize, Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord,
 )]
 pub struct EventPaginationCursor {
-    ts: Timestamp,
-    event_id: ShortEventId,
+    pub ts: Timestamp,
+    pub event_id: ShortEventId,
 }
 
 pub struct SocialPostRecord<C> {

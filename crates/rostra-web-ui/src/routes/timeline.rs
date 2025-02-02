@@ -5,13 +5,15 @@ use std::time::Duration;
 use axum::extract::ws::WebSocket;
 use axum::extract::{Path, State, WebSocketUpgrade};
 use axum::response::IntoResponse;
+use axum::Form;
 use maud::{html, Markup, PreEscaped};
 use rostra_client::ClientRef;
-use rostra_client_db::social::SocialPostRecord;
+use rostra_client_db::social::{EventPaginationCursor, SocialPostRecord};
 use rostra_core::event::{EventKind, SocialPost};
 use rostra_core::id::{RostraId, ToShort as _};
-use rostra_core::{ExternalEventId, ShortEventId};
+use rostra_core::{ExternalEventId, ShortEventId, Timestamp};
 use rostra_util_error::FmtCompact as _;
+use serde::Deserialize;
 use snafu::ResultExt as _;
 use tracing::debug;
 
@@ -22,12 +24,25 @@ use crate::error::{InvalidDataSnafu, UserSnafu};
 use crate::html_utils::re_typeset_mathjax;
 use crate::{SharedState, UiState, LOG_TARGET};
 
+#[derive(Deserialize)]
+pub struct Input {
+    ts: Option<Timestamp>,
+    event_id: Option<ShortEventId>,
+}
+
 pub async fn get(
     state: State<SharedState>,
     _user: UserSession,
     session: UserSession,
+    Form(form): Form<Input>,
 ) -> RequestResult<impl IntoResponse> {
-    Ok(Maud(state.render_timeline_page(&session).await?))
+    let pagination = form.ts.and_then(|ts| {
+        form.event_id
+            .map(|event_id| EventPaginationCursor { ts, event_id })
+    });
+    Ok(Maud(
+        state.render_timeline_page(pagination, &session).await?,
+    ))
 }
 
 pub async fn get_updates(
@@ -99,7 +114,11 @@ impl UiState {
         Ok(())
     }
 
-    pub async fn render_timeline_page(&self, user: &UserSession) -> RequestResult<Markup> {
+    pub async fn render_timeline_page(
+        &self,
+        pagination: Option<EventPaginationCursor>,
+        user: &UserSession,
+    ) -> RequestResult<Markup> {
         let content = html! {
             nav ."o-navBar" hx-ext="ws" ws-connect="/ui/timeline/updates" {
 
@@ -121,7 +140,7 @@ impl UiState {
 
             main ."o-mainBar" {
                 (self.render_new_posts_alert(false, 0))
-                (self.main_bar_timeline(user).await?)
+                (self.render_main_bar_timeline(pagination, user).await?)
             }
 
             nav ."o-sideBar" {
@@ -190,7 +209,11 @@ impl UiState {
         }
     }
 
-    pub async fn main_bar_timeline(&self, user: &UserSession) -> RequestResult<Markup> {
+    pub async fn render_main_bar_timeline(
+        &self,
+        pagination: Option<EventPaginationCursor>,
+        user: &UserSession,
+    ) -> RequestResult<Markup> {
         let client = self.client(user.id()).await?;
         let client_ref = client.client_ref()?;
 
@@ -198,7 +221,7 @@ impl UiState {
             .client(user.id())
             .await?
             .storage()??
-            .paginate_social_posts_rev(None, 100)
+            .paginate_social_posts_rev(pagination, 20)
             .await;
 
         let parents = self
@@ -214,7 +237,7 @@ impl UiState {
         Ok(html! {
             div ."o-mainBarTimeline" {
                 div ."o-mainBarTimeline__item -preview -empty" { }
-                @for post in posts {
+                @for post in &posts {
                     div ."o-mainBarTimeline__item" {
                         (self.post_overview(
                             &client_ref,
@@ -226,6 +249,14 @@ impl UiState {
                             user.ro_mode()
                         ).await?)
                     }
+                }
+                @if let Some(last) = posts.last() {
+                    div ."o-mainBarTimeline__rest -empty"
+                        hx-get={(format!("/ui/timeline?ts={}&event_id={}", last.ts, last.event_id))}
+                        hx-select=".o-mainBarTimeline__item, .o-mainBarTimeline__rest"
+                        hx-trigger="intersect once, threshold:0.5"
+                        hx-swap="outerHTML"
+                    { }
                 }
             }
         })

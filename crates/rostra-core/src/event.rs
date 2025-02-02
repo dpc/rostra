@@ -21,7 +21,7 @@ pub use verified_event::*;
 
 use crate::id::RostraId;
 use crate::{
-    define_array_type_no_serde, ContentHash, MsgLen, NullableShortEventId, ShortEventId, Timestamp,
+    define_array_type, ContentHash, MsgLen, NullableShortEventId, ShortEventId, Timestamp,
     TimestampFixed,
 };
 
@@ -229,7 +229,7 @@ impl From<VerifiedEvent> for SignedEvent {
     }
 }
 
-define_array_type_no_serde!(
+define_array_type!(
     #[derive(PartialEq, Eq)]
     struct EventSignature,
     64

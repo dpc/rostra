@@ -1,4 +1,5 @@
 use std::fmt;
+use std::str::FromStr;
 
 #[cfg(feature = "bincode")]
 pub mod bincode;
@@ -13,9 +14,9 @@ pub mod rand;
 pub mod id;
 
 pub use crate::event::Event;
-pub use crate::id::{ExternalEventId, RostraId};
+pub use crate::id::ExternalEventId;
 #[macro_export]
-macro_rules! define_array_type_no_serde {
+macro_rules! define_array_type {
     (
         $(#[$outer:meta])*
         struct $t:tt, $n:literal
@@ -34,21 +35,6 @@ macro_rules! define_array_type_no_serde {
 }
 
 #[macro_export]
-macro_rules! define_array_type {
-    (
-        $(#[$outer:meta])*
-        struct $t:tt, $n:literal
-    ) => {
-        $crate::define_array_type_no_serde!(
-            #[cfg_attr(feature = "serde", derive(::serde::Serialize, ::serde::Deserialize))]
-            $(#[$outer])*
-            struct $t, $n
-        );
-
-    }
-}
-
-#[macro_export]
 macro_rules! define_array_type_public {
     (
         $(#[$outer:meta])*
@@ -63,19 +49,46 @@ macro_rules! define_array_type_public {
 }
 
 #[macro_export]
-macro_rules! define_array_type_public_no_serde {
+macro_rules! impl_array_type_serde {
     (
-        $(#[$outer:meta])*
         struct $t:tt, $n:literal
     ) => {
-        $crate::define_array_type_no_serde!(
-            #[derive(PartialOrd, Ord, PartialEq, Eq)]
-            $(#[$outer])*
-            struct $t, $n
-        );
-    }
-}
+        #[cfg(feature = "serde")]
+        impl ::serde::Serialize for $t {
+            fn serialize<S>(&self, s: S) -> Result<S::Ok, S::Error>
+            where
+                S: ::serde::Serializer,
+            {
+                if s.is_human_readable() {
+                    s.serialize_str(&self.to_string())
+                } else {
+                    s.serialize_bytes(&self.0)
+                }
+            }
+        }
 
+        #[cfg(feature = "serde")]
+        impl<'de> ::serde::de::Deserialize<'de> for $t {
+            fn deserialize<D>(d: D) -> Result<Self, D::Error>
+            where
+                D: ::serde::Deserializer<'de>,
+            {
+                if d.is_human_readable() {
+                    let str = <String>::deserialize(d)?;
+                    Self::from_str(&str).map_err(|e| {
+                        ::serde::de::Error::custom(format!("Deserialization error: {e:#}"))
+                    })
+                } else {
+                    let bytes = <Vec<u8>>::deserialize(d)?;
+                    if bytes.len() != $n {
+                        return Err(::serde::de::Error::custom("Invalid length"));
+                    }
+                    Ok(Self(bytes.try_into().expect("Just checked length")))
+                }
+            }
+        }
+    };
+}
 macro_rules! impl_base32_str {
     (
         $t:tt
@@ -147,6 +160,7 @@ define_array_type_public!(
     /// way anyway, e.g. by first 8B mapping to a sequence of matching events.
     struct ShortEventId, 16
 );
+impl_array_type_serde!(struct ShortEventId, 16);
 impl_base32_str!(ShortEventId);
 impl_zero_default!(ShortEventId);
 
@@ -161,6 +175,7 @@ define_array_type_public!(
     /// For actual content, see [`EventContent`]
     struct ContentHash, 32
 );
+impl_array_type_serde!(struct ContentHash, 32);
 impl_base32_str!(ContentHash);
 
 impl From<blake3::Hash> for ContentHash {
@@ -249,6 +264,20 @@ impl From<Timestamp> for u64 {
 impl From<TimestampFixed> for Timestamp {
     fn from(value: TimestampFixed) -> Self {
         Self(value.0)
+    }
+}
+
+impl FromStr for Timestamp {
+    type Err = <u64 as FromStr>::Err;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        Ok(Self(u64::from_str(s)?))
+    }
+}
+
+impl fmt::Display for Timestamp {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        self.0.fmt(f)
     }
 }
 

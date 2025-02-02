@@ -3,7 +3,7 @@ use std::str::FromStr;
 
 use snafu::Snafu;
 
-use crate::{define_array_type_public, define_array_type_public_no_serde, EventId, ShortEventId};
+use crate::{define_array_type_public, impl_array_type_serde, EventId, ShortEventId};
 
 #[cfg(feature = "ed25519-dalek")]
 mod ed25519;
@@ -14,7 +14,7 @@ mod pkarr;
 #[cfg(feature = "serde")]
 mod serde;
 
-define_array_type_public_no_serde!(struct RostraId, 32);
+define_array_type_public!(struct RostraId, 32);
 
 impl RostraId {
     pub const ZERO: Self = Self([0u8; 32]);
@@ -48,8 +48,8 @@ impl RostraId {
     }
 }
 
-define_array_type_public_no_serde!(struct RostraIdSecretKey, 32);
-
+define_array_type_public!(struct RostraIdSecretKey, 32);
+impl_array_type_serde!(struct RostraIdSecretKey, 32);
 impl fmt::Display for RostraIdSecretKey {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str(

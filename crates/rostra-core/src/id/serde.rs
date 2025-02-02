@@ -1,6 +1,8 @@
 use std::fmt::{self};
 use std::str::FromStr;
 
+use snafu::Snafu;
+
 use super::{ExternalEventId, RostraId, RostraIdSecretKey, RostraIdSecretKeyError};
 
 impl fmt::Display for RostraId {
@@ -9,13 +11,32 @@ impl fmt::Display for RostraId {
     }
 }
 
+#[derive(Debug, Snafu)]
+pub enum RostraIdParseError {
+    #[snafu(transparent)]
+    Z32 {
+        source: z32::Z32Error,
+    },
+    InvalidLength,
+}
+impl FromStr for RostraId {
+    type Err = RostraIdParseError;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        let bytes = z32::decode(s.as_bytes())?;
+        if bytes.len() != 32 {
+            return Err(InvalidLengthSnafu.build());
+        }
+        Ok(Self(bytes.try_into().expect("Just checked length")))
+    }
+}
 impl serde::Serialize for RostraId {
     fn serialize<S>(&self, s: S) -> Result<S::Ok, S::Error>
     where
         S: serde::Serializer,
     {
         if s.is_human_readable() {
-            s.serialize_str(&z32::encode(self.0.as_slice()))
+            s.serialize_str(&self.to_string())
         } else {
             s.serialize_bytes(&self.0)
         }
@@ -29,12 +50,8 @@ impl<'de> serde::de::Deserialize<'de> for RostraId {
     {
         if d.is_human_readable() {
             let str = <String>::deserialize(d)?;
-            let bytes = z32::decode(str.as_bytes())
-                .map_err(|e| serde::de::Error::custom(format!("z32 deserialization error: {e}")))?;
-            if bytes.len() != 32 {
-                return Err(serde::de::Error::custom("Invalid length"));
-            }
-            Ok(Self(bytes.try_into().expect("Just checked length")))
+            Self::from_str(&str)
+                .map_err(|e| serde::de::Error::custom(format!("Deserialization error: {e:#}")))
         } else {
             let bytes = <Vec<u8>>::deserialize(d)?;
             if bytes.len() != 32 {
@@ -45,44 +62,44 @@ impl<'de> serde::de::Deserialize<'de> for RostraId {
     }
 }
 
-impl serde::Serialize for RostraIdSecretKey {
-    fn serialize<S>(&self, s: S) -> Result<S::Ok, S::Error>
-    where
-        S: serde::Serializer,
-    {
-        if s.is_human_readable() {
-            s.serialize_str(&self.to_string())
-        } else {
-            s.serialize_bytes(&self.0)
-        }
-    }
-}
+// impl serde::Serialize for RostraIdSecretKey {
+//     fn serialize<S>(&self, s: S) -> Result<S::Ok, S::Error>
+//     where
+//         S: serde::Serializer,
+//     {
+//         if s.is_human_readable() {
+//             s.serialize_str(&self.to_string())
+//         } else {
+//             s.serialize_bytes(&self.0)
+//         }
+//     }
+// }
 
-impl<'de> serde::de::Deserialize<'de> for RostraIdSecretKey {
-    fn deserialize<D>(d: D) -> Result<Self, D::Error>
-    where
-        D: serde::Deserializer<'de>,
-    {
-        if d.is_human_readable() {
-            let str = <String>::deserialize(d)?;
-            let bytes = bip39::Mnemonic::from_str(&str)
-                .map_err(|e| {
-                    serde::de::Error::custom(format!("Mnemonic deserialization error: {e}"))
-                })?
-                .to_entropy();
-            if bytes.len() != 32 {
-                return Err(serde::de::Error::custom("Invalid length"));
-            }
-            Ok(Self(bytes.try_into().expect("Just checked length")))
-        } else {
-            let bytes = <Vec<u8>>::deserialize(d)?;
-            if bytes.len() != 32 {
-                return Err(serde::de::Error::custom("Invalid length"));
-            }
-            Ok(Self(bytes.try_into().expect("Just checked length")))
-        }
-    }
-}
+// impl<'de> serde::de::Deserialize<'de> for RostraIdSecretKey {
+//     fn deserialize<D>(d: D) -> Result<Self, D::Error>
+//     where
+//         D: serde::Deserializer<'de>,
+//     {
+//         if d.is_human_readable() {
+//             let str = <String>::deserialize(d)?;
+//             let bytes = bip39::Mnemonic::from_str(&str)
+//                 .map_err(|e| {
+//                     serde::de::Error::custom(format!("Mnemonic
+// deserialization error: {e}"))                 })?
+//                 .to_entropy();
+//             if bytes.len() != 32 {
+//                 return Err(serde::de::Error::custom("Invalid length"));
+//             }
+//             Ok(Self(bytes.try_into().expect("Just checked length")))
+//         } else {
+//             let bytes = <Vec<u8>>::deserialize(d)?;
+//             if bytes.len() != 32 {
+//                 return Err(serde::de::Error::custom("Invalid length"));
+//             }
+//             Ok(Self(bytes.try_into().expect("Just checked length")))
+//         }
+//     }
+// }
 impl FromStr for RostraIdSecretKey {
     type Err = RostraIdSecretKeyError;
 

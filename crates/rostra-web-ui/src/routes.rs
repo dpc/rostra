@@ -133,6 +133,8 @@ pub fn route_handler(state: SharedState) -> Router {
     Router::new()
         .route("/", get(root))
         .route("/ui", get(timeline::get))
+        .route("/ui/timeline", get(timeline::get))
+        .route("/ui/timeline/updates", get(timeline::get_updates))
         .route("/ui/post", post(new_post::post_new_post))
         .route("/ui/post/preview", post(new_post::get_post_preview))
         .route("/ui/post/reply_to", get(new_post::get_reply_to))
@@ -140,7 +142,6 @@ pub fn route_handler(state: SharedState) -> Router {
         .route("/ui/unlock", get(unlock::get).post(unlock::post_unlock))
         .route("/ui/unlock/logout", get(unlock::get).post(unlock::logout))
         .route("/ui/unlock/random", get(unlock::get_random))
-        .route("/ui/timeline/updates", get(timeline::get_updates))
         .route(
             "/ui/timeline/comments/{event_id}",
             get(timeline::get_post_comments),
