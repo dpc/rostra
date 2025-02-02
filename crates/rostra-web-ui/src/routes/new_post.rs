@@ -19,6 +19,45 @@ pub struct Input {
     content: String,
 }
 
+fn focus_on_new_post_content_input() -> Markup {
+    html! {
+        script {
+            // focus on new post content input
+            (PreEscaped(r#"
+                (function() {
+                    const content = document.querySelector('.m-newPostForm__content');
+                    if (content != null) {
+                        content.focus();
+                        // on small devices, we want to keep the input in view,
+                        // so we scroll to it; on larger ones this breaks scrolling preview
+                        // into view
+                        console.log(window.innerWidth);
+                        if (window.innerWidth < 768) {
+                            content.parentNode.scrollIntoView();
+                        }
+                    }
+                })()
+            "#))
+        }
+    }
+}
+fn scroll_preview_into_view() -> Markup {
+    html! {
+        script {
+            (PreEscaped(r#"
+                (function() {
+                    const input = document.querySelector('.o-mainBarTimeline__item.-preview');
+                    if (input != null) {
+                        input.parentNode.scrollIntoView()
+                    } else {
+                        console.log("Not found preview?")
+                    }
+                })()
+            "#))
+        }
+    }
+}
+
 pub async fn post_new_post(
     state: State<SharedState>,
     session: UserSession,
@@ -76,11 +115,7 @@ pub async fn get_post_preview(
     let self_id = client.client_ref()?.rostra_id();
     Ok(Maud(html! {
         @if !form.content.is_empty() {
-            div ."o-mainBarTimeline__item -preview"
-                // We want to show the preview, even if the user was scrolling, and to scroll
-                // all the way to the top, we actually want the parent of a parent.
-                "hx-on::load"="this.parentNode.parentNode.scrollIntoView()" {
-
+            div ."o-mainBarTimeline__item -preview" {
                 (state.post_overview(
                     &client.client_ref()?,
                     self_id,
@@ -91,6 +126,8 @@ pub async fn get_post_preview(
                     None,
                     session.ro_mode()
                 ).await?)
+                (scroll_preview_into_view())
+                (focus_on_new_post_content_input())
                 (re_typeset_mathjax())
             }
         } @else {
@@ -149,17 +186,7 @@ impl UiState {
                     readonly
                     {}
                 }
-                script {
-                    // focus on new post content input
-                    (PreEscaped(r#"
-                        (function() {
-                            const content = document.querySelector('.m-newPostForm__content');
-                            if (content != null) {
-                                content.focus();
-                            }
-                        })()
-                    "#))
-                }
+                (focus_on_new_post_content_input())
             }
         }
     }

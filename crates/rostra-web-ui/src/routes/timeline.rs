@@ -122,30 +122,30 @@ impl UiState {
         let content = html! {
             nav ."o-navBar" hx-ext="ws" ws-connect="/ui/timeline/updates" {
 
-                div ."o-navBar__selfAccount" {
-                    (self.render_self_profile_summary(user, user.ro_mode()).await?)
-                }
-
-                (self.new_post_form(None, user.ro_mode()))
-
-                (self.render_add_followee_form(None))
-
                 div ."o-navBar__list" {
                     span ."o-navBar__header" { "Rostra:" }
                     a ."o-navBar__item" href="https://github.com/dpc/rostra/discussions" { "Support" }
                     a ."o-navBar__item" href="https://github.com/dpc/rostra/wiki" { "Wiki" }
                     a ."o-navBar__item" href="https://github.com/dpc/rostra" { "Github" }
                 }
+
+                div ."o-navBar__selfAccount" {
+                    (self.render_self_profile_summary(user, user.ro_mode()).await?)
+                }
+
+                (self.render_add_followee_form(None))
+
+                (self.new_post_form(None, user.ro_mode()))
+
+
             }
 
             main ."o-mainBar" {
                 (self.render_new_posts_alert(false, 0))
                 (self.render_main_bar_timeline(pagination, user).await?)
             }
+            (re_typeset_mathjax())
 
-            nav ."o-sideBar" {
-
-            }
         };
 
         self.render_html_page("You're Rostra!", content).await
@@ -253,7 +253,7 @@ impl UiState {
                 @if let Some(last) = posts.last() {
                     div ."o-mainBarTimeline__rest -empty"
                         hx-get={(format!("/ui/timeline?ts={}&event_id={}", last.ts, last.event_id))}
-                        hx-select=".o-mainBarTimeline__item, .o-mainBarTimeline__rest"
+                        hx-select=".o-mainBarTimeline__item, .o-mainBarTimeline__rest, script.mathjax"
                         hx-trigger="intersect once, threshold:0.5"
                         hx-swap="outerHTML"
                     { }

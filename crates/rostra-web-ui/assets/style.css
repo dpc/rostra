@@ -3,6 +3,8 @@
  --background-border-color: rgb(217, 217, 232);
  --link-color: oklch(33.68% 0.1567 257.82);
  --link-hover-color: oklch(33.68% 0.1567 351.52);
+
+ --layout-break-width: 768px;
 }
 
 * { margin: 0; padding: 0; box-sizing: border-box; }
@@ -81,21 +83,37 @@ a:active {
 
 .o-pageLayout {
   display: flex;
+  flex-direction: column;
   justify-content: center;
-  height: 100dvh;
-  overflow: auto;
+  align-items: center;
+  /* justify-content: center; */
+  /* height: 100dvh; */
+  /* overflow: auto; */
 }
 
 .o-navBar {
-  /* flex: 1; */
+  flex: 1;
+  align-self: stretch;
   display: flex;
   flex-direction: column;
   gap: 10pt;
   padding: 5pt;
-  position: sticky;
-  top: 0;
-  align-self: start;
 }
+
+@media (min-width: 768px /* var's dont work here */ ) {
+  .o-pageLayout {
+    flex-direction: row;
+  }
+  .o-navBar {
+    position: sticky;
+    top: 0;
+    align-self: start;
+    max-width: 450px;
+    padding: 10pt;
+    padding-right: 5pt;
+  }
+}
+
 
 .o-navBar__list {
   display: flex;
@@ -135,19 +153,26 @@ a:active {
   background: oklch(95.12% 0 117.53);
 
 
-  padding: 4pt;
   border: 1px solid var(--background-border-color);
 }
+
+
+
 
 .o-mainBarTimeline__item.-empty {
   display: none;
 }
 
 .o-mainBarTimeline__item {
-  padding-top: 10pt;
-  padding-bottom: 10pt;
+  padding: 4pt;
 }
   
+@media (min-width: 768px /* var's dont work here */ ) {
+  .o-mainBarTimeline__item {
+    padding: 10pt;
+    padding-top: 20pt;
+  }
+}
 .o-mainBarTimeline__item.-preview .m-postOverview {
   opacity: 0.6;
 }
@@ -167,7 +192,7 @@ a:active {
 }
 
 .m-postOverview {
-  min-width: 30rem;
+  /* min-width: 30rem; */
   max-width: 50rem;
 }
 
@@ -182,7 +207,7 @@ a:active {
 
 .m-postOverview__main {
   display: flex;
-  min-width: 20rem;
+  /* min-width: 20rem; */
 }
 
 .m-postOverview__userImage {
@@ -262,12 +287,14 @@ a:active {
 }
 
 .m-selfAccount__bio {
-  min-height: 200px;
-  min-width: 100%;
+  /* min-height: 200px; */
+  /* min-width: 100%; */
 }
 
 .m-selfAccount__buttons {
   display: flex;
+  flex-direction: row;
+  flex-wrap: wrap;
   gap: 0.5rem;
 }
 
@@ -336,9 +363,9 @@ a:active {
 
 .m-newPostForm__content {
   padding: 5pt;
-  min-height: 200px;
-  min-width: 100%;
-  width: 100%;
+  /* min-height: 200px; */
+  /* min-width: 100%; */
+  /* width: 100%; */
   border: 1px solid var(--background-border-color);
   border-radius: 4pt;
 }
@@ -370,7 +397,8 @@ a:active {
 .m-addFolloweeForm__content {
   border: 1px solid var(--background-border-color);
   border-radius: 4pt;
-  min-width: 100%;
+  width: 100%;
+  /* min-width: 100%; */
 }
 
 .m-addFolloweeForm__followButton {
@@ -385,12 +413,14 @@ a:active {
   flex-direction: column;
   justify-content: center;
   align-items: center;
-  min-height: 100vh;
-  min-width: 100vw;
+  height: 100dvh;
+  padding: 1rem;
+  /* min-height: 100vh; */
+  /* min-width: 100vw; */
 }
 
 .o-unlockScreen__form {
-  padding: 2rem;
+  padding: 1rem;
   background: white;
   border-radius: 8px;
   box-shadow: 0 2px 4px rgba(0,0,0,0.1);
@@ -411,6 +441,7 @@ a:active {
 
 .o-unlockScreen__idLine {
   display: flex;
+  flex-wrap: wrap;
   gap: 5pt;
 }
 .o-unlockScreen__id {
@@ -419,6 +450,7 @@ a:active {
 
 .o-unlockScreen__mnemonicLine {
   display: flex;
+  flex-wrap: wrap;
   gap: 5pt;
 }
 

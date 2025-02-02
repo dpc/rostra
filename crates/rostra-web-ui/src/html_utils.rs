@@ -6,9 +6,11 @@ use maud::{html, Markup, PreEscaped};
 /// page load.
 pub(crate) fn re_typeset_mathjax() -> Markup {
     html! {
-        script {
+        script ."mathjax" {
             (PreEscaped(r#"
-                MathJax.typesetPromise();
+                if (typeof MathJax !== 'undefined') {
+                    MathJax.typesetPromise();
+                }
             "#))
         }
     }
