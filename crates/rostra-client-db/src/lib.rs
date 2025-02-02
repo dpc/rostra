@@ -147,6 +147,11 @@ impl Database {
         self_id: RostraId,
     ) -> std::result::Result<PathBuf, io::Error> {
         tokio::fs::create_dir_all(&data_dir).await?;
+
+        let legacy_path = data_dir.join(format!("{}.redb", self_id.to_z32_string()));
+        if legacy_path.exists() {
+            return Ok(legacy_path);
+        }
         Ok(data_dir.join(format!("{}.redb", self_id)))
     }
 

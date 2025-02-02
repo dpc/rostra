@@ -15,10 +15,70 @@ mod pkarr;
 mod serde;
 
 define_array_type_public!(struct RostraId, 32);
-
+impl_array_type_serde!(struct RostraId,  32);
 impl RostraId {
     pub const ZERO: Self = Self([0u8; 32]);
     pub const MAX: Self = Self([0xffu8; 32]);
+    pub const BECH32_HRP: bech32::Hrp = bech32::Hrp::parse_unchecked("rstr");
+}
+
+impl fmt::Display for RostraId {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match bech32::encode_to_fmt::<bech32::Bech32m, _>(f, Self::BECH32_HRP, &self.0) {
+            Ok(()) => Ok(()),
+            Err(e) => match e {
+                bech32::EncodeError::TooLong(_) => unreachable!("Fixed size"),
+                bech32::EncodeError::Fmt(error) => Err(error),
+                e => panic!("Unexpected error: {e:#}"),
+            },
+        }
+    }
+}
+
+#[derive(Debug, Snafu, Clone)]
+pub enum RostraIdParseError {
+    #[snafu(transparent)]
+    Decoding {
+        source: bech32::DecodeError,
+    },
+    InvalidHrp,
+    InvalidLength,
+}
+
+impl RostraId {
+    fn from_bech32m_str(s: &str) -> Result<Self, RostraIdParseError> {
+        let (hrp, bytes) = bech32::decode(s)?;
+        if hrp != Self::BECH32_HRP {
+            return Err(InvalidHrpSnafu.build());
+        }
+        if bytes.len() != 32 {
+            return Err(InvalidLengthSnafu.build());
+        }
+        Ok(Self(bytes.try_into().expect("Just checked length")))
+    }
+
+    pub fn to_z32_string(&self) -> String {
+        z32::encode(&self.0)
+    }
+}
+
+impl FromStr for RostraId {
+    type Err = RostraIdParseError;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match Self::from_bech32m_str(s) {
+            Ok(o) => Ok(o),
+            Err(err) => {
+                // Fallback attempting decoding with older z32 (pkarr) encoding
+                let bytes = z32::decode(s.as_bytes()).map_err(|_| err.clone())?;
+                if bytes.len() != 32 {
+                    return Err(err);
+                }
+
+                Ok(Self(bytes.try_into().expect("Just checked length")))
+            }
+        }
+    }
 }
 
 impl From<RostraId> for ShortRostraId {

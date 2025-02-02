@@ -10,10 +10,11 @@ version = { workspace = true }
 default = []
 bincode = ["dep:bincode"]
 ed25519-dalek = ["dep:ed25519-dalek", "dep:rand"]
-serde = ["dep:serde", "dep:ciborium", "dep:z32", "dep:bip39"]
+serde = ["dep:serde", "dep:ciborium",  "dep:bip39"]
 rand = ["dep:rand"]
 
 [dependencies]
+bech32 = { workspace = true }
 bincode = { workspace = true, optional = true }
 bip39 = { workspace = true, optional = true }
 blake3 = { workspace = true }
@@ -26,7 +27,7 @@ serde = { workspace = true, optional = true }
 ciborium = { workspace = true, optional = true }
 snafu = { workspace = true }
 pkarr = { workspace = true, optional = true }
-z32 = { workspace = true, optional = true }
+z32 = { workspace = true }
 
 [dev-dependencies]
 test-log = { workspace = true, features = ["trace"] }
