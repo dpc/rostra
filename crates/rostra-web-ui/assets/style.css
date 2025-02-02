@@ -208,6 +208,7 @@ a:active {
 .m-postOverview__main {
   display: flex;
   /* min-width: 20rem; */
+  max-width: 45rem;
 }
 
 .m-postOverview__userImage {
