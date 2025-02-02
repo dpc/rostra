@@ -16,7 +16,7 @@ pub mod id;
 pub use crate::event::Event;
 pub use crate::id::ExternalEventId;
 #[macro_export]
-macro_rules! define_array_type {
+macro_rules! array_type_define {
     (
         $(#[$outer:meta])*
         struct $t:tt, $n:literal
@@ -27,20 +27,28 @@ macro_rules! define_array_type {
         pub struct $t([u8; $n]);
 
         impl $t {
+
+            pub const ZERO: Self = Self([0u8; $n]);
+            pub const MAX: Self = Self([0xffu8; $n]);
+
             pub fn as_slice(&self) -> &[u8] {
                 self.0.as_slice()
+            }
+
+            pub fn from_bytes(bytes: [u8; $n]) -> Self {
+                Self(bytes)
             }
         }
     }
 }
 
 #[macro_export]
-macro_rules! define_array_type_public {
+macro_rules! array_type_define_public {
     (
         $(#[$outer:meta])*
         struct $t:tt, $n:literal
     ) => {
-        $crate::define_array_type!(
+        $crate::array_type_define!(
             #[derive(PartialOrd, Ord, PartialEq, Eq)]
             $(#[$outer])*
             struct $t, $n
@@ -49,7 +57,7 @@ macro_rules! define_array_type_public {
 }
 
 #[macro_export]
-macro_rules! impl_array_type_serde {
+macro_rules! array_type_impl_serde {
     (
         struct $t:tt, $n:literal
     ) => {
@@ -75,21 +83,20 @@ macro_rules! impl_array_type_serde {
             {
                 if d.is_human_readable() {
                     let str = <String>::deserialize(d)?;
-                    Self::from_str(&str).map_err(|e| {
+                    <Self as std::str::FromStr>::from_str(&str).map_err(|e| {
                         ::serde::de::Error::custom(format!("Deserialization error: {e:#}"))
                     })
                 } else {
-                    let bytes = <Vec<u8>>::deserialize(d)?;
-                    if bytes.len() != $n {
-                        return Err(::serde::de::Error::custom("Invalid length"));
-                    }
+                    let bytes = <[u8; $n]>::deserialize(d)?;
                     Ok(Self(bytes.try_into().expect("Just checked length")))
                 }
             }
         }
     };
 }
-macro_rules! impl_base32_str {
+
+#[macro_export]
+macro_rules! array_type_impl_base32_str {
     (
         $t:tt
     ) => {
@@ -125,10 +132,10 @@ macro_rules! impl_zero_default {
     };
 }
 
-define_array_type_public!(
+array_type_define_public!(
     struct EventId, 32
 );
-impl_base32_str!(EventId);
+array_type_impl_base32_str!(EventId);
 
 impl From<blake3::Hash> for EventId {
     fn from(value: blake3::Hash) -> Self {
@@ -148,7 +155,7 @@ impl From<EventId> for ShortEventId {
     }
 }
 
-define_array_type_public!(
+array_type_define_public!(
     /// [`ShortEventId`] is short (16B) because it is always used in a context of an existing
     /// [`id::RostraId`] so even though client might potentially grind collisions
     /// (64-bits of resistance) it really gains them nothing.
@@ -160,23 +167,18 @@ define_array_type_public!(
     /// way anyway, e.g. by first 8B mapping to a sequence of matching events.
     struct ShortEventId, 16
 );
-impl_array_type_serde!(struct ShortEventId, 16);
-impl_base32_str!(ShortEventId);
+array_type_impl_serde!(struct ShortEventId, 16);
+array_type_impl_base32_str!(ShortEventId);
 impl_zero_default!(ShortEventId);
 
-impl ShortEventId {
-    pub const ZERO: Self = Self([0u8; 16]);
-    pub const MAX: Self = Self([0xffu8; 16]);
-}
-
-define_array_type_public!(
+array_type_define_public!(
     /// Blake3 hash of a payload
     ///
     /// For actual content, see [`EventContent`]
     struct ContentHash, 32
 );
-impl_array_type_serde!(struct ContentHash, 32);
-impl_base32_str!(ContentHash);
+array_type_impl_serde!(struct ContentHash, 32);
+array_type_impl_base32_str!(ContentHash);
 
 impl From<blake3::Hash> for ContentHash {
     fn from(value: blake3::Hash) -> Self {

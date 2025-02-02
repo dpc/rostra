@@ -3,7 +3,7 @@ use std::str::FromStr;
 
 use snafu::Snafu;
 
-use crate::{define_array_type_public, impl_array_type_serde, EventId, ShortEventId};
+use crate::{array_type_define_public, array_type_impl_serde, EventId, ShortEventId};
 
 #[cfg(feature = "ed25519-dalek")]
 mod ed25519;
@@ -14,11 +14,9 @@ mod pkarr;
 #[cfg(feature = "serde")]
 mod serde;
 
-define_array_type_public!(struct RostraId, 32);
-impl_array_type_serde!(struct RostraId,  32);
+array_type_define_public!(struct RostraId, 32);
+array_type_impl_serde!(struct RostraId,  32);
 impl RostraId {
-    pub const ZERO: Self = Self([0u8; 32]);
-    pub const MAX: Self = Self([0xffu8; 32]);
     pub const BECH32_HRP: bech32::Hrp = bech32::Hrp::parse_unchecked("rstr");
 }
 
@@ -87,13 +85,8 @@ impl From<RostraId> for ShortRostraId {
     }
 }
 
-define_array_type_public!(struct ShortRostraId, 16);
-define_array_type_public!(struct RestRostraId, 16);
-
-impl ShortRostraId {
-    pub const ZERO: Self = Self([0u8; 16]);
-    pub const MAX: Self = Self([0xffu8; 16]);
-}
+array_type_define_public!(struct ShortRostraId, 16);
+array_type_define_public!(struct RestRostraId, 16);
 
 impl RostraId {
     pub fn split(self) -> (ShortRostraId, RestRostraId) {
@@ -108,8 +101,8 @@ impl RostraId {
     }
 }
 
-define_array_type_public!(struct RostraIdSecretKey, 32);
-impl_array_type_serde!(struct RostraIdSecretKey, 32);
+array_type_define_public!(struct RostraIdSecretKey, 32);
+array_type_impl_serde!(struct RostraIdSecretKey, 32);
 impl fmt::Display for RostraIdSecretKey {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str(

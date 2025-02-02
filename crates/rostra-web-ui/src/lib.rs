@@ -144,7 +144,7 @@ impl UiState {
 
             ensure!(secret_id.id() == rostra_id, IdMismatchSnafu);
             let client = self.clients.load(rostra_id).await?;
-            client.unlock_active(secret_id)?;
+            client.unlock_active(secret_id).await?;
 
             Some(secret_id)
         };

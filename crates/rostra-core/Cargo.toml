@@ -10,7 +10,14 @@ version = { workspace = true }
 default = []
 bincode = ["dep:bincode"]
 ed25519-dalek = ["dep:ed25519-dalek", "dep:rand"]
-serde = ["dep:serde", "dep:ciborium",  "dep:bip39"]
+serde = [
+  "dep:serde",
+  # "dep:cbor4ii",
+  "dep:ciborium",
+  "dep:bip39",
+  # "cbor4ii/serde1",
+  # "cbor4ii/use_std",
+]
 rand = ["dep:rand"]
 
 [dependencies]
@@ -25,6 +32,7 @@ ed25519-dalek = { workspace = true, optional = true }
 rand = { workspace = true, optional = true }
 serde = { workspace = true, optional = true }
 ciborium = { workspace = true, optional = true }
+# cbor4ii = { workspace = true, optional = true, feature = ["serde1"] }
 snafu = { workspace = true }
 pkarr = { workspace = true, optional = true }
 z32 = { workspace = true }

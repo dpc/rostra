@@ -1,7 +1,6 @@
-use std::io;
 use std::sync::Arc;
 
-use super::{EventContent, EventContentUnsized, EventKind, EventSignature};
+use super::{EventContent, EventContentKind, EventContentUnsized, EventKind, EventSignature};
 
 impl serde::Serialize for EventSignature {
     fn serialize<S>(&self, ser: S) -> Result<S::Ok, S::Error>
@@ -95,11 +94,13 @@ impl<'de> serde::de::Deserialize<'de> for EventKind {
 }
 
 impl EventContentUnsized {
-    pub fn deserialize_cbor<T>(&self) -> Result<T, ::ciborium::de::Error<io::Error>>
+    // pub fn deserialize_cbor<T>(&self) -> Result<T,
+    // cbor4ii::serde::DecodeError<Infallible>>
+    pub fn deserialize_cbor<T>(&self) -> std::result::Result<T, ciborium::de::Error<std::io::Error>>
     where
-        T: ::serde::de::DeserializeOwned,
+        T: EventContentKind,
     {
-        ciborium::from_reader(&mut self.as_ref())
+        ciborium::from_reader(self.as_ref())
     }
 }
 

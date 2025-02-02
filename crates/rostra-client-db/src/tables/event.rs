@@ -6,8 +6,9 @@ use rostra_core::ShortEventId;
 
 #[derive(Debug, Encode, Decode, Clone)]
 pub enum EventContentState<'a> {
+    /// The event content is present and we processed it without problems
     Present(Cow<'a, EventContentUnsized>),
-    // Deleted as requested by the author
+    /// Deleted as requested by the author
     Deleted {
         // Notably: we only store one ShortEventId somewhat opportunistically
         // If multiple events pointed at the same parent event to be deleted,
@@ -15,6 +16,13 @@ pub enum EventContentState<'a> {
         deleted_by: ShortEventId,
     },
     Pruned,
+
+    /// The event content is present, but turned out invalid during internal
+    /// processing
+    ///
+    /// The main different is that we are not going to try to revert it when
+    /// it's being deleted.
+    Invalid(Cow<'a, EventContentUnsized>),
 }
 
 pub type EventContentStateOwned = EventContentState<'static>;

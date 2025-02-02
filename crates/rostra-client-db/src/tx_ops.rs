@@ -1,4 +1,3 @@
-use std::borrow::Cow;
 use std::collections::{HashMap, HashSet};
 
 use ids::{IdsFollowersRecord, IdsUnfollowedRecord};
@@ -97,7 +96,7 @@ impl Database {
             .collect::<Result<HashMap<_, _>, _>>()?)
     }
 
-    pub(crate) fn insert_self_event_id(
+    pub(crate) fn insert_self_event_id_tx(
         event_id: impl Into<rostra_core::ShortEventId>,
         events_self_table: &mut events_self::Table,
     ) -> DbResult<()> {
@@ -158,7 +157,7 @@ impl Database {
 
         let mut deleted_parent = None;
 
-        let mut deleted_parent_content: Option<EventContent> = None;
+        let mut reverted_parent_content: Option<EventContent> = None;
         let mut missing_parents = vec![];
 
         for (parent_id, parent_is_aux) in parent_ids {
@@ -170,7 +169,7 @@ impl Database {
             if let Some(_parent_event) = parent_event {
                 if event.is_delete_parent_aux_content_set() && parent_is_aux {
                     deleted_parent = Some(parent_id);
-                    deleted_parent_content = events_content_table
+                    reverted_parent_content = events_content_table
                         .insert(
                             &parent_id,
                             &EventContentState::Deleted {
@@ -180,7 +179,10 @@ impl Database {
                         .and_then(|deleted_content| match deleted_content.value() {
                             EventContentState::Present(cow) => Some(cow.into_owned()),
                             EventContentState::Deleted { deleted_by: _ } => None,
-                            EventContentState::Pruned => None,
+                            EventContentState::Pruned
+                            |
+                            // There is no need to revert this event, so we don't return it
+                            EventContentState::Invalid(_) => None,
                         });
                 }
             } else {
@@ -211,16 +213,15 @@ impl Database {
             was_missing,
             is_deleted,
             deleted_parent,
-            deleted_parent_content,
+            reverted_parent_content,
             missing_parents,
         }
         .validate())
     }
 
-    #[allow(clippy::needless_lifetimes)]
-    pub fn insert_event_content_tx<'t, 'e>(
-        VerifiedEventContent { event, content, .. }: &'e VerifiedEventContent,
-        events_content_table: &'t mut events_content::Table,
+    pub fn can_insert_event_content_tx(
+        VerifiedEventContent { event, .. }: &VerifiedEventContent,
+        events_content_table: &mut events_content::Table,
     ) -> DbResult<bool> {
         let event_id = event.event_id.to_short();
         if let Some(existing_content) = events_content_table.get(&event_id)?.map(|g| g.value()) {
@@ -228,17 +229,12 @@ impl Database {
                 EventContentState::Deleted { .. } => {
                     return Ok(false);
                 }
-                EventContentState::Present(_) => {
+                EventContentState::Present(_) | EventContentState::Invalid(_) => {
                     return Ok(false);
                 }
                 EventContentState::Pruned => {}
             }
         }
-
-        events_content_table.insert(
-            &event_id,
-            &EventContentState::Present(Cow::Owned(content.clone())),
-        )?;
 
         Ok(true)
     }
@@ -254,9 +250,12 @@ impl Database {
                     return Ok(false);
                 }
                 EventContentState::Pruned => {
+                    // already pruned, no need to do anything
                     return Ok(true);
                 }
-                EventContentState::Present(_) => {}
+                EventContentState::Invalid(_) | EventContentState::Present(_) => {
+                    // go ahead and mark as pruned
+                }
             }
         }
 

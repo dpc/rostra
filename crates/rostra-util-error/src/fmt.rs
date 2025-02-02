@@ -37,17 +37,21 @@ where
 }
 
 pub trait FmtCompact {
-    type Report: fmt::Display;
-    fn fmt_compact(self) -> Self::Report;
+    type Report<'a>: fmt::Display
+    where
+        Self: 'a;
+    fn fmt_compact(&self) -> Self::Report<'_>;
 }
 
-impl<'e, E> FmtCompact for &'e E
+impl<E> FmtCompact for E
 where
     E: error::Error,
 {
-    type Report = FmtCompactError<'e, E>;
-
-    fn fmt_compact(self) -> Self::Report {
+    type Report<'a>
+        = FmtCompactError<'a, E>
+    where
+        E: 'a;
+    fn fmt_compact(&self) -> Self::Report<'_> {
         FmtCompactError(self)
     }
 }

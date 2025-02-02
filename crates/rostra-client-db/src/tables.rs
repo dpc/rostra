@@ -3,7 +3,7 @@ pub use event::EventRecord;
 use event::EventsMissingRecord;
 use id_self::IdSelfAccountRecord;
 use ids::{IdsFolloweesRecord, IdsFollowersRecord, IdsPersonaRecord, IdsUnfollowedRecord};
-use rostra_core::event::PersonaId;
+use rostra_core::event::{IrohNodeId, PersonaId};
 use rostra_core::id::{RestRostraId, RostraId, ShortRostraId};
 use rostra_core::{ShortEventId, Timestamp};
 
@@ -46,6 +46,7 @@ def_table! {
     /// to a full [`RostraId`] doesn't matter, to save space.
     ids_full: ShortRostraId => RestRostraId
 }
+def_table!(ids_nodes: (RostraId, IrohNodeId) => IrohNodeRecord);
 def_table!(ids_followees: (RostraId, RostraId) => IdsFolloweesRecord);
 def_table!(ids_followers: (RostraId, RostraId) => IdsFollowersRecord);
 def_table!(ids_unfollowed: (RostraId, RostraId) => IdsUnfollowedRecord);
@@ -91,4 +92,17 @@ pub struct IdSocialProfileRecord {
 )]
 pub struct SocialPostRecord {
     pub reply_count: u64,
+}
+
+#[derive(Debug, Encode, Decode, Clone)]
+pub struct IrohNodeRecord {
+    pub announcement_ts: Timestamp,
+    pub stats: IrohNodeStats,
+}
+#[derive(Debug, Encode, Decode, Clone, Default)]
+pub struct IrohNodeStats {
+    pub last_success: Option<Timestamp>,
+    pub last_failure: Option<Timestamp>,
+    pub success_count: u64,
+    pub fail_count: u64,
 }

@@ -19,8 +19,8 @@ use itertools::Itertools as _;
 use pkarr::PkarrClient;
 use rostra_client_db::{Database, DbResult, IdsFolloweesRecord, IdsFollowersRecord};
 use rostra_core::event::{
-    content_kind, Event, EventExt as _, EventKind, PersonaId, SignedEvent, VerifiedEvent,
-    VerifiedEventContent,
+    content_kind, Event, EventExt as _, EventKind, IrohNodeId, PersonaId, SignedEvent,
+    VerifiedEvent, VerifiedEventContent,
 };
 use rostra_core::id::{RostraId, RostraIdSecretKey, ToShort as _};
 use rostra_core::{ExternalEventId, ShortEventId};
@@ -32,7 +32,7 @@ use rostra_util_fmt::AsFmtOption as _;
 use snafu::{ensure, Location, OptionExt as _, ResultExt as _, Snafu};
 use tokio::sync::{broadcast, watch};
 use tokio::time::Instant;
-use tracing::debug;
+use tracing::{debug, info, warn};
 
 use super::{get_rrecord_typed, take_first_ok_some, RRECORD_HEAD_KEY, RRECORD_P2P_KEY};
 use crate::error::{
@@ -216,12 +216,43 @@ impl Client {
         self.id
     }
 
-    pub fn unlock_active(&self, id_secret: RostraIdSecretKey) -> ActivateResult<()> {
+    pub async fn unlock_active(&self, id_secret: RostraIdSecretKey) -> ActivateResult<()> {
         ensure!(self.id == id_secret.id(), SecretMismatchSnafu);
 
         if !self.active.swap(true, SeqCst) {
             self.start_pkarr_id_publisher(id_secret);
         }
+
+        if let Some(db) = self.storage_opt() {
+            let our_endpoint = IrohNodeId::from_bytes(*self.endpoint.node_id().as_bytes());
+            let endpoints = db.get_id_endpoints(self.rostra_id()).await;
+
+            if let Some((_existing_id, _existing_record)) = endpoints
+                .iter()
+                .find(|((_ts, endpoint), _)| endpoint == &our_endpoint)
+            {
+                debug!(target: LOG_TARGET, "Existing node announcement found");
+            } else {
+                if let Err(err) = self.publish_node_announcement(id_secret).await {
+                    warn!(target: LOG_TARGET, err = %err.fmt_compact(), "Could not publish node announcement");
+                } else {
+                    info!(target: LOG_TARGET, "Published node announcement");
+                }
+            }
+        }
+
+        Ok(())
+    }
+
+    pub async fn publish_node_announcement(&self, id_secret: RostraIdSecretKey) -> PostResult<()> {
+        self.publish_event(
+            id_secret,
+            content_kind::NodeAnnouncement::Iroh {
+                addr: IrohNodeId::from_bytes(*self.endpoint.node_id().as_bytes()),
+            },
+        )
+        .call()
+        .await?;
 
         Ok(())
     }

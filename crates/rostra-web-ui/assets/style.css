@@ -41,6 +41,11 @@ code {
   background-clip: white;
 }
 
+p {
+  margin-top: 1rem;
+  margin-bottom: 1rem;
+}
+
 /* Underline effect on hover */
 a::after {
   content: '';
@@ -269,11 +274,6 @@ a:active {
 }
 
 .m-postOverview__content {
-}
-
-.m-postOverview__content p {
-  margin-top: 5pt;
-  margin-bottom: 5pt;
 }
 
 .m-postOverview__buttonBar {

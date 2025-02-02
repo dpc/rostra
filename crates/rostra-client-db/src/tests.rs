@@ -167,7 +167,8 @@ async fn test_store_deleted_event() -> BoxedErrorResult<()> {
             (
                 event_b,
                 [
-                    Some(Some(event_c_id.into())),
+                    // Note: event_c also deleted `a`, so we're kind of testing impl details here
+                    Some(Some(event_b_id.into())),
                     Some(Some(event_d_id.into())),
                     Some(None),
                     Some(None),
@@ -175,8 +176,8 @@ async fn test_store_deleted_event() -> BoxedErrorResult<()> {
             ),
         ] {
             // verify idempotency, just for for the sake of it
+            info!(event_id = %event.event_id, "# Inserting");
             for _ in 0..2 {
-                info!(event_id = %event.event_id, "Inserting");
                 Database::insert_event_tx(
                     event,
                     &mut ids_full_tbl,

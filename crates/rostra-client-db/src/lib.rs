@@ -1,22 +1,27 @@
+mod id_nodes_ops;
 mod models;
+mod process_event_content_ops;
+mod process_event_ops;
 pub mod social;
 mod tables;
 mod tx_ops;
 
-use std::collections::{HashMap, HashSet};
+use std::borrow::Cow;
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::{io, ops, result};
 
+use event::EventContentState;
 pub use ids::{IdsFolloweesRecord, IdsFollowersRecord};
+use process_event_content_ops::ProcessEventError;
 use redb_bincode::{ReadTransaction, ReadableTable, WriteTransaction};
 use rostra_core::event::{
-    content_kind, EventContent, EventExt as _, EventKind, PersonaId, VerifiedEvent,
-    VerifiedEventContent,
+    content_kind, EventContent, IrohNodeId, PersonaId, VerifiedEvent, VerifiedEventContent,
 };
 use rostra_core::id::{RostraId, ToShort as _};
-use rostra_core::ShortEventId;
+use rostra_core::{ShortEventId, Timestamp};
 use rostra_util_error::{BoxedError, FmtCompact as _};
-use snafu::{Location, OptionExt as _, ResultExt as _, Snafu};
+use snafu::{Location, ResultExt as _, Snafu};
 use tokio::sync::{broadcast, watch};
 use tokio::task::JoinError;
 use tracing::{debug, info, instrument};
@@ -282,6 +287,7 @@ impl Database {
                 Database::get_event_content_tx(event_id, &events_content_table)?.and_then(
                     |content_state| match content_state {
                         crate::event::EventContentState::Present(b) => Some(b.into_owned()),
+                        crate::event::EventContentState::Invalid(b) => Some(b.into_owned()),
                         crate::event::EventContentState::Deleted { .. }
                         | crate::event::EventContentState::Pruned => None,
                     },
@@ -333,104 +339,6 @@ impl Database {
         .await
         .expect("Storage error")
     }
-
-    pub fn process_event_tx(
-        &self,
-        event: &VerifiedEvent,
-        tx: &WriteTransactionCtx,
-    ) -> DbResult<(InsertEventOutcome, ProcessEventState)> {
-        let mut events_tbl = tx.open_table(&events::TABLE)?;
-        let mut events_content_tbl = tx.open_table(&events_content::TABLE)?;
-        let mut events_missing_tbl = tx.open_table(&events_missing::TABLE)?;
-        let mut events_heads_tbl = tx.open_table(&events_heads::TABLE)?;
-        let mut events_by_time_tbl = tx.open_table(&events_by_time::TABLE)?;
-        let mut ids_full_tbl = tx.open_table(&ids_full::TABLE)?;
-
-        let insert_event_outcome = Database::insert_event_tx(
-            *event,
-            &mut ids_full_tbl,
-            &mut events_tbl,
-            &mut events_by_time_tbl,
-            &mut events_content_tbl,
-            &mut events_missing_tbl,
-            &mut events_heads_tbl,
-        )?;
-
-        if let InsertEventOutcome::Inserted {
-            was_missing,
-            is_deleted,
-            deleted_parent,
-            ref deleted_parent_content,
-            ..
-        } = insert_event_outcome
-        {
-            if is_deleted {
-                info!(target: LOG_TARGET,
-                    event_id = %event.event_id,
-                    author = %event.event.author,
-                    parent_prev = %event.event.parent_prev,
-                    parent_aux = %event.event.parent_aux,
-                    "Ignoring already deleted event"
-                );
-            } else {
-                info!(target: LOG_TARGET,
-                    event_id = %event.event_id,
-                    author = %event.event.author,
-                    parent_prev = %event.event.parent_prev,
-                    parent_aux = %event.event.parent_aux,
-                    "New event inserted"
-                );
-                if event.event.author == self.self_id {
-                    let mut events_self_table = tx.open_table(&crate::events_self::TABLE)?;
-                    Database::insert_self_event_id(event.event_id, &mut events_self_table)?;
-
-                    if !was_missing {
-                        info!(target: LOG_TARGET, event_id = %event.event_id, "New self head");
-
-                        let sender = self.self_head_updated.clone();
-                        let event_id = event.event_id.into();
-                        tx.on_commit(move || {
-                            let _ = sender.send(Some(event_id));
-                        });
-                    }
-                }
-            }
-
-            if let Some(content) = deleted_parent_content {
-                let event_id = deleted_parent.expect("Must have the deleted event id");
-                let event = events_tbl
-                    .get(&event_id)?
-                    .expect("Must have the event")
-                    .value();
-                let verified_event = VerifiedEvent::assume_verified_from_signed(event.signed);
-                let verified_event_content =
-                    VerifiedEventContent::assume_verified(verified_event, content.clone());
-                self.process_event_content_reverted_tx(&verified_event_content, tx)?;
-            }
-        }
-
-        let process_event_content_state =
-            if Self::MAX_CONTENT_LEN < u32::from(event.event.content_len) {
-                Database::prune_event_content_tx(event.event_id, &mut events_content_tbl)?;
-
-                ProcessEventState::Pruned
-            } else {
-                match insert_event_outcome {
-                    InsertEventOutcome::AlreadyPresent => ProcessEventState::Existing,
-                    InsertEventOutcome::Inserted { is_deleted, .. } => {
-                        if is_deleted {
-                            ProcessEventState::Deleted
-                        } else {
-                            // If the event was not there, and it wasn't deleted
-                            // it definitely does not have content yet.
-                            ProcessEventState::New
-                        }
-                    }
-                }
-            };
-        Ok((insert_event_outcome, process_event_content_state))
-    }
-
     /// Process event content
     ///
     /// Note: Must only be called for an event that was already processed
@@ -453,211 +361,47 @@ impl Database {
             &events_table
         )?);
 
-        let content_added =
-            if u32::from(event_content.event.event.content_len) < Self::MAX_CONTENT_LEN {
-                Database::insert_event_content_tx(event_content, &mut events_content_table)?
-            } else {
-                false
+        let can_insert = if u32::from(event_content.event.event.content_len) < Self::MAX_CONTENT_LEN
+        {
+            Database::can_insert_event_content_tx(event_content, &mut events_content_table)?
+        } else {
+            false
+        };
+
+        if can_insert {
+            match self.process_event_content_inserted_tx(event_content, tx) {
+                Ok(()) => {
+                    events_content_table.insert(
+                        &event_content.event_id().to_short(),
+                        &EventContentState::Present(Cow::Owned(event_content.content.clone())),
+                    )?;
+                }
+                Err(ProcessEventError::Invalid { source, location }) => {
+                    info!(
+                        target: LOG_TARGET,
+                        err = %source.as_ref().fmt_compact(),
+                        %location,
+                        "Invalid event content"
+                    );
+                    events_content_table.insert(
+                        &event_content.event_id().to_short(),
+                        &EventContentState::Invalid(Cow::Owned(event_content.content.clone())),
+                    )?;
+                }
+                Err(ProcessEventError::Db { source }) => {
+                    return Err(source);
+                }
             };
 
-        if content_added {
-            self.process_event_content_inserted_tx(event_content, tx)?;
+            // Valid or not, we notify about new thing
             tx.on_commit({
                 let new_content_tx = self.new_content_tx.clone();
                 let event_content = event_content.clone();
                 move || {
                     let _ = new_content_tx.send(event_content);
                 }
-            })
+            });
         }
-        Ok(())
-    }
-
-    /// After an event content was inserted process special kinds of event
-    /// content, like follows/unfollows
-    pub fn process_event_content_inserted_tx(
-        &self,
-        event_content: &VerifiedEventContent,
-        tx: &WriteTransactionCtx,
-    ) -> DbResult<()> {
-        let author = event_content.event.event.author;
-        #[allow(clippy::single_match)]
-        match event_content.event.event.kind {
-            EventKind::FOLLOW | EventKind::UNFOLLOW => {
-                let mut ids_followees_t = tx.open_table(&crate::ids_followees::TABLE)?;
-                let mut ids_followers_t = tx.open_table(&crate::ids_followers::TABLE)?;
-                let mut id_unfollowed_t = tx.open_table(&crate::ids_unfollowed::TABLE)?;
-
-                let (followee, updated) = match event_content.event.event.kind {
-                    EventKind::FOLLOW => {
-                        match event_content.content.deserialize_cbor::<content_kind::Follow>() {
-                            Ok(content) => (
-                                Some(content.followee),
-                                Database::insert_follow_tx(
-                                    author,
-                                    event_content.event.event.timestamp.into(),
-                                    content,
-                                    &mut ids_followees_t,
-                                    &mut ids_followers_t,
-                                    &mut id_unfollowed_t,
-                                )?,
-                            ),
-                            Err(err) => {
-                                debug!(target: LOG_TARGET, err = %err.fmt_compact(), "Ignoring malformed ContentFollow payload");
-                                (None, false)
-                            }
-                        }
-                    }
-                    EventKind::UNFOLLOW => {
-                        match event_content
-                            .content
-                            .deserialize_cbor::<content_kind::Unfollow>()
-                        {
-                            Ok(content) => (
-                                Some(content.followee),
-                                Database::insert_unfollow_tx(
-                                    author,
-                                    event_content.event.event.timestamp.into(),
-                                    content,
-                                    &mut ids_followees_t,
-                                    &mut ids_followers_t,
-                                    &mut id_unfollowed_t,
-                                )?,
-                            ),
-                            Err(err) => {
-                                debug!(target: LOG_TARGET, err = %err.fmt_compact(), "Ignoring malformed ContentUnfollow payload");
-                                (None, false)
-                            }
-                        }
-                    }
-                    _ => unreachable!(),
-                };
-
-                if updated {
-                    if author == self.self_id {
-                        let followees_sender = self.self_followees_updated.clone();
-                        let self_followees =
-                            Database::read_followees_tx(self.self_id, &ids_followees_t)?;
-                        tx.on_commit(move || {
-                            let _ = followees_sender.send(self_followees);
-                        });
-                    }
-
-                    if followee == Some(self.self_id) {
-                        let followers_sender = self.self_followers_updated.clone();
-                        let self_followers =
-                            Database::read_followers_tx(self.self_id, &ids_followers_t)?;
-
-                        tx.on_commit(move || {
-                            let _ = followers_sender.send(self_followers);
-                        });
-                    }
-                }
-            }
-            _ => match event_content.event.event.kind {
-                EventKind::SOCIAL_PROFILE_UPDATE => {
-                    if let Ok(content) = event_content
-                        .content
-                        .deserialize_cbor::<content_kind::SocialProfileUpdate>().inspect_err(|err| {
-                            debug!(target: LOG_TARGET, err = %err.fmt_compact(), "Ignoring malformed SocialProfileUpdate payload");
-                        }) {
-                            Database::insert_latest_value_tx(
-                                event_content.event.event.timestamp.into(),
-                                &author,
-                                IdSocialProfileRecord {
-                                    event_id: event_content.event.event_id.to_short(),
-                                    display_name: content.display_name,
-                                    bio: content.bio,
-                                    img_mime: content.img_mime,
-                                    img: content.img,
-                                },
-                                &mut tx.open_table(&crate::social_profiles::TABLE)?,
-                            )?;
-                    }
-                }
-                EventKind::SOCIAL_POST => {
-                    if let Ok(content) = event_content
-                        .content
-                        .deserialize_cbor::<content_kind::SocialPost>().inspect_err(|err| {
-                            debug!(target: LOG_TARGET, err = %err.fmt_compact(), "Ignoring malformed SocialComment payload");
-                        }) {
-
-                        let mut social_post_by_time_tbl= tx.open_table(&social_posts_by_time::TABLE)?;
-                        social_post_by_time_tbl.insert(&(event_content.timestamp(), event_content.event_id().to_short()), &())?;
-
-                        tx.on_commit({
-                            let event_content = event_content.clone();
-                            let content = content.clone();
-                            let new_posts_tx = self.new_posts_tx.clone();
-                            move || {
-                            let _ = new_posts_tx.send((event_content.to_owned(), content));
-                        }});
-
-                        if let Some(reply_to) = content.reply_to {
-                            let mut social_post_tbl= tx.open_table(&social_posts::TABLE)?;
-                            let mut social_post_reply_tbl = tx.open_table(&social_posts_reply::TABLE)?;
-
-                            social_post_reply_tbl.insert(
-                                &(reply_to.event_id(), event_content.event.event.timestamp.into(),event_content.event.event_id.to_short()
-                                ),
-                                &()
-                            )?;
-                            let mut social_post_record = social_post_tbl.get(
-                                &reply_to.event_id(),
-                            )?.map(|g| g.value()).unwrap_or_default();
-
-                            social_post_record.reply_count = social_post_record.reply_count.checked_add(1).context(OverflowSnafu)?;
-
-                            social_post_tbl.insert(&reply_to.event_id(), &social_post_record)?;
-                        }
-
-                    }
-                },
-                _ => {}
-            },
-        };
-
-        Ok(())
-    }
-
-    pub fn process_event_content_reverted_tx(
-        &self,
-        event_content: &VerifiedEventContent,
-        tx: &WriteTransactionCtx,
-    ) -> DbResult<()> {
-        #[allow(clippy::single_match)]
-        match event_content.event.event.kind {
-            EventKind::SOCIAL_POST => {
-                if let Ok(content) = event_content
-                    .content
-                    .deserialize_cbor::<content_kind::SocialPost>().inspect_err(|err| {
-                        debug!(target: LOG_TARGET, err = %err.fmt_compact(), "Ignoring malformed SocialComment payload");
-                    }) {
-
-                    let mut social_post_by_time_tbl = tx.open_table(&social_posts_by_time::TABLE)?;
-
-                    social_post_by_time_tbl.remove(&(event_content.timestamp(), event_content.event_id().to_short()))?;
-
-                    if let Some(reply_to) = content.reply_to {
-                        let mut social_reply_tbl = tx.open_table(&social_posts_reply::TABLE)?;
-                        let mut social_post_tbl = tx.open_table(&social_posts::TABLE)?;
-                        social_reply_tbl.remove(
-                        &(reply_to.event_id(), event_content.timestamp(), event_content.event_id().to_short())
-                        )?;
-
-                        let mut social_post_record = social_post_tbl.get(
-                            &reply_to.event_id(),
-                        )?.map(|g| g.value()).unwrap_or_default();
-
-                        social_post_record.reply_count = social_post_record.reply_count.checked_sub(1).context(OverflowSnafu)?;
-
-                        social_post_tbl.insert(&reply_to.event_id(), &social_post_record)?;
-                    }
-                }
-            }
-            _ => {}
-        }
-
         Ok(())
     }
 
@@ -777,6 +521,18 @@ impl Database {
         .await
         .expect("Database panic")
     }
+    pub async fn get_id_endpoints(
+        &self,
+        id: RostraId,
+    ) -> BTreeMap<(Timestamp, IrohNodeId), IrohNodeRecord> {
+        self.write_with(|tx| {
+            let mut table = tx.open_table(&ids_nodes::TABLE)?;
+
+            Self::get_id_endpoints_tx(id, &mut table)
+        })
+        .await
+        .expect("Database panic")
+    }
 }
 
 fn get_first_in_range<K, V>(
@@ -813,24 +569,32 @@ pub enum InsertEventOutcome {
     /// An event already existed, so it changed nothing
     AlreadyPresent,
     Inserted {
-        /// An event already had a parent reporting its existence.
+        /// An event already had a child reporting its existence.
         ///
-        /// This also implies that the event is not considered a "head event"
-        /// anymore.
+        /// This also implies that the event can't be a "head event"
+        /// as we already have a child of it.
         was_missing: bool,
         /// This event was already marked as deleted by some processed children
-        /// event
+        /// event.
+        ///
+        /// This also implies that the event can't be a "head event"
+        /// as we already have a child of it.
         is_deleted: bool,
-        /// An existing parent event had its content marked as deleted.
+        /// An existing parent event had its content marked as deleted by this
+        /// event.
         ///
         /// Note, if the parent event was marked for deletion, but it was not
         /// processed yet, this will not be set, and instead `is_deleted` will
         /// be set to true, when the deleted parent is processed.
         deleted_parent: Option<ShortEventId>,
-        deleted_parent_content: Option<EventContent>,
+        /// Parent content to be reverted.
+        ///
+        /// If Some - deletion of the `deleted_parent` is cusing revertion of
+        /// this content, which should be processed.
+        reverted_parent_content: Option<EventContent>,
 
-        /// Ids of parents storage was not aware of yet, so they are now marked
-        /// as "missing"
+        /// Ids of parents we don't have yet, so they are now marked
+        /// as "missing".
         missing_parents: Vec<ShortEventId>,
     },
 }
@@ -838,19 +602,12 @@ pub enum InsertEventOutcome {
 impl InsertEventOutcome {
     fn validate(self) -> Self {
         if let InsertEventOutcome::Inserted {
-            was_missing,
-            is_deleted,
             deleted_parent,
-            deleted_parent_content,
+            reverted_parent_content,
             ..
         } = &self
         {
-            if *is_deleted {
-                // Can't be missing if it was already deleted
-                assert!(!was_missing);
-            }
-
-            if deleted_parent_content.is_some() {
+            if reverted_parent_content.is_some() {
                 assert!(deleted_parent.is_some());
             }
         }

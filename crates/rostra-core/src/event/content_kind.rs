@@ -1,8 +1,12 @@
 use std::collections::BTreeSet;
+use std::str::FromStr as _;
 
 use super::{EventContent, EventKind, PersonaId};
 use crate::id::RostraId;
-use crate::{ExternalEventId, ShortEventId};
+use crate::{
+    array_type_define, array_type_impl_base32_str, array_type_impl_serde, ExternalEventId,
+    ShortEventId,
+};
 
 /// Extension trait for deserializing content
 #[cfg(feature = "serde")]
@@ -19,6 +23,7 @@ pub trait EventContentKind: ::serde::Serialize + ::serde::de::DeserializeOwned {
     ///   for external APIs and such.
     fn serialize_cbor(&self) -> EventContent {
         let mut buf = Vec::with_capacity(128);
+        // cbor4ii::serde::to_writer(&mut buf, self).expect("Can't fail");
         ciborium::into_writer(self, &mut buf).expect("Can't fail");
         EventContent::new(buf)
     }
@@ -42,6 +47,83 @@ impl EventContentKind for Follow {
 pub struct Unfollow {
     #[serde(rename = "i")]
     pub followee: RostraId,
+}
+
+impl EventContentKind for Unfollow {
+    const KIND: EventKind = EventKind::UNFOLLOW;
+}
+
+array_type_define!(
+    /// To avoid importing whole iroh to `rostra-core` we define our own type
+    /// for `iroh::NodeAddr`
+    #[derive(PartialEq, Eq, PartialOrd, Ord)]
+    struct IrohNodeId, 32
+);
+array_type_impl_serde!(struct IrohNodeId, 32);
+array_type_impl_base32_str!(IrohNodeId);
+
+#[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
+#[cfg_attr(feature = "serde", derive(::serde::Serialize))]
+#[cfg_attr(feature = "serde", serde(tag = "t"))]
+pub enum NodeAnnouncement {
+    #[serde(rename = "i")]
+    Iroh {
+        #[serde(rename = "a")]
+        addr: IrohNodeId,
+    },
+}
+
+impl EventContentKind for NodeAnnouncement {
+    const KIND: EventKind = EventKind::NODE_ANNOUNCEMENT;
+}
+
+// Workaround https://github.com/serde-rs/serde/issues/2704
+#[cfg(feature = "serde")]
+impl<'de> ::serde::de::Deserialize<'de> for NodeAnnouncement {
+    fn deserialize<D>(d: D) -> Result<Self, D::Error>
+    where
+        D: ::serde::Deserializer<'de>,
+    {
+        #[derive(::serde::Deserialize)]
+        struct NodeAnnouncementRaw<T> {
+            #[serde(rename = "t")]
+            t: String,
+            #[serde(rename = "a")]
+            addr: Option<T>,
+        }
+
+        let addr = if d.is_human_readable() {
+            let raw = NodeAnnouncementRaw::<String>::deserialize(d)?;
+            if raw.t != "i" {
+                return Err(::serde::de::Error::custom(format!(
+                    "Unknown variant: {}",
+                    raw.t
+                )));
+            }
+
+            let Some(addr) = raw.addr else {
+                return Err(::serde::de::Error::custom("Missing field: a"));
+            };
+            IrohNodeId::from_str(&addr)
+                .map_err(|e| ::serde::de::Error::custom(format!("Decoding a error: {}", e)))?
+        } else {
+            let raw = NodeAnnouncementRaw::<[u8; 32]>::deserialize(d)?;
+            if raw.t != "i" {
+                return Err(::serde::de::Error::custom(format!(
+                    "Unknown variant: {}",
+                    raw.t
+                )));
+            }
+
+            let Some(addr) = raw.addr else {
+                return Err(::serde::de::Error::custom("Missing field: a"));
+            };
+
+            IrohNodeId::from_bytes(addr)
+        };
+
+        Ok(NodeAnnouncement::Iroh { addr })
+    }
 }
 
 #[cfg_attr(feature = "serde", derive(::serde::Serialize, ::serde::Deserialize))]
@@ -103,3 +185,6 @@ pub struct SocialProfileUpdate {
 impl EventContentKind for SocialProfileUpdate {
     const KIND: EventKind = EventKind::SOCIAL_PROFILE_UPDATE;
 }
+
+#[cfg(test)]
+mod tests;

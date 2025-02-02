@@ -21,7 +21,7 @@ pub use verified_event::*;
 
 use crate::id::RostraId;
 use crate::{
-    define_array_type, ContentHash, MsgLen, NullableShortEventId, ShortEventId, Timestamp,
+    array_type_define, ContentHash, MsgLen, NullableShortEventId, ShortEventId, Timestamp,
     TimestampFixed,
 };
 
@@ -229,7 +229,7 @@ impl From<VerifiedEvent> for SignedEvent {
     }
 }
 
-define_array_type!(
+array_type_define!(
     #[derive(PartialEq, Eq)]
     struct EventSignature,
     64
@@ -251,6 +251,8 @@ impl EventKind {
     pub const UNFOLLOW: Self = EventKind::from_u16(0x11);
     /// Control: Persona update
     pub const PERSONA_UPDATE: Self = EventKind::from_u16(0x12);
+    /// Control: Node Announcement
+    pub const NODE_ANNOUNCEMENT: Self = EventKind::from_u16(0x13);
 
     /// Social Post, backbone of the social network
     pub const SOCIAL_POST: Self = EventKind::from_u16(0x20);
