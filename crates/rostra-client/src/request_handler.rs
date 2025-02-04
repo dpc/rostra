@@ -18,7 +18,7 @@ use tokio::sync::watch;
 use tracing::{debug, info, instrument};
 
 use crate::client::Client;
-use crate::{ClientHandle, ClientRefError, ClientStorageError, ClientStorageSnafu};
+use crate::{ClientHandle, ClientRefError, ClientRefSnafu};
 
 const LOG_TARGET: &str = "rostra::req_handler";
 
@@ -57,10 +57,6 @@ pub enum IncomingConnectionError {
         location: Location,
     },
     #[snafu(transparent)]
-    ClientStorage {
-        source: ClientStorageError,
-    },
-    #[snafu(transparent)]
     ClientRefError {
         source: ClientRefError,
     },
@@ -81,9 +77,7 @@ impl RequestHandler {
             client: client.handle(),
             endpoint,
             our_id: client.rostra_id(),
-            self_followees_rx: client
-                .self_followees_subscribe()
-                .expect("Can't start folowee checker without storage"),
+            self_followees_rx: client.self_followees_subscribe(),
         }
         .into()
     }
@@ -240,7 +234,7 @@ impl RequestHandler {
 
             client
                 .store_event_with_content(event.event_id, &verified_content)
-                .await?;
+                .await;
         }
 
         Connection::write_success_return_code(&mut send)
@@ -260,7 +254,7 @@ impl RequestHandler {
             GetEventRequest::decode_whole::<MAX_REQUEST_SIZE>(&req_msg).context(DecodingSnafu)?;
 
         let client = self.client.client_ref()?;
-        let storage = client.storage()?;
+        let storage = client.db();
 
         let event = storage.get_event(event_id).await;
 
@@ -286,9 +280,9 @@ impl RequestHandler {
                 .context(DecodingSnafu)?;
 
         let client = self.client.client_ref()?;
-        let storage = client.storage()?;
+        let db = client.db();
 
-        let content = storage.get_event_content(event_id).await;
+        let content = db.get_event_content(event_id).await;
 
         Connection::write_success_return_code(&mut send)
             .await
@@ -299,7 +293,7 @@ impl RequestHandler {
             .context(RpcSnafu)?;
 
         if let Some(content) = content {
-            let event = storage
+            let event = db
                 .get_event(event_id)
                 .await
                 .expect("Must have event if we have content");
@@ -326,11 +320,11 @@ impl RequestHandler {
             .context(RpcSnafu)?;
 
         // Note: do not keep storage around
-        let mut head_updated = self.client.storage()??.self_head_subscribe();
+        let mut head_updated = self.client.db()?.self_head_subscribe();
 
         let mut heads;
         loop {
-            heads = self.client.storage()??.get_heads_self().await?;
+            heads = self.client.db()?.get_heads_self().await?;
 
             if heads.contains(&event_id) {
                 break;
@@ -338,7 +332,7 @@ impl RequestHandler {
             head_updated
                 .changed()
                 .await
-                .map_err(|_| ClientStorageSnafu.build())?;
+                .map_err(|_| ClientRefSnafu.build())?;
         }
 
         Connection::write_message(

@@ -160,15 +160,28 @@ impl Database {
         Ok(data_dir.join(format!("{}.redb", self_id)))
     }
 
-    #[instrument(skip_all)]
+    pub async fn new_in_memory(self_id: RostraId) -> DbResult<Database> {
+        let inner = redb::Database::builder()
+            .create_with_backend(redb::backends::InMemoryBackend::new())
+            .context(DatabaseSnafu)?;
+        Self::open_inner(inner, self_id).await
+    }
+
     pub async fn open(path: impl Into<PathBuf>, self_id: RostraId) -> DbResult<Database> {
         let path = path.into();
         debug!(target: LOG_TARGET, path = %path.display(), "Opening database");
-        let inner = tokio::task::spawn_blocking(move || redb_bincode::Database::create(path))
+
+        let inner = tokio::task::spawn_blocking(move || redb::Database::create(path))
             .await
             .context(JoinSnafu)?
             .context(DatabaseSnafu)?;
 
+        Self::open_inner(inner, self_id).await
+    }
+
+    #[instrument(skip_all)]
+    async fn open_inner(inner: redb::Database, self_id: RostraId) -> DbResult<Database> {
+        let inner = redb_bincode::Database::from(inner);
         Self::write_with_inner(&inner, |tx| {
             Self::init_tables_tx(tx)?;
             Self::verify_self_tx(self_id, &mut tx.open_table(&ids_self::TABLE)?)?;

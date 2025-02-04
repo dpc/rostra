@@ -52,17 +52,15 @@ impl UiState {
         id: RostraId,
         client: &ClientRef<'_>,
     ) -> RequestResult<IdSocialProfileRecord> {
-        let existing = client
-            .storage()?
-            .get_social_profile(id)
-            .await
-            .unwrap_or_else(|| rostra_client_db::IdSocialProfileRecord {
+        let existing = client.db().get_social_profile(id).await.unwrap_or_else(|| {
+            rostra_client_db::IdSocialProfileRecord {
                 event_id: ShortEventId::ZERO,
                 display_name: id.to_short().to_string(),
                 bio: "".into(),
                 img_mime: "".into(),
                 img: vec![],
-            });
+            }
+        });
         Ok(existing)
     }
 

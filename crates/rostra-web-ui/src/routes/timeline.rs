@@ -1,4 +1,3 @@
-use std::future::pending;
 use std::str::FromStr as _;
 use std::time::Duration;
 
@@ -76,10 +75,7 @@ impl UiState {
     async fn handle_get_updates(&self, mut ws: WebSocket, user: &UserSession) -> RequestResult<()> {
         let client = self.client(user.id()).await?;
         let self_id = client.client_ref()?.rostra_id();
-        let Some(mut new_posts) = client.client_ref()?.new_posts_subscribe() else {
-            pending::<()>().await;
-            return Ok(());
-        };
+        let mut new_posts = client.client_ref()?.new_posts_subscribe();
 
         let mut count = 0;
 
@@ -162,7 +158,7 @@ impl UiState {
         let comments = self
             .client(user.id())
             .await?
-            .storage()??
+            .db()?
             .paginate_social_post_comments_rev(post_id, None, 100)
             .await;
 
@@ -220,14 +216,14 @@ impl UiState {
         let posts = self
             .client(user.id())
             .await?
-            .storage()??
+            .db()?
             .paginate_social_posts_rev(pagination, 20)
             .await;
 
         let parents = self
             .client(user.id())
             .await?
-            .storage()??
+            .db()?
             .get_posts_by_id(
                 posts
                     .iter()

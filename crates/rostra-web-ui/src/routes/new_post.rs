@@ -151,7 +151,7 @@ pub async fn get_reply_to(
 
     let display_name = if let Some(reply_to) = form.reply_to {
         client_ref
-            .storage()?
+            .db()
             .get_social_profile(reply_to.rostra_id())
             .await
             .map(|p| p.display_name)

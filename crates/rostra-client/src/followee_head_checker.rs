@@ -28,13 +28,9 @@ impl FolloweeHeadChecker {
         debug!(target: LOG_TARGET, "Starting followee head checking task" );
         Self {
             client: client.handle(),
-            db: client
-                .storage_opt()
-                .expect("Must start followee head checker only on a client with storage"),
+            db: client.db().to_owned(),
 
-            followee_updated: client
-                .self_followees_subscribe()
-                .expect("Can't start folowee checker without storage"),
+            followee_updated: client.self_followees_subscribe(),
             check_for_updates_rx: client.check_for_updates_tx_subscribe(),
         }
     }
@@ -65,10 +61,9 @@ impl FolloweeHeadChecker {
                 }
             }
 
-            let Ok(storage) = self.client.storage() else {
+            let Ok(storage) = self.client.db() else {
                 break;
             };
-            let storage = storage.expect("Must no run head checker without storage");
 
             let self_followees = storage.get_self_followees().await;
 
@@ -130,7 +125,7 @@ impl FolloweeHeadChecker {
     ) -> WhateverResult<()> {
         let mut events = BinaryHeap::from([(0, head)]);
 
-        let storage = client.storage().whatever_context("No storage")?;
+        let storage = client.db();
 
         let conn = client
             .connect(id)

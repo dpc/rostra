@@ -1,7 +1,7 @@
 use axum::http::{HeaderName, HeaderValue, StatusCode};
 use axum::response::{IntoResponse, Redirect, Response};
 use rostra_client::error::PostError;
-use rostra_client::{ClientRefError, ClientStorageError};
+use rostra_client::ClientRefError;
 use rostra_util_error::BoxedError;
 use serde::Serialize;
 use snafu::Snafu;
@@ -40,9 +40,6 @@ pub enum RequestError {
     Client { source: ClientRefError },
     #[snafu(transparent)]
     StateClient { source: UiStateClientError },
-    // TODO: shouldn't really exist here
-    #[snafu(transparent)]
-    ClientStorage { source: ClientStorageError },
     #[snafu(transparent)]
     PostError { source: PostError },
     #[snafu(visibility(pub(crate)))]

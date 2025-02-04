@@ -27,16 +27,10 @@ impl HeadUpdateBroadcaster {
         debug!(target: LOG_TARGET, "Starting followee head checking task" );
         Self {
             client: client.handle(),
-            db: client
-                .storage_opt()
-                .expect("Must start followee head checker only on a client with storage"),
+            db: client.db().to_owned(),
 
-            self_followers_rx: client
-                .self_followers_subscribe()
-                .expect("Can't start folowee checker without storage"),
-            self_head_rx: client
-                .self_head_subscribe()
-                .expect("Can't start folowee checker without storage"),
+            self_followers_rx: client.self_followers_subscribe(),
+            self_head_rx: client.self_head_subscribe(),
         }
     }
 

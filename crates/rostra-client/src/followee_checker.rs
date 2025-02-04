@@ -18,9 +18,7 @@ impl FolloweeChecker {
         debug!(target: LOG_TARGET, "Starting followee checking task" );
         Self {
             client: client.handle(),
-            self_followees_updated: client
-                .self_followees_subscribe()
-                .expect("Can't start folowee checker without storage"),
+            self_followees_updated: client.self_followees_subscribe(),
         }
     }
 
@@ -30,13 +28,10 @@ impl FolloweeChecker {
         let mut interval = tokio::time::interval(Duration::from_secs(30));
 
         let mut self_followees = {
-            let Ok(storage) = self.client.storage() else {
+            let Ok(storage) = self.client.db() else {
                 return;
             };
-            storage
-                .expect("Must not start follower checker without storage")
-                .get_self_followees()
-                .await
+            storage.get_self_followees().await
         };
 
         loop {
@@ -49,13 +44,12 @@ impl FolloweeChecker {
                         break;
                     }
 
-                    let Ok(storage) = self.client.storage() else {
+                    let Ok(storage) = self.client.db() else {
                         break;
                     };
 
 
                     let self_followees_new = storage
-                        .expect("Must not start follower checker without storage")
                         .get_self_followees()
                         .await;
 

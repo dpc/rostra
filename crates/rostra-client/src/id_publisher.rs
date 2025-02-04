@@ -1,4 +1,3 @@
-use std::future;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
@@ -27,7 +26,7 @@ pub struct PkarrIdPublisher {
     pkarr_client: Arc<pkarr::PkarrClientAsync>,
     pkarr_client_relay: Arc<pkarr::PkarrRelayClientAsync>,
     keypair: pkarr::Keypair,
-    self_head_rx: Option<watch::Receiver<Option<ShortEventId>>>,
+    self_head_rx: watch::Receiver<Option<ShortEventId>>,
 }
 
 impl PkarrIdPublisher {
@@ -101,13 +100,7 @@ impl PkarrIdPublisher {
                 // either periodically
                 _ = interval.tick() => (),
                 // or when our head changes
-                res = async {
-                    if let Some(rx) = self.self_head_rx.as_mut() {
-                        rx.changed().await
-                    } else {
-                        future::pending().await
-                    }
-                }  => {
+                res = self.self_head_rx.changed() => {
                     if res.is_err() {
                         break;
                     }

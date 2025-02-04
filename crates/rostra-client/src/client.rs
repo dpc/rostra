@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 use std::marker::PhantomData;
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
+use std::ops;
 use std::option::Option;
 use std::path::Path;
 use std::str::FromStr as _;
@@ -8,7 +9,6 @@ use std::sync::atomic::AtomicBool;
 use std::sync::atomic::Ordering::SeqCst;
 use std::sync::{Arc, Weak};
 use std::time::Duration;
-use std::{ops, result};
 
 use backon::Retryable as _;
 use iroh::discovery::dns::DnsDiscovery;
@@ -85,16 +85,11 @@ impl ClientHandle {
             r: PhantomData,
         })
     }
-    pub fn storage_opt(&self) -> ClientRefResult<Option<Arc<Database>>> {
+
+    pub fn db(&self) -> ClientRefResult<Arc<Database>> {
         let client = self.0.upgrade().context(ClientRefSnafu)?;
 
-        Ok(client.storage_opt())
-    }
-
-    pub fn storage(&self) -> ClientRefResult<ClientStorageResult<Arc<Database>>> {
-        let client = self.0.upgrade().context(ClientRefSnafu)?;
-
-        Ok(client.storage())
+        Ok(client.db().clone())
     }
 }
 
@@ -132,7 +127,7 @@ pub struct Client {
     /// Our main identity (pkarr/ed25519_dalek keypair)
     pub(crate) id: RostraId,
 
-    db: Option<Arc<Database>>,
+    db: Arc<Database>,
 
     /// Our iroh-net endpoint
     ///
@@ -146,16 +141,6 @@ pub struct Client {
 
     active: AtomicBool,
 }
-
-#[derive(Debug, Snafu)]
-#[snafu(display("Client storage not available"))]
-#[snafu(visibility(pub))]
-pub struct ClientStorageError {
-    #[snafu(implicit)]
-    location: Location,
-}
-
-pub type ClientStorageResult<T> = result::Result<T, ClientStorageError>;
 
 #[bon::bon]
 impl Client {
@@ -185,12 +170,18 @@ impl Client {
         let endpoint = Self::make_iroh_endpoint(db.as_ref().map(|s| s.iroh_secret())).await?;
         let (check_for_updates_tx, _) = watch::channel(());
 
+        let db = if let Some(db) = db {
+            db
+        } else {
+            Database::new_in_memory(id).await?
+        }
+        .into();
         let client = Arc::new_cyclic(|client| Self {
             handle: client.clone().into(),
             endpoint,
             pkarr_client,
             pkarr_client_relay,
-            db: db.map(Into::into),
+            db,
             id,
             check_for_updates_tx,
             active: AtomicBool::new(false),
@@ -223,21 +214,21 @@ impl Client {
             self.start_pkarr_id_publisher(id_secret);
         }
 
-        if let Some(db) = self.storage_opt() {
-            let our_endpoint = IrohNodeId::from_bytes(*self.endpoint.node_id().as_bytes());
-            let endpoints = db.get_id_endpoints(self.rostra_id()).await;
+        let db = &self.db;
 
-            if let Some((_existing_id, _existing_record)) = endpoints
-                .iter()
-                .find(|((_ts, endpoint), _)| endpoint == &our_endpoint)
-            {
-                debug!(target: LOG_TARGET, "Existing node announcement found");
+        let our_endpoint = IrohNodeId::from_bytes(*self.endpoint.node_id().as_bytes());
+        let endpoints = db.get_id_endpoints(self.rostra_id()).await;
+
+        if let Some((_existing_id, _existing_record)) = endpoints
+            .iter()
+            .find(|((_ts, endpoint), _)| endpoint == &our_endpoint)
+        {
+            debug!(target: LOG_TARGET, "Existing node announcement found");
+        } else {
+            if let Err(err) = self.publish_node_announcement(id_secret).await {
+                warn!(target: LOG_TARGET, err = %err.fmt_compact(), "Could not publish node announcement");
             } else {
-                if let Err(err) = self.publish_node_announcement(id_secret).await {
-                    warn!(target: LOG_TARGET, err = %err.fmt_compact(), "Could not publish node announcement");
-                } else {
-                    info!(target: LOG_TARGET, "Published node announcement");
-                }
+                info!(target: LOG_TARGET, "Published node announcement");
             }
         }
 
@@ -371,42 +362,30 @@ impl Client {
         self.endpoint.node_addr().await.map(sanitize_node_addr)
     }
 
-    pub fn self_head_subscribe(&self) -> Option<watch::Receiver<Option<ShortEventId>>> {
-        self.db
-            .as_ref()
-            .map(|storage| storage.self_head_subscribe())
+    pub fn self_head_subscribe(&self) -> watch::Receiver<Option<ShortEventId>> {
+        self.db.self_head_subscribe()
     }
 
-    pub fn new_content_subscribe(&self) -> Option<broadcast::Receiver<VerifiedEventContent>> {
-        self.db
-            .as_ref()
-            .map(|storage| storage.new_content_subscribe())
+    pub fn new_content_subscribe(&self) -> broadcast::Receiver<VerifiedEventContent> {
+        self.db.new_content_subscribe()
     }
 
     pub fn new_posts_subscribe(
         &self,
-    ) -> Option<broadcast::Receiver<(VerifiedEventContent, content_kind::SocialPost)>> {
-        self.db
-            .as_ref()
-            .map(|storage| storage.new_posts_subscribe())
+    ) -> broadcast::Receiver<(VerifiedEventContent, content_kind::SocialPost)> {
+        self.db.new_posts_subscribe()
     }
 
     pub fn check_for_updates_tx_subscribe(&self) -> watch::Receiver<()> {
         self.check_for_updates_tx.subscribe()
     }
 
-    pub fn storage_opt(&self) -> Option<Arc<Database>> {
-        self.db.clone()
-    }
-
-    pub fn storage(&self) -> ClientStorageResult<Arc<Database>> {
-        self.db.clone().context(ClientStorageSnafu)
+    pub fn db(&self) -> &Arc<Database> {
+        &self.db
     }
 
     pub async fn events_head(&self) -> Option<ShortEventId> {
-        let storage = self.db.as_ref()?;
-
-        storage.get_self_current_head().await
+        self.db.get_self_current_head().await
     }
 
     pub fn handle(&self) -> ClientHandle {
@@ -467,9 +446,8 @@ impl Client {
         &self,
         _event_id: impl Into<ShortEventId>,
         content: &VerifiedEventContent,
-    ) -> ClientStorageResult<()> {
-        self.storage()?.process_event_with_content(content).await;
-        Ok(())
+    ) {
+        self.db.process_event_with_content(content).await;
     }
 
     pub async fn store_event_too_large(
@@ -514,15 +492,11 @@ impl Client {
     where
         C: content_kind::EventContentKind,
     {
-        let storage = self
-            .storage()
-            .expect("TODO: Implement fallback for lack of storage");
-
-        let current_head = storage.get_self_current_head().await;
+        let current_head = self.db.get_self_current_head().await;
         let aux_event = if replace.is_some() {
             None
         } else {
-            storage.get_self_random_eventid().await
+            self.db.get_self_random_eventid().await
         };
 
         let content = content.serialize_cbor();
@@ -542,7 +516,8 @@ impl Client {
         let verified_event_content =
             rostra_core::event::VerifiedEventContent::verify(verified_event, content)
                 .expect("Can't fail to verify self-created content");
-        let _ = storage
+        let _ = self
+            .db
             .process_event_with_content(&verified_event_content)
             .await;
 
@@ -572,14 +547,11 @@ impl Client {
         display_name: String,
         bio: String,
     ) -> PostResult<VerifiedEvent> {
-        let existing = if let Ok(storage) = self.storage() {
-            storage
-                .get_social_profile(self.rostra_id())
-                .await
-                .map(|r| r.event_id)
-        } else {
-            None
-        };
+        let existing = self
+            .db
+            .get_social_profile(self.rostra_id())
+            .await
+            .map(|r| r.event_id);
         self.publish_event(
             id_secret,
             content_kind::SocialProfileUpdate {
@@ -699,16 +671,13 @@ impl Client {
 
     pub fn self_followees_subscribe(
         &self,
-    ) -> Option<watch::Receiver<HashMap<RostraId, IdsFolloweesRecord>>> {
-        self.db
-            .as_ref()
-            .map(|storage| storage.self_followees_subscribe())
+    ) -> watch::Receiver<HashMap<RostraId, IdsFolloweesRecord>> {
+        self.db.self_followees_subscribe()
     }
+
     pub fn self_followers_subscribe(
         &self,
-    ) -> Option<watch::Receiver<HashMap<RostraId, IdsFollowersRecord>>> {
-        self.db
-            .as_ref()
-            .map(|storage| storage.self_followers_subscribe())
+    ) -> watch::Receiver<HashMap<RostraId, IdsFollowersRecord>> {
+        self.db.self_followers_subscribe()
     }
 }
