@@ -105,6 +105,8 @@ brotli = { opt-level = 2 }
 brotli-decompressor = { opt-level = 2 }
 data-encoding = { opt-level = 2 }
 tokio = { opt-level = 2 }
+serde = { opt-level = 2 }
+serde_derive = { opt-level = 3 }
 
 [profile.ci]
 inherits = "dev"
