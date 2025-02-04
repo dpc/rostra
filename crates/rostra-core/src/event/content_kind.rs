@@ -107,7 +107,7 @@ impl<'de> ::serde::de::Deserialize<'de> for NodeAnnouncement {
             IrohNodeId::from_str(&addr)
                 .map_err(|e| ::serde::de::Error::custom(format!("Decoding a error: {}", e)))?
         } else {
-            let raw = NodeAnnouncementRaw::<[u8; 32]>::deserialize(d)?;
+            let raw = NodeAnnouncementRaw::<serde_bytes::ByteArray<32>>::deserialize(d)?;
             if raw.t != "i" {
                 return Err(::serde::de::Error::custom(format!(
                     "Unknown variant: {}",
@@ -119,7 +119,7 @@ impl<'de> ::serde::de::Deserialize<'de> for NodeAnnouncement {
                 return Err(::serde::de::Error::custom("Missing field: a"));
             };
 
-            IrohNodeId::from_bytes(addr)
+            IrohNodeId::from_bytes(addr.into_array())
         };
 
         Ok(NodeAnnouncement::Iroh { addr })

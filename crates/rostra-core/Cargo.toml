@@ -15,6 +15,7 @@ serde = [
   # "dep:cbor4ii",
   "dep:ciborium",
   "dep:bip39",
+  "dep:serde_bytes",
   # "cbor4ii/serde1",
   # "cbor4ii/use_std",
 ]
@@ -31,6 +32,7 @@ data-encoding = { workspace = true }
 ed25519-dalek = { workspace = true, optional = true }
 rand = { workspace = true, optional = true }
 serde = { workspace = true, optional = true }
+serde_bytes = { workspace = true, optional = true }
 ciborium = { workspace = true, optional = true }
 # cbor4ii = { workspace = true, optional = true, feature = ["serde1"] }
 snafu = { workspace = true }

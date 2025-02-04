@@ -3800,6 +3800,7 @@ dependencies = [
  "pkarr",
  "rand",
  "serde",
+ "serde_bytes",
  "serde_json",
  "snafu",
  "test-log",

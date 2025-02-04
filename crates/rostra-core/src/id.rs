@@ -15,7 +15,7 @@ mod pkarr;
 mod serde;
 
 array_type_define_public!(struct RostraId, 32);
-array_type_impl_serde!(struct RostraId,  32);
+array_type_impl_serde!(struct RostraId, 32);
 impl RostraId {
     pub const BECH32_HRP: bech32::Hrp = bech32::Hrp::parse_unchecked("rstr");
 }
