@@ -24,7 +24,7 @@ use rostra_core::event::{
 };
 use rostra_core::id::{RostraId, RostraIdSecretKey, ToShort as _};
 use rostra_core::{ExternalEventId, ShortEventId};
-use rostra_p2p::connection::{Connection, FeedEventRequest, FeedEventResponse};
+use rostra_p2p::connection::{Connection, FeedEventRequest, FeedEventResponse, PingRequest};
 use rostra_p2p::RpcError;
 use rostra_p2p_api::ROSTRA_P2P_V0_ALPN;
 use rostra_util_error::FmtCompact as _;
@@ -249,6 +249,50 @@ impl Client {
     }
 
     pub async fn connect(&self, id: RostraId) -> ConnectResult<Connection> {
+        // TODO: maintain connection attempt stats and use them to prioritize best
+        // endpoints
+        for ((_ts, endpoint), _stats) in self.db.get_id_endpoints(id).await.into_iter().rev() {
+            let Ok(endpoint) = iroh::NodeId::from_bytes(&endpoint.to_bytes()) else {
+                debug!(target: LOG_TARGET, %id, "Invalid iroh id for rostra id found");
+                continue;
+            };
+
+            if endpoint == self.endpoint.node_id() {
+                // If we are trying to connect to our own Id, we want to connect (if possible)
+                // with some other node.
+                continue;
+            }
+
+            let conn = match self.endpoint.connect(endpoint, ROSTRA_P2P_V0_ALPN).await {
+                Ok(conn) => Connection::from(conn),
+                Err(err) => {
+                    debug!(
+                        target: LOG_TARGET,
+                        %id,
+                        %endpoint,
+                        err = %format!("{err:#}"),
+                        "Failed to connect to a know iroh endpoint"
+                    );
+                    continue;
+                }
+            };
+
+            // Make a ping request, just to make sure we can talk
+            match conn.make_rpc(&PingRequest(0)).await {
+                Ok(_) => return Ok(conn),
+                Err(err) => {
+                    debug!(
+                        target: LOG_TARGET,
+                        %id,
+                        %endpoint,
+                        err = %format!("{err:#}"),
+                        "Failed to ping a know iroh endpoint"
+                    );
+                    continue;
+                }
+            }
+        }
+
         let ticket = self.resolve_id_ticket(id).await.context(ResolveSnafu)?;
 
         let node_addr = NodeAddr::from(ticket);

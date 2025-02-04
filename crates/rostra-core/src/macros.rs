@@ -21,6 +21,10 @@ macro_rules! array_type_define {
             pub fn from_bytes(bytes: [u8; $n]) -> Self {
                 Self(bytes)
             }
+
+            pub fn to_bytes(self) -> [u8; $n] {
+                self.0
+            }
         }
     }
 }
