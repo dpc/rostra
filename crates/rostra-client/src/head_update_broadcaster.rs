@@ -18,6 +18,7 @@ const LOG_TARGET: &str = "rostra::head_broadcaster";
 pub struct HeadUpdateBroadcaster {
     client: crate::client::ClientHandle,
     db: Arc<Database>,
+    self_id: RostraId,
     self_followers_rx: watch::Receiver<HashMap<RostraId, IdsFollowersRecord>>,
     self_head_rx: watch::Receiver<Option<ShortEventId>>,
 }
@@ -28,6 +29,7 @@ impl HeadUpdateBroadcaster {
         Self {
             client: client.handle(),
             db: client.db().to_owned(),
+            self_id: client.rostra_id(),
 
             self_followers_rx: client.self_followers_subscribe(),
             self_head_rx: client.self_head_subscribe(),
@@ -75,7 +77,8 @@ impl HeadUpdateBroadcaster {
                 continue;
             };
 
-            for (follower, _) in followers {
+            // send to ourselves first, in case we have redundant nodes
+            for id in [self.self_id].into_iter().chain(followers.into_keys()) {
                 let Some(client) = self.client.app_ref_opt() else {
                     debug!(target: LOG_TARGET, "Client gone, quitting");
 
@@ -83,14 +86,14 @@ impl HeadUpdateBroadcaster {
                 };
 
                 if let Err(err) = self
-                    .broadcast_event(&client, follower, &event.signed, &event_content)
+                    .broadcast_event(&client, id, &event.signed, &event_content)
                     .await
                 {
                     debug!(
                         target: LOG_TARGET,
                         err = %err.fmt_compact(),
-                        id = %follower.to_short(),
-                        "Failed to broadcast new head to follower"
+                        id = %id.to_short(),
+                        "Failed to broadcast new head to node"
                     );
                 }
             }
