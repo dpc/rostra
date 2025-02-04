@@ -19,7 +19,7 @@ dev PORT="2345":
 
     env \
       ROSTRA_DEV_MODE=1 \
-      RUST_LOG=rostra=debug,info,iroh=error,mainline=error \
+      RUST_LOG=${RUST_LOG:-rostra=debug,info,iroh=error,mainline=error} \
       cargo watch \
         -i 'dev/**' \
         -i 'crates/rostra-web-ui/assets/**' \

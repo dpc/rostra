@@ -57,7 +57,7 @@ iroh-base = { version = "0.31.0", default-features = false }
 iroh-io = "0.6.0"
 itertools = "0.13.0"
 jotdown = "0.7.0"
-pkarr = "2.2.1"
+pkarr = "2.3.1"
 proptest = "1.6.0"
 maud = "*"
 tempfile = "3.14.0"

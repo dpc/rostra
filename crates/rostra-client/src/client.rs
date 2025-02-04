@@ -32,7 +32,7 @@ use rostra_util_fmt::AsFmtOption as _;
 use snafu::{ensure, Location, OptionExt as _, ResultExt as _, Snafu};
 use tokio::sync::{broadcast, watch};
 use tokio::time::Instant;
-use tracing::{debug, info, warn};
+use tracing::{debug, info, trace, warn};
 
 use super::{get_rrecord_typed, take_first_ok_some, RRECORD_HEAD_KEY, RRECORD_P2P_KEY};
 use crate::error::{
@@ -150,15 +150,17 @@ impl Client {
         #[builder(default = true)] start_request_handler: bool,
         db: Option<Database>,
     ) -> InitResult<Arc<Self>> {
-        debug!(id = %id.try_fmt(), "Rostra Client");
+        debug!(target: LOG_TARGET, id = %id.try_fmt(), "Starting Rostra client");
         let is_mode_full = db.is_some();
 
+        trace!(target: LOG_TARGET, id = %id.try_fmt(), "Creating Pkarr client");
         let pkarr_client = PkarrClient::builder()
             .build()
             .context(InitPkarrClientSnafu)?
             .as_async()
             .into();
 
+        trace!(target: LOG_TARGET, id = %id.try_fmt(), "Creating Pkarr client relay");
         let pkarr_client_relay = pkarr::PkarrRelayClient::new(pkarr::RelaySettings {
             relays: vec!["https://dns.iroh.link/pkarr".to_string()],
             ..pkarr::RelaySettings::default()
@@ -167,15 +169,18 @@ impl Client {
         .as_async()
         .into();
 
+        trace!(target: LOG_TARGET, id = %id.try_fmt(), "Creating Iroh endpoint");
         let endpoint = Self::make_iroh_endpoint(db.as_ref().map(|s| s.iroh_secret())).await?;
         let (check_for_updates_tx, _) = watch::channel(());
 
         let db = if let Some(db) = db {
             db
         } else {
+            debug!(target: LOG_TARGET, id = %id.try_fmt(), "Creating temporary in-memory database");
             Database::new_in_memory(id).await?
         }
         .into();
+        trace!(target: LOG_TARGET, id = %id.try_fmt(), "Creating client");
         let client = Arc::new_cyclic(|client| Self {
             handle: client.clone().into(),
             endpoint,
@@ -187,6 +192,7 @@ impl Client {
             active: AtomicBool::new(false),
         });
 
+        trace!(target: LOG_TARGET, id = %id.try_fmt(), "Starting client tasks");
         if start_request_handler {
             client.start_request_handler();
         }
@@ -197,6 +203,7 @@ impl Client {
             client.start_head_update_broadcaster();
         }
 
+        trace!(target: LOG_TARGET, id = %id.try_fmt(), "Client complete");
         Ok(client)
     }
 }

@@ -161,6 +161,7 @@ impl Database {
     }
 
     pub async fn new_in_memory(self_id: RostraId) -> DbResult<Database> {
+        debug!(target: LOG_TARGET, id = %self_id, "Opening in-memory database");
         let inner = redb::Database::builder()
             .create_with_backend(redb::backends::InMemoryBackend::new())
             .context(DatabaseSnafu)?;
@@ -169,7 +170,7 @@ impl Database {
 
     pub async fn open(path: impl Into<PathBuf>, self_id: RostraId) -> DbResult<Database> {
         let path = path.into();
-        debug!(target: LOG_TARGET, path = %path.display(), "Opening database");
+        debug!(target: LOG_TARGET, id = %self_id, path = %path.display(), "Opening database");
 
         let inner = tokio::task::spawn_blocking(move || redb::Database::create(path))
             .await
