@@ -23,8 +23,8 @@ pub trait EventContentKind: ::serde::Serialize + ::serde::de::DeserializeOwned {
     ///   for external APIs and such.
     fn serialize_cbor(&self) -> EventContent {
         let mut buf = Vec::with_capacity(128);
-        // cbor4ii::serde::to_writer(&mut buf, self).expect("Can't fail");
-        ciborium::into_writer(self, &mut buf).expect("Can't fail");
+        cbor4ii::serde::to_writer(&mut buf, self).expect("Can't fail");
+        // ciborium::into_writer(self, &mut buf).expect("Can't fail");
         EventContent::new(buf)
     }
 }

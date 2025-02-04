@@ -12,12 +12,12 @@ bincode = ["dep:bincode"]
 ed25519-dalek = ["dep:ed25519-dalek", "dep:rand"]
 serde = [
   "dep:serde",
-  # "dep:cbor4ii",
-  "dep:ciborium",
   "dep:bip39",
   "dep:serde_bytes",
-  # "cbor4ii/serde1",
-  # "cbor4ii/use_std",
+  # "dep:ciborium",
+  "dep:cbor4ii",
+  "cbor4ii/serde1",
+  "cbor4ii/use_std",
 ]
 rand = ["dep:rand"]
 
@@ -33,8 +33,8 @@ ed25519-dalek = { workspace = true, optional = true }
 rand = { workspace = true, optional = true }
 serde = { workspace = true, optional = true }
 serde_bytes = { workspace = true, optional = true }
-ciborium = { workspace = true, optional = true }
-# cbor4ii = { workspace = true, optional = true, feature = ["serde1"] }
+# ciborium = { workspace = true, optional = true }
+cbor4ii = { workspace = true, optional = true, features = ["serde1"] }
 snafu = { workspace = true }
 pkarr = { workspace = true, optional = true }
 z32 = { workspace = true }

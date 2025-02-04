@@ -1,3 +1,4 @@
+use std::convert::Infallible;
 use std::sync::Arc;
 
 use super::{EventContent, EventContentKind, EventContentUnsized, EventKind, EventSignature};
@@ -94,13 +95,14 @@ impl<'de> serde::de::Deserialize<'de> for EventKind {
 }
 
 impl EventContentUnsized {
-    // pub fn deserialize_cbor<T>(&self) -> Result<T,
-    // cbor4ii::serde::DecodeError<Infallible>>
-    pub fn deserialize_cbor<T>(&self) -> std::result::Result<T, ciborium::de::Error<std::io::Error>>
+    pub fn deserialize_cbor<T>(&self) -> Result<T, cbor4ii::serde::DecodeError<Infallible>>
+    // pub fn deserialize_cbor<T>(&self) -> std::result::Result<T,
+    // ciborium::de::Error<std::io::Error>>
     where
         T: EventContentKind,
     {
-        ciborium::from_reader(self.as_ref())
+        // ciborium::from_reader(self.as_ref())
+        cbor4ii::serde::from_slice(self.as_ref())
     }
 }
 

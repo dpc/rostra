@@ -12,11 +12,11 @@ where
     assert_eq!(v, json_ret);
 
     let mut bytes = vec![];
-    // cbor4ii::serde::to_writer(&mut bytes, &v).expect("ok");
-    ciborium::into_writer(&v, &mut bytes).expect("ok");
+    cbor4ii::serde::to_writer(&mut bytes, &v).expect("ok");
+    // ciborium::into_writer(&v, &mut bytes).expect("ok");
     println!("cbor: {}", data_encoding::HEXLOWER.encode(&bytes));
-    // let ret: T = cbor4ii::serde::from_slice(bytes.as_slice()).expect("ok");
-    let ret: T = ciborium::from_reader(&mut bytes.as_slice()).expect("ok");
+    let ret: T = cbor4ii::serde::from_slice(bytes.as_slice()).expect("ok");
+    // let ret: T = ciborium::from_reader(&mut bytes.as_slice()).expect("ok");
     assert_eq!(v, ret);
 }
 
