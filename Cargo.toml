@@ -58,7 +58,7 @@ iroh-base = { version = "0.31.0", default-features = false }
 iroh-io = "0.6.0"
 itertools = "0.13.0"
 jotdown = "0.7.0"
-pkarr = "2.3.1"
+pkarr = { version = "3.0.0-rc.1" }
 proptest = "1.6.0"
 maud = "*"
 tempfile = "3.14.0"
@@ -78,6 +78,7 @@ rostra-web-ui = { path = "crates/rostra-web-ui" }
 serde = "1.0.216"
 serde_bytes = "0.11.15"
 serde_json = "1.0.134"
+url = "2.5.4"
 snafu = { version = "0.8.5", features = ["rust_1_81"] }
 time = "0.3.36"
 tokio = { version = "1.42.0", features = ["macros"] }

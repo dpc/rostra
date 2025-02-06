@@ -20,7 +20,6 @@ futures = { workspace = true }
 futures-util = { workspace = true }
 duct = { workspace = true }
 iroh = { workspace = true, default-features = false }
-pkarr = { workspace = true, features = ["async"] }
 snafu = { workspace = true }
 rostra-core = { workspace = true }
 rostra-client = { workspace = true }

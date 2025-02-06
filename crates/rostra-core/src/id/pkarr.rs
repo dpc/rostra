@@ -4,10 +4,10 @@ use pkarr::{Keypair, PublicKey};
 
 use super::{RostraId, RostraIdSecretKey, ShortRostraId};
 
-type PkarrResult<T> = std::result::Result<T, ::pkarr::Error>;
+type PkarrPublicKeyResult<T> = std::result::Result<T, ::pkarr::errors::PublicKeyError>;
 
 impl RostraId {
-    pub fn try_from_pkarr_str(s: &str) -> PkarrResult<Self> {
+    pub fn try_from_pkarr_str(s: &str) -> PkarrPublicKeyResult<Self> {
         Ok(Self(PublicKey::try_from(s)?.to_bytes()))
     }
 
@@ -40,7 +40,7 @@ impl From<PublicKey> for RostraId {
 }
 
 impl TryFrom<RostraId> for PublicKey {
-    type Error = pkarr::Error;
+    type Error = pkarr::errors::PublicKeyError;
 
     fn try_from(id: RostraId) -> Result<Self, Self::Error> {
         PublicKey::try_from(id.as_slice())

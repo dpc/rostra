@@ -16,7 +16,6 @@ use iroh::discovery::pkarr::PkarrPublisher;
 use iroh::discovery::ConcurrentDiscovery;
 use iroh::NodeAddr;
 use itertools::Itertools as _;
-use pkarr::PkarrClient;
 use rostra_client_db::{Database, DbResult, IdsFolloweesRecord, IdsFollowersRecord};
 use rostra_core::event::{
     content_kind, Event, EventExt as _, EventKind, IrohNodeId, PersonaId, SignedEvent,
@@ -33,13 +32,14 @@ use snafu::{ensure, Location, OptionExt as _, ResultExt as _, Snafu};
 use tokio::sync::{broadcast, watch};
 use tokio::time::Instant;
 use tracing::{debug, info, trace, warn};
+use url::Url;
 
-use super::{get_rrecord_typed, take_first_ok_some, RRECORD_HEAD_KEY, RRECORD_P2P_KEY};
+use super::{get_rrecord_typed, RRECORD_HEAD_KEY, RRECORD_P2P_KEY};
 use crate::error::{
     ActivateResult, ConnectIrohSnafu, ConnectResult, IdResolveError, IdResolveResult,
     IdSecretReadResult, InitIrohClientSnafu, InitPkarrClientSnafu, InitResult, InvalidIdSnafu,
-    IoSnafu, IrohResult, MissingTicketSnafu, NotFoundSnafu, ParsingSnafu, PkarrResolveSnafu,
-    PostResult, RRecordSnafu, ResolveSnafu, SecretMismatchSnafu,
+    IoSnafu, IrohResult, MissingTicketSnafu, ParsingSnafu, PkarrResolveSnafu, PostResult,
+    RRecordSnafu, ResolveSnafu, SecretMismatchSnafu,
 };
 use crate::id::{CompactTicket, IdPublishedData, IdResolvedData};
 use crate::id_publisher::PkarrIdPublisher;
@@ -121,8 +121,7 @@ pub struct Client {
     /// Weak self-reference that can be given out to components
     pub(crate) handle: ClientHandle,
 
-    pub(crate) pkarr_client: Arc<pkarr::PkarrClientAsync>,
-    pub(crate) pkarr_client_relay: Arc<pkarr::PkarrRelayClientAsync>,
+    pub(crate) pkarr_client: Arc<pkarr::Client>,
 
     /// Our main identity (pkarr/ed25519_dalek keypair)
     pub(crate) id: RostraId,
@@ -154,20 +153,13 @@ impl Client {
         let is_mode_full = db.is_some();
 
         trace!(target: LOG_TARGET, id = %id.try_fmt(), "Creating Pkarr client");
-        let pkarr_client = PkarrClient::builder()
+        let pkarr_client = pkarr::Client::builder()
+            .relays(vec![
+                Url::parse("https://dns.iroh.link/pkarr").expect("Can't fail")
+            ])
             .build()
             .context(InitPkarrClientSnafu)?
-            .as_async()
             .into();
-
-        trace!(target: LOG_TARGET, id = %id.try_fmt(), "Creating Pkarr client relay");
-        let pkarr_client_relay = pkarr::PkarrRelayClient::new(pkarr::RelaySettings {
-            relays: vec!["https://dns.iroh.link/pkarr".to_string()],
-            ..pkarr::RelaySettings::default()
-        })
-        .expect("Has a relay")
-        .as_async()
-        .into();
 
         trace!(target: LOG_TARGET, id = %id.try_fmt(), "Creating Iroh endpoint");
         let endpoint = Self::make_iroh_endpoint(db.as_ref().map(|s| s.iroh_secret())).await?;
@@ -185,7 +177,6 @@ impl Client {
             handle: client.clone().into(),
             endpoint,
             pkarr_client,
-            pkarr_client_relay,
             db,
             id,
             check_for_updates_tx,
@@ -446,13 +437,11 @@ impl Client {
     pub async fn resolve_id_data(&self, id: RostraId) -> IdResolveResult<IdResolvedData> {
         let public_key = pkarr::PublicKey::try_from(id).context(InvalidIdSnafu)?;
         let domain = public_key.to_string();
-        let packet = take_first_ok_some(
-            self.pkarr_client.resolve(&public_key),
-            self.pkarr_client_relay.resolve(&public_key),
-        )
-        .await
-        .context(PkarrResolveSnafu)?
-        .context(NotFoundSnafu)?;
+        let packet = self
+            .pkarr_client
+            .resolve(&public_key)
+            .await
+            .context(PkarrResolveSnafu)?;
 
         let timestamp = packet.timestamp();
         let ticket = get_rrecord_typed(&packet, &domain, RRECORD_P2P_KEY).context(RRecordSnafu)?;
@@ -468,7 +457,7 @@ impl Client {
 
         Ok(IdResolvedData {
             published: IdPublishedData { ticket, head },
-            timestamp,
+            timestamp: timestamp.as_u64(),
         })
     }
 
@@ -480,12 +469,8 @@ impl Client {
             .context(MissingTicketSnafu)
     }
 
-    pub(crate) fn pkarr_client(&self) -> Arc<pkarr::PkarrClientAsync> {
+    pub(crate) fn pkarr_client(&self) -> Arc<pkarr::Client> {
         self.pkarr_client.clone()
-    }
-
-    pub(crate) fn pkarr_client_relay(&self) -> Arc<pkarr::PkarrRelayClientAsync> {
-        self.pkarr_client_relay.clone()
     }
 
     pub(crate) async fn does_have_event(&self, _event_id: rostra_core::EventId) -> bool {

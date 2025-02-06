@@ -2,8 +2,7 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use pkarr::dns::rdata::TXT;
-use pkarr::dns::SimpleDnsError;
-use pkarr::{dns, Keypair, SignedPacket};
+use pkarr::{Keypair, SignedPacket};
 use rostra_core::id::{RostraId, RostraIdSecretKey, ToShort as _};
 use rostra_core::ShortEventId;
 use rostra_util_fmt::AsFmtOption as _;
@@ -12,7 +11,7 @@ use tokio::sync::watch;
 use tracing::{debug, instrument, trace, warn};
 
 use crate::client::Client;
-use crate::error::{DnsSnafu, IdPublishResult, PkarrPacketSnafu, PkarrPublishSnafu};
+use crate::error::{DnsSnafu, IdPublishResult, PkarrPublishSnafu, PkarrSignedPacketSnafu};
 use crate::id::{CompactTicket, IdPublishedData};
 use crate::{RRECORD_HEAD_KEY, RRECORD_P2P_KEY};
 const LOG_TARGET: &str = "rostra::publisher";
@@ -23,8 +22,7 @@ pub fn publishing_interval() -> Duration {
 
 pub struct PkarrIdPublisher {
     app: crate::client::ClientHandle,
-    pkarr_client: Arc<pkarr::PkarrClientAsync>,
-    pkarr_client_relay: Arc<pkarr::PkarrRelayClientAsync>,
+    pkarr_client: Arc<pkarr::Client>,
     keypair: pkarr::Keypair,
     self_head_rx: watch::Receiver<Option<ShortEventId>>,
 }
@@ -44,38 +42,29 @@ impl IdPublishedData {
     where
         'n: 'txt,
     {
-        fn make_txt_rrecord<'a>(
-            name: &'a str,
-            val: &'a str,
-            ttl_secs: u32,
-        ) -> Result<dns::ResourceRecord<'a>, SimpleDnsError> {
-            let mut txt = TXT::new();
-            txt.add_string(val)?;
-            Ok(dns::ResourceRecord::new(
-                dns::Name::new(name)?,
-                dns::CLASS::IN,
-                ttl_secs,
-                dns::rdata::RData::TXT(txt),
-            ))
-        }
-
-        let mut packet = dns::Packet::new_reply(0);
+        let mut packet = pkarr::SignedPacket::builder();
 
         let ticket = self.ticket.as_ref().map(|ticket| ticket.to_string());
         let head = self.head.as_ref().map(|head| head.to_string());
         if let Some(ticket) = ticket.as_deref() {
             trace!(target: LOG_TARGET, key=%RRECORD_P2P_KEY, val=%ticket, val_len=ticket.len(), "Publishing rrecord");
-            packet
-                .answers
-                .push(make_txt_rrecord(RRECORD_P2P_KEY, ticket, ttl_secs).context(DnsSnafu)?);
+            packet = packet.txt(
+                pkarr::dns::Name::new_unchecked(RRECORD_P2P_KEY),
+                ticket.try_into().context(DnsSnafu)?,
+                ttl_secs,
+            );
         }
         if let Some(head) = head.as_deref() {
             trace!(target: LOG_TARGET, key=%RRECORD_HEAD_KEY, val=%head, val_len=head.len(), "Publishing rrecord");
-            packet
-                .answers
-                .push(make_txt_rrecord(RRECORD_HEAD_KEY, head, ttl_secs).context(DnsSnafu)?);
+            let mut txt = TXT::new();
+            txt.add_string(head).context(DnsSnafu)?;
+            packet = packet.txt(
+                pkarr::dns::Name::new_unchecked(RRECORD_HEAD_KEY),
+                head.try_into().context(DnsSnafu)?,
+                ttl_secs,
+            );
         }
-        SignedPacket::from_packet(keypair, &packet).context(PkarrPacketSnafu)
+        packet.build(keypair).context(PkarrSignedPacketSnafu)
     }
 }
 
@@ -86,7 +75,6 @@ impl PkarrIdPublisher {
             app: client.handle(),
             keypair: id_secret.into(),
             pkarr_client: client.pkarr_client(),
-            pkarr_client_relay: client.pkarr_client_relay(),
             self_head_rx: client.self_head_subscribe(),
         }
     }
@@ -134,7 +122,7 @@ impl PkarrIdPublisher {
                 )
                 .await
             {
-                warn!(%err, "Failed to publish to pkarr relay");
+                warn!(%err, "Failed to publish to pkarr");
             }
         }
     }
@@ -152,15 +140,10 @@ impl PkarrIdPublisher {
 
         let packet = data.to_signed_packet(&self.keypair, ttl_secs)?;
 
-        let (res, res_relay) = tokio::join!(
-            self.pkarr_client.publish(&packet),
-            self.pkarr_client_relay.publish(&packet)
-        );
-
-        // TODO: report both?
-        if res_relay.is_err() && res.is_err() {
-            res_relay.context(PkarrPublishSnafu)?;
-        }
+        self.pkarr_client
+            .publish(&packet, None)
+            .await
+            .context(PkarrPublishSnafu)?;
 
         debug!(
             target: LOG_TARGET,

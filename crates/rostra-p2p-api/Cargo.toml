@@ -10,7 +10,6 @@ version = { workspace = true }
 anyhow = { workspace = true }
 futures = { workspace = true }
 iroh = { workspace = true }
-pkarr = { workspace = true, features = ["async"] }
 snafu = { workspace = true }
 tokio = { workspace = true }
 tracing = { workspace = true }

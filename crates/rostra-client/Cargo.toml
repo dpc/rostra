@@ -22,7 +22,7 @@ iroh-base = { workspace = true, features = ["ticket"] }
 iroh = { workspace = true }
 iroh-io = { workspace = true }
 itertools = { workspace = true }
-pkarr = { workspace = true, features = ["async", "relay"] }
+pkarr = { workspace = true, features = ["dht", "relays"] }
 redb = { workspace = true }
 redb-bincode = { workspace = true }
 rostra-client-db = { workspace = true }
@@ -41,6 +41,7 @@ rostra-util = { workspace = true }
 serde = { workspace = true }
 snafu = { workspace = true }
 rand = { workspace = true }
+url = { workspace = true }
 tokio = { workspace = true }
 tracing = { workspace = true }
 tracing-subscriber = { workspace = true }

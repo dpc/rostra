@@ -14,7 +14,7 @@ pub type IrohResult<T> = anyhow::Result<T>;
 #[snafu(visibility(pub(crate)))]
 pub enum InitError {
     #[snafu(display("Pkarr Client initialization error"))]
-    InitPkarrClient { source: pkarr::Error },
+    InitPkarrClient { source: pkarr::errors::BuildError },
     #[snafu(display("Iroh Client initialization error"))]
     InitIrohClient { source: IrohError },
     #[snafu(transparent)]
@@ -35,11 +35,15 @@ pub type ActivateResult<T> = std::result::Result<T, ActivateError>;
 #[snafu(visibility(pub(crate)))]
 pub enum IdResolveError {
     NotFound,
-    InvalidId { source: pkarr::Error },
-    RRecord { source: RRecordError },
+    InvalidId {
+        source: pkarr::errors::PublicKeyError,
+    },
+    RRecord {
+        source: RRecordError,
+    },
     MissingTicket,
     MalformedIrohTicket,
-    PkarrResolve { source: pkarr::Error },
+    PkarrResolve,
 }
 
 pub(crate) type IdResolveResult<T> = std::result::Result<T, IdResolveError>;
@@ -47,11 +51,14 @@ pub(crate) type IdResolveResult<T> = std::result::Result<T, IdResolveError>;
 #[derive(Debug, Snafu)]
 #[snafu(visibility(pub(crate)))]
 pub enum IdPublishError {
-    PkarrPublish {
-        source: pkarr::Error,
+    PkarrSignedPacket {
+        source: pkarr::errors::SignedPacketBuildError,
     },
-    PkarrPacket {
-        source: pkarr::Error,
+    PkarrPublish {
+        source: pkarr::errors::PublishError,
+    },
+    PkarrPacketBuild {
+        source: pkarr::errors::SignedPacketBuildError,
     },
     #[snafu(display("Iroh Client initialization error"))]
     Dns {

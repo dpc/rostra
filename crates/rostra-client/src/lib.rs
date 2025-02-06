@@ -52,9 +52,7 @@ fn get_rrecord(
     let domain = Name::new(domain).context(InvalidDomainSnafu)?;
     let key = Name::new(key).context(InvalidKeySnafu)?;
     let value = match packet
-        .packet()
-        .answers
-        .iter()
+        .all_resource_records()
         .find(|a| a.name.without(&domain).is_some_and(|sub| sub == key))
         .map(|r| r.rdata.to_owned())
     {
@@ -84,30 +82,6 @@ where
         Either::Left((ok @ Ok(_), _)) => ok,
         Either::Left((Err(_), fut2)) => fut2.await,
         Either::Right((ok @ Ok(_), _)) => ok,
-        Either::Right((Err(_), fut1)) => fut1.await,
-    }
-}
-
-async fn take_first_ok_some<T, E, F1, F2>(fut1: F1, fut2: F2) -> Result<Option<T>, E>
-where
-    F1: future::Future<Output = Result<Option<T>, E>>,
-    F2: future::Future<Output = Result<Option<T>, E>>,
-{
-    let fut1 = Box::pin(fut1);
-    let fut2 = Box::pin(fut2);
-
-    match future::select(fut1, fut2).await {
-        Either::Left((ok @ Ok(Some(_)), _)) => ok,
-        Either::Left((_ok @ Ok(None), fut2)) => {
-            // TODO: reconsider?
-            fut2.await
-        }
-        Either::Left((Err(_), fut2)) => fut2.await,
-        Either::Right((ok @ Ok(Some(_)), _)) => ok,
-        Either::Right((_ok @ Ok(None), fut1)) => {
-            // TODO: reconsider
-            fut1.await
-        }
         Either::Right((Err(_), fut1)) => fut1.await,
     }
 }

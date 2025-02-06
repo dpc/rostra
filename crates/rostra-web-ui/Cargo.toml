@@ -18,7 +18,6 @@ futures = { workspace = true }
 futures-util = { workspace = true }
 jotdown = { workspace = true }
 maud = { workspace = true }
-pkarr = { workspace = true, features = ["async"] }
 snafu = { workspace = true }
 rostra-core = { workspace = true }
 rostra-client = { workspace = true }

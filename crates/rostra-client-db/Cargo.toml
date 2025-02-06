@@ -22,7 +22,6 @@ iroh-base = { workspace = true, features = ["ticket"] }
 iroh = { workspace = true }
 iroh-io = { workspace = true }
 itertools = { workspace = true }
-pkarr = { workspace = true, features = ["async", "relay"] }
 redb = { workspace = true }
 redb-bincode = { workspace = true }
 rostra-p2p = { workspace = true }
