@@ -12,3 +12,6 @@ default = []
 [dependencies]
 snafu = { workspace = true }
 tokio = { workspace = true }
+
+[dev-dependencies]
+test-log = { workspace = true, features = ["trace"] }

@@ -3886,6 +3886,7 @@ name = "rostra-util-dedup-chan"
 version = "0.1.0"
 dependencies = [
  "snafu",
+ "test-log",
  "tokio",
 ]
 
