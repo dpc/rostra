@@ -42,7 +42,7 @@ blake3 = "1.5.5"
 brotli = "*"
 bon = "3.3.0"
 bip39 = "2.0.0"
-cbor4ii  = "1.0.0"
+cbor4ii = "1.0.0"
 # ciborium = "0.2.2"
 clap = { version = "4.5.23", features = ["derive", "env"] }
 convi = { version = "0.1.1", features = ["min_target_pointer_width_32"] }
@@ -72,6 +72,8 @@ rostra-client-db = { path = "crates/rostra-client-db" }
 rostra-p2p = { path = "crates/rostra-p2p" }
 rostra-p2p-api = { path = "crates/rostra-p2p-api" }
 rostra-util = { path = "crates/rostra-util" }
+# rostra-util-dedup-chan = { path = "crates/rostra-util-dedup-chan" }
+dedup-chan = { path = "crates/rostra-util-dedup-chan", package = "rostra-util-dedup-chan" }
 rostra-util-error = { path = "crates/rostra-util-error" }
 rostra-util-fmt = { path = "crates/rostra-util-fmt" }
 rostra-web-ui = { path = "crates/rostra-web-ui" }

@@ -1,4 +1,4 @@
-use rostra_core::event::{VerifiedEvent, VerifiedEventContent};
+use rostra_core::event::{EventExt as _, VerifiedEvent, VerifiedEventContent};
 use rostra_util_error::FmtCompact as _;
 use tracing::{info, warn};
 
@@ -35,6 +35,7 @@ impl Database {
             was_missing,
             is_deleted,
             deleted_parent,
+            ref missing_parents,
             ref reverted_parent_content,
             ..
         } = insert_event_outcome
@@ -69,6 +70,14 @@ impl Database {
                         });
                     }
                 }
+            }
+
+            if !missing_parents.is_empty() {
+                let mut missing_event_tx = self.ids_with_missing_events_tx.clone();
+                let author = event.author();
+                tx.on_commit(move || {
+                    missing_event_tx.send(author);
+                })
             }
 
             // if the event reverted any previously processed content, revert it here

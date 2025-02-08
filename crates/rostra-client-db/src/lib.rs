@@ -144,6 +144,7 @@ pub struct Database {
     self_head_updated: watch::Sender<Option<ShortEventId>>,
     new_content_tx: broadcast::Sender<VerifiedEventContent>,
     new_posts_tx: broadcast::Sender<(VerifiedEventContent, content_kind::SocialPost)>,
+    ids_with_missing_events_tx: dedup_chan::Sender<RostraId>,
 }
 
 impl Database {
@@ -217,6 +218,7 @@ impl Database {
             self_head_updated,
             new_content_tx,
             new_posts_tx,
+            ids_with_missing_events_tx: dedup_chan::Sender::new(),
         };
 
         Ok(s)
@@ -252,6 +254,12 @@ impl Database {
     ) -> broadcast::Receiver<(VerifiedEventContent, content_kind::SocialPost)> {
         self.new_posts_tx.subscribe()
     }
+    pub fn ids_with_missing_events_subscribe(
+        &self,
+        capacity: usize,
+    ) -> dedup_chan::Receiver<RostraId> {
+        self.ids_with_missing_events_tx.subscribe(capacity)
+    }
 
     pub async fn has_event(&self, event_id: impl Into<ShortEventId>) -> bool {
         let event_id = event_id.into();
@@ -263,15 +271,45 @@ impl Database {
         .expect("Database panic")
     }
 
-    pub async fn get_self_followees(&self) -> Vec<(RostraId, PersonaId)> {
+    pub async fn get_missing_events_for_id(&self, id: RostraId) -> Vec<ShortEventId> {
         self.read_with(|tx| {
-            let ids_followees_table = tx.open_table(&ids_followees::TABLE)?;
+            let events_missing_tbl = tx.open_table(&events_missing::TABLE)?;
             Ok(
-                Database::read_followees_tx(self.self_id, &ids_followees_table)?
+                Database::get_missing_events_for_id_tx(id, &events_missing_tbl)?
                     .into_iter()
-                    .map(|(id, record)| (id, record.persona))
                     .collect(),
             )
+        })
+        .await
+        .expect("Database panic")
+    }
+
+    pub async fn get_self_followees(&self) -> Vec<(RostraId, PersonaId)> {
+        self.get_followees(self.self_id).await
+    }
+
+    pub async fn get_followees(&self, id: RostraId) -> Vec<(RostraId, PersonaId)> {
+        self.read_with(|tx| {
+            let ids_followees_table = tx.open_table(&ids_followees::TABLE)?;
+            Ok(Database::read_followees_tx(id, &ids_followees_table)?
+                .into_iter()
+                .map(|(id, record)| (id, record.persona))
+                .collect())
+        })
+        .await
+        .expect("Database panic")
+    }
+
+    pub async fn get_self_followers(&self) -> Vec<RostraId> {
+        self.get_followers(self.self_id).await
+    }
+
+    pub async fn get_followers(&self, id: RostraId) -> Vec<RostraId> {
+        self.read_with(|tx| {
+            let ids_followers_table = tx.open_table(&ids_followers::TABLE)?;
+            Ok(Database::read_followers_tx(id, &ids_followers_table)?
+                .into_keys()
+                .collect())
         })
         .await
         .expect("Database panic")

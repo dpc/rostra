@@ -55,14 +55,14 @@ impl<T> std::error::Error for SendError<T> {}
 struct ChannelInner<T> {
     set: HashSet<T>,
     queue: VecDeque<T>,
-    dropped_messages: bool,
+    lagged: bool,
 }
 
 /// A queue in which items are being collected for the
 #[derive(Clone)]
 struct Channel<T> {
     inner: Arc<std::sync::Mutex<ChannelInner<T>>>,
-    tx: watch::Sender<usize>,
+    tx: watch::Sender<u64>,
     capacity: usize,
 }
 
@@ -74,32 +74,39 @@ where
     ///
     /// Returns [`SendError`] if the channel is already at full capacity.
     /// Some receiver will be notified about the dropped message.
-    pub async fn send(&mut self, v: T) -> std::result::Result<(), SendError<T>> {
+    pub fn send(&mut self, v: T) -> std::result::Result<(), SendError<T>> {
         let mut lock = self.inner.lock().expect("locking failed");
 
         if lock.set.contains(&v) {
             return Ok(());
         }
 
-        let len = lock.queue.len();
-        if self.capacity <= len {
-            lock.dropped_messages = true;
-            return Err(SendError::Lagging(v));
-        }
-
-        if self.tx.send(len + 1).is_err() {
+        let prev_tx = *self.tx.borrow();
+        if self.tx.send(prev_tx + 1).is_err() {
             return Err(SendError::Closed(v));
         };
 
-        lock.set.insert(v.clone());
-        lock.queue.push_back(v);
-        Ok(())
+        let len = lock.queue.len();
+        if self.capacity <= len {
+            lock.lagged = true;
+
+            Err(SendError::Lagging(v))
+        } else {
+            lock.set.insert(v.clone());
+            lock.queue.push_back(v);
+            Ok(())
+        }
     }
 }
 
 #[derive(Clone)]
 pub struct Sender<T> {
-    channels: BTreeMap<usize, Channel<T>>,
+    channels: Arc<std::sync::Mutex<BTreeMap<usize, Channel<T>>>>,
+}
+impl<T> fmt::Debug for Sender<T> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str("Sender")
+    }
 }
 
 impl<T> Sender<T>
@@ -117,12 +124,13 @@ where
     /// Some receiver will be notified about the dropped message.
     ///
     /// Returns number of channel that the message was delivered to.
-    pub async fn send(&mut self, v: T) -> usize {
+    pub fn send(&mut self, v: T) -> usize {
         let mut to_delete = vec![];
         let mut sent_count = 0;
+        let mut channels_lock = self.channels.lock().expect("Locking failed");
 
-        for (k, inner) in &mut self.channels {
-            match inner.send(v.clone()).await {
+        for (k, inner) in channels_lock.iter_mut() {
+            match inner.send(v.clone()) {
                 Ok(_) => {
                     sent_count += 1;
                 }
@@ -134,7 +142,7 @@ where
         }
 
         for to_delete in to_delete {
-            self.channels.remove(&to_delete).expect("Must be some");
+            channels_lock.remove(&to_delete).expect("Must be some");
         }
 
         sent_count
@@ -144,12 +152,12 @@ where
     ///
     /// From now on, a copy of every sent item will be queued to be delivered to
     /// the returned `Receiver`.
-    pub fn subscribe(&mut self, capacity: usize) -> Receiver<T> {
+    pub fn subscribe(&self, capacity: usize) -> Receiver<T> {
         let (sending_tx, sending_rx) = watch::channel(0);
         let inner = ChannelInner {
             set: HashSet::new(),
             queue: VecDeque::new(),
-            dropped_messages: false,
+            lagged: false,
         };
 
         let inner = Arc::new(Mutex::new(inner));
@@ -160,16 +168,13 @@ where
             capacity,
         };
 
-        assert!(self
-            .channels
-            .insert(
-                self.channels
-                    .last_key_value()
-                    .map(|(k, _)| *k + 1)
-                    .unwrap_or_default(),
-                sender_inner,
-            )
-            .is_none());
+        let mut channels_lock = self.channels.lock().expect("Locking failed");
+
+        let next_key = channels_lock
+            .last_key_value()
+            .map(|(k, _)| *k + 1)
+            .unwrap_or_default();
+        assert!(channels_lock.insert(next_key, sender_inner,).is_none());
         Receiver {
             inner,
             rx: sending_rx,
@@ -195,29 +200,32 @@ where
 #[derive(Clone)]
 pub struct Receiver<T> {
     inner: Arc<Mutex<ChannelInner<T>>>,
-    rx: watch::Receiver<usize>,
+    rx: watch::Receiver<u64>,
 }
 
 impl<T> Receiver<T>
 where
     T: cmp::Eq + hash::Hash,
 {
-    #[allow(clippy::await_holding_lock)] // clippy is wrong
     pub async fn recv(&mut self) -> std::result::Result<T, RecvError> {
+        let mut first_iteration = true;
         loop {
+            #[allow(clippy::collapsible_if)]
+            if !first_iteration {
+                if self.rx.changed().await.is_err() {
+                    return Err(RecvError::Closed);
+                }
+            }
+            first_iteration = false;
             let mut lock = self.inner.lock().expect("Locking error");
             let len = lock.queue.len();
 
             if len == 0 {
-                if lock.dropped_messages {
-                    lock.dropped_messages = false;
+                if lock.lagged {
+                    lock.lagged = false;
                     return Err(RecvError::Lagging);
                 }
-                drop(lock);
 
-                if self.rx.changed().await.is_err() {
-                    return Err(RecvError::Closed);
-                }
                 continue;
             }
 

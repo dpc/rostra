@@ -264,7 +264,7 @@ impl Database {
         Ok(true)
     }
 
-    pub fn get_missing_events_tx(
+    pub fn get_missing_events_for_id_tx(
         author: RostraId,
         events_missing_table: &impl events_missing::ReadableTable,
     ) -> DbResult<Vec<ShortEventId>> {

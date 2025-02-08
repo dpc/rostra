@@ -90,7 +90,8 @@ async fn test_store_event() -> BoxedErrorResult<()> {
                 )?;
 
                 info!(event_id = %event.event_id, "Checking missing");
-                let missing = Database::get_missing_events_tx(author, &events_missing_table)?;
+                let missing =
+                    Database::get_missing_events_for_id_tx(author, &events_missing_table)?;
                 missing
                     .iter()
                     .for_each(|missing| info!(%missing, "Missing"));

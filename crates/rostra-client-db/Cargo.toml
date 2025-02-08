@@ -35,6 +35,9 @@ rostra-core = { workspace = true, features = [
 ] }
 rostra-util-error = { workspace = true }
 rostra-util-fmt = { workspace = true }
+# rostra-util-dedup-chan = { workspace = true, package = "dedup-chan" }
+# dedup-chan = { workspace = true, package = "rostra-util-dedup-chan" }
+dedup-chan = { workspace = true, package = "rostra-util-dedup-chan" }
 rostra-util = { workspace = true }
 serde = { workspace = true }
 snafu = { workspace = true }

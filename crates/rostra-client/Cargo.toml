@@ -36,6 +36,7 @@ rostra-core = { workspace = true, features = [
   "rand",
 ] }
 rostra-util-error = { workspace = true }
+dedup-chan = { workspace = true, package = "rostra-util-dedup-chan" }
 rostra-util-fmt = { workspace = true }
 rostra-util = { workspace = true }
 serde = { workspace = true }

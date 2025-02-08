@@ -1,9 +1,6 @@
 pub mod error;
-mod followee_checker;
-mod followee_head_checker;
-mod head_update_broadcaster;
-mod id_publisher;
-mod request_handler;
+
+pub(crate) mod task;
 
 pub mod multiclient;
 

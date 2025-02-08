@@ -42,8 +42,9 @@ use crate::error::{
     RRecordSnafu, ResolveSnafu, SecretMismatchSnafu,
 };
 use crate::id::{CompactTicket, IdPublishedData, IdResolvedData};
-use crate::id_publisher::PkarrIdPublisher;
-use crate::request_handler::RequestHandler;
+use crate::task::id_publisher::PkarrIdPublisher;
+use crate::task::missing_event_fetcher::MissingEventFetcher;
+use crate::task::request_handler::RequestHandler;
 use crate::LOG_TARGET;
 
 #[derive(Debug, Snafu)]
@@ -192,6 +193,7 @@ impl Client {
             client.start_followee_checker();
             client.start_followee_head_checker();
             client.start_head_update_broadcaster();
+            client.start_missing_event_fetcher();
         }
 
         trace!(target: LOG_TARGET, id = %id.try_fmt(), "Client complete");
@@ -347,13 +349,16 @@ impl Client {
     }
 
     pub(crate) fn start_followee_checker(&self) {
-        tokio::spawn(crate::followee_checker::FolloweeChecker::new(self).run());
+        tokio::spawn(crate::task::followee_checker::FolloweeChecker::new(self).run());
     }
     pub(crate) fn start_followee_head_checker(&self) {
-        tokio::spawn(crate::followee_head_checker::FolloweeHeadChecker::new(self).run());
+        tokio::spawn(crate::task::followee_head_checker::FolloweeHeadChecker::new(self).run());
     }
     pub(crate) fn start_head_update_broadcaster(&self) {
-        tokio::spawn(crate::head_update_broadcaster::HeadUpdateBroadcaster::new(self).run());
+        tokio::spawn(crate::task::head_update_broadcaster::HeadUpdateBroadcaster::new(self).run());
+    }
+    pub(crate) fn start_missing_event_fetcher(&self) {
+        tokio::spawn(MissingEventFetcher::new(self).run());
     }
 
     pub(crate) async fn iroh_address(&self) -> IrohResult<NodeAddr> {
@@ -420,6 +425,13 @@ impl Client {
 
     pub fn check_for_updates_tx_subscribe(&self) -> watch::Receiver<()> {
         self.check_for_updates_tx.subscribe()
+    }
+
+    pub fn ids_with_missing_events_subscribe(
+        &self,
+        capacity: usize,
+    ) -> dedup_chan::Receiver<RostraId> {
+        self.db.ids_with_missing_events_subscribe(capacity)
     }
 
     pub fn db(&self) -> &Arc<Database> {
