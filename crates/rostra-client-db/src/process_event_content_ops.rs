@@ -155,8 +155,7 @@ impl Database {
                             event_id: event_content.event.event_id.to_short(),
                             display_name: content.display_name,
                             bio: content.bio,
-                            img_mime: content.img_mime,
-                            img: content.img,
+                            avatar: content.avatar,
                         },
                         &mut tx
                             .open_table(&crate::social_profiles::TABLE)

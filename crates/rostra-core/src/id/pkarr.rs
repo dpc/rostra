@@ -1,8 +1,6 @@
-use core::fmt;
-
 use pkarr::{Keypair, PublicKey};
 
-use super::{RostraId, RostraIdSecretKey, ShortRostraId};
+use super::{RostraId, RostraIdSecretKey};
 
 type PkarrPublicKeyResult<T> = std::result::Result<T, ::pkarr::errors::PublicKeyError>;
 

@@ -301,6 +301,10 @@ a:active {
   margin: 2pt;
 }
 
+.m-selfAccount.-edit .m-selfAccount__userImage:hover {
+  filter: blur(2px);
+}
+
 .m-selfAccount__content {
   display: flex;
   flex-direction: column;

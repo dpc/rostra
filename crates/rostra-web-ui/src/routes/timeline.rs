@@ -322,7 +322,7 @@ impl UiState {
         let post_main = html! {
             div ."m-postOverview__main" {
                 img ."m-postOverview__userImage u-userImage"
-                    src="/assets/icons/circle-user.svg"
+                    src=(self.avatar_url(author))
                     width="32pt"
                     height="32pt"
                     { }

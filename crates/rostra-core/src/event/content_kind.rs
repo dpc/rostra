@@ -176,10 +176,8 @@ pub struct SocialProfileUpdate {
     pub display_name: String,
     #[serde(rename = "b")]
     pub bio: String,
-    #[serde(rename = "m")]
-    pub img_mime: String,
-    #[serde(rename = "i")]
-    pub img: Vec<u8>,
+    #[serde(rename = "a")]
+    pub avatar: Option<(String, Vec<u8>)>,
 }
 
 impl EventContentKind for SocialProfileUpdate {

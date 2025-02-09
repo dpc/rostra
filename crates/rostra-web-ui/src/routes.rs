@@ -1,4 +1,5 @@
 mod add_followee;
+mod avatar;
 mod new_post;
 mod self_account;
 mod timeline;
@@ -133,6 +134,7 @@ pub fn route_handler(state: SharedState) -> Router {
     Router::new()
         .route("/", get(root))
         .route("/ui", get(timeline::get))
+        .route("/ui/avatar/{id}", get(avatar::get))
         .route("/ui/timeline", get(timeline::get))
         .route("/ui/timeline/updates", get(timeline::get_updates))
         .route("/ui/post", post(new_post::post_new_post))

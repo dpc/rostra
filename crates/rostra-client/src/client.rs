@@ -594,6 +594,7 @@ impl Client {
         id_secret: RostraIdSecretKey,
         display_name: String,
         bio: String,
+        avatar: Option<(String, Vec<u8>)>,
     ) -> PostResult<VerifiedEvent> {
         let existing = self
             .db
@@ -605,8 +606,7 @@ impl Client {
             content_kind::SocialProfileUpdate {
                 display_name,
                 bio,
-                img_mime: "".into(),
-                img: vec![],
+                avatar,
             },
         )
         .maybe_replace(existing)

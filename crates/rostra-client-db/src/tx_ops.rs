@@ -1,7 +1,9 @@
 use std::collections::{HashMap, HashSet};
+use std::ops::Not as _;
 
 use ids::{IdsFollowersRecord, IdsUnfollowedRecord};
 use rand::{thread_rng, Rng as _};
+use redb::ReadableTable as _;
 use redb_bincode::{ReadableTable, Table};
 use rostra_core::event::{
     content_kind, EventContent, EventExt as _, VerifiedEvent, VerifiedEventContent,
@@ -22,7 +24,8 @@ use super::{
 };
 use crate::{
     ids_full, social_posts, social_posts_by_time, social_posts_reply, social_profiles,
-    DbVersionTooHighSnafu, IdSocialProfileRecord, Latest, SocialPostRecord, LOG_TARGET,
+    social_profiles_v0, DbVersionTooHighSnafu, IdSocialProfileRecord, Latest, SocialPostRecord,
+    LOG_TARGET,
 };
 
 impl Database {
@@ -51,18 +54,17 @@ impl Database {
     }
 
     pub(crate) fn handle_db_ver_migrations(dbtx: &WriteTransactionCtx) -> DbResult<()> {
-        const DB_VER: u64 = 0;
+        const DB_VER: u64 = 1;
 
         let mut table_db_ver = dbtx.open_table(&db_version::TABLE)?;
 
-        let Some(cur_db_ver) = table_db_ver.first()?.map(|g| g.1.value()) else {
+        let Some(mut cur_db_ver) = table_db_ver.first()?.map(|g| g.1.value()) else {
             info!(target: LOG_TARGET, "Initializing new database");
             table_db_ver.insert(&(), &DB_VER)?;
 
             return Ok(());
         };
 
-        debug!(target: LOG_TARGET, db_ver = cur_db_ver, "Checking db version");
         if DB_VER < cur_db_ver {
             return DbVersionTooHighSnafu {
                 db_ver: cur_db_ver,
@@ -72,7 +74,67 @@ impl Database {
         }
 
         // migration code will go here
+        //
+        while cur_db_ver < DB_VER {
+            debug!(target: LOG_TARGET, db_ver=%cur_db_ver, "Running migration");
+            match cur_db_ver {
+                0 => Self::migrate_v0(dbtx)?,
+                x => panic!("Unexpected db ver: {x}"),
+            }
 
+            cur_db_ver += 1;
+        }
+
+        table_db_ver.insert(&(), &cur_db_ver)?;
+        debug!(target: LOG_TARGET, db_ver = cur_db_ver, "Db version");
+
+        Ok(())
+    }
+
+    pub(crate) fn migrate_v0(dbtx: &WriteTransactionCtx) -> DbResult<()> {
+        let mut raw_v0_table = dbtx
+            .as_raw()
+            .open_table(social_profiles_v0::TABLE.as_raw())?;
+        let mut raw_table = dbtx.as_raw().open_table(social_profiles::TABLE.as_raw())?;
+        for record in raw_table.range::<&[u8]>(..)? {
+            let (k, v) = record?;
+            raw_v0_table.insert(k.value(), v.value())?;
+        }
+        raw_table.retain(|_, _| false)?;
+        drop(raw_table);
+        drop(raw_v0_table);
+
+        let table_v0 = dbtx.open_table(&social_profiles_v0::TABLE)?;
+        let mut table = dbtx.open_table(&social_profiles::TABLE)?;
+
+        for g in table_v0.range(..)? {
+            let (k, v_v0) = g?;
+            let v_v0 = v_v0.value();
+            table.insert(
+                &k.value(),
+                &Latest {
+                    ts: v_v0.ts,
+                    inner: IdSocialProfileRecord {
+                        event_id: v_v0.inner.event_id,
+                        display_name: v_v0.inner.display_name,
+                        bio: v_v0.inner.bio,
+                        avatar: if !v_v0.inner.img.is_empty() && v_v0.inner.img_mime.is_empty() {
+                            Some((v_v0.inner.img_mime, v_v0.inner.img))
+                        } else {
+                            None
+                        },
+                    },
+                },
+            )?;
+        }
+
+        drop(table);
+        drop(table_v0);
+
+        dbtx.as_raw()
+            .delete_table(social_profiles_v0::TABLE.as_raw())?
+            .not()
+            .then(|| panic!("Expected to delete the table"));
         Ok(())
     }
 

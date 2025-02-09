@@ -1,12 +1,12 @@
+mod extractor;
+
 use axum::extract::State;
 use axum::response::IntoResponse;
-use axum::Form;
 use maud::{html, Markup, PreEscaped};
 use rostra_client::ClientRef;
 use rostra_client_db::IdSocialProfileRecord;
 use rostra_core::id::{RostraId, ToShort as _};
 use rostra_core::ShortEventId;
-use serde::Deserialize;
 
 use super::unlock::session::{RoMode, UserSession};
 use super::Maud;
@@ -21,22 +21,16 @@ pub async fn get_self_account_edit(
     Ok(Maud(state.render_profile_edit_form(&session).await?))
 }
 
-#[derive(Deserialize)]
-pub struct EditInput {
-    name: String,
-    bio: String,
-}
-
 pub async fn post_self_account_edit(
     state: State<SharedState>,
     session: UserSession,
-    Form(form): Form<EditInput>,
+    form: extractor::InputForm,
 ) -> RequestResult<impl IntoResponse> {
     state
         .client(session.id())
         .await?
         .client_ref()?
-        .post_social_profile_update(session.id_secret()?, form.name, form.bio)
+        .post_social_profile_update(session.id_secret()?, form.name, form.bio, form.avatar)
         .await?;
 
     Ok(Maud(
@@ -57,15 +51,14 @@ impl UiState {
                 event_id: ShortEventId::ZERO,
                 display_name: id.to_short().to_string(),
                 bio: "".into(),
-                img_mime: "".into(),
-                img: vec![],
+                avatar: None,
             }
         });
         Ok(existing)
     }
 
-    pub async fn self_avatar_url(&self) -> String {
-        "/assets/icons/circle-user.svg".into()
+    pub fn avatar_url(&self, id: RostraId) -> String {
+        format!("/ui/avatar/{}", id)
     }
 
     pub async fn render_self_profile_summary(
@@ -83,7 +76,9 @@ impl UiState {
                 script {
                     (PreEscaped(
                     r#"
+                    console.log("THERE");
                     function copyIdToClipboard(event) {
+                    console.log("HERE");
                         const target = event.target;
                         const id = target.getAttribute('data-value');
                         navigator.clipboard.writeText(id);
@@ -97,7 +92,7 @@ impl UiState {
                     ))
                 }
                 img ."m-selfAccount__userImage u-userImage"
-                    src=(self.self_avatar_url().await)
+                    src=(self.avatar_url(self_id))
                     width="32pt"
                     height="32pt"
                     { }
@@ -141,15 +136,34 @@ impl UiState {
             .get_social_profile(client_ref.rostra_id(), &client_ref)
             .await?;
         Ok(html! {
-            form ."m-selfAccount"
+            form ."m-selfAccount -edit"
                 hx-post="/ui/self/edit"
                 hx-swap="outerHTML"
+                hx-encoding="multipart/form-data"
             {
-                img ."m-selfAccount__userImage"
-                    src=(self.self_avatar_url().await)
-                    width="32pt"
-                    height="32pt" {
+                script {
+                    (PreEscaped(r#"
+                        function previewAvatar(event) {
+                            document.querySelector('.m-selfAccount__userImage').src=URL.createObjectURL(event.target.files[0]);
+                        }    
+                    "#))
                 }
+                label for="avatar-upload" ."m-selfAccount__userImageLabel" {
+                    img ."m-selfAccount__userImage"
+                        src=(self.avatar_url(user.id()))
+                        width="32pt"
+                        height="32pt" {
+                    }
+                }
+                input #"avatar-upload"
+                    ."m-selfAccount__userImageInput"
+                    type="file"
+                    name="avatar"
+                    accept="image/*"
+                    style="display: none;"
+                    onchange="previewAvatar(event)"
+                {}
+
                 div ."m-selfAccount__content" {
                     input ."m-selfAccount__displayName"
                         type="text"
@@ -166,8 +180,8 @@ impl UiState {
 
                     div ."m-selfAccount__buttons" {
                         button
-                            ."m-selfAccount__saveButton" {
-                            span ."m-selfAccount__saveButtonIcon" width="1rem" height="1rem" {}
+                            ."m-selfAccount__saveButton u-button" {
+                            span ."m-selfAccount__saveButtonIcon u-buttonIcon" width="1rem" height="1rem" {}
                             "Save"
                         }
                     }

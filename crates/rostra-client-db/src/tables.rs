@@ -61,6 +61,7 @@ def_table!(events_content: ShortEventId => event::EventContentStateOwned);
 def_table!(events_by_time: (Timestamp, ShortEventId) => ());
 
 // SOCIAL
+def_table!(social_profiles_v0: RostraId => Latest<IdSocialProfileRecordV0>);
 def_table!(social_profiles: RostraId => Latest<IdSocialProfileRecord>);
 def_table!(social_posts: (ShortEventId)=> SocialPostRecord);
 def_table!(social_posts_reply: (ShortEventId, Timestamp, ShortEventId)=> ());
@@ -73,12 +74,20 @@ pub struct Latest<T> {
 }
 
 #[derive(Debug, Encode, Decode, Clone)]
-pub struct IdSocialProfileRecord {
+pub struct IdSocialProfileRecordV0 {
     pub event_id: ShortEventId,
     pub display_name: String,
     pub bio: String,
     pub img_mime: String,
     pub img: Vec<u8>,
+}
+
+#[derive(Debug, Encode, Decode, Clone)]
+pub struct IdSocialProfileRecord {
+    pub event_id: ShortEventId,
+    pub display_name: String,
+    pub bio: String,
+    pub avatar: Option<(String, Vec<u8>)>,
 }
 
 #[derive(
