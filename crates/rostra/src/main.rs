@@ -89,10 +89,10 @@ async fn handle_cmd(opts: Opts) -> CliResult<serde_json::Value> {
                     let rostra_id = client.rostra_id();
                     match client.resolve_id_data(rostra_id).await {
                         Ok(data) => {
-                            info!(id = %rostra_id.try_fmt(), ?data, "ID resolved");
+                            info!(id = %rostra_id, ?data, "ID resolved");
                         }
                         Err(err) => {
-                            info!(%err, id = %rostra_id.try_fmt(), "Resolution error");
+                            info!(%err, id = %rostra_id, "Resolution error");
                         }
                     }
                     tokio::time::sleep(Duration::from_secs(15)).await;

@@ -72,7 +72,7 @@ pub struct RequestHandler {
 
 impl RequestHandler {
     pub fn new(client: &Client, endpoint: Endpoint) -> Arc<Self> {
-        info!(id = %client.rostra_id().try_fmt(), iroh_endpoint = %endpoint.node_id(), "Starting request handler task");
+        info!(id = %client.rostra_id(), iroh_endpoint = %endpoint.node_id(), "Starting request handler task");
         Self {
             client: client.handle(),
             endpoint,

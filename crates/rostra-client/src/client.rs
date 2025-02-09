@@ -150,10 +150,10 @@ impl Client {
         #[builder(default = true)] start_request_handler: bool,
         db: Option<Database>,
     ) -> InitResult<Arc<Self>> {
-        debug!(target: LOG_TARGET, id = %id.try_fmt(), "Starting Rostra client");
+        debug!(target: LOG_TARGET, id = %id, "Starting Rostra client");
         let is_mode_full = db.is_some();
 
-        trace!(target: LOG_TARGET, id = %id.try_fmt(), "Creating Pkarr client");
+        trace!(target: LOG_TARGET, id = %id, "Creating Pkarr client");
         let pkarr_client = pkarr::Client::builder()
             .relays(vec![
                 Url::parse("https://dns.iroh.link/pkarr").expect("Can't fail")
@@ -162,18 +162,18 @@ impl Client {
             .context(InitPkarrClientSnafu)?
             .into();
 
-        trace!(target: LOG_TARGET, id = %id.try_fmt(), "Creating Iroh endpoint");
+        trace!(target: LOG_TARGET, id = %id, "Creating Iroh endpoint");
         let endpoint = Self::make_iroh_endpoint(db.as_ref().map(|s| s.iroh_secret())).await?;
         let (check_for_updates_tx, _) = watch::channel(());
 
         let db = if let Some(db) = db {
             db
         } else {
-            debug!(target: LOG_TARGET, id = %id.try_fmt(), "Creating temporary in-memory database");
+            debug!(target: LOG_TARGET, id = %id, "Creating temporary in-memory database");
             Database::new_in_memory(id).await?
         }
         .into();
-        trace!(target: LOG_TARGET, id = %id.try_fmt(), "Creating client");
+        trace!(target: LOG_TARGET, id = %id, "Creating client");
         let client = Arc::new_cyclic(|client| Self {
             handle: client.clone().into(),
             endpoint,
@@ -184,7 +184,7 @@ impl Client {
             active: AtomicBool::new(false),
         });
 
-        trace!(target: LOG_TARGET, id = %id.try_fmt(), "Starting client tasks");
+        trace!(target: LOG_TARGET, id = %id, "Starting client tasks");
         if start_request_handler {
             client.start_request_handler();
         }
@@ -196,7 +196,7 @@ impl Client {
             client.start_missing_event_fetcher();
         }
 
-        trace!(target: LOG_TARGET, id = %id.try_fmt(), "Client complete");
+        trace!(target: LOG_TARGET, %id, "Client complete");
         Ok(client)
     }
 }
@@ -461,7 +461,7 @@ impl Client {
 
         debug!(
             target: LOG_TARGET,
-            id = %id.try_fmt(),
+            %id,
             ticket = %ticket.fmt_option(),
             head=%head.fmt_option(),
             "Resolved Id"

@@ -86,8 +86,21 @@ impl From<RostraId> for ShortRostraId {
 }
 
 array_type_define_public!(struct ShortRostraId, 16);
+
 array_type_define_public!(struct RestRostraId, 16);
 
+impl fmt::Display for ShortRostraId {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match bech32::encode_to_fmt::<bech32::Bech32m, _>(f, RostraId::BECH32_HRP, &self.0) {
+            Ok(()) => Ok(()),
+            Err(e) => match e {
+                bech32::EncodeError::TooLong(_) => unreachable!("Fixed size"),
+                bech32::EncodeError::Fmt(error) => Err(error),
+                e => panic!("Unexpected error: {e:#}"),
+            },
+        }
+    }
+}
 impl RostraId {
     pub fn split(self) -> (ShortRostraId, RestRostraId) {
         (
