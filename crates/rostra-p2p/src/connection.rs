@@ -2,10 +2,9 @@ use std::fmt;
 use std::future::Future;
 use std::pin::Pin;
 
-use bao_tree::io::fsm::CreateOutboard as _;
-use bao_tree::io::outboard::{EmptyOutboard, PreOrderMemOutboard, PreOrderOutboard};
+use bao_tree::io::outboard::{EmptyOutboard, PreOrderMemOutboard};
 use bao_tree::io::round_up_to_chunks;
-use bao_tree::{blake3, BaoTree, BlockSize, ByteRanges};
+use bao_tree::{blake3, BlockSize, ByteRanges};
 use bincode::{Decode, Encode};
 use convi::{CastInto, ExpectFrom};
 use iroh::endpoint::{RecvStream, SendStream};
@@ -397,7 +396,7 @@ impl Connection {
     pub async fn write_bao_content(
         send: &mut SendStream,
         bytes: &[u8],
-        hash: ContentHash,
+        _hash: ContentHash,
     ) -> RpcResult<()> {
         let bytes_len = u32::try_from(bytes.len())
             .ok()
