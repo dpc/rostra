@@ -1,7 +1,8 @@
 use core::fmt;
 use std::str::FromStr;
 
-use snafu::Snafu;
+use data_encoding::Specification;
+use snafu::{OptionExt as _, Snafu};
 
 use crate::{array_type_define_public, array_type_impl_serde, EventId, ShortEventId};
 
@@ -14,36 +15,57 @@ mod pkarr;
 #[cfg(feature = "serde")]
 mod serde;
 
+pub fn z32_encoding() -> data_encoding::Encoding {
+    let mut spec = Specification::new();
+    spec.symbols.push_str("ybndrfg8ejkmcpqxot1uwisza345h769");
+    spec.encoding().unwrap()
+}
+
 array_type_define_public!(struct RostraId, 32);
 array_type_impl_serde!(struct RostraId, 32);
 impl RostraId {
+    // Obsolete
     pub const BECH32_HRP: bech32::Hrp = bech32::Hrp::parse_unchecked("rstr");
 }
 
 impl fmt::Display for RostraId {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match bech32::encode_to_fmt::<bech32::Bech32m, _>(f, Self::BECH32_HRP, &self.0) {
-            Ok(()) => Ok(()),
-            Err(e) => match e {
-                bech32::EncodeError::TooLong(_) => unreachable!("Fixed size"),
-                bech32::EncodeError::Fmt(error) => Err(error),
-                e => panic!("Unexpected error: {e:#}"),
-            },
-        }
+        f.write_str("rs")?;
+        let str = z32::encode(self.0.as_slice());
+        f.write_str(&str)?;
+        let str_data_encoding = z32_encoding().encode(self.as_slice());
+        assert_eq!(str, str_data_encoding);
+        Ok(())
     }
 }
 
 #[derive(Debug, Snafu, Clone)]
 pub enum RostraIdParseError {
     #[snafu(transparent)]
-    Decoding {
+    DecodingBech32 {
         source: bech32::DecodeError,
     },
+    DecodingZ32,
     InvalidHrp,
     InvalidLength,
+    InvalidPrefix,
 }
 
 impl RostraId {
+    fn from_rs_z32_str(s: &str) -> Result<Self, RostraIdParseError> {
+        if !s.starts_with("rs") {
+            return Err(InvalidPrefixSnafu.build());
+        }
+
+        let bytes = z32::decode(s[2..].as_bytes())
+            .ok()
+            .context(DecodingZ32Snafu)?;
+
+        if bytes.len() != 32 {
+            return Err(InvalidLengthSnafu.build());
+        }
+        Ok(Self(bytes.try_into().expect("Just checked length")))
+    }
     fn from_bech32m_str(s: &str) -> Result<Self, RostraIdParseError> {
         let (hrp, bytes) = bech32::decode(s)?;
         if hrp != Self::BECH32_HRP {
@@ -55,8 +77,27 @@ impl RostraId {
         Ok(Self(bytes.try_into().expect("Just checked length")))
     }
 
-    pub fn to_z32_string(&self) -> String {
+    pub fn from_unprefixed_z32_str(s: &str) -> Result<Self, RostraIdParseError> {
+        // Fallback attempting decoding with unprefixed-older z32 (pkarr) encoding
+        let bytes = z32::decode(s.as_bytes()).ok().context(DecodingZ32Snafu)?;
+        if bytes.len() != 32 {
+            return Err(InvalidLengthSnafu.build());
+        }
+        Ok(Self(bytes.try_into().expect("Just checked length")))
+    }
+
+    pub fn to_unprefixed_z32_string(&self) -> String {
         z32::encode(&self.0)
+    }
+
+    pub fn to_bech32_string(&self) -> String {
+        match bech32::encode::<bech32::Bech32m>(RostraId::BECH32_HRP, &self.0) {
+            Ok(s) => s,
+            Err(e) => match e {
+                bech32::EncodeError::TooLong(_) => unreachable!("Fixed size"),
+                e => panic!("Unexpected error: {e:#}"),
+            },
+        }
     }
 }
 
@@ -64,16 +105,17 @@ impl FromStr for RostraId {
     type Err = RostraIdParseError;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        match Self::from_bech32m_str(s) {
+        match Self::from_rs_z32_str(s) {
             Ok(o) => Ok(o),
             Err(err) => {
-                // Fallback attempting decoding with older z32 (pkarr) encoding
-                let bytes = z32::decode(s.as_bytes()).map_err(|_| err.clone())?;
-                if bytes.len() != 32 {
-                    return Err(err);
+                if let Ok(o) = Self::from_bech32m_str(s) {
+                    return Ok(o);
+                }
+                if let Ok(o) = Self::from_unprefixed_z32_str(s) {
+                    return Ok(o);
                 }
 
-                Ok(Self(bytes.try_into().expect("Just checked length")))
+                Err(err)
             }
         }
     }
@@ -91,16 +133,18 @@ array_type_define_public!(struct RestRostraId, 16);
 
 impl fmt::Display for ShortRostraId {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match bech32::encode_to_fmt::<bech32::Bech32m, _>(f, RostraId::BECH32_HRP, &self.0) {
-            Ok(()) => Ok(()),
-            Err(e) => match e {
-                bech32::EncodeError::TooLong(_) => unreachable!("Fixed size"),
-                bech32::EncodeError::Fmt(error) => Err(error),
-                e => panic!("Unexpected error: {e:#}"),
-            },
-        }
+        f.write_str("rs")?;
+        let str = z32::encode(self.0.as_slice());
+        f.write_str(&str)?;
+
+        let str_data_encoding = z32_encoding().encode(self.as_slice());
+
+        assert_eq!(str, str_data_encoding);
+
+        Ok(())
     }
 }
+
 impl RostraId {
     pub fn split(self) -> (ShortRostraId, RestRostraId) {
         (

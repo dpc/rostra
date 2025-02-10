@@ -154,9 +154,14 @@ impl Database {
     ) -> std::result::Result<PathBuf, io::Error> {
         tokio::fs::create_dir_all(&data_dir).await?;
 
-        let legacy_path = data_dir.join(format!("{}.redb", self_id.to_z32_string()));
-        if legacy_path.exists() {
-            return Ok(legacy_path);
+        let legacy_path_unprefixed_z32 =
+            data_dir.join(format!("{}.redb", self_id.to_unprefixed_z32_string()));
+        if legacy_path_unprefixed_z32.exists() {
+            return Ok(legacy_path_unprefixed_z32);
+        }
+        let legacy_path_bech32 = data_dir.join(format!("{}.redb", self_id.to_bech32_string()));
+        if legacy_path_bech32.exists() {
+            return Ok(legacy_path_bech32);
         }
         Ok(data_dir.join(format!("{}.redb", self_id)))
     }
