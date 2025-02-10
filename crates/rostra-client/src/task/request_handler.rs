@@ -13,9 +13,10 @@ use rostra_p2p::connection::{
 };
 use rostra_p2p::RpcError;
 use rostra_util_error::{BoxedError, FmtCompact as _};
+use rostra_util_fmt::AsFmtOption as _;
 use snafu::{Location, OptionExt as _, ResultExt as _, Snafu};
 use tokio::sync::watch;
-use tracing::{debug, info, instrument};
+use tracing::{debug, info, instrument, trace};
 
 use crate::client::Client;
 use crate::{ClientHandle, ClientRefError, ClientRefSnafu};
@@ -104,7 +105,7 @@ impl RequestHandler {
             match err {
                 // normal, mostly ignore
                 IncomingConnectionError::Connection { source: _, .. } => {
-                    debug!(target: LOG_TARGET, err=%err.fmt_compact(), %peer_addr, "Error handling incoming connection");
+                    trace!(target: LOG_TARGET, err=%err.fmt_compact(), %peer_addr, "Client disconnected");
                 }
                 _ => {
                     debug!(target: LOG_TARGET, err=%err.fmt_compact(), %peer_addr, "Error handling incoming connection");
@@ -121,11 +122,18 @@ impl RequestHandler {
 
         loop {
             let (send, mut recv) = conn.accept_bi().await.context(ConnectionSnafu)?;
-            let (id, req_msg) = Connection::read_request_raw(&mut recv)
+            let (rpc_id, req_msg) = Connection::read_request_raw(&mut recv)
                 .await
                 .context(RpcSnafu)?;
 
-            match id {
+            debug!(
+                target: LOG_TARGET,
+                rpc_id = %rpc_id,
+                from = %conn.remote_node_id().ok().fmt_option(),
+                "Rpc request"
+            );
+
+            match rpc_id {
                 RpcId::PING => {
                     self.handle_ping_request(req_msg, send).await?;
                 }
@@ -141,7 +149,7 @@ impl RequestHandler {
                 RpcId::WAIT_HEAD_UPDATE => {
                     self.handle_wait_head_update(req_msg, send, recv).await?;
                 }
-                _ => return UnknownRpcIdSnafu { id }.fail(),
+                _ => return UnknownRpcIdSnafu { id: rpc_id }.fail(),
             }
         }
     }

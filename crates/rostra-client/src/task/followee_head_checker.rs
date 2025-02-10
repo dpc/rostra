@@ -8,6 +8,7 @@ use rostra_core::id::RostraId;
 use rostra_core::ShortEventId;
 use rostra_util::is_rostra_dev_mode_set;
 use rostra_util_error::{FmtCompact, WhateverResult};
+use rostra_util_fmt::AsFmtOption as _;
 use snafu::{whatever, ResultExt as _};
 use tokio::sync::watch;
 use tracing::{debug, info, instrument};
@@ -120,7 +121,7 @@ impl FolloweeHeadChecker {
     async fn download_new_data(
         &self,
         client: &ClientRef<'_>,
-        id: RostraId,
+        rostra_id: RostraId,
         head: ShortEventId,
     ) -> WhateverResult<()> {
         let mut events = BinaryHeap::from([(0, head)]);
@@ -128,21 +129,40 @@ impl FolloweeHeadChecker {
         let storage = client.db();
 
         let conn = client
-            .connect(id)
+            .connect(rostra_id)
             .await
             .whatever_context("Failed to connect")?;
 
+        let peer_id = conn.remote_node_id();
+
         while let Some((depth, event_id)) = events.pop() {
+            debug!(
+               target: LOG_TARGET,
+                %depth,
+                node_id = %peer_id.fmt_option(),
+                %rostra_id,
+                %event_id,
+                "Querrying for event"
+            );
             let event = conn
                 .get_event(event_id)
                 .await
                 .whatever_context("Failed to query peer")?;
 
             let Some(event) = event else {
+                debug!(
+                   target: LOG_TARGET,
+                    %depth,
+                node_id = %peer_id.fmt_option(),
+                    %rostra_id,
+                    %event_id,
+                    "Event not found"
+                );
                 continue;
             };
-            let event = VerifiedEvent::verify_response(id, event_id, *event.event(), event.sig())
-                .whatever_context("Invalid event received")?;
+            let event =
+                VerifiedEvent::verify_response(rostra_id, event_id, *event.event(), event.sig())
+                    .whatever_context("Invalid event received")?;
 
             let (insert_outcome, process_state) = storage.process_event(&event).await;
 

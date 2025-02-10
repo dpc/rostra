@@ -1,6 +1,8 @@
 pub mod content;
 pub mod content_kind;
 
+use std::fmt;
+
 pub use content::*;
 pub use content_kind::*;
 
@@ -262,6 +264,29 @@ impl EventKind {
 
     pub const fn from_u16(value: u16) -> Self {
         Self(value.to_be_bytes())
+    }
+}
+
+impl fmt::Display for EventKind {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let s = match *self {
+            Self::NULL => "null",
+            Self::RAW => "raw",
+            Self::FOLLOW => "follow",
+            Self::UNFOLLOW => "unfollow",
+            Self::PERSONA_UPDATE => "persona-update",
+            Self::NODE_ANNOUNCEMENT => "node-announcement",
+            Self::SOCIAL_POST => "social-post",
+            Self::SOCIAL_LIKE => "social-like",
+            Self::SOCIAL_REPOST => "social-repost",
+            Self::SOCIAL_PROFILE_UPDATE => "social-profile-update",
+            v => {
+                f.write_fmt(format_args!("{v}"))?;
+                return Ok(());
+            }
+        };
+
+        f.write_str(s)
     }
 }
 impl From<u16> for EventKind {

@@ -38,8 +38,8 @@ use super::{get_rrecord_typed, RRECORD_HEAD_KEY, RRECORD_P2P_KEY};
 use crate::error::{
     ActivateResult, ConnectIrohSnafu, ConnectResult, IdResolveError, IdResolveResult,
     IdSecretReadResult, InitIrohClientSnafu, InitPkarrClientSnafu, InitResult, InvalidIdSnafu,
-    IoSnafu, IrohResult, MissingTicketSnafu, ParsingSnafu, PkarrResolveSnafu, PostResult,
-    RRecordSnafu, ResolveSnafu, SecretMismatchSnafu,
+    IoSnafu, IrohResult, MissingTicketSnafu, ParsingSnafu, PeerUnavailableSnafu, PkarrResolveSnafu,
+    PostResult, RRecordSnafu, ResolveSnafu, SecretMismatchSnafu,
 };
 use crate::id::{CompactTicket, IdPublishedData, IdResolvedData};
 use crate::task::id_publisher::PkarrIdPublisher;
@@ -251,25 +251,26 @@ impl Client {
     pub async fn connect(&self, id: RostraId) -> ConnectResult<Connection> {
         // TODO: maintain connection attempt stats and use them to prioritize best
         // endpoints
-        for ((_ts, endpoint), _stats) in self.db.get_id_endpoints(id).await.into_iter().rev() {
-            let Ok(endpoint) = iroh::NodeId::from_bytes(&endpoint.to_bytes()) else {
+        for ((_ts, node_id), _stats) in self.db.get_id_endpoints(id).await.into_iter().rev() {
+            let Ok(node_id) = iroh::NodeId::from_bytes(&node_id.to_bytes()) else {
                 debug!(target: LOG_TARGET, %id, "Invalid iroh id for rostra id found");
                 continue;
             };
 
-            if endpoint == self.endpoint.node_id() {
+            if node_id == self.endpoint.node_id() {
                 // If we are trying to connect to our own Id, we want to connect (if possible)
                 // with some other node.
                 continue;
             }
 
-            let conn = match self.endpoint.connect(endpoint, ROSTRA_P2P_V0_ALPN).await {
+            let conn = match self.endpoint.connect(node_id, ROSTRA_P2P_V0_ALPN).await {
                 Ok(conn) => Connection::from(conn),
                 Err(err) => {
                     debug!(
                         target: LOG_TARGET,
                         %id,
-                        %endpoint,
+                        %node_id,
+                        our_id = %self.endpoint.node_id(),
                         err = %format!("{err:#}"),
                         "Failed to connect to a know iroh endpoint"
                     );
@@ -284,7 +285,7 @@ impl Client {
                     debug!(
                         target: LOG_TARGET,
                         %id,
-                        %endpoint,
+                        %node_id,
                         err = %format!("{err:#}"),
                         "Failed to ping a know iroh endpoint"
                     );
@@ -296,6 +297,11 @@ impl Client {
         let ticket = self.resolve_id_ticket(id).await.context(ResolveSnafu)?;
 
         let node_addr = NodeAddr::from(ticket);
+        if node_addr.node_id == self.endpoint.node_id() {
+            // If we are trying to connect to our own Id, we want to connect (if possible)
+            // with some other node.
+            return Err(PeerUnavailableSnafu.build());
+        }
         debug!(target: LOG_TARGET, iroh_id = %node_addr.node_id, id = %id.to_short(), "Connecting");
         Ok(self
             .endpoint
@@ -459,7 +465,7 @@ impl Client {
         let ticket = get_rrecord_typed(&packet, &domain, RRECORD_P2P_KEY).context(RRecordSnafu)?;
         let head = get_rrecord_typed(&packet, &domain, RRECORD_HEAD_KEY).context(RRecordSnafu)?;
 
-        debug!(
+        trace!(
             target: LOG_TARGET,
             %id,
             ticket = %ticket.fmt_option(),

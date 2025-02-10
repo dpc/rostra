@@ -1,4 +1,5 @@
 use rostra_core::event::{EventExt as _, VerifiedEvent, VerifiedEventContent};
+use rostra_core::id::ToShort as _;
 use rostra_util_error::FmtCompact as _;
 use tracing::{info, warn};
 
@@ -50,8 +51,9 @@ impl Database {
                 );
             } else {
                 info!(target: LOG_TARGET,
-                    event_id = %event.event_id,
-                    author = %event.event.author,
+                    kind = %event.kind(),
+                    event_id = %event.event_id.to_short(),
+                    author = %event.event.author.to_short(),
                     parent_prev = %event.event.parent_prev,
                     parent_aux = %event.event.parent_aux,
                     "New event inserted"

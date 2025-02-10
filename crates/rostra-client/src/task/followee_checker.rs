@@ -3,7 +3,7 @@ use std::time::Duration;
 
 use rostra_client_db::IdsFolloweesRecord;
 use rostra_core::id::RostraId;
-use tracing::{debug, info, instrument};
+use tracing::{debug, instrument, trace};
 
 use crate::client::Client;
 const LOG_TARGET: &str = "rostra::publisher";
@@ -86,7 +86,7 @@ impl FolloweeChecker {
                 //     }
                 // }
                 //
-                info!(target: LOG_TARGET,
+                trace!(target: LOG_TARGET,
                     followee_id = %followee_id,
                     "Followee is not implemented yet",
                 );
