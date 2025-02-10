@@ -27,13 +27,36 @@ Rostra is extensible, and can be used for applications other
 than Twitter-like-app, as long as it fits its general
 social-graph-based data model.
 
+## Using
+
+#### Demo public instance
+
+A public instance is available at https://rostra.me/ , but
+it's advised to run Rostra directly on your system.
+
+#### Using Cargo
+
+As a Rust project Rostra can be installed using Cargo:
+
+```
+cargo install --git https://github.com/dpc/rostra
+```
+
+#### Using Nix
+
+You can run Rostra using Nix with:
+
+```
+nix run github:dpc/rostra
+```
+
 ## Plan
 
 Status: early, but getting to something usable.
 
 * Figure out general idea and architecture (mostly done)
 * Implement data model, p2p rpc, replication, etc.
-* Implement a built-in UX (web-server, using htmx).
+* Implement a built-in UI (web-server, using htmx).
 
 ## More info about Rostra:
 
