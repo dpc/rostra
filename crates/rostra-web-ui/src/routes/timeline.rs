@@ -144,7 +144,7 @@ impl UiState {
 
         };
 
-        self.render_html_page("You're Rostra!", content).await
+        self.render_html_page("Rostra", content).await
     }
 
     pub async fn render_post_comments(
