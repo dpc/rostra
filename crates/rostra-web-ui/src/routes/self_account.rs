@@ -89,9 +89,7 @@ impl UiState {
                 script {
                     (PreEscaped(
                     r#"
-                    console.log("THERE");
                     function copyIdToClipboard(event) {
-                    console.log("HERE");
                         const target = event.target;
                         const id = target.getAttribute('data-value');
                         navigator.clipboard.writeText(id);
