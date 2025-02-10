@@ -1,4 +1,3 @@
-use std::str::FromStr as _;
 use std::time::Duration;
 
 use axum::extract::ws::WebSocket;
@@ -13,13 +12,11 @@ use rostra_core::id::{RostraId, ToShort as _};
 use rostra_core::{ExternalEventId, ShortEventId, Timestamp};
 use rostra_util_error::FmtCompact as _;
 use serde::Deserialize;
-use snafu::ResultExt as _;
 use tracing::debug;
 
 use super::super::error::RequestResult;
 use super::unlock::session::{RoMode, UserSession};
 use super::Maud;
-use crate::error::{InvalidDataSnafu, UserSnafu};
 use crate::html_utils::re_typeset_mathjax;
 use crate::{SharedState, UiState, LOG_TARGET};
 
@@ -112,8 +109,12 @@ impl UiState {
         user: &UserSession,
     ) -> RequestResult<Markup> {
         let content = html! {
-            nav ."o-navBar" hx-ext="ws" ws-connect="/ui/timeline/updates" {
-
+            nav ."o-navBar"
+                hx-ext="ws"
+                ws-connect="/ui/timeline/updates"
+                // doesn't work, gets lowercased, wait for https://github.com/lambda-fairy/maud/pull/445
+                // hx-on:htmx:wsError="console.log(JSON.stringify(event))"
+            {
                 div ."o-navBar__list" {
                     span ."o-navBar__header" { "Rostra:" }
                     a ."o-navBar__item" href="https://github.com/dpc/rostra/discussions" { "Support" }
@@ -128,8 +129,6 @@ impl UiState {
                 (self.render_add_followee_form(None))
 
                 (self.new_post_form(None, user.ro_mode()))
-
-
             }
 
             main ."o-mainBar" {
