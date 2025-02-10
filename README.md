@@ -40,6 +40,8 @@ it's advised to run Rostra directly on your system.
 
 #### Using Cargo
 
+**NOTE**: [This flow currently doesn't work end to end](https://github.com/dpc/rostra/discussions/7).
+
 As a Rust project Rostra can be installed using Cargo:
 
 ```
