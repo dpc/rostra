@@ -53,8 +53,8 @@ ed25519-dalek = "2.1.1"
 futures = "0.3.31"
 bytes = "*"
 futures-util = "*"
-iroh = { version = "0.31.0", default-features = false }
-iroh-base = { version = "0.31.0", default-features = false }
+iroh = { version = "0.32.0", default-features = false }
+iroh-base = { version = "0.32.0", default-features = false }
 iroh-io = "0.6.0"
 itertools = "0.13.0"
 jotdown = "0.7.0"
