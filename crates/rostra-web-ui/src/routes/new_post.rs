@@ -72,7 +72,7 @@ pub async fn post_new_post(
     let clean_form = state.new_post_form(
         html! {
             div {
-                p { "Posted!" }
+                span { "Posted!" }
             }
         },
         session.ro_mode(),

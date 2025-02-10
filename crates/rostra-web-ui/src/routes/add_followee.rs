@@ -27,9 +27,7 @@ pub async fn add_followee(
         .follow(session.id_secret()?, form.rostra_id)
         .await?;
     Ok(Maud(state.render_add_followee_form(html! {
-    div {
-        p { "Followed!" }
-    }
+        span { "Followed!" }
     })))
 }
 
@@ -41,18 +39,23 @@ impl UiState {
                 hx-post="/ui/followee"
                 hx-swap="outerHTML"
             {
-                @if let Some(n) = notification {
-                    (n)
-                }
                 input ."m-addFolloweeForm__content"
                     placeholder="RostraId"
                     type="text"
                     name="rostra_id"
                     autocomplete="off"
                     {}
-                button ."m-addFolloweeForm__followButton u-button" {
-                    span ."m-addFolloweeForm__followButtonIcon u-buttonIcon" width="1rem" height="1rem" {}
-                    "Follow"
+
+                div ."m-addFolloweeForm__bottomBar"{
+                    div ."m-addFolloweeForm__notification"{
+                        @if let Some(n) = notification {
+                                (n)
+                        }
+                    }
+                    button ."m-addFolloweeForm__followButton u-button" {
+                        span ."m-addFolloweeForm__followButtonIcon u-buttonIcon" width="1rem" height="1rem" {}
+                        "Follow"
+                    }
                 }
             }
         }

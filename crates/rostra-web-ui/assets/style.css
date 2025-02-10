@@ -437,6 +437,10 @@ a:active {
   width: 100%;
   /* min-width: 100%; */
 }
+.m-addFolloweeForm__bottomBar {
+  display: flex;
+  gap: 5pt;
+}
 
 .m-addFolloweeForm__followButton {
 }
