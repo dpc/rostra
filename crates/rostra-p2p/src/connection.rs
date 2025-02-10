@@ -2,8 +2,8 @@ use std::fmt;
 use std::future::Future;
 use std::pin::Pin;
 
-use bao_tree::io::fsm::encode_ranges_validated;
-use bao_tree::io::outboard::EmptyOutboard;
+use bao_tree::io::fsm::CreateOutboard as _;
+use bao_tree::io::outboard::{EmptyOutboard, PreOrderMemOutboard, PreOrderOutboard};
 use bao_tree::io::round_up_to_chunks;
 use bao_tree::{blake3, BaoTree, BlockSize, ByteRanges};
 use bincode::{Decode, Encode};
@@ -23,6 +23,11 @@ use crate::{
 
 pub struct Connection(iroh::endpoint::Connection);
 
+impl Connection {
+    pub fn remote_node_id(&self) -> Option<iroh::PublicKey> {
+        self.0.remote_node_id().ok()
+    }
+}
 /// Max request message size
 ///
 /// Requests are smaller, because they are initiated by an unknown side
@@ -402,19 +407,19 @@ impl Connection {
             })?;
         /// Use a block size of 16 KiB, a good default
         /// for most cases
-        pub(crate) const BLOCK_SIZE: BlockSize = BlockSize::from_chunk_log(4);
-
-        let mut ob = EmptyOutboard {
-            tree: BaoTree::new(bytes_len.into(), BLOCK_SIZE),
-            root: blake3::Hash::from_bytes(hash.into()),
-        };
-
-        // Encode the first 100000 bytes of the file
+        const BLOCK_SIZE: BlockSize = BlockSize::from_chunk_log(4);
         let ranges = ByteRanges::from(0u64..bytes_len.into());
         let ranges = round_up_to_chunks(&ranges);
-        encode_ranges_validated(bytes, &mut ob, &ranges, TokioStreamWriter(send))
-            .await
-            .context(EncodingBaoSnafu)?;
+        let mut ob = PreOrderMemOutboard::create(bytes, BLOCK_SIZE);
+
+        bao_tree::io::fsm::encode_ranges_validated(
+            bytes,
+            &mut ob,
+            &ranges,
+            TokioStreamWriter(send),
+        )
+        .await
+        .context(EncodingBaoSnafu)?;
 
         Ok(())
     }
@@ -426,20 +431,16 @@ impl Connection {
     ) -> RpcResult<Vec<u8>> {
         const BLOCK_SIZE: BlockSize = BlockSize::from_chunk_log(4);
         let ranges = ByteRanges::from(0u64..len.into());
-        let chunk_ranges = round_up_to_chunks(&ranges);
-        let mut decoded = Vec::with_capacity(len.cast_into());
+        let ranges = round_up_to_chunks(&ranges);
         let mut ob = EmptyOutboard {
             tree: bao_tree::BaoTree::new(len.into(), BLOCK_SIZE),
             root: blake3::Hash::from_bytes(hash.into()),
         };
-        bao_tree::io::fsm::decode_ranges(
-            TokioStreamReader(read),
-            chunk_ranges,
-            &mut decoded,
-            &mut ob,
-        )
-        .await
-        .context(DecodingBaoSnafu)?;
+
+        let mut decoded = Vec::with_capacity(len.cast_into());
+        bao_tree::io::fsm::decode_ranges(TokioStreamReader(read), ranges, &mut decoded, &mut ob)
+            .await
+            .context(DecodingBaoSnafu)?;
 
         Ok(decoded)
     }
