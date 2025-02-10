@@ -32,7 +32,6 @@ use snafu::{ensure, Location, OptionExt as _, ResultExt as _, Snafu};
 use tokio::sync::{broadcast, watch};
 use tokio::time::Instant;
 use tracing::{debug, info, trace, warn};
-use url::Url;
 
 use super::{get_rrecord_typed, RRECORD_HEAD_KEY, RRECORD_P2P_KEY};
 use crate::error::{
@@ -155,9 +154,8 @@ impl Client {
 
         trace!(target: LOG_TARGET, id = %id, "Creating Pkarr client");
         let pkarr_client = pkarr::Client::builder()
-            .relays(vec![
-                Url::parse("https://dns.iroh.link/pkarr").expect("Can't fail")
-            ])
+            .relays(&["https://dns.iroh.link/pkarr"])
+            .expect("Can't fail")
             .build()
             .context(InitPkarrClientSnafu)?
             .into();

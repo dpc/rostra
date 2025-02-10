@@ -58,14 +58,14 @@ iroh-base = { version = "0.32.0", default-features = false }
 iroh-io = "0.6.0"
 itertools = "0.13.0"
 jotdown = "0.7.0"
-pkarr = { version = "3.0.0-rc.1" }
+pkarr = "3.0.0"
 proptest = "1.6.0"
 maud = "*"
 tempfile = "3.14.0"
 test-log = { version = "0.2.16", features = ["trace"] }
 rand = "0.8"
 redb = "2.3.0"
-redb-bincode = "0.2.2"
+redb-bincode = "0.3.0"
 rostra-core = { path = "crates/rostra-core" }
 rostra-client = { path = "crates/rostra-client" }
 rostra-client-db = { path = "crates/rostra-client-db" }
@@ -131,5 +131,5 @@ debug = false
 [profile.release.build-override]
 debug = false
 
-[patch.crates-io]
-redb-bincode = { git = "https://github.com/rustshop/redb-bincode", rev = "24c07171aa74a56a2f5448c17563fc34f5b99893" }
+# [patch.crates-io]
+# redb-bincode = { git = "https://github.com/rustshop/redb-bincode", rev = "24c07171aa74a56a2f5448c17563fc34f5b99893" }

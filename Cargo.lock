@@ -2468,9 +2468,9 @@ dependencies = [
 
 [[package]]
 name = "mainline"
-version = "5.0.0-rc.1"
+version = "5.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d40903d61c43712efd2d9151eeb3d53e8081e26efb2b69d7bb0693c49dfa195a"
+checksum = "5390cadf8fe89752b97a486edb3180199c4f84b66e7640fd29763491fa644ad0"
 dependencies = [
  "crc",
  "document-features",
@@ -3107,9 +3107,9 @@ dependencies = [
 
 [[package]]
 name = "pkarr"
-version = "3.0.0-rc.1"
+version = "3.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "41060323086a60c20f28bf52afc915eafc971493bf8b887907c0909004731807"
+checksum = "a1e77ba80d75120dbcdd92a9855dd9aa0f3a17d50679441e28daf1f5493bfa21"
 dependencies = [
  "async-compat",
  "base32",
@@ -3607,8 +3607,9 @@ dependencies = [
 
 [[package]]
 name = "redb-bincode"
-version = "0.2.2"
-source = "git+https://github.com/rustshop/redb-bincode?rev=24c07171aa74a56a2f5448c17563fc34f5b99893#24c07171aa74a56a2f5448c17563fc34f5b99893"
+version = "0.3.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4dcdb9f555b804ee5cd0622a3b0b3686f19c4da8303ab00edbddcb1a109d0389"
 dependencies = [
  "bincode",
  "redb",
@@ -3817,7 +3818,7 @@ dependencies = [
  "iroh-base",
  "iroh-io",
  "itertools",
- "pkarr 3.0.0-rc.1",
+ "pkarr 3.0.0",
  "rand",
  "redb",
  "redb-bincode",
@@ -3887,7 +3888,7 @@ dependencies = [
  "convi",
  "data-encoding",
  "ed25519-dalek",
- "pkarr 3.0.0-rc.1",
+ "pkarr 3.0.0",
  "rand",
  "serde",
  "serde_bytes",
@@ -3909,7 +3910,7 @@ dependencies = [
  "futures",
  "iroh",
  "iroh-io",
- "pkarr 3.0.0-rc.1",
+ "pkarr 3.0.0",
  "rostra-core",
  "rostra-util-error",
  "serde",
