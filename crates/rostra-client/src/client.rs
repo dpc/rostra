@@ -547,7 +547,7 @@ impl Client {
             self.db.get_self_random_eventid().await
         };
 
-        let content = content.serialize_cbor();
+        let content = content.serialize_cbor()?;
 
         let signed_event = Event::builder()
             .author(self.id)

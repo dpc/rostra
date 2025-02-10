@@ -1,7 +1,12 @@
 use std::convert::Infallible;
 use std::sync::Arc;
 
-use super::{EventContent, EventContentKind, EventContentUnsized, EventKind, EventSignature};
+use snafu::Snafu;
+
+use super::{
+    ContentValidationError, EventContent, EventContentKind, EventContentUnsized, EventKind,
+    EventSignature,
+};
 
 impl serde::Serialize for EventSignature {
     fn serialize<S>(&self, ser: S) -> Result<S::Ok, S::Error>
@@ -94,15 +99,29 @@ impl<'de> serde::de::Deserialize<'de> for EventKind {
     }
 }
 
+#[derive(Debug, Snafu)]
+pub enum ContentDeserializationError {
+    #[snafu(transparent)]
+    Validation { source: ContentValidationError },
+    #[snafu(transparent)]
+    Decoding {
+        source: cbor4ii::serde::DecodeError<Infallible>,
+    },
+}
+
+pub type ContentDeserializationResult<T> = std::result::Result<T, ContentDeserializationError>;
 impl EventContentUnsized {
-    pub fn deserialize_cbor<T>(&self) -> Result<T, cbor4ii::serde::DecodeError<Infallible>>
+    pub fn deserialize_cbor<T>(&self) -> ContentDeserializationResult<T>
     // pub fn deserialize_cbor<T>(&self) -> std::result::Result<T,
     // ciborium::de::Error<std::io::Error>>
     where
         T: EventContentKind,
     {
         // ciborium::from_reader(self.as_ref())
-        cbor4ii::serde::from_slice(self.as_ref())
+        let v: T = cbor4ii::serde::from_slice(self.as_ref())?;
+        v.validate()?;
+
+        Ok(v)
     }
 }
 

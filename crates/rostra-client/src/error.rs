@@ -2,6 +2,7 @@ use std::io;
 
 use pkarr::dns::SimpleDnsError;
 use rostra_client_db::DbError;
+use rostra_core::event::ContentValidationError;
 use rostra_core::id::RostraIdSecretKeyError;
 use rostra_util_error::BoxedError;
 use snafu::Snafu;
@@ -95,6 +96,8 @@ pub enum PostError {
     #[snafu(display("Encoding error: {source}"))]
     #[snafu(visibility(pub))]
     Encode { source: BoxedError },
+    #[snafu(transparent)]
+    Validation { source: ContentValidationError },
 }
 
 pub type PostResult<T> = std::result::Result<T, PostError>;

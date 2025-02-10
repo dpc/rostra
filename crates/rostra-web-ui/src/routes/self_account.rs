@@ -26,11 +26,24 @@ pub async fn post_self_account_edit(
     session: UserSession,
     form: extractor::InputForm,
 ) -> RequestResult<impl IntoResponse> {
+    let existing = state
+        .client(session.id())
+        .await?
+        .client_ref()?
+        .db()
+        .get_social_profile(session.id())
+        .await;
+
     state
         .client(session.id())
         .await?
         .client_ref()?
-        .post_social_profile_update(session.id_secret()?, form.name, form.bio, form.avatar)
+        .post_social_profile_update(
+            session.id_secret()?,
+            form.name,
+            form.bio,
+            form.avatar.or_else(|| existing.and_then(|e| e.avatar)),
+        )
         .await?;
 
     Ok(Maud(

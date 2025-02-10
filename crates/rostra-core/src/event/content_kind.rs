@@ -1,12 +1,19 @@
 use std::collections::BTreeSet;
 use std::str::FromStr as _;
 
+use snafu::Snafu;
+
 use super::{EventContent, EventKind, PersonaId};
 use crate::id::RostraId;
 use crate::{
     array_type_define, array_type_impl_base32_str, array_type_impl_serde, ExternalEventId,
     ShortEventId,
 };
+
+#[derive(Debug, Snafu)]
+pub struct ContentValidationError;
+
+pub type ContentValidationResult<T> = std::result::Result<T, ContentValidationError>;
 
 /// Extension trait for deserializing content
 #[cfg(feature = "serde")]
@@ -21,11 +28,16 @@ pub trait EventContentKind: ::serde::Serialize + ::serde::de::DeserializeOwned {
     /// * self-describing, so flexible to evolve while maintaining compatibility
     /// * roughly-compatible with JSON, making it easy to transform to JSON form
     ///   for external APIs and such.
-    fn serialize_cbor(&self) -> EventContent {
+    fn serialize_cbor(&self) -> ContentValidationResult<EventContent> {
+        self.validate()?;
         let mut buf = Vec::with_capacity(128);
         cbor4ii::serde::to_writer(&mut buf, self).expect("Can't fail");
         // ciborium::into_writer(self, &mut buf).expect("Can't fail");
-        EventContent::new(buf)
+        Ok(EventContent::new(buf))
+    }
+
+    fn validate(&self) -> ContentValidationResult<()> {
+        Ok(())
     }
 }
 
@@ -182,6 +194,30 @@ pub struct SocialProfileUpdate {
 
 impl EventContentKind for SocialProfileUpdate {
     const KIND: EventKind = EventKind::SOCIAL_PROFILE_UPDATE;
+
+    fn validate(&self) -> ContentValidationResult<()> {
+        if 100 < self.display_name.len() {
+            return Err(ContentValidationError);
+        }
+
+        if 1000 < self.display_name.len() {
+            return Err(ContentValidationError);
+        }
+
+        if let Some(avatar) = self.avatar.as_ref() {
+            if 100 < avatar.0.len() {
+                return Err(ContentValidationError);
+            }
+
+            if !avatar.0.starts_with("image/") {
+                return Err(ContentValidationError);
+            }
+            if 1_000_000 < avatar.1.len() {
+                return Err(ContentValidationError);
+            }
+        }
+        Ok(())
+    }
 }
 
 #[cfg(test)]
