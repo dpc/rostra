@@ -4,7 +4,7 @@ Let's be honest. The single biggest reason Rostra exist is: I didn't
 design any of the alternatives, so they work differently to how I think
 p2p social network should work. :D
 
-I have no illusions that Rostra has a high change of gaining traction,
+I have no illusions that Rostra has a high chance of gaining traction,
 but I always had a lot of opinions about the existing solutions, and
 what's more fun than making your own social network, and then being
 the only user on it, right? At least the posts are always bangers.
@@ -94,7 +94,7 @@ if you can't tell. :D
 
 Similarities:
 
-* Name. I swear I asked Claude.ia to come up with Roman terms related to public discourse first,
+* Name. I swear I asked Claude.ai to come up with Roman terms related to public discourse first,
   and only then turned out there's one that is oddly similar, so I ran with it for LOLs.
 
 Differences:
