@@ -32,8 +32,9 @@ Differences:
 
 * No ads. No algorithms.
 * Rostra is P2P.
-* No one can block you.
-* You can host it on your server, you can run it from your desktop, or both.
+* No one can stop you from using it.
+* You can host it on your server, you can run it from your desktop, or
+  any combination of devices at the same time.
 * No users. :D (but it's fixable!)
 
 ### vs Mastodon
