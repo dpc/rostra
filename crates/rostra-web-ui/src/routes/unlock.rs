@@ -131,6 +131,7 @@ impl UiState {
                             type="username"
                             name="username"
                             placeholder="Id..."
+                            autocomplete="username"
                             title="Id is a single, long string of characters encoding your public identifier"
                             value=(current_rostra_id.map(|id| id.to_string()).unwrap_or_default())
                             {}
