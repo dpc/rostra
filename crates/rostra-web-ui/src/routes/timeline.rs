@@ -62,12 +62,8 @@ pub async fn get_updates(
 pub async fn get_post_comments(
     state: State<SharedState>,
     session: UserSession,
-    // TODO: seems like using `[u8;16]` in path does not work as expected
-    Path(id): Path<String>,
+    Path(id): Path<ShortEventId>,
 ) -> RequestResult<impl IntoResponse> {
-    let id = ShortEventId::from_str(&id)
-        .map_err(|_| InvalidDataSnafu.build())
-        .context(UserSnafu)?;
     Ok(Maud(state.render_post_comments(id, &session).await?))
 }
 
