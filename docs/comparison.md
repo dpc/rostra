@@ -53,14 +53,14 @@ Differences:
 
 ### vs Secure Scuttlebutt
 
-I really liked design of SSB, but it went largely nowhere for years, and I don't
+I enjoyed the idea behind SSB a while ago, but it went largely nowhere for years, and I don't
 understand why. Admitely, I stopped caring about it years ago, so maybe something
 changed in the meantime?
 
 It isn't entirely p2p, as it uses "pubs" to exchange messages. OK-ish, but
 in Rostra every node can connect directly, and every node acts as a "pub".
 
-Every time I looked into details of a design, I was disappointed.
+Every time I looked into details of its design, I was disappointed.
 
 It couldn't solve the multi-device/account problem. Too much JS, if you ask me. :D.
 I can't help them because I am not touching JavaScript.
@@ -77,19 +77,19 @@ Differences:
 Big part of my motivation to work on Rostra is how meh Nostr is. :D
 
 Nostr basically re-discovers SSB, because why learn from the past, when
-you can simply ignore it and have fun.
+you can simply ignore it.
 
 Comparing to SSB "pub"s are now called "relays" and do slightly more work,
 which is OK when you have no users anyway. The design is roughly as clunky as SSB was,
 but optimized for a web-developer, so anyone can easily build another half-assed
 client, demo it and feel good about themselves.
 
-Compared to SSB doesn't have a conept of a chain of events, so you never know
+Compared to SSB doesn't have a concept of a chain of events, so you never know
 if you actually received all the past messages.
 
 Got mildly popular because Bitcoin community was socially adjacent and ran with it.
 The Ostrich is kind of cool, and the meme game is A+, so yeah. NGL, I'm a bit envious and salty,
-if you weren't able to tell. :D
+if you can't tell. :D
 
 
 Similarities:
@@ -100,11 +100,11 @@ Similarities:
 Differences:
 
 * No relays. Actually p2p.
-* Actually scales. (I hope, LOL)
+* Scales. (I hope, LOL)
 * The lower layers of the implementation are more advanced tech-wise, for a good reason.
   Can still expose simple "sign me a json" API-s too.
-* Abandons JS, embraces Rust and Unix tech. Optimizing for JS-integration is not
-  the most important goal, especially as it sacorifices actually being P2P.
+* Abandons JS, embraces Rust and Unix tech. Optimizing for JS-integration is non-goal,
+  especially if it was to sacrifice being P2P.
 * Optimizes for performance and resource usage.
 * Events are chained together in a DAG.
 
