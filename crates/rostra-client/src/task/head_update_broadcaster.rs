@@ -25,7 +25,7 @@ pub struct HeadUpdateBroadcaster {
 
 impl HeadUpdateBroadcaster {
     pub fn new(client: &Client) -> Self {
-        debug!(target: LOG_TARGET, "Starting followee head checking task" );
+        debug!(target: LOG_TARGET, "Starting followee head broadcasting task" );
         Self {
             client: client.handle(),
             db: client.db().to_owned(),

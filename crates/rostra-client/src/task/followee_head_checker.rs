@@ -76,36 +76,29 @@ impl FolloweeHeadChecker {
                     break;
                 };
 
-                match self.check_for_new_head_pkarr(&client, *followee).await {
-                    Err(err) => {
-                        info!(target: LOG_TARGET, err = %err, id = %followee, "Failed to check for updates");
-                    }
-                    Ok(None) => {
-                        info!(target: LOG_TARGET, id = %followee, "No updates via pkarr");
-                        continue;
-                    }
-                    Ok(Some(head)) => {
-                        info!(target: LOG_TARGET, id = %followee, "Has updates");
-                        if let Err(err) = self.download_new_data(&client, *followee, head).await {
-                            info!(target: LOG_TARGET, err = %err.fmt_compact(), id = %followee, "Failed to download new data");
+                let (head_pkarr, head_iroh) = tokio::join!(
+                    self.check_for_new_head_pkarr(&client, *followee),
+                    self.check_for_new_head_iroh(&client, *followee),
+                );
+
+                for (source, res) in [("pkarr", head_pkarr), ("iroh", head_iroh)] {
+                    match res {
+                        Err(err) => {
+                            info!(target: LOG_TARGET, err = %err, id = %followee, %source, "Failed to check for updates");
+                        }
+                        Ok(None) => {
+                            info!(target: LOG_TARGET, id = %followee, %source, "No updates");
+                            continue;
+                        }
+                        Ok(Some(head)) => {
+                            info!(target: LOG_TARGET, id = %followee, %source, "Has updates");
+                            if let Err(err) = self.download_new_data(&client, *followee, head).await
+                            {
+                                info!(target: LOG_TARGET, err = %err.fmt_compact(), id = %followee, "Failed to download new data");
+                            }
                         }
                     }
-                };
-                match self.check_for_new_head_iroh(&client, *followee).await {
-                    Err(err) => {
-                        info!(target: LOG_TARGET, err = %err, id = %followee, "Failed to check for updates");
-                    }
-                    Ok(None) => {
-                        info!(target: LOG_TARGET, id = %followee, "No updates via iroh");
-                        continue;
-                    }
-                    Ok(Some(head)) => {
-                        info!(target: LOG_TARGET, id = %followee, "Has updates");
-                        if let Err(err) = self.download_new_data(&client, *followee, head).await {
-                            info!(target: LOG_TARGET, err = %err.fmt_compact(), id = %followee, "Failed to download new data");
-                        }
-                    }
-                };
+                }
             }
         }
     }
