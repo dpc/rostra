@@ -255,7 +255,7 @@ impl UiState {
                         (self.post_overview(
                             &client_ref,
                             post.author,
-                            post.reply_to.map(|reply_to| parents.get(&reply_to.event_id().to_short())),
+                            post.reply_to.map(|reply_to| (reply_to.rostra_id(), parents.get(&reply_to.event_id().to_short()))),
                             Some(post.event_id),
                             &post.content.djot_content,
                             Some(post.reply_count),
@@ -289,7 +289,7 @@ impl UiState {
         &self,
         client: &ClientRef<'_>,
         author: RostraId,
-        reply_to: Option<Option<&SocialPostRecord<SocialPost>>>,
+        reply_to: Option<(RostraId, Option<&SocialPostRecord<SocialPost>>)>,
         event_id: Option<ShortEventId>,
         content: &str,
         reply_count: Option<u64>,
@@ -376,21 +376,21 @@ impl UiState {
                     "post-" (event_id.map(|e| e.to_string()).unwrap_or_else(|| "preview".to_string()))
                 } {
 
-                    @if let Some(reply_to) = reply_to {
+                    @if let Some((reply_to_author, reply_to_post)) = reply_to {
                         div ."m-postOverview__parent" {
-                            @if let Some(reply_to) = reply_to {
+                            @if let Some(reply_to_post) = reply_to_post {
                                 (Box::pin(self.post_overview(
                                     client,
-                                    reply_to.author,
+                                    reply_to_post.author,
                                     None,
-                                    Some(reply_to.event_id),
-                                    &reply_to.content.djot_content,
+                                    Some(reply_to_post.event_id),
+                                    &reply_to_post.content.djot_content,
                                     // We could display comment button here, but the UX is weird
                                     None,
                                     ro
                                 )).await?)
                             } @else {
-                                p { "Parent missing" }
+                                p { (format!("Parent post by {} missing", reply_to_author)) }
                             }
                         }
 
