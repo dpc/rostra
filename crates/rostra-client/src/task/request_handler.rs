@@ -8,8 +8,9 @@ use rostra_core::event::{EventContent, EventExt as _, VerifiedEvent, VerifiedEve
 use rostra_core::id::RostraId;
 use rostra_p2p::connection::{
     Connection, FeedEventRequest, FeedEventResponse, GetEventContentRequest,
-    GetEventContentResponse, GetEventRequest, GetEventResponse, PingRequest, PingResponse, RpcId,
-    RpcMessage as _, WaitHeadUpdateRequest, WaitHeadUpdateResponse, MAX_REQUEST_SIZE,
+    GetEventContentResponse, GetEventRequest, GetEventResponse, GetHeadRequest, GetHeadResponse,
+    PingRequest, PingResponse, RpcId, RpcMessage as _, WaitHeadUpdateRequest,
+    WaitHeadUpdateResponse, MAX_REQUEST_SIZE,
 };
 use rostra_p2p::RpcError;
 use rostra_util_error::{BoxedError, FmtCompact as _};
@@ -148,6 +149,9 @@ impl RequestHandler {
                 }
                 RpcId::WAIT_HEAD_UPDATE => {
                     self.handle_wait_head_update(req_msg, send, recv).await?;
+                }
+                RpcId::GET_HEAD => {
+                    self.handle_get_head(req_msg, send, recv).await?;
                 }
                 _ => return UnknownRpcIdSnafu { id: rpc_id }.fail(),
             }
@@ -354,6 +358,27 @@ impl RequestHandler {
         )
         .await
         .context(RpcSnafu)?;
+        Ok(())
+    }
+
+    async fn handle_get_head(
+        &self,
+        req_msg: Vec<u8>,
+        mut send: iroh::endpoint::SendStream,
+        _read: iroh::endpoint::RecvStream,
+    ) -> Result<(), IncomingConnectionError> {
+        let GetHeadRequest(id) =
+            GetHeadRequest::decode_whole::<MAX_REQUEST_SIZE>(&req_msg).context(DecodingSnafu)?;
+
+        Connection::write_success_return_code(&mut send)
+            .await
+            .context(RpcSnafu)?;
+
+        let heads = self.client.db()?.get_heads(id).await?;
+
+        Connection::write_message(&mut send, &GetHeadResponse(heads.into_iter().next()))
+            .await
+            .context(RpcSnafu)?;
         Ok(())
     }
 }

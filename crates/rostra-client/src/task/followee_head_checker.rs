@@ -6,10 +6,11 @@ use rostra_client_db::{Database, IdsFolloweesRecord, InsertEventOutcome};
 use rostra_core::event::{EventExt as _, VerifiedEvent, VerifiedEventContent};
 use rostra_core::id::RostraId;
 use rostra_core::ShortEventId;
+use rostra_p2p::connection::GetHeadRequest;
 use rostra_util::is_rostra_dev_mode_set;
-use rostra_util_error::{FmtCompact, WhateverResult};
+use rostra_util_error::{BoxedErrorResult, FmtCompact, WhateverResult};
 use rostra_util_fmt::AsFmtOption as _;
-use snafu::{whatever, ResultExt as _};
+use snafu::ResultExt as _;
 use tokio::sync::watch;
 use tracing::{debug, info, instrument};
 
@@ -75,37 +76,65 @@ impl FolloweeHeadChecker {
                     break;
                 };
 
-                let head = match self.check_for_new_head(&client, *followee).await {
+                match self.check_for_new_head_pkarr(&client, *followee).await {
                     Err(err) => {
-                        info!(target: LOG_TARGET, err = %err.fmt_compact(), id = %followee, "Failed to check for updates");
-                        continue;
+                        info!(target: LOG_TARGET, err = %err, id = %followee, "Failed to check for updates");
                     }
                     Ok(None) => {
-                        info!(target: LOG_TARGET, id = %followee, "No updates");
+                        info!(target: LOG_TARGET, id = %followee, "No updates via pkarr");
                         continue;
                     }
                     Ok(Some(head)) => {
                         info!(target: LOG_TARGET, id = %followee, "Has updates");
-                        head
+                        if let Err(err) = self.download_new_data(&client, *followee, head).await {
+                            info!(target: LOG_TARGET, err = %err.fmt_compact(), id = %followee, "Failed to download new data");
+                        }
                     }
                 };
-
-                if let Err(err) = self.download_new_data(&client, *followee, head).await {
-                    info!(target: LOG_TARGET, err = %err.fmt_compact(), id = %followee, "Failed to download new data");
-                }
+                match self.check_for_new_head_iroh(&client, *followee).await {
+                    Err(err) => {
+                        info!(target: LOG_TARGET, err = %err, id = %followee, "Failed to check for updates");
+                    }
+                    Ok(None) => {
+                        info!(target: LOG_TARGET, id = %followee, "No updates via iroh");
+                        continue;
+                    }
+                    Ok(Some(head)) => {
+                        info!(target: LOG_TARGET, id = %followee, "Has updates");
+                        if let Err(err) = self.download_new_data(&client, *followee, head).await {
+                            info!(target: LOG_TARGET, err = %err.fmt_compact(), id = %followee, "Failed to download new data");
+                        }
+                    }
+                };
             }
         }
     }
 
-    async fn check_for_new_head(
+    async fn check_for_new_head_iroh(
         &self,
         client: &ClientRef<'_>,
         id: RostraId,
-    ) -> WhateverResult<Option<ShortEventId>> {
-        let data = client
-            .resolve_id_data(id)
-            .await
-            .whatever_context("Could not resolve id published data")?;
+    ) -> BoxedErrorResult<Option<ShortEventId>> {
+        let conn = client.connect(id).await?;
+
+        let head = conn.make_rpc(&GetHeadRequest(id)).await.boxed()?;
+        if let Some(head) = head.0 {
+            if self.db.has_event(head).await {
+                return Ok(None);
+            } else {
+                return Ok(Some(head));
+            }
+        }
+
+        Ok(None)
+    }
+
+    async fn check_for_new_head_pkarr(
+        &self,
+        client: &ClientRef<'_>,
+        id: RostraId,
+    ) -> BoxedErrorResult<Option<ShortEventId>> {
+        let data = client.resolve_id_data(id).await.boxed()?;
 
         if let Some(head) = data.published.head {
             if self.db.has_event(head).await {
@@ -115,7 +144,7 @@ impl FolloweeHeadChecker {
             }
         }
 
-        whatever!("No head published")
+        Ok(None)
     }
 
     async fn download_new_data(

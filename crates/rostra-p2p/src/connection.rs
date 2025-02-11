@@ -11,6 +11,7 @@ use iroh::endpoint::{RecvStream, SendStream};
 use iroh_io::{TokioStreamReader, TokioStreamWriter};
 use rostra_core::bincode::STD_BINCODE_CONFIG;
 use rostra_core::event::{EventContent, SignedEvent};
+use rostra_core::id::RostraId;
 use rostra_core::{ContentHash, MsgLen, ShortEventId};
 use rostra_util_error::BoxedErrorResult;
 use snafu::{OptionExt as _, ResultExt as _};
@@ -74,6 +75,7 @@ impl RpcId {
     pub const GET_EVENT: Self = Self(2);
     pub const GET_EVENT_CONTENT: Self = Self(3);
     pub const WAIT_HEAD_UPDATE: Self = Self(4);
+    pub const GET_HEAD: Self = Self(5);
     pub const fn const_from(value: u16) -> Self {
         Self(value)
     }
@@ -171,6 +173,14 @@ define_rpc!(
     pub struct WaitHeadUpdateRequest(pub ShortEventId);,
     WaitHeadUpdateResponse,
     pub struct WaitHeadUpdateResponse(pub ShortEventId);
+);
+
+define_rpc!(
+    RpcId::GET_HEAD,
+    GetHeadRequest,
+    pub struct GetHeadRequest(pub RostraId);,
+    GetHeadResponse,
+    pub struct GetHeadResponse(pub Option<ShortEventId>);
 );
 
 impl GetEventRequest {
