@@ -58,16 +58,23 @@ impl UiState {
         &self,
         id: RostraId,
         client: &ClientRef<'_>,
-    ) -> RequestResult<IdSocialProfileRecord> {
-        let existing = client.db().get_social_profile(id).await.unwrap_or_else(|| {
+    ) -> IdSocialProfileRecord {
+        client.db().get_social_profile(id).await.unwrap_or_else(|| {
             rostra_client_db::IdSocialProfileRecord {
                 event_id: ShortEventId::ZERO,
                 display_name: id.to_short().to_string(),
                 bio: "".into(),
                 avatar: None,
             }
-        });
-        Ok(existing)
+        })
+    }
+
+    pub async fn get_social_profile_opt(
+        &self,
+        id: RostraId,
+        client: &ClientRef<'_>,
+    ) -> Option<IdSocialProfileRecord> {
+        client.db().get_social_profile(id).await
     }
 
     pub fn avatar_url(&self, id: RostraId) -> String {
@@ -83,9 +90,9 @@ impl UiState {
         let self_id = client.client_ref()?.rostra_id();
         let self_profile = self
             .get_social_profile(self_id, &client.client_ref()?)
-            .await?;
+            .await;
         Ok(html! {
-            div ."m-selfAccount" {
+            div ."m-profileSummary" {
                 script {
                     (PreEscaped(
                     r#"
@@ -102,36 +109,36 @@ impl UiState {
                     "#
                     ))
                 }
-                img ."m-selfAccount__userImage u-userImage"
+                img ."m-profileSummary__userImage u-userImage"
                     src=(self.avatar_url(self_id))
                     width="32pt"
                     height="32pt"
                     { }
 
-                div ."m-selfAccount__content" {
-                    span ."m-selfAccount__displayName" { (self_profile.display_name) }
-                    div ."m-selfAccount__buttons" {
+                div ."m-profileSummary__content" {
+                    span ."m-profileSummary__displayName" { (self_profile.display_name) }
+                    div ."m-profileSummary__buttons" {
                         button
-                            ."m-selfAccount__copyButton u-button"
-                            data-value=(self.client(user.id()).await?.client_ref()?.rostra_id()) onclick="copyIdToClipboard(event)"  {
-                                span ."m-selfAccount__copyButtonIcon u-buttonIcon" width="1rem" height="1rem" {}
+                            ."m-profileSummary__copyButton u-button"
+                            data-value=(self_id) onclick="copyIdToClipboard(event)"  {
+                                span ."m-profileSummary__copyButtonIcon u-buttonIcon" width="1rem" height="1rem" {}
                                 "RostraId"
                             }
                         button
-                            ."m-selfAccount__editButton u-button"
+                            ."m-profileSummary__editButton u-button"
                             hx-get="/ui/self/edit"
-                            hx-target="closest .m-selfAccount"
+                            hx-target="closest .m-profileSummary"
                             hx-swap="outerHTML"
                             disabled[ro.to_disabled()]
                             {
-                                span ."m-selfAccount__editButtonIcon u-buttonIcon" width="1rem" height="1rem" {}
+                                span ."m-profileSummary__editButtonIcon u-buttonIcon" width="1rem" height="1rem" {}
                                 "Edit"
                             }
                         button
-                            ."m-selfAccount__logoutButton u-button"
+                            ."m-profileSummary__logoutButton u-button"
                             hx-get="/ui/unlock/logout"
                             {
-                                span ."m-selfAccount__logoutButtonIcon u-buttonIcon" width="1rem" height="1rem" {}
+                                span ."m-profileSummary__logoutButtonIcon u-buttonIcon" width="1rem" height="1rem" {}
                                 "Logout"
                             }
                     }
@@ -145,9 +152,9 @@ impl UiState {
         let client_ref = client.client_ref()?;
         let self_profile = self
             .get_social_profile(client_ref.rostra_id(), &client_ref)
-            .await?;
+            .await;
         Ok(html! {
-            form ."m-selfAccount -edit"
+            form ."m-profileSummary -edit"
                 hx-post="/ui/self/edit"
                 hx-swap="outerHTML"
                 hx-encoding="multipart/form-data"
@@ -155,19 +162,19 @@ impl UiState {
                 script {
                     (PreEscaped(r#"
                         function previewAvatar(event) {
-                            document.querySelector('.m-selfAccount__userImage').src=URL.createObjectURL(event.target.files[0]);
+                            document.querySelector('.m-profileSummary__userImage').src=URL.createObjectURL(event.target.files[0]);
                         }    
                     "#))
                 }
-                label for="avatar-upload" ."m-selfAccount__userImageLabel" {
-                    img ."m-selfAccount__userImage"
+                label for="avatar-upload" ."m-profileSummary__userImageLabel" {
+                    img ."m-profileSummary__userImage"
                         src=(self.avatar_url(user.id()))
                         width="32pt"
                         height="32pt" {
                     }
                 }
                 input #"avatar-upload"
-                    ."m-selfAccount__userImageInput"
+                    ."m-profileSummary__userImageInput"
                     type="file"
                     name="avatar"
                     accept="image/*"
@@ -175,13 +182,13 @@ impl UiState {
                     onchange="previewAvatar(event)"
                 {}
 
-                div ."m-selfAccount__content" {
-                    input ."m-selfAccount__displayName"
+                div ."m-profileSummary__content" {
+                    input ."m-profileSummary__displayName"
                         type="text"
                         name="name"
                         value=(self_profile.display_name) {
                     }
-                    textarea."m-selfAccount__bio"
+                    textarea."m-profileSummary__bio"
                         placeholder="Bio..."
                         type="text"
                         dir="auto"
@@ -189,16 +196,16 @@ impl UiState {
                         {(self_profile.bio)}
                     }
 
-                    div ."m-selfAccount__buttons" {
+                    div ."m-profileSummary__buttons" {
                         button
-                            ."m-selfAccount__saveButton u-button" {
-                            span ."m-selfAccount__saveButtonIcon u-buttonIcon" width="1rem" height="1rem" {}
+                            ."m-profileSummary__saveButton u-button" {
+                            span ."m-profileSummary__saveButtonIcon u-buttonIcon" width="1rem" height="1rem" {}
                             "Save"
                         }
                     }
                 }
             }
-            (submit_on_ctrl_enter(".m-selfAccount", ".m-selfAccount__bio"))
+            (submit_on_ctrl_enter(".m-profileSummary", ".m-profileSummary__bio"))
         })
     }
 }

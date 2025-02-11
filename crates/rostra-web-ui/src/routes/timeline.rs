@@ -7,6 +7,7 @@ use axum::Form;
 use maud::{html, Markup, PreEscaped};
 use rostra_client::ClientRef;
 use rostra_client_db::social::{EventPaginationCursor, SocialPostRecord};
+use rostra_client_db::IdSocialProfileRecord;
 use rostra_core::event::{EventKind, SocialPost};
 use rostra_core::id::{RostraId, ToShort as _};
 use rostra_core::{ExternalEventId, ShortEventId, Timestamp};
@@ -21,23 +22,48 @@ use crate::html_utils::re_typeset_mathjax;
 use crate::{SharedState, UiState, LOG_TARGET};
 
 #[derive(Deserialize)]
-pub struct Input {
-    ts: Option<Timestamp>,
-    event_id: Option<ShortEventId>,
+pub struct TimelinePaginationInput {
+    pub ts: Option<Timestamp>,
+    pub event_id: Option<ShortEventId>,
+    pub user: Option<RostraId>,
 }
 
 pub async fn get(
     state: State<SharedState>,
-    _user: UserSession,
     session: UserSession,
-    Form(form): Form<Input>,
+    Form(form): Form<TimelinePaginationInput>,
 ) -> RequestResult<impl IntoResponse> {
     let pagination = form.ts.and_then(|ts| {
         form.event_id
             .map(|event_id| EventPaginationCursor { ts, event_id })
     });
+    let navbar = html! {
+        nav ."o-navBar"
+            hx-ext="ws"
+            ws-connect="/ui/timeline/updates"
+            // doesn't work, gets lowercased, wait for https://github.com/lambda-fairy/maud/pull/445
+            // hx-on:htmx:wsError="console.log(JSON.stringify(event))"
+        {
+            div ."o-navBar__list" {
+                span ."o-navBar__header" { "Rostra:" }
+                a ."o-navBar__item" href="https://github.com/dpc/rostra/discussions" { "Support" }
+                a ."o-navBar__item" href="https://github.com/dpc/rostra/wiki" { "Wiki" }
+                a ."o-navBar__item" href="https://github.com/dpc/rostra" { "Github" }
+            }
+
+            div ."o-navBar__profileSummary" {
+                (state.render_self_profile_summary(&session, session.ro_mode()).await?)
+            }
+
+            (state.render_add_followee_form(None))
+
+            (state.new_post_form(None, session.ro_mode()))
+        }
+    };
     Ok(Maud(
-        state.render_timeline_page(pagination, &session).await?,
+        state
+            .render_timeline_page(navbar, pagination, &session, form.user)
+            .await?,
     ))
 }
 
@@ -105,35 +131,18 @@ impl UiState {
 
     pub async fn render_timeline_page(
         &self,
+        navbar: Markup,
         pagination: Option<EventPaginationCursor>,
-        user: &UserSession,
+        session: &UserSession,
+        filter_user: Option<RostraId>,
     ) -> RequestResult<Markup> {
         let content = html! {
-            nav ."o-navBar"
-                hx-ext="ws"
-                ws-connect="/ui/timeline/updates"
-                // doesn't work, gets lowercased, wait for https://github.com/lambda-fairy/maud/pull/445
-                // hx-on:htmx:wsError="console.log(JSON.stringify(event))"
-            {
-                div ."o-navBar__list" {
-                    span ."o-navBar__header" { "Rostra:" }
-                    a ."o-navBar__item" href="https://github.com/dpc/rostra/discussions" { "Support" }
-                    a ."o-navBar__item" href="https://github.com/dpc/rostra/wiki" { "Wiki" }
-                    a ."o-navBar__item" href="https://github.com/dpc/rostra" { "Github" }
-                }
 
-                div ."o-navBar__selfAccount" {
-                    (self.render_self_profile_summary(user, user.ro_mode()).await?)
-                }
-
-                (self.render_add_followee_form(None))
-
-                (self.new_post_form(None, user.ro_mode()))
-            }
+            (navbar)
 
             main ."o-mainBar" {
                 (self.render_new_posts_alert(false, 0))
-                (self.render_main_bar_timeline(pagination, user).await?)
+                (self.render_main_bar_timeline(pagination, session, filter_user).await?)
             }
             (re_typeset_mathjax())
 
@@ -203,20 +212,24 @@ impl UiState {
     pub async fn render_main_bar_timeline(
         &self,
         pagination: Option<EventPaginationCursor>,
-        user: &UserSession,
+        session: &UserSession,
+        filter_user: Option<RostraId>,
     ) -> RequestResult<Markup> {
-        let client = self.client(user.id()).await?;
+        let client = self.client(session.id()).await?;
         let client_ref = client.client_ref()?;
 
-        let posts = self
-            .client(user.id())
+        let posts: Vec<_> = self
+            .client(session.id())
             .await?
             .db()?
             .paginate_social_posts_rev(pagination, 20)
-            .await;
+            .await
+            .into_iter()
+            .filter(|post| filter_user.is_none_or(|filter_user| post.author == filter_user))
+            .collect();
 
         let parents = self
-            .client(user.id())
+            .client(session.id())
             .await?
             .db()?
             .get_posts_by_id(
@@ -259,13 +272,20 @@ impl UiState {
                             Some(post.event_id),
                             &post.content.djot_content,
                             Some(post.reply_count),
-                            user.ro_mode()
+                            session.ro_mode()
                         ).await?)
                     }
                 }
                 @if let Some(last) = posts.last() {
                     div ."o-mainBarTimeline__rest -empty"
-                        hx-get={(format!("/ui/timeline?ts={}&event_id={}", last.ts, last.event_id))}
+                        hx-get=({
+                            let path = format!("/ui/timeline?ts={}&event_id={}", last.ts, last.event_id);
+                            if let Some(filter_user) = filter_user {
+                                format!("{path}&user={filter_user}")
+                            } else {
+                                path
+                            }
+                        })
                         hx-select=".o-mainBarTimeline__item, .o-mainBarTimeline__rest, script.mathjax"
                         hx-trigger="intersect once, threshold:0.5"
                         hx-swap="outerHTML"
@@ -296,7 +316,7 @@ impl UiState {
         ro: RoMode,
     ) -> RequestResult<Markup> {
         let external_event_id = event_id.map(|e| ExternalEventId::new(author, e));
-        let user_profile = self.get_social_profile(author, client).await?;
+        let user_profile = self.get_social_profile_opt(author, client).await;
 
         let post_content_rendered = PreEscaped(jotdown::html::render_to_string(
             jotdown::Parser::new(content).map(|e| match e {
@@ -323,8 +343,8 @@ impl UiState {
                     { }
 
                 div ."m-postOverview__contentSide" {
-                    header .".m-postOverview__header" {
-                        span ."m-postOverview__username" { (user_profile.display_name) }
+                    header ."m-postOverview__header" {
+                        (self.render_user_handle(event_id, author, user_profile.as_ref()))
                     }
 
                     div ."m-postOverview__content" {
@@ -413,5 +433,32 @@ impl UiState {
 
             }
         })
+    }
+
+    fn render_user_handle(
+        &self,
+        _event_id: Option<ShortEventId>,
+        id: RostraId,
+        profile: Option<&IdSocialProfileRecord>,
+    ) -> Markup {
+        // TODO: I wanted this to be some kind of a popover etc. but looks
+        // like `anchored` css is not there yet
+        let display_name = if let Some(profile) = profile {
+            profile.display_name.clone()
+        } else {
+            id.to_short().to_string()
+        };
+        html! {
+            div
+                ."a-userNameHandle"
+            {
+                a
+                    ."a-userNameHandle__displayName"
+                    href={"/ui/user/"(id)}
+                {
+                    (display_name)
+                }
+            }
+        }
     }
 }

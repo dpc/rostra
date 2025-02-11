@@ -1,7 +1,8 @@
 mod add_followee;
 mod avatar;
 mod new_post;
-mod self_account;
+mod profile;
+mod profile_self;
 mod timeline;
 mod unlock;
 
@@ -134,6 +135,7 @@ pub fn route_handler(state: SharedState) -> Router {
     Router::new()
         .route("/", get(root))
         .route("/ui", get(timeline::get))
+        .route("/ui/user/{id}", get(profile::get))
         .route("/ui/avatar/{id}", get(avatar::get))
         .route("/ui/timeline", get(timeline::get))
         .route("/ui/timeline/updates", get(timeline::get_updates))
@@ -150,7 +152,7 @@ pub fn route_handler(state: SharedState) -> Router {
         )
         .route(
             "/ui/self/edit",
-            get(self_account::get_self_account_edit).post(self_account::post_self_account_edit),
+            get(profile_self::get_self_account_edit).post(profile_self::post_self_account_edit),
         )
         // .route("/a/", put(account_new))
         // .route("/t/", put(token_new))

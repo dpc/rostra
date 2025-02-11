@@ -258,7 +258,7 @@ a:active {
   word-break: break-all;
 }
 
-.m-postOverview__username {
+.a-userNameHandle__displayName {
   font-weight: bold;
 }
 
@@ -289,7 +289,7 @@ a:active {
   background: url('/assets/icons/reply.svg') center/contain no-repeat;
 }
 
-.m-selfAccount {
+.m-profileSummary {
   display: flex;
   justify-content: flex-start;
   gap: 0.5rem;
@@ -297,15 +297,15 @@ a:active {
   padding-bottom: 0.5rem;
 }
 
-.m-selfAccount__userImage {
+.m-profileSummary__userImage {
   margin: 2pt;
 }
 
-.m-selfAccount.-edit .m-selfAccount__userImage:hover {
+.m-profileSummary.-edit .m-profileSummary__userImage:hover {
   filter: blur(2px);
 }
 
-.m-selfAccount__content {
+.m-profileSummary__content {
   display: flex;
   flex-direction: column;
   align-items: flex-start;
@@ -313,7 +313,7 @@ a:active {
   width: 100%;
 }
 
-.m-selfAccount__displayName {
+.m-profileSummary__displayName {
   font-weight: 700;
   height: 1.1rem;
   line-height: 1.1rem;
@@ -322,68 +322,68 @@ a:active {
   width: 100%;
 }
 
-.m-selfAccount__bio {
+.m-profileSummary__bio {
   /* min-height: 200px; */
   /* min-width: 100%; */
   width: 100%;
 }
 
-.m-selfAccount__buttons {
+.m-profileSummary__buttons {
   display: flex;
   flex-direction: row;
   flex-wrap: wrap;
   gap: 0.5rem;
 }
 
-.m-selfAccount__copyButton {
+.m-profileSummary__copyButton {
   display: flex;
   align-items: center;
   gap: 0.5rem;
   padding: 0.1rem .25rem;
 }
 
-.m-selfAccount__copyButtonIcon {
+.m-profileSummary__copyButtonIcon {
   background: url('/assets/icons/id-card.svg') center/contain no-repeat;
 }
 
-.m-selfAccount__copyButton:hover .m-selfAccount__copyButtonIcon {
+.m-profileSummary__copyButton:hover .m-profileSummary__copyButtonIcon {
   background-image: url('/assets/icons/copy.svg');
 }
 
-.m-selfAccount__copyButton.-active .m-selfAccount__copyButtonIcon {
+.m-profileSummary__copyButton.-active .m-profileSummary__copyButtonIcon {
   background-image: url('/assets/icons/circle-check.svg') !important;
 }
 
-.m-selfAccount__editButton {
+.m-profileSummary__editButton {
   display: flex;
   align-items: center;
   gap: 0.5rem;
   padding: 0.1rem .25rem;
 }
 
-.m-selfAccount__editButtonIcon {
+.m-profileSummary__editButtonIcon {
   background: url('/assets/icons/pen-to-square.svg') center/contain no-repeat;
 }
 
-.m-selfAccount__saveButton {
+.m-profileSummary__saveButton {
   display: flex;
   align-items: center;
   gap: 0.5rem;
   padding: 0.1rem .25rem;
 }
 
-.m-selfAccount__saveButtonIcon {
+.m-profileSummary__saveButtonIcon {
   background: url('/assets/icons/upload.svg') center/contain no-repeat;
 }
 
-.m-selfAccount__logoutButton {
+.m-profileSummary__logoutButton {
   display: flex;
   align-items: center;
   gap: 0.5rem;
   padding: 0.1rem .25rem;
 }
 
-.m-selfAccount__logoutButtonIcon {
+.m-profileSummary__logoutButtonIcon {
   background: url('/assets/icons/arrow-right-from-bracket.svg') center/contain no-repeat;
 }
 
