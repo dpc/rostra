@@ -25,8 +25,19 @@
             github.ci.buildOutputs = [ ".#ci.${projectName}" ];
             just.importPaths = [ "justfile.rostra.just" ];
             just.rules.watch.enable = false;
+            toolchain.channel = "latest";
           };
         };
+
+        toolchainArgs = {
+          extraRustFlags = "-Z threads=0";
+        };
+
+        stdToolchains = (flakeboxLib.mkStdToolchains (toolchainArgs // { }));
+
+        toolchainAll = (flakeboxLib.mkFenixToolchain (toolchainArgs // {
+          targets = pkgs.lib.getAttrs [ "default" ] (flakeboxLib.mkStdTargets { });
+        }));
 
         buildPaths = [
           "Cargo.toml"
@@ -45,29 +56,33 @@
           paths = buildPaths;
         };
 
-        multiBuild = (flakeboxLib.craneMultiBuild { }) (
-          craneLib':
-          let
-            craneLib = (
-              craneLib'.overrideArgs {
-                pname = projectName;
-                src = buildSrc;
-                nativeBuildInputs = [ ];
+        multiBuild =
+          (flakeboxLib.craneMultiBuild {
+            toolchains = stdToolchains;
+          })
+            (
+              craneLib':
+              let
+                craneLib = (
+                  craneLib'.overrideArgs {
+                    pname = projectName;
+                    src = buildSrc;
+                    nativeBuildInputs = [ ];
+                  }
+                );
+              in
+              rec {
+                rostraDeps = craneLib.buildDepsOnly { };
+                rostra = craneLib.buildPackage {
+                  meta.mainProgram = "rostra";
+                  cargoArtifacts = rostraDeps;
+
+                  preBuild = ''
+                    export ROSTRA_SHARE_DIR=$out/share
+                  '';
+                };
               }
             );
-          in
-          rec {
-            rostraDeps = craneLib.buildDepsOnly { };
-            rostra = craneLib.buildPackage {
-              meta.mainProgram = "rostra";
-              cargoArtifacts = rostraDeps;
-
-              preBuild = ''
-                export ROSTRA_SHARE_DIR=$out/share
-              '';
-            };
-          }
-        );
 
         rostra-web-ui = pkgs.writeShellScriptBin "rostra-web-ui" ''
           ${multiBuild.rostra}/bin/rostra web-ui "$@"
@@ -83,6 +98,7 @@
         legacyPackages = multiBuild;
 
         devShells = flakeboxLib.mkShells {
+          toolchain = toolchainAll;
           packages = [ pkgs.jq ];
           shellHook = ''
             export FLAKEBOX_GIT_LS_TEXT_IGNORE="crates/rostra-web-ui/assets/libs/|crates/rostra-web-ui/assets/icons"
