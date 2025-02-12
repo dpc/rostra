@@ -106,16 +106,29 @@ pub async fn cache_control(request: Request, next: Next) -> Response {
 
     if let Some(content_type) = response.headers().get(CONTENT_TYPE) {
         const NON_CACHEABLE_CONTENT_TYPES: &[&str] = &["text/html"];
+        const SHORT_CACHE_CONTENT_TYPES: &[&str] = &["text/css"];
 
-        if NON_CACHEABLE_CONTENT_TYPES
+        let cache_duration_secs = if SHORT_CACHE_CONTENT_TYPES
             .iter()
-            .all(|&ct| !content_type.as_bytes().starts_with(ct.as_bytes()))
+            .any(|&ct| !content_type.as_bytes().starts_with(ct.as_bytes()))
         {
-            let value = format!("public, max-age={}", 24 * 60 * 60);
+            Some(10 * 60)
+        } else if NON_CACHEABLE_CONTENT_TYPES
+            .iter()
+            .any(|&ct| content_type.as_bytes().starts_with(ct.as_bytes()))
+        {
+            None
+        } else {
+            Some(24 * 60 * 60)
+        };
 
-            if let Ok(value) = HeaderValue::from_str(&value) {
-                response.headers_mut().insert("cache-control", value);
-            }
+        if let Some(dur) = cache_duration_secs {
+            let value = format!("public, max-age={}", dur);
+
+            response.headers_mut().insert(
+                "cache-control",
+                HeaderValue::from_str(&value).expect("Can't fail"),
+            );
         }
     }
 
