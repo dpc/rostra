@@ -621,12 +621,12 @@ impl Client {
     pub async fn follow(
         &self,
         id_secret: RostraIdSecretKey,
-        followee: RostraId,
+        followee_id: RostraId,
     ) -> PostResult<VerifiedEvent> {
         self.publish_event(
             id_secret,
             content_kind::Follow {
-                followee,
+                followee: followee_id,
                 persona: PersonaId(0),
             },
         )
@@ -634,6 +634,15 @@ impl Client {
         .await
     }
 
+    pub async fn unfollow(
+        &self,
+        id_secret: RostraIdSecretKey,
+        followee: RostraId,
+    ) -> PostResult<VerifiedEvent> {
+        self.publish_event(id_secret, content_kind::Unfollow { followee })
+            .call()
+            .await
+    }
     pub async fn publish_omni_tbd(
         &self,
         id_secret: RostraIdSecretKey,

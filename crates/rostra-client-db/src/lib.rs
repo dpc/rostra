@@ -578,6 +578,7 @@ impl Database {
         .await
         .expect("Database panic")
     }
+
     pub async fn get_id_endpoints(
         &self,
         id: RostraId,

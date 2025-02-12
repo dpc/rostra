@@ -95,7 +95,7 @@ pub async fn post_new_post(
                     // TODO: get and display as well
                     None,
                     Some(event.event_id.to_short()),
-                    &form.content,
+                    Some(&form.content),
                     None,
                     session.ro_mode()
                 ).await?)
@@ -122,7 +122,7 @@ pub async fn get_post_preview(
                     None,
                     // TODO: get and display
                     None,
-                    &form.content,
+                    Some(&form.content),
                     None,
                     session.ro_mode()
                 ).await?)

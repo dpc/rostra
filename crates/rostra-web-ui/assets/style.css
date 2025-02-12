@@ -276,6 +276,11 @@ a:active {
 .m-postOverview__content {
 }
 
+.m-postOverview__content.-missing {
+  color: red;
+  font-style: italic;
+}
+
 .m-postOverview__buttonBar {
   display: flex;
   justify-content: flex-end;
@@ -400,9 +405,7 @@ a:active {
 
 .m-newPostForm__content {
   padding: 5pt;
-  /* min-height: 200px; */
-  /* min-width: 100%; */
-  /* width: 100%; */
+  height: 10rem;
   border: 1px solid var(--background-border-color);
   border-radius: 4pt;
 }
@@ -446,6 +449,14 @@ a:active {
 }
 
 .m-addFolloweeForm__followButtonIcon {
+  background: url('/assets/icons/upload.svg') center/contain no-repeat;
+}
+
+.m-profileSummary__followButtonIcon {
+  background: url('/assets/icons/upload.svg') center/contain no-repeat;
+}
+
+.m-profileSummary__unfollowButtonIcon {
   background: url('/assets/icons/upload.svg') center/contain no-repeat;
 }
 

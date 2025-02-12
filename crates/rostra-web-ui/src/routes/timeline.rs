@@ -1,3 +1,4 @@
+use std::collections::HashSet;
 use std::time::Duration;
 
 use axum::extract::ws::WebSocket;
@@ -175,7 +176,7 @@ impl UiState {
                             comment.author,
                             None,
                             Some(comment.event_id),
-                            &comment.content.djot_content,
+                            Some(&comment.content.djot_content),
                             Some(comment.reply_count),
                             user.ro_mode()
                         ).await?)
@@ -218,6 +219,18 @@ impl UiState {
         let client = self.client(session.id()).await?;
         let client_ref = client.client_ref()?;
 
+        let filter = if let Some(filter) = filter_user {
+            HashSet::from([filter])
+        } else {
+            client
+                .db()?
+                .get_followees(session.id())
+                .await
+                .into_iter()
+                .map(|(k, _)| k)
+                .collect()
+        };
+
         let posts: Vec<_> = self
             .client(session.id())
             .await?
@@ -225,7 +238,7 @@ impl UiState {
             .paginate_social_posts_rev(pagination, 20)
             .await
             .into_iter()
-            .filter(|post| filter_user.is_none_or(|filter_user| post.author == filter_user))
+            .filter(|post| filter.contains(&post.author))
             .collect();
 
         let parents = self
@@ -270,7 +283,7 @@ impl UiState {
                             post.author,
                             post.reply_to.map(|reply_to| (reply_to.rostra_id(), parents.get(&reply_to.event_id().to_short()))),
                             Some(post.event_id),
-                            &post.content.djot_content,
+                            Some(&post.content.djot_content),
                             Some(post.reply_count),
                             session.ro_mode()
                         ).await?)
@@ -311,28 +324,33 @@ impl UiState {
         author: RostraId,
         reply_to: Option<(RostraId, Option<&SocialPostRecord<SocialPost>>)>,
         event_id: Option<ShortEventId>,
-        content: &str,
+        content: Option<&str>,
         reply_count: Option<u64>,
         ro: RoMode,
     ) -> RequestResult<Markup> {
         let external_event_id = event_id.map(|e| ExternalEventId::new(author, e));
         let user_profile = self.get_social_profile_opt(author, client).await;
 
-        let post_content_rendered = PreEscaped(jotdown::html::render_to_string(
-            jotdown::Parser::new(content).map(|e| match e {
-                jotdown::Event::Start(jotdown::Container::RawBlock { format }, attrs)
-                    if format == "html" =>
-                {
-                    jotdown::Event::Start(jotdown::Container::CodeBlock { language: format }, attrs)
-                }
-                jotdown::Event::End(jotdown::Container::RawBlock { format })
-                    if format == "html" =>
-                {
-                    jotdown::Event::End(jotdown::Container::CodeBlock { language: format })
-                }
-                e => e,
-            }),
-        ));
+        let post_content_rendered = content.map(|content| {
+            PreEscaped(jotdown::html::render_to_string(
+                jotdown::Parser::new(content).map(|e| match e {
+                    jotdown::Event::Start(jotdown::Container::RawBlock { format }, attrs)
+                        if format == "html" =>
+                    {
+                        jotdown::Event::Start(
+                            jotdown::Container::CodeBlock { language: format },
+                            attrs,
+                        )
+                    }
+                    jotdown::Event::End(jotdown::Container::RawBlock { format })
+                        if format == "html" =>
+                    {
+                        jotdown::Event::End(jotdown::Container::CodeBlock { language: format })
+                    }
+                    e => e,
+                }),
+            ))
+        });
 
         let post_main = html! {
             div ."m-postOverview__main" {
@@ -347,9 +365,16 @@ impl UiState {
                         (self.render_user_handle(event_id, author, user_profile.as_ref()))
                     }
 
-                    div ."m-postOverview__content" {
+                    div ."m-postOverview__content"
+                     ."-missing"[post_content_rendered.is_none()]
+                     ."-present"[post_content_rendered.is_some()]
+                    {
                         p {
-                            (post_content_rendered)
+                            @if let Some(post_content_rendered) = post_content_rendered {
+                                (post_content_rendered)
+                            } @else {
+                                    "Post missing"
+                            }
                         }
                     }
                 }
@@ -404,13 +429,22 @@ impl UiState {
                                     reply_to_post.author,
                                     None,
                                     Some(reply_to_post.event_id),
-                                    &reply_to_post.content.djot_content,
+                                    Some(&reply_to_post.content.djot_content),
                                     // We could display comment button here, but the UX is weird
                                     None,
                                     ro
                                 )).await?)
                             } @else {
-                                p { (format!("Parent post by {} missing", reply_to_author)) }
+                                (Box::pin(self.post_overview(
+                                    client,
+                                    reply_to_author,
+                                    None,
+                                    None,
+                                    None,
+                                    // We could display comment button here, but the UX is weird
+                                    None,
+                                    ro
+                                )).await?)
                             }
                         }
 
@@ -454,7 +488,7 @@ impl UiState {
             {
                 a
                     ."a-userNameHandle__displayName"
-                    href={"/ui/user/"(id)}
+                    href={"/ui/profile/"(id)}
                 {
                     (display_name)
                 }
