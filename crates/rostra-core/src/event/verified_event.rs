@@ -2,9 +2,11 @@ use convi::CastFrom;
 use ed25519_dalek::SignatureError;
 use snafu::{ResultExt as _, Snafu};
 
-use super::{Event, EventContent, EventExt, EventSignature, SignedEvent, SignedEventExt};
+use super::{
+    Event, EventContent, EventExt, EventKind, EventSignature, SignedEvent, SignedEventExt,
+};
 use crate::id::RostraId;
-use crate::{EventId, ShortEventId};
+use crate::{ContentHash, EventId, ShortEventId};
 
 /// An event with all the external invariants verified
 ///
@@ -36,7 +38,7 @@ impl SignedEventExt for VerifiedEvent {
 #[derive(Clone, Debug)]
 pub struct VerifiedEventContent {
     pub event: VerifiedEvent,
-    pub content: EventContent,
+    pub content: Option<EventContent>,
 }
 
 impl EventExt for VerifiedEventContent {
@@ -120,17 +122,34 @@ impl VerifiedEvent {
 }
 
 impl VerifiedEventContent {
-    pub fn verify(event: VerifiedEvent, content: EventContent) -> VerifiedEventResult<Self> {
-        if content.len() != usize::cast_from(u32::from(event.event.content_len)) {
-            return ContentMismatchSnafu.fail();
-        }
-        if content.compute_content_hash() != event.event.content_hash {
-            return ContentMismatchSnafu.fail();
+    pub fn verify(
+        event: VerifiedEvent,
+        content: impl Into<Option<EventContent>>,
+    ) -> VerifiedEventResult<Self> {
+        let content = content.into();
+        if let Some(content) = content.as_ref() {
+            if content.len() != usize::cast_from(event.content_len()) {
+                return ContentMismatchSnafu.fail();
+            }
+            if content.compute_content_hash() != event.content_hash() {
+                return ContentMismatchSnafu.fail();
+            }
+        } else {
+            if event.kind() != EventKind::NULL {
+                return ContentMismatchSnafu.fail();
+            }
+            if event.content_len() != 0 {
+                return ContentMismatchSnafu.fail();
+            }
+            if event.event.content_hash != ContentHash::ZERO {
+                return ContentMismatchSnafu.fail();
+            }
         }
 
         Ok(Self { event, content })
     }
-    pub fn assume_verified(event: VerifiedEvent, content: EventContent) -> Self {
+    pub fn assume_verified(event: VerifiedEvent, content: impl Into<Option<EventContent>>) -> Self {
+        let content = content.into();
         debug_assert!(VerifiedEventContent::verify(event, content.clone()).is_ok());
         Self { event, content }
     }

@@ -426,38 +426,40 @@ impl Database {
         };
 
         if can_insert {
-            match self.process_event_content_inserted_tx(event_content, tx) {
-                Ok(()) => {
-                    events_content_table.insert(
-                        &event_content.event_id().to_short(),
-                        &EventContentState::Present(Cow::Owned(event_content.content.clone())),
-                    )?;
-                }
-                Err(ProcessEventError::Invalid { source, location }) => {
-                    info!(
-                        target: LOG_TARGET,
-                        err = %source.as_ref().fmt_compact(),
-                        %location,
-                        "Invalid event content"
-                    );
-                    events_content_table.insert(
-                        &event_content.event_id().to_short(),
-                        &EventContentState::Invalid(Cow::Owned(event_content.content.clone())),
-                    )?;
-                }
-                Err(ProcessEventError::Db { source }) => {
-                    return Err(source);
-                }
-            };
+            if let Some(content) = event_content.content.as_ref() {
+                match self.process_event_content_inserted_tx(event_content, tx) {
+                    Ok(()) => {
+                        events_content_table.insert(
+                            &event_content.event_id().to_short(),
+                            &EventContentState::Present(Cow::Owned(content.clone())),
+                        )?;
+                    }
+                    Err(ProcessEventError::Invalid { source, location }) => {
+                        info!(
+                            target: LOG_TARGET,
+                            err = %source.as_ref().fmt_compact(),
+                            %location,
+                            "Invalid event content"
+                        );
+                        events_content_table.insert(
+                            &event_content.event_id().to_short(),
+                            &EventContentState::Invalid(Cow::Owned(content.clone())),
+                        )?;
+                    }
+                    Err(ProcessEventError::Db { source }) => {
+                        return Err(source);
+                    }
+                };
 
-            // Valid or not, we notify about new thing
-            tx.on_commit({
-                let new_content_tx = self.new_content_tx.clone();
-                let event_content = event_content.clone();
-                move || {
-                    let _ = new_content_tx.send(event_content);
-                }
-            });
+                // Valid or not, we notify about new thing
+                tx.on_commit({
+                    let new_content_tx = self.new_content_tx.clone();
+                    let event_content = event_content.clone();
+                    move || {
+                        let _ = new_content_tx.send(event_content);
+                    }
+                });
+            }
         }
         Ok(())
     }
@@ -542,31 +544,34 @@ impl Database {
         Ok(())
     }
 
-    pub async fn get_head(&self, id: RostraId) -> DbResult<Option<ShortEventId>> {
+    pub async fn get_head(&self, id: RostraId) -> Option<ShortEventId> {
         self.read_with(|tx| {
             let events_heads = tx.open_table(&events_heads::TABLE)?;
 
             Self::read_head_tx(id, &events_heads)
         })
         .await
+        .expect("Database panic")
     }
 
-    pub async fn get_heads(&self, id: RostraId) -> DbResult<HashSet<ShortEventId>> {
+    pub async fn get_heads(&self, id: RostraId) -> HashSet<ShortEventId> {
         self.read_with(|tx| {
             let events_heads = tx.open_table(&events_heads::TABLE)?;
 
             Self::get_heads_tx(id, &events_heads)
         })
         .await
+        .expect("Database panic")
     }
 
-    pub async fn get_heads_self(&self) -> DbResult<HashSet<ShortEventId>> {
+    pub async fn get_heads_self(&self) -> HashSet<ShortEventId> {
         self.read_with(|tx| {
             let events_heads = tx.open_table(&events_heads::TABLE)?;
 
             Self::get_heads_tx(self.self_id, &events_heads)
         })
         .await
+        .expect("Database panic")
     }
 
     pub async fn get_social_profile(&self, id: RostraId) -> Option<IdSocialProfileRecord> {

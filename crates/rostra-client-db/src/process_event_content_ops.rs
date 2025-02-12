@@ -48,7 +48,6 @@ impl Database {
                 let (followee, updated) = match event_content.event.event.kind {
                     EventKind::FOLLOW => {
                         let content = event_content
-                            .content
                             .deserialize_cbor::<content_kind::Follow>()
                             .boxed()
                             .context(InvalidSnafu)?;
@@ -66,7 +65,6 @@ impl Database {
                     }
                     EventKind::UNFOLLOW => {
                         let content = event_content
-                            .content
                             .deserialize_cbor::<content_kind::Unfollow>()
                             .boxed()
                             .context(InvalidSnafu)?;
@@ -109,7 +107,6 @@ impl Database {
             _ => match event_content.event.event.kind {
                 EventKind::NODE_ANNOUNCEMENT => {
                     let content = event_content
-                        .content
                         .deserialize_cbor::<content_kind::NodeAnnouncement>()
                         .boxed()
                         .context(InvalidSnafu)?;
@@ -144,7 +141,6 @@ impl Database {
                 }
                 EventKind::SOCIAL_PROFILE_UPDATE => {
                     let content = event_content
-                        .content
                         .deserialize_cbor::<content_kind::SocialProfileUpdate>()
                         .boxed()
                         .context(InvalidSnafu)?;
@@ -164,7 +160,6 @@ impl Database {
                 }
                 EventKind::SOCIAL_POST => {
                     let content = event_content
-                        .content
                         .deserialize_cbor::<content_kind::SocialPost>().inspect_err(|err| {
                             debug!(target: LOG_TARGET, err = %err.fmt_compact(), "Ignoring malformed SocialComment payload");
                         }).boxed().context(InvalidSnafu)?;
@@ -240,7 +235,6 @@ impl Database {
         match event_content.event.event.kind {
             EventKind::SOCIAL_POST => {
                 let content = event_content
-                    .content
                     .deserialize_cbor::<content_kind::SocialPost>()
                     .boxed()
                     .context(InvalidSnafu)?;

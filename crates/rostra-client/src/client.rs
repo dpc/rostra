@@ -41,6 +41,7 @@ use crate::error::{
     PostResult, RRecordSnafu, ResolveSnafu, SecretMismatchSnafu,
 };
 use crate::id::{CompactTicket, IdPublishedData, IdResolvedData};
+use crate::task::head_merger::HeadMerger;
 use crate::task::id_publisher::PkarrIdPublisher;
 use crate::task::missing_event_fetcher::MissingEventFetcher;
 use crate::task::request_handler::RequestHandler;
@@ -210,6 +211,7 @@ impl Client {
 
         if !self.active.swap(true, SeqCst) {
             self.start_pkarr_id_publisher(id_secret);
+            self.start_head_merger(id_secret);
         }
 
         let db = &self.db;
@@ -346,6 +348,10 @@ impl Client {
 
     pub(crate) fn start_pkarr_id_publisher(&self, secret_id: RostraIdSecretKey) {
         tokio::spawn(PkarrIdPublisher::new(self, secret_id).run());
+    }
+
+    pub(crate) fn start_head_merger(&self, secret_id: RostraIdSecretKey) {
+        tokio::spawn(HeadMerger::new(self, secret_id).run());
     }
 
     pub(crate) fn start_request_handler(&self) {

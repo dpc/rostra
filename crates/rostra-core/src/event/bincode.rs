@@ -23,7 +23,7 @@ impl Event {
         parent_prev: Option<ShortEventId>,
         parent_aux: Option<ShortEventId>,
         timestamp: Option<SystemTime>,
-        content: &EventContent,
+        content: Option<&EventContent>,
     ) -> Self {
         if delete.is_some() && parent_aux.is_some() {
             panic!("Can't set both both delete and parent_aux");
@@ -43,13 +43,19 @@ impl Event {
             version: 0,
             flags: if replace.is_some() { 1 } else { 0 },
             kind: kind.into(),
-            content_len: MsgLen(content.len().expect_into()),
+            content_len: content
+                .as_ref()
+                .map(|content| MsgLen(content.len().expect_into()))
+                .unwrap_or_default(),
             padding: [0; 16],
             timestamp: timestamp.into(),
             author,
             parent_prev: parent_prev.unwrap_or_default(),
             parent_aux: parent_aux.or(replace).unwrap_or_default(),
-            content_hash: content.compute_content_hash(),
+            content_hash: content
+                .as_ref()
+                .map(|content| content.compute_content_hash())
+                .unwrap_or(ContentHash::ZERO),
         }
     }
 

@@ -336,7 +336,7 @@ impl RequestHandler {
 
         let mut heads;
         loop {
-            heads = self.client.db()?.get_heads_self().await?;
+            heads = self.client.db()?.get_heads_self().await;
 
             if heads.contains(&event_id) {
                 break;
@@ -374,7 +374,7 @@ impl RequestHandler {
             .await
             .context(RpcSnafu)?;
 
-        let heads = self.client.db()?.get_heads(id).await?;
+        let heads = self.client.db()?.get_heads(id).await;
 
         Connection::write_message(&mut send, &GetHeadResponse(heads.into_iter().next()))
             .await

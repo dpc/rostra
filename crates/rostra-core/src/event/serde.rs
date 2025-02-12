@@ -5,7 +5,7 @@ use snafu::Snafu;
 
 use super::{
     ContentValidationError, EventContent, EventContentKind, EventContentUnsized, EventKind,
-    EventSignature,
+    EventSignature, VerifiedEventContent,
 };
 
 impl serde::Serialize for EventSignature {
@@ -102,14 +102,18 @@ impl<'de> serde::de::Deserialize<'de> for EventKind {
 #[derive(Debug, Snafu)]
 pub enum ContentDeserializationError {
     #[snafu(transparent)]
-    Validation { source: ContentValidationError },
+    Validation {
+        source: ContentValidationError,
+    },
     #[snafu(transparent)]
     Decoding {
         source: cbor4ii::serde::DecodeError<Infallible>,
     },
+    MissingContent,
 }
 
 pub type ContentDeserializationResult<T> = std::result::Result<T, ContentDeserializationError>;
+
 impl EventContentUnsized {
     pub fn deserialize_cbor<T>(&self) -> ContentDeserializationResult<T>
     // pub fn deserialize_cbor<T>(&self) -> std::result::Result<T,
@@ -125,5 +129,22 @@ impl EventContentUnsized {
     }
 }
 
+impl VerifiedEventContent {
+    pub fn deserialize_cbor<T>(&self) -> ContentDeserializationResult<T>
+    // pub fn deserialize_cbor<T>(&self) -> std::result::Result<T,
+    // ciborium::de::Error<std::io::Error>>
+    where
+        T: EventContentKind,
+    {
+        // ciborium::from_reader(self.as_ref())
+        let Some(content) = self.content.as_ref() else {
+            return MissingContentSnafu.fail();
+        };
+        let v: T = cbor4ii::serde::from_slice(content.as_slice())?;
+        v.validate()?;
+
+        Ok(v)
+    }
+}
 #[cfg(test)]
 mod tests;

@@ -88,7 +88,7 @@ impl From<ContentHash> for blake3::Hash {
 /// In a couple of places it of the protocol it's important
 /// that a 32-bit length field is encoded as fixed-size.
 #[cfg_attr(feature = "serde", derive(::serde::Serialize, ::serde::Deserialize))]
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
 pub struct MsgLen(pub u32);
 
 impl From<u32> for MsgLen {
