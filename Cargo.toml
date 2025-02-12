@@ -95,7 +95,7 @@ z32 = "1.1.1"
 
 
 [profile.dev]
-# debug = "line-tables-only"
+debug = "line-tables-only"
 lto = "off"
 incremental = true
 

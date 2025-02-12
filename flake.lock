@@ -48,17 +48,17 @@
     },
     "crane": {
       "locked": {
-        "lastModified": 1734808813,
-        "narHash": "sha256-3aH/0Y6ajIlfy7j52FGZ+s4icVX0oHhqBzRdlOeztqg=",
+        "lastModified": 1739936662,
+        "narHash": "sha256-x4syUjNUuRblR07nDPeLDP7DpphaBVbUaSoeZkFbGSk=",
         "owner": "ipetkov",
         "repo": "crane",
-        "rev": "72e2d02dbac80c8c86bf6bf3e785536acf8ee926",
+        "rev": "19de14aaeb869287647d9461cbd389187d8ecdb7",
         "type": "github"
       },
       "original": {
         "owner": "ipetkov",
         "repo": "crane",
-        "rev": "72e2d02dbac80c8c86bf6bf3e785536acf8ee926",
+        "rev": "19de14aaeb869287647d9461cbd389187d8ecdb7",
         "type": "github"
       }
     },
@@ -188,17 +188,17 @@
         "systems": "systems_4"
       },
       "locked": {
-        "lastModified": 1740158674,
-        "narHash": "sha256-mVp57KC7UKJGUTwgNzMzks5d3RIWS71FlWrz7bVZS6U=",
+        "lastModified": 1740503283,
+        "narHash": "sha256-qHEg+O86NFxPiCO2zeyZnXxuJxHjFvX0Daa1Xw7a3CM=",
         "owner": "rustshop",
         "repo": "flakebox",
-        "rev": "c7efd77efc2ce9486ae0cade52ce11ab52b04055",
+        "rev": "5e9ce550fb989f1311547ee09301315cc311ba3b",
         "type": "github"
       },
       "original": {
         "owner": "rustshop",
         "repo": "flakebox",
-        "rev": "c7efd77efc2ce9486ae0cade52ce11ab52b04055",
+        "rev": "5e9ce550fb989f1311547ee09301315cc311ba3b",
         "type": "github"
       }
     },
@@ -258,6 +258,22 @@
         "type": "github"
       }
     },
+    "nixpkgs-unstable": {
+      "locked": {
+        "lastModified": 1741246872,
+        "narHash": "sha256-Q6pMP4a9ed636qilcYX8XUguvKl/0/LGXhHcRI91p0U=",
+        "owner": "NixOS",
+        "repo": "nixpkgs",
+        "rev": "10069ef4cf863633f57238f179a0297de84bd8d3",
+        "type": "github"
+      },
+      "original": {
+        "owner": "NixOS",
+        "ref": "nixos-unstable",
+        "repo": "nixpkgs",
+        "type": "github"
+      }
+    },
     "nixpkgs_2": {
       "locked": {
         "lastModified": 1737672001,
@@ -295,7 +311,8 @@
         "bundlers": "bundlers",
         "flake-utils": "flake-utils_2",
         "flakebox": "flakebox",
-        "nixpkgs": "nixpkgs_3"
+        "nixpkgs": "nixpkgs_3",
+        "nixpkgs-unstable": "nixpkgs-unstable"
       }
     },
     "rust-analyzer-src": {

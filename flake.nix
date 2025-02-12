@@ -3,8 +3,9 @@
 
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-24.11";
+    nixpkgs-unstable.url = "github:NixOS/nixpkgs/nixos-unstable";
     flake-utils.url = "github:numtide/flake-utils";
-    flakebox.url = "github:rustshop/flakebox?rev=c7efd77efc2ce9486ae0cade52ce11ab52b04055";
+    flakebox.url = "github:rustshop/flakebox?rev=5e9ce550fb989f1311547ee09301315cc311ba3b";
 
     bundlers = {
       url = "github:NixOS/bundlers";
@@ -16,6 +17,7 @@
     {
       self,
       nixpkgs,
+      nixpkgs-unstable,
       flake-utils,
       flakebox,
       bundlers,
@@ -26,6 +28,7 @@
     // flake-utils.lib.eachDefaultSystem (
       system:
       let
+        pkgs-unstable = nixpkgs-unstable.legacyPackages.${system};
         pkgs = nixpkgs.legacyPackages.${system};
         projectName = "rostra";
 
@@ -114,9 +117,13 @@
 
         devShells = flakeboxLib.mkShells {
           toolchain = toolchainAll;
-          packages = [ pkgs.jq ];
+          packages = [
+            pkgs.jq
+            (pkgs-unstable.callPackage ./nix/pkgs/wild.nix { })
+          ];
           shellHook = ''
             export FLAKEBOX_GIT_LS_TEXT_IGNORE="crates/rostra-web-ui/assets/libs/|crates/rostra-web-ui/assets/icons"
+            export CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_RUSTFLAGS="-C link-arg=--ld-path=wild"
           '';
         };
       }
