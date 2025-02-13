@@ -149,8 +149,6 @@ button {
   border: solid 1px;
   border-radius: 5px;
   border-color: var(--color-button-border);
-  /* outline: none; */
-  /* box-shadow: none; */
   appearance: none;
   -webkit-appearance: none;
   -moz-appearance: none;
@@ -169,6 +167,7 @@ p {
 textarea,
 input[type="text"],
 input[type="email"],
+input[type="username"],
 input[type="password"],
 input[type="number"],
 input[type="tel"],
@@ -176,8 +175,22 @@ input[type="url"],
 input[type="search"] {
   background-color: var(--color-text-input-bg);
   color: var(--color-text-input);
-}
 
+
+  font: inherit;
+  cursor: pointer;
+  color: var(--color-text-default);
+  background: none;
+  border: solid 1px;
+  border-radius: 5px;
+  border-color: var(--color-button-border);
+  appearance: none;
+  -webkit-appearance: none;
+  -moz-appearance: none;
+
+  height: 1.75rem;
+  padding: 0 .5rem;
+}
 
 a {
   color: var(--color-link);
@@ -254,8 +267,9 @@ a:active {
   align-self: stretch;
   display: flex;
   flex-direction: column;
-  gap: 10pt;
+  gap: 3rem;
   padding: 5pt;
+  justify-items: flex-start;
 }
 
 @media (min-width: 768px
@@ -466,8 +480,6 @@ a:active {
   display: flex;
   justify-content: flex-start;
   gap: 0.5rem;
-  padding-top: 0.5rem;
-  padding-bottom: 0.5rem;
 }
 
 .m-profileSummary__userImage {
@@ -589,9 +601,8 @@ a:active {
 
 .m-addFolloweeForm {
   display: flex;
-  flex-direction: column;
-  align-items: flex-end;
-  gap: 5pt;
+  flex-direction: row;
+  align-items: center;
 }
 
 .m-addFolloweeForm__content {
@@ -631,7 +642,7 @@ a:active {
 }
 
 .o-unlockScreen__form {
-  padding: 1rem;
+  padding: clamp(0px, 2.5vw, 2rem) clamp(0px, 5vw, 4rem);
   background: white;
   border-radius: 8px;
   box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
