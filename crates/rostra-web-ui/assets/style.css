@@ -425,7 +425,7 @@ a:active {
   top: 40%;
   background: linear-gradient(to bottom,
       rgba(59, 59, 59, 0) 0%,
-      var(--color-timeline-bg));
+      var(--color-timeline-bg) 85%);
   z-index: 1;
 }
 
