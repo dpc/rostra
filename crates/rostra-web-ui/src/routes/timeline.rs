@@ -363,14 +363,17 @@ impl UiState {
         });
 
         let post_main = html! {
-            div ."m-postOverview__main" {
+            div ."m-postOverview__main"
+            {
                 img ."m-postOverview__userImage u-userImage"
                     src=(self.avatar_url(author))
                     width="32pt"
                     height="32pt"
-                    { }
+                { }
 
-                div ."m-postOverview__contentSide" {
+                div ."m-postOverview__contentSide"
+                    onclick=[comment.as_ref().map(|_|"this.classList.toggle('-expanded')" )]
+                {
                     header ."m-postOverview__header" {
                         (self.render_user_handle(event_id, author, user_profile.as_ref()))
                     }
@@ -436,6 +439,7 @@ impl UiState {
             article #(post_id)
                 ."m-postOverview"
                 ."-response"[reply_to.is_some() || is_comment]
+                ."-reply-parent"[comment.is_some()]
              {
                 (post_main)
 

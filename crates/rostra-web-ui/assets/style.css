@@ -370,15 +370,6 @@ a:active {
   max-width: 55rem;
 }
 
-/* .m-postOverview__parent { */
-/* padding: 0.5rem 0.5rem 0.5rem 1rem; */
-/* background-color: var(--color-blockquote-bg); */
-/* } */
-
-/* .m-postOverview.-response { */
-/* padding-top: 1rem; */
-/* padding-left: 2rem; */
-/* } */
 
 .m-postOverview__main {
   display: flex;
@@ -392,6 +383,41 @@ a:active {
 
 .m-postOverview__contentSide {
   padding-inline: 10pt;
+  width: 100%;
+}
+
+.m-postOverview__content {
+  position: relative;
+}
+
+/* Unexpanded (folded) reply-parent's should be truncated, so the response itself is uncluttered */
+.m-postOverview.-reply-parent>div>.m-postOverview__contentSide:not(.-expanded)>.m-postOverview__content.-present {
+  max-height: 10rem;
+  overflow: hidden;
+  display: -webkit-box;
+  -webkit-line-clamp: 10;
+  line-clamp: 10;
+  -webkit-box-orient: vertical;
+}
+
+/* Cover reply-parent's folded content with gradient if not expanded */
+.m-postOverview.-reply-parent>div>.m-postOverview__contentSide:not(.-expanded)>.m-postOverview__content.-present::after {
+  content: '';
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  /* height: 10rem; */
+  top: 40%;
+  background: linear-gradient(to bottom,
+      rgba(59, 59, 59, 0) 0%,
+      var(--color-timeline-bg));
+  z-index: 1;
+}
+
+/* If the reply-parent's content is folded, we don't want to bother with any buttons */
+.m-postOverview.-reply-parent:has(>div>.m-postOverview__contentSide:not(.-expanded))>.m-postOverview__buttonBar {
+  display: none;
 }
 
 .m-postOverview__contentSide>* {
