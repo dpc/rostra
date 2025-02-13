@@ -81,6 +81,45 @@ body {
   font-family: sans-serif;
   color: var(--color-text-default);
   background: var(--color-bg-default);
+  line-height: 1.6;
+  font-size: 16px;
+}
+
+h1,
+h2,
+h3,
+h4,
+h5,
+h6 {
+  line-height: 1.2;
+  margin-top: 1rem;
+  margin-bottom: 1rem;
+  line-height: 1.2;
+  font-weight: 600;
+}
+
+h1 {
+  font-size: 2.0rem;
+}
+
+h2 {
+  font-size: 1.75rem;
+}
+
+h3 {
+  font-size: 1.5rem;
+}
+
+h4 {
+  font-size: 1.35rem;
+}
+
+h5 {
+  font-size: 1.10rem;
+}
+
+h6 {
+  font-size: 1rem;
 }
 
 blockquote {
@@ -120,7 +159,6 @@ button {
 button:hover {
   background-color: var(--color-button-bg-hover);
   border-color: var(--color-button-border-hover);
-
 }
 
 p {
@@ -181,7 +219,7 @@ a:active {
   display: flex;
   gap: 0.5rem;
   min-width: 5rem;
-  padding: 0.1rem .25rem;
+  padding: 0.0rem .25rem;
 }
 
 .u-buttonIcon {
@@ -231,7 +269,7 @@ a:active {
     position: sticky;
     top: 0;
     align-self: start;
-    max-width: 450px;
+    max-width: 400px;
     padding: 10pt;
     padding-right: 5pt;
   }
@@ -253,7 +291,7 @@ a:active {
 
 .o-mainBar {
   flex-grow: 1;
-  max-width: 45rem;
+  max-width: 50rem;
   padding: 4pt;
 }
 
@@ -329,7 +367,7 @@ a:active {
 }
 
 .m-postOverview {
-  max-width: 50rem;
+  max-width: 55rem;
 }
 
 /* .m-postOverview__parent { */
@@ -345,7 +383,7 @@ a:active {
 .m-postOverview__main {
   display: flex;
   /* min-width: 20rem; */
-  max-width: 45rem;
+  max-width: 50rem;
 }
 
 .m-postOverview__userImage {
@@ -374,6 +412,10 @@ a:active {
   font-weight: bold;
 }
 
+
+.m-postOverview__content {
+  word-break: break-word;
+}
 
 .m-postOverview__content.-missing {
   color: red;
@@ -444,7 +486,6 @@ a:active {
   display: flex;
   align-items: center;
   gap: 0.5rem;
-  padding: 0.1rem .25rem;
 }
 
 .m-profileSummary__copyButtonIcon {
@@ -463,7 +504,6 @@ a:active {
   display: flex;
   align-items: center;
   gap: 0.5rem;
-  padding: 0.1rem .25rem;
 }
 
 .m-profileSummary__editButtonIcon {
@@ -474,7 +514,6 @@ a:active {
   display: flex;
   align-items: center;
   gap: 0.5rem;
-  padding: 0.1rem .25rem;
 }
 
 .m-profileSummary__saveButtonIcon {
@@ -485,7 +524,6 @@ a:active {
   display: flex;
   align-items: center;
   gap: 0.5rem;
-  padding: 0.1rem .25rem;
 }
 
 .m-profileSummary__logoutButtonIcon {
@@ -517,7 +555,6 @@ a:active {
   display: flex;
   align-items: center;
   gap: 0.5rem;
-  padding: 0.1rem .25rem;
 }
 
 .m-newPostForm__postButtonIcon {
