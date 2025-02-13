@@ -273,8 +273,6 @@ a:active {
 
 .o-mainBarTimeline {
   background-color: var(--color-timeline-bg);
-
-
   border: 1px solid var(--color-timeline-item-border);
 }
 
@@ -288,7 +286,7 @@ a:active {
   flex-direction: row;
   justify-content: flex-start;
   align-items: center;
-  padding: 4pt;
+  padding: 1rem;
 }
 
 .o-mainBarTimeline__repliesLabel {
@@ -304,16 +302,11 @@ a:active {
   display: none;
 }
 
-.o-mainBarTimeline__item {
-  padding: 4pt;
-}
-
 @media (min-width: 768px
   /* var's dont work here */
 ) {
   .o-mainBarTimeline__item {
-    padding: 10pt;
-    padding-top: 20pt;
+    padding: 1rem;
   }
 }
 
