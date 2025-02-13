@@ -146,29 +146,31 @@ impl UiState {
                             span ."m-profileSummary__copyButtonIcon u-buttonIcon" width="1rem" height="1rem" {}
                             "RostraId"
                         }
-                        @if following {
-                            button
-                                ."m-profileSummary__unfollowButton u-button"
-                                hx-post=(format!("/ui/profile/{profile_id}/unfollow"))
-                                hx-target="closest .m-profileSummary"
-                                hx-swap="outerHTML"
-                                disabled[ro.to_disabled()]
+                        @if session.id() != profile_id {
+                            @if following {
+                                button
+                                    ."m-profileSummary__unfollowButton u-button"
+                                    hx-post=(format!("/ui/profile/{profile_id}/unfollow"))
+                                    hx-target="closest .m-profileSummary"
+                                    hx-swap="outerHTML"
+                                    disabled[ro.to_disabled()]
                                 {
                                     span ."m-profileSummary__unfollowButtonIcon u-buttonIcon" width="1rem" height="1rem"
                                     {}
                                     "Unfollow"
                                 }
-                        } @else {
-                            button
-                                ."m-profileSummary__followButton u-button"
-                                hx-post=(format!("/ui/profile/{profile_id}/follow"))
-                                hx-target="closest .m-profileSummary"
-                                hx-swap="outerHTML"
-                                disabled[ro.to_disabled()]
-                            {
-                                span ."m-profileSummary__followButtonIcon u-buttonIcon" width="1rem" height="1rem"
-                                {}
-                                "Follow"
+                            } @else {
+                                button
+                                    ."m-profileSummary__followButton u-button"
+                                    hx-post=(format!("/ui/profile/{profile_id}/follow"))
+                                    hx-target="closest .m-profileSummary"
+                                    hx-swap="outerHTML"
+                                    disabled[ro.to_disabled()]
+                                {
+                                    span ."m-profileSummary__followButtonIcon u-buttonIcon" width="1rem" height="1rem"
+                                    {}
+                                    "Follow"
+                                }
                             }
                         }
                     }
