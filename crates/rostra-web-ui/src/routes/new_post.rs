@@ -111,13 +111,13 @@ pub async fn post_new_post(
              {
                 (state.post_overview(
                     &client_ref,
-                    client_ref.rostra_id(),
-                    reply_to,
-                    Some(event.event_id.to_short()),
-                    Some(&form.content),
-                    None,
-                    session.ro_mode()
-                ).await?)
+                    client_ref.rostra_id())
+                    .maybe_reply_to(reply_to)
+                    .event_id(event.event_id.to_short())
+                    .content(&form.content)
+                    .ro( session.ro_mode())
+                    .call()
+                .await?)
             }
         }
         (re_typeset_mathjax())
@@ -137,14 +137,12 @@ pub async fn get_post_preview(
             div ."o-mainBarTimeline__item -preview" {
                 (state.post_overview(
                     &client.client_ref()?,
-                    self_id,
-                    None,
-                    // TODO: get and display
-                    None,
-                    Some(&form.content),
-                    None,
-                    session.ro_mode()
-                ).await?)
+                    self_id
+                    )
+                    .content(&form.content)
+                    .ro(session.ro_mode())
+                    .call().await?
+                )
                 (scroll_preview_into_view())
                 (focus_on_new_post_content_input())
                 (re_typeset_mathjax())

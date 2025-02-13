@@ -12,6 +12,7 @@ workspace = true
 [dependencies]
 async-stream = { workspace = true }
 axum = { workspace = true, features = ["ws", "multipart"] }
+bon = { workspace = true }
 bytes = { workspace = true }
 brotli = { workspace = true }
 futures = { workspace = true }

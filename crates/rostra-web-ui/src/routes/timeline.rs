@@ -91,6 +91,7 @@ pub async fn get_post_comments(
     Ok(Maud(state.render_post_comments(id, &session).await?))
 }
 
+#[bon::bon]
 impl UiState {
     async fn handle_get_updates(&self, mut ws: WebSocket, user: &UserSession) -> RequestResult<()> {
         let client = self.client(user.id()).await?;
@@ -173,13 +174,13 @@ impl UiState {
                     div ."o-postOverview__commentsItem" {
                         (self.post_overview(
                             &client_ref,
-                            comment.author,
-                            None,
-                            Some(comment.event_id),
-                            Some(&comment.content.djot_content),
-                            Some(comment.reply_count),
-                            user.ro_mode()
-                        ).await?)
+                            comment.author
+                            ).event_id(comment.event_id)
+                            .content(&comment.content.djot_content)
+                            .reply_count(comment.reply_count)
+                            .ro(user.ro_mode())
+                            .is_comment(true)
+                            .call().await?)
                     }
                 }
 
@@ -281,12 +282,15 @@ impl UiState {
                         (self.post_overview(
                             &client_ref,
                             post.author,
-                            post.reply_to.map(|reply_to| (reply_to.rostra_id(), parents.get(&reply_to.event_id().to_short()))),
-                            Some(post.event_id),
-                            Some(&post.content.djot_content),
-                            Some(post.reply_count),
-                            session.ro_mode()
-                        ).await?)
+                            ).maybe_reply_to(
+                                post.reply_to
+                                    .map(|reply_to| (reply_to.rostra_id(), parents.get(&reply_to.event_id().to_short())))
+                                )
+                                .event_id(post.event_id)
+                                .content(&post.content.djot_content)
+                                .reply_count(post.reply_count)
+                                .ro(session.ro_mode())
+                                .call().await?)
                     }
                 }
                 @if let Some(last) = posts.last() {
@@ -318,15 +322,21 @@ impl UiState {
     }
 
     #[allow(clippy::too_many_arguments)]
+    #[builder]
     pub async fn post_overview(
         &self,
-        client: &ClientRef<'_>,
-        author: RostraId,
+        #[builder(start_fn)] client: &ClientRef<'_>,
+        #[builder(start_fn)] author: RostraId,
         reply_to: Option<(RostraId, Option<&SocialPostRecord<SocialPost>>)>,
         event_id: Option<ShortEventId>,
         content: Option<&str>,
         reply_count: Option<u64>,
         ro: RoMode,
+        // Render the post including a comment, right away
+        comment: Option<Markup>,
+        // Is the post loaded as a comment to an existing post (already being
+        // displayed)
+        #[builder(default = false)] is_comment: bool,
     ) -> RequestResult<Markup> {
         let external_event_id = event_id.map(|e| ExternalEventId::new(author, e));
         let user_profile = self.get_social_profile_opt(author, client).await;
@@ -415,56 +425,59 @@ impl UiState {
             }
         };
 
-        Ok(html! {
-            article ."m-postOverview"
-                #{
-                    "post-" (event_id.map(|e| e.to_string()).unwrap_or_else(|| "preview".to_string()))
-                } {
+        let post_id = format!(
+            "post-{}",
+            event_id
+                .map(|e| e.to_string())
+                .unwrap_or_else(|| "preview".to_string()),
+        );
 
-                    @if let Some((reply_to_author, reply_to_post)) = reply_to {
-                        div ."m-postOverview__parent" {
-                            @if let Some(reply_to_post) = reply_to_post {
-                                (Box::pin(self.post_overview(
-                                    client,
-                                    reply_to_post.author,
-                                    None,
-                                    Some(reply_to_post.event_id),
-                                    Some(&reply_to_post.content.djot_content),
-                                    // We could display comment button here, but the UX is weird
-                                    None,
-                                    ro
-                                )).await?)
-                            } @else {
-                                (Box::pin(self.post_overview(
-                                    client,
-                                    reply_to_author,
-                                    None,
-                                    None,
-                                    None,
-                                    // We could display comment button here, but the UX is weird
-                                    None,
-                                    ro
-                                )).await?)
-                            }
+        let post = html! {
+            article #(post_id)
+                ."m-postOverview"
+                ."-response"[reply_to.is_some() || is_comment]
+             {
+                (post_main)
+
+                (button_bar)
+
+                div ."m-postOverview__comments"
+                    ."-empty"[comment.is_none()]
+                {
+                    @if let Some(comment) = comment {
+                        div ."m-postOverview__commentsItem" {
+                            (comment)
                         }
-
-                        div ."m-postOverview__parent_response" {
-                            (post_main)
-
-                            (button_bar)
-
-                            div ."m-postOverview__comments -empty" { }
-                        }
-
-                    } @else {
-
-                        (post_main)
-
-                        (button_bar)
-
-                        div ."m-postOverview__comments -empty" { }
                     }
+                }
+            }
+        };
 
+        Ok(html! {
+            @if let Some((reply_to_author, reply_to_post)) = reply_to {
+                @if let Some(reply_to_post) = reply_to_post {
+                    (Box::pin(self.post_overview(
+                        client,
+                        reply_to_post.author
+                        )
+                        .event_id(reply_to_post.event_id)
+                        .content(&reply_to_post.content.djot_content)
+                        .ro(ro)
+                        .comment(post)
+                        .call()
+                    )
+                    .await?)
+                } @else {
+                    (Box::pin(self.post_overview(
+                        client,
+                        reply_to_author,
+                        )
+                        .ro( ro).comment(post)
+                        .call()
+                    ).await?)
+                }
+            } @else {
+                (post)
             }
         })
     }

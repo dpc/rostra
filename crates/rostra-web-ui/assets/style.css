@@ -63,6 +63,7 @@
   --color-button-border-hover: oklch(calc(var(--color-bg) + 25 * var(--color-bg-inc)) 0 0);
   --color-timeline-item-border: oklch(calc(var(--color-bg) + 10 * var(--color-bg-inc)) 0 0);
   --color-timeline-bg: oklch(calc(var(--color-bg) + 5 * var(--color-bg-inc)) 0 0);
+  --color-post-highlight-bg: oklch(calc(var(--color-bg) + 8 * var(--color-bg-inc)) 0 0);
   --color-link: oklch(calc(var(--color-fg) + 15 * var(--color-fg-inc)) 0.4 30);
   --color-link-hover: oklch(calc(var(--color-fg) + 55 * var(--color-fg-inc)) 0.4 110);
 }
@@ -111,6 +112,7 @@ button {
   border-color: var(--color-button-border);
   /* outline: none; */
   /* box-shadow: none; */
+  appearance: none;
   -webkit-appearance: none;
   -moz-appearance: none;
 }
@@ -334,7 +336,6 @@ a:active {
 }
 
 .m-postOverview {
-  /* min-width: 30rem; */
   max-width: 50rem;
 }
 
@@ -343,10 +344,10 @@ a:active {
 /* background-color: var(--color-blockquote-bg); */
 /* } */
 
-.m-postOverview__parent_response {
-  padding-top: 1rem;
-  padding-left: 2rem;
-}
+/* .m-postOverview.-response { */
+/* padding-top: 1rem; */
+/* padding-left: 2rem; */
+/* } */
 
 .m-postOverview__main {
   display: flex;
@@ -375,13 +376,11 @@ a:active {
   padding-left: 2rem;
 }
 
-.m-newPostForm__replyToLabel {}
 
 .m-newPostForm__replyToText {
   font-weight: bold;
 }
 
-.m-postOverview__content {}
 
 .m-postOverview__content.-missing {
   color: red;
@@ -507,9 +506,6 @@ a:active {
   gap: 5pt;
 }
 
-.m-newPostForm__replyToLine {
-  /* display: flex; */
-}
 
 .m-newPostForm__content {
   padding: 5pt;
@@ -554,7 +550,6 @@ a:active {
   gap: 5pt;
 }
 
-.m-addFolloweeForm__followButton {}
 
 .m-addFolloweeForm__followButtonIcon {
   background: url('/assets/icons/upload.svg') center/contain no-repeat;
