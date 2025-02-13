@@ -219,7 +219,7 @@ a:active {
   display: flex;
   gap: 0.5rem;
   min-width: 5rem;
-  padding: 0.0rem .25rem;
+  padding: 0.0rem .5rem;
 }
 
 .u-buttonIcon {
