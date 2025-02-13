@@ -386,21 +386,22 @@ impl UiState {
             @if let Some(ext_event_id) = external_event_id {
                 div ."m-postOverview__buttonBar" {
                     @if let Some(reply_count) = reply_count {
-                    @if reply_count > 0 {
-                        button ."m-postOverview__commentsButton u-button"
-                            hx-get={"/ui/timeline/comments/"(ext_event_id.event_id().to_short())}
-                            hx-target="next .m-postOverview__comments"
-                            hx-swap="outerHTML"
-                        {
-                            span ."m-postOverview__commentsButtonIcon u-buttonIcon" width="1rem" height="1rem" {}
-                            @if reply_count == 1 {
-                                ("1 Reply".to_string())
-                            } @else {
-                                (format!("{} Replies", reply_count))
+                        @if reply_count > 0 {
+                            button ."m-postOverview__commentsButton u-button"
+                                hx-get={"/ui/timeline/comments/"(ext_event_id.event_id().to_short())}
+                                hx-target="next .m-postOverview__comments"
+                                hx-swap="outerHTML"
+                            {
+                                span ."m-postOverview__commentsButtonIcon u-buttonIcon" width="1rem" height="1rem" {}
+                                @if reply_count == 1 {
+                                    ("1 Reply".to_string())
+                                } @else {
+                                    (format!("{} Replies", reply_count))
+                                }
                             }
                         }
-                    }
 
+                    }
                     button ."m-postOverview__replyToButton u-button"
                         disabled[ro.to_disabled()]
                         hx-get={"/ui/post/reply_to?reply_to="(ext_event_id)}
@@ -409,7 +410,6 @@ impl UiState {
                     {
                         span ."m-postOverview__replyToButtonIcon u-buttonIcon" width="1rem" height="1rem" {}
                         "Reply"
-                    }
                     }
                 }
             }
