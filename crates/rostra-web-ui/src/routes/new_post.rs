@@ -77,6 +77,24 @@ pub async fn post_new_post(
         },
         session.ro_mode(),
     );
+    let reply_to = if let Some(reply_to) = form.reply_to {
+        Some((
+            reply_to.rostra_id(),
+            state
+                .client(session.id())
+                .await?
+                .db()?
+                .get_posts_by_id([reply_to.event_id()].into_iter())
+                .await
+                .get(&reply_to.event_id())
+                .cloned(),
+        ))
+    } else {
+        None
+    };
+    let reply_to = reply_to
+        .as_ref()
+        .map(|(rostra_id, record)| (*rostra_id, record.as_ref()));
     Ok(Maud(html! {
 
         (clean_form)
@@ -88,12 +106,13 @@ pub async fn post_new_post(
 
         // Insert new post at the top of the timeline, where the preview we just cleared was.
         div hx-swap-oob="afterend: .o-mainBarTimeline__item.-preview" {
-            div ."o-mainBarTimeline__item" {
+            div ."o-mainBarTimeline__item"
+                ."-reply"[reply_to.is_some()]
+             {
                 (state.post_overview(
                     &client_ref,
                     client_ref.rostra_id(),
-                    // TODO: get and display as well
-                    None,
+                    reply_to,
                     Some(event.event_id.to_short()),
                     Some(&form.content),
                     None,

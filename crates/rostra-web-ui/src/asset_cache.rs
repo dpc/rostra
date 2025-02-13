@@ -42,7 +42,7 @@ impl AssetCache {
         let mut parts = path.split(['.', HASH_SPLIT_CHAR]);
 
         let basename = parts.next().unwrap_or_default();
-        let ext = parts.last().unwrap_or_default();
+        let ext = parts.next_back().unwrap_or_default();
 
         format!("{}.{}", basename, ext)
     }
@@ -98,7 +98,7 @@ impl AssetCache {
                             } else {
                                 LazyLock::new(Box::new(|| Bytes::from(raw)))
                             },
-                            compressed: compressed.map(Bytes::from),
+                            compressed,
                         },
                     )))
                 })

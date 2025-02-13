@@ -21,6 +21,7 @@ pub struct EventPaginationCursor {
     pub event_id: ShortEventId,
 }
 
+#[derive(Clone)]
 pub struct SocialPostRecord<C> {
     pub ts: Timestamp,
     pub event_id: ShortEventId,
