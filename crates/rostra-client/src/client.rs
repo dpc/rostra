@@ -42,8 +42,8 @@ use crate::error::{
 };
 use crate::id::{CompactTicket, IdPublishedData, IdResolvedData};
 use crate::task::head_merger::HeadMerger;
-use crate::task::id_publisher::PkarrIdPublisher;
 use crate::task::missing_event_fetcher::MissingEventFetcher;
+use crate::task::pkarr_id_publisher::PkarrIdPublisher;
 use crate::task::request_handler::RequestHandler;
 use crate::LOG_TARGET;
 
@@ -294,6 +294,10 @@ impl Client {
             }
         }
 
+        self.connect_by_pkarr_resolution(id).await
+    }
+
+    pub async fn connect_by_pkarr_resolution(&self, id: RostraId) -> ConnectResult<Connection> {
         let ticket = self.resolve_id_ticket(id).await.context(ResolveSnafu)?;
 
         let node_addr = NodeAddr::from(ticket);

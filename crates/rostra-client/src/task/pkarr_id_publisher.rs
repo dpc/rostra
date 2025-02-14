@@ -3,8 +3,11 @@ use std::time::{Duration, Instant};
 
 use pkarr::dns::rdata::TXT;
 use pkarr::{Keypair, SignedPacket};
+use rand::Rng as _;
 use rostra_core::id::{RostraId, RostraIdSecretKey, ToShort as _};
 use rostra_core::ShortEventId;
+use rostra_p2p::connection::PingRequest;
+use rostra_util_error::BoxedErrorResult;
 use rostra_util_fmt::AsFmtOption as _;
 use snafu::ResultExt as _;
 use tokio::sync::watch;
@@ -17,11 +20,11 @@ use crate::{RRECORD_HEAD_KEY, RRECORD_P2P_KEY};
 const LOG_TARGET: &str = "rostra::publisher";
 
 pub fn publishing_interval() -> Duration {
-    Duration::from_secs(60)
+    Duration::from_secs(360)
 }
 
 pub struct PkarrIdPublisher {
-    app: crate::client::ClientHandle,
+    client: crate::client::ClientHandle,
     pkarr_client: Arc<pkarr::Client>,
     keypair: pkarr::Keypair,
     self_head_rx: watch::Receiver<Option<ShortEventId>>,
@@ -72,7 +75,7 @@ impl PkarrIdPublisher {
     pub fn new(client: &Client, id_secret: RostraIdSecretKey) -> Self {
         debug!(target: LOG_TARGET, pkarr_id = %id_secret.id().to_unprefixed_z32_string(), "Starting ID publishing task" );
         Self {
-            app: client.handle(),
+            client: client.handle(),
             keypair: id_secret.into(),
             pkarr_client: client.pkarr_client(),
             self_head_rx: client.self_head_subscribe(),
@@ -82,6 +85,9 @@ impl PkarrIdPublisher {
     /// Run the thread
     #[instrument(skip(self), ret)]
     pub async fn run(mut self) {
+        self.wait_for_your_turn().await;
+        debug!(target: LOG_TARGET, "Detect no other peer alive, assuming the role of Pkarr ID publisher");
+
         let mut interval = tokio::time::interval(publishing_interval());
         loop {
             tokio::select! {
@@ -96,7 +102,7 @@ impl PkarrIdPublisher {
             }
 
             let (addr, head) = {
-                let Some(app) = self.app.app_ref_opt() else {
+                let Some(app) = self.client.app_ref_opt() else {
                     debug!(target: LOG_TARGET, "Client gone, quitting");
                     break;
                 };
@@ -152,6 +158,36 @@ impl PkarrIdPublisher {
             head = %data.head.fmt_option(),
             "Published RostraId"
         );
+
+        Ok(())
+    }
+
+    async fn wait_for_your_turn(&self) {
+        let mut failures_count = 0;
+
+        loop {
+            if 3 < failures_count {
+                break;
+            }
+            let secs = rand::thread_rng().gen_range(1..10);
+            tokio::time::sleep(Duration::from_secs(secs)).await;
+            if self.connect_self().await.is_err() {
+                failures_count += 1;
+            } else {
+                trace!(target: LOG_TARGET, "Detect other peer alive, waiting");
+                failures_count = 0;
+            }
+        }
+    }
+
+    async fn connect_self(&self) -> BoxedErrorResult<()> {
+        let conn = self
+            .client
+            .client_ref()?
+            .connect_by_pkarr_resolution(self.self_id())
+            .await?;
+
+        conn.make_rpc(&PingRequest(3)).await?;
 
         Ok(())
     }
