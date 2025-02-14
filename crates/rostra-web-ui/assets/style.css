@@ -227,6 +227,11 @@ a:active {
   /* Very dark blue */
 }
 
+img {
+  max-width: 100%;
+}
+
+/* UTILITY CLASSES */
 .u-button {
   align-items: center;
   display: flex;
