@@ -341,26 +341,7 @@ impl UiState {
         let external_event_id = event_id.map(|e| ExternalEventId::new(author, e));
         let user_profile = self.get_social_profile_opt(author, client).await;
 
-        let post_content_rendered = content.map(|content| {
-            PreEscaped(jotdown::html::render_to_string(
-                jotdown::Parser::new(content).map(|e| match e {
-                    jotdown::Event::Start(jotdown::Container::RawBlock { format }, attrs)
-                        if format == "html" =>
-                    {
-                        jotdown::Event::Start(
-                            jotdown::Container::CodeBlock { language: format },
-                            attrs,
-                        )
-                    }
-                    jotdown::Event::End(jotdown::Container::RawBlock { format })
-                        if format == "html" =>
-                    {
-                        jotdown::Event::End(jotdown::Container::CodeBlock { language: format })
-                    }
-                    e => e,
-                }),
-            ))
-        });
+        let post_content_rendered = content.map(|content| self.render_content(content));
 
         let post_main = html! {
             div ."m-postOverview__main"

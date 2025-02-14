@@ -1,5 +1,6 @@
 mod add_followee;
 mod avatar;
+mod content;
 mod new_post;
 mod profile;
 mod profile_self;
