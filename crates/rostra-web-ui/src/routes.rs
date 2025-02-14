@@ -111,7 +111,7 @@ pub async fn cache_control(request: Request, next: Next) -> Response {
 
         let cache_duration_secs = if SHORT_CACHE_CONTENT_TYPES
             .iter()
-            .any(|&ct| !content_type.as_bytes().starts_with(ct.as_bytes()))
+            .any(|&ct| content_type.as_bytes().starts_with(ct.as_bytes()))
         {
             Some(10 * 60)
         } else if NON_CACHEABLE_CONTENT_TYPES
