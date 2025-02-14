@@ -229,6 +229,7 @@ impl UiState {
                 .await
                 .into_iter()
                 .map(|(k, _)| k)
+                .chain([session.id()])
                 .collect()
         };
 
