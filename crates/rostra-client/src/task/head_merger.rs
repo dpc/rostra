@@ -43,11 +43,6 @@ impl HeadMerger {
                 break;
             };
 
-            debug!(
-                target: LOG_TARGET,
-                "Merging divergent heads"
-            );
-
             let db = client.db();
             let mut heads = db.get_heads(self.id).await.into_iter();
 
@@ -71,6 +66,13 @@ impl HeadMerger {
             let verified_event_content =
                 rostra_core::event::VerifiedEventContent::verify(verified_event, None)
                     .expect("Can't fail to verify self-created content");
+            debug!(
+                target: LOG_TARGET,
+                %head1,
+                %head2,
+                head = %verified_event.event_id,
+                "Merging divergent heads"
+            );
             let _ = db.process_event_with_content(&verified_event_content).await;
         }
     }
