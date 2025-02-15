@@ -77,12 +77,23 @@
 }
 
 /* GLOBAL STYLE */
+
+html {
+  height: 100%;
+  overflow: hidden;
+}
+
 body {
   font-family: sans-serif;
   color: var(--color-text-default);
   background: var(--color-bg-default);
   line-height: 1.6;
   font-size: 16px;
+
+  height: 100%;
+  overflow: auto;
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior: none;
 }
 
 h1,
