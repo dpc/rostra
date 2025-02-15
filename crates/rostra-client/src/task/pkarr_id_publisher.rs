@@ -85,9 +85,6 @@ impl PkarrIdPublisher {
     /// Run the thread
     #[instrument(skip(self), ret)]
     pub async fn run(mut self) {
-        self.wait_for_your_turn().await;
-        debug!(target: LOG_TARGET, "Detect no other peer alive, assuming the role of Pkarr ID publisher");
-
         let mut interval = tokio::time::interval(publishing_interval());
         loop {
             tokio::select! {
@@ -100,6 +97,9 @@ impl PkarrIdPublisher {
                     }
                 }
             }
+
+            self.wait_for_your_turn().await;
+            debug!(target: LOG_TARGET, "Detect no other peer alive, assuming the role of Pkarr ID publisher");
 
             let (addr, head) = {
                 let Some(app) = self.client.app_ref_opt() else {
@@ -169,7 +169,7 @@ impl PkarrIdPublisher {
             if 3 < failures_count {
                 break;
             }
-            let secs = rand::thread_rng().gen_range(1..10);
+            let secs = rand::thread_rng().gen_range(1..30);
             tokio::time::sleep(Duration::from_secs(secs)).await;
             if self.connect_self().await.is_err() {
                 failures_count += 1;
