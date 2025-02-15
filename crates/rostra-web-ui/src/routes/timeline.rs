@@ -342,7 +342,11 @@ impl UiState {
         let external_event_id = event_id.map(|e| ExternalEventId::new(author, e));
         let user_profile = self.get_social_profile_opt(author, client).await;
 
-        let post_content_rendered = content.map(|content| self.render_content(content));
+        let post_content_rendered = if let Some(content) = content.as_ref() {
+            Some(self.render_content(client, content).await)
+        } else {
+            None
+        };
 
         let post_main = html! {
             div ."m-postOverview__main"
