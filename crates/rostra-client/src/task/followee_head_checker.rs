@@ -3,7 +3,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use rostra_client_db::{Database, IdsFolloweesRecord, InsertEventOutcome};
-use rostra_core::event::{EventExt as _, VerifiedEvent, VerifiedEventContent};
+use rostra_core::event::{EventExt as _, PersonaId, VerifiedEvent, VerifiedEventContent};
 use rostra_core::id::RostraId;
 use rostra_core::ShortEventId;
 use rostra_p2p::connection::GetHeadRequest;
@@ -21,6 +21,7 @@ const LOG_TARGET: &str = "rostra::head_checker";
 pub struct FolloweeHeadChecker {
     client: crate::client::ClientHandle,
     db: Arc<Database>,
+    self_id: RostraId,
     followee_updated: watch::Receiver<HashMap<RostraId, IdsFolloweesRecord>>,
     check_for_updates_rx: watch::Receiver<()>,
 }
@@ -31,6 +32,7 @@ impl FolloweeHeadChecker {
         Self {
             client: client.handle(),
             db: client.db().to_owned(),
+            self_id: client.rostra_id(),
 
             followee_updated: client.self_followees_subscribe(),
             check_for_updates_rx: client.check_for_updates_tx_subscribe(),
@@ -69,7 +71,10 @@ impl FolloweeHeadChecker {
 
             let self_followees = storage.get_self_followees().await;
 
-            for (followee, _persona_id) in &self_followees {
+            for (followee, _persona_id) in [&(self.self_id, PersonaId::default())]
+                .into_iter()
+                .chain(&self_followees)
+            {
                 let Some(client) = self.client.app_ref_opt() else {
                     debug!(target: LOG_TARGET, "Client gone, quitting");
 

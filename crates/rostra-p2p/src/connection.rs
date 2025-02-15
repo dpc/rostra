@@ -15,10 +15,11 @@ use rostra_core::id::RostraId;
 use rostra_core::{ContentHash, MsgLen, ShortEventId};
 use rostra_util_error::BoxedErrorResult;
 use snafu::{OptionExt as _, ResultExt as _};
+use tracing::trace;
 
 use crate::{
     ConnectionSnafu, DecodingBaoSnafu, DecodingSnafu, EncodingBaoSnafu, FailedSnafu,
-    MessageTooLargeSnafu, ReadSnafu, RpcResult, TrailerSnafu, WriteSnafu,
+    MessageTooLargeSnafu, ReadSnafu, RpcResult, TrailerSnafu, WriteSnafu, LOG_TARGET,
 };
 
 pub struct Connection(iroh::endpoint::Connection);
@@ -308,6 +309,7 @@ impl Connection {
     }
 
     pub async fn write_rpc_request<R: Rpc>(send: &mut SendStream, rpc: &R) -> RpcResult<()> {
+        trace!(target: LOG_TARGET, kind = %<R as Rpc>::RPC_ID, "Writing rpc request");
         send.write_all(&rpc_request_to_bytes(rpc))
             .await
             .context(WriteSnafu)?;
@@ -318,6 +320,8 @@ impl Connection {
     pub async fn read_success_error_code(recv: &mut RecvStream) -> RpcResult<u8> {
         let mut res = [0u8; 1];
         recv.read_exact(&mut res).await.boxed().context(ReadSnafu)?;
+
+        trace!(target: LOG_TARGET, res = %res[0], "Got rpc response");
 
         if res[0] != 0 {
             return FailedSnafu {

@@ -182,7 +182,7 @@ impl EventExt for Event {
 
 #[cfg_attr(feature = "serde", derive(::serde::Serialize, ::serde::Deserialize))]
 #[cfg_attr(feature = "bincode", derive(::bincode::Encode, ::bincode::Decode))]
-#[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
+#[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Debug, Default)]
 pub struct PersonaId(pub u32);
 
 pub trait SignedEventExt: EventExt {
