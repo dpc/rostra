@@ -38,6 +38,16 @@ if you don't want to stare at an empty timeline.
 A public instance is available at https://rostra.me/ , but
 it's advised to run Rostra directly on your system.
 
+#### Checkout Code, build and run 
+
+Pre-requisite: You should have rust installed on your system, so that you can build the code. 
+
+1. Checkout code using `git clone https://github.com/dpc/rostra`, then do `cd rostra/`
+2. Build the binaries using `cargo build`
+3. run the web-ui using `./target/build/rostra web-ui`. This will open the web-ui on localhost.
+
+To verify that the above is working well, login to your above localhost web-ui using same 'account or private key' that you use to access rostra.me. Both should show same posts from your account, and from other accounts you follow. 
+
 #### Using Cargo
 
 **NOTE**: [This flow currently doesn't work end to end](https://github.com/dpc/rostra/discussions/7).
