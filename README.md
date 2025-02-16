@@ -60,6 +60,18 @@ You can run Rostra using Nix with:
 nix run github:dpc/rostra
 ```
 
+#### Using prebuilt binaries
+
+The [CI builds binaries](https://github.com/dpc/rostra/actions/workflows/ci.yml?query=branch%3Amaster):
+
+* portable Linux x86_64 binary
+* DEB package
+* RPM package
+
+Pick the last build and at the bottom of the page look for "Artifacts".
+
+In the future, the official releases will come with prebuilt binaries as well.
+
 ## Plan
 
 Status: early, but getting to something usable.
