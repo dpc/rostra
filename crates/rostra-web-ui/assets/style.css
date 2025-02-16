@@ -242,7 +242,12 @@ img {
   max-width: 100%;
 }
 
+
 /* UTILITY CLASSES */
+.u-tooltip:not(.shown) {
+  display: none;
+}
+
 .u-button {
   align-items: center;
   display: flex;
@@ -329,7 +334,7 @@ img {
   position: fixed;
   top: 20px;
   right: 20px;
-  z-index: 100;
+  z-index: 50;
   background: white;
   padding: 4pt;
   border: 1px solid var(--color-timeline-item-border);
@@ -468,6 +473,9 @@ img {
   font-weight: bold;
 }
 
+.m-newPostForm__emojiBar.-hidden {
+  display: none;
+}
 
 .m-postOverview__content {
   word-break: break-word;

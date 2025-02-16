@@ -216,7 +216,8 @@ impl UiState {
                 hx-swap="outerHTML"
             {
                 (self.render_reply_to_line(None, None))
-                textarea ."m-newPostForm__content"
+                textarea
+                    ."m-newPostForm__content"
                     placeholder=(
                         if ro.to_disabled() {
                             "Read-Only mode."
@@ -240,6 +241,9 @@ impl UiState {
                         (n)
                     }
                     a href="https://htmlpreview.github.io/?https://github.com/jgm/djot/blob/master/doc/syntax.html" target="_blank" { "Formatting" }
+                    div
+                        ."m-newPostForm__emojiButton"
+                    { "😀" }
                     button ."m-newPostForm__postButton u-button"
                         disabled[ro.to_disabled()]
                         type="submit"
@@ -248,6 +252,32 @@ impl UiState {
                         "Post"
                     }
                 }
+                div
+                    ."m-newPostForm__emojiBar -hidden"
+                    role="tooltip" {
+                    emoji-picker
+                        data-source="/assets/libs/emoji-picker-element/data.json"
+                    {}
+                }
+
+                script type="module" {
+                    (PreEscaped(r#"
+                        import { Picker } from '/assets/libs/emoji-picker-element/index.js';
+                        import textFieldEdit from '/assets/libs/text-field-edit/index.js';
+
+                        const button = document.querySelector('.m-newPostForm__emojiButton')
+                        const tooltip = document.querySelector('.m-newPostForm__emojiBar')
+
+                        button.onclick = () => {
+                            tooltip.classList.toggle('-hidden')
+                        }
+
+                        document.querySelector('emoji-picker').addEventListener('emoji-click', e => {
+                          textFieldEdit.insert(document.querySelector('.m-newPostForm__content'), e.detail.unicode);
+                        })
+                    "#));
+                }
+
             }
             (submit_on_ctrl_enter(".m-newPostForm", ".m-newPostForm__content"))
         }
