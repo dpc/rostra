@@ -40,13 +40,17 @@ it's advised to run Rostra directly on your system.
 
 #### Using Cargo
 
-**NOTE**: [This flow currently doesn't work end to end](https://github.com/dpc/rostra/discussions/7).
-
-As a Rust project Rostra can be installed using Cargo:
+You can clone the git repository locally and run:
 
 ```
-cargo install --git https://github.com/dpc/rostra
+cargo run --release web-ui  
 ```
+
+to start the web ui.
+
+**NOTE**: [`cargo install` can't bundle web UI assets embedded in the git
+repository, which are necessary for the web UI to work.](https://github.com/dpc/rostra/discussions/7).
+
 
 #### Using Nix
 
