@@ -1,0 +1,131 @@
+name: "Release packages"
+
+on:
+  push:
+    branches: [ "main", "master", "devel", "releases/v*" ]
+    tags:
+      - 'v*'
+  pull_request:
+    branches: [ "main", "master", "devel", "releases/v*" ]
+  merge_group:
+    branches: [ "main", "master", "devel", "releases/v*" ]
+
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+
+jobs:
+  lint:
+    name: "Lint"
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dpc/nix-installer-action@dpc/jj-vqymqvyntouw
+      - uses: cachix/cachix-action@v15
+        with:
+          name: rostra
+          authToken: '${{ secrets.CACHIX_AUTH_TOKEN }}'
+        continue-on-error: true
+
+      - name: Check `nix flake show`
+        run: nix flake show .#
+
+
+
+  pkg:
+    name: "Build packages"
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dpc/nix-installer-action@dpc/jj-vqymqvyntouw
+      - uses: cachix/cachix-action@v15
+        with:
+          name: rostra
+          authToken: '${{ secrets.CACHIX_AUTH_TOKEN }}'
+        continue-on-error: true
+
+
+      - name: Set BUILD_ID to tag or commit hash
+        run: |
+          if [[ $GITHUB_REF_TYPE == "tag" ]]; then
+            echo "BUILD_ID=${GITHUB_REF_NAME}" >> $GITHUB_ENV
+          else
+            echo "BUILD_ID=${GITHUB_SHA}" >> $GITHUB_ENV
+          fi
+
+      - name: Build rostra
+        env:
+          # seems like cachix needs this explicitly set in the env
+          CACHIX_AUTH_TOKEN: '${{ secrets.CACHIX_AUTH_TOKEN }}'
+        run: |
+          mkdir -p bins
+          nix build -L .#rostra && sha256sum "./result/bin/rostra"
+
+          closure_size=$(nix path-info -rS --json .#rostra | jq '. | to_entries[] | select(.value.ultimate == true) | .value.narSize')
+          >&2 echo "rostra's Nix closure size: $closure_size"
+
+          if [ 100000000 -lt $closure_size ]; then
+            >&2 echo "rostra's Nix closure size seems too big: $closure_size"
+            exit 1
+          fi
+
+          nix bundle --bundler .# ".#rostra" -o "bins/rostra-$BUILD_ID" && sha256sum "bins/rostra-$BUILD_ID"
+
+      - name: Upload Binaries
+        uses: actions/upload-artifact@v4
+        with:
+          name: "rostra-linux-x86_64"
+          path: "bins/**"
+
+      - name: Release Binaries
+        uses: softprops/action-gh-release@v2
+        if: startsWith(github.ref, 'refs/tags/')
+        with:
+          files: "bins/**"
+          prerelease: ${{ contains(github.ref, 'rc') }}
+          body: ${{ contains(github.ref, 'rc') && env.PRERELEASE_MESSAGE || '' }}
+
+      - name: Build DEB package
+        run: |
+          nix bundle -L --bundler .#toDEB --accept-flake-config -o debs/rostra .#rostra
+          # workaround: https://github.com/actions/upload-artifact/issues/92
+          cp -a debs/rostra/*.deb debs/
+
+      - name: Build RPM package
+        run: |
+          nix bundle -L --bundler .#toRPM --accept-flake-config -o rpms/rostra .#rostra
+          # workaround: https://github.com/actions/upload-artifact/issues/92
+          cp -a rpms/rostra/*.rpm rpms/
+
+      - name: Upload DEB packages
+        uses: actions/upload-artifact@v4
+        with:
+          name: "rostra-deb-bundle"
+          path: "debs/**.deb"
+
+      - name: Release DEB packages
+        uses: softprops/action-gh-release@v2
+        if: startsWith(github.ref, 'refs/tags/')
+        with:
+          files: "debs/**.deb"
+          prerelease: ${{ contains(github.ref, 'rc') }}
+          body: ${{ contains(github.ref, 'rc') && env.PRERELEASE_MESSAGE || '' }}
+
+      - name: Upload RPM packages
+        uses: actions/upload-artifact@v4
+        with:
+          name: "rostra-rpm-bundle"
+          path: "rpms/**.rpm"
+
+      - name: Release RPM packages
+        uses: softprops/action-gh-release@v2
+        if: startsWith(github.ref, 'refs/tags/')
+        with:
+          files: "rpms/**.rpm"
+          prerelease: ${{ contains(github.ref, 'rc') }}
+          body: ${{ contains(github.ref, 'rc') && env.PRERELEASE_MESSAGE || '' }}

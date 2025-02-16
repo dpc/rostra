@@ -4,7 +4,12 @@
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-24.11";
     flake-utils.url = "github:numtide/flake-utils";
-    flakebox.url = "github:rustshop/flakebox?rev=6b975dda3f481971fcaa332598d40c9992e738e7";
+    flakebox.url = "github:rustshop/flakebox?rev=f721e70163c9c9434d59e811dc09cdc4c7660dba";
+
+    bundlers = {
+      url = "github:NixOS/bundlers";
+      inputs.nixpkgs.follows = "nixpkgs";
+    };
   };
 
   outputs =
@@ -13,8 +18,12 @@
       nixpkgs,
       flake-utils,
       flakebox,
+      bundlers,
     }:
-    flake-utils.lib.eachDefaultSystem (
+    {
+      bundlers = bundlers.bundlers;
+    }
+    // flake-utils.lib.eachDefaultSystem (
       system:
       let
         pkgs = nixpkgs.legacyPackages.${system};
@@ -35,9 +44,14 @@
 
         stdToolchains = (flakeboxLib.mkStdToolchains (toolchainArgs // { }));
 
-        toolchainAll = (flakeboxLib.mkFenixToolchain (toolchainArgs // {
-          targets = pkgs.lib.getAttrs [ "default" ] (flakeboxLib.mkStdTargets { });
-        }));
+        toolchainAll = (
+          flakeboxLib.mkFenixToolchain (
+            toolchainArgs
+            // {
+              targets = pkgs.lib.getAttrs [ "default" ] (flakeboxLib.mkStdTargets { });
+            }
+          )
+        );
 
         buildPaths = [
           "Cargo.toml"
