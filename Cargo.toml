@@ -17,7 +17,7 @@ resolver = "2"
 [workspace.package]
 version = "0.1.0"
 edition = "2021"
-license = "MIT"
+license = "MIT OR APACHE-2.0 OR MPL-2.0"
 description = "A p2p (f2f) social network."
 
 [workspace.lints.clippy]

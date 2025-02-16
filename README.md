@@ -71,3 +71,18 @@ Status: early, but getting to something usable.
 * [FAQ](/docs/FAQ.md)
 * [Comparison with other social protocols](/docs/comparison.md)
 * [`HACKING.md`](./HACKING.md)
+
+## License
+
+Rostra code is licenses under any of your choosing:
+
+* MPL-2.0
+* Apache-2.0
+* MIT
+
+The code vendors source code for 3rd party projects:
+
+* [htmx](https://github.com/bigskysoftware/htmx/) - Zero-Clause BSD
+* [emoji-picker-element](https://github.com/nolanlawson/emoji-picker-element) - Apache 2.0
+* [text-field-edit](https://github.com/fregante/text-field-edit) - MIT
+* [mathjax](https://github.com/mathjax/MathJax-src/) - Apache 2.0
