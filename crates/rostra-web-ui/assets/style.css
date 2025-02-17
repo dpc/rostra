@@ -8,7 +8,7 @@
   :root {
     --color-bg: 10%;
     --color-bg-inc: 2%;
-    --color-fg: 99%;
+    --color-fg: 90%;
     --color-fg-inc: -1%;
 
     --invert: 100%;
@@ -21,9 +21,6 @@
     --color-blockquote-bg: #f9fafb;
 
     --color-border: rgb(217, 217, 232);
-    /* --color-bg-default: #121212; */
-    --color-text-default: #f7f7f7;
-    /* --color-text-input-bg: #1a1a1a; */
     --color-text-input: var(--color-text-default);
     --quote-background-color: #0f0f0f;
   }
@@ -46,16 +43,15 @@
 
 
     --color-border: rgb(217, 217, 232);
-    /* --color-bg-default: #fafafa; */
-    --color-text-default: #050505;
-    /* --color-text-input-bg: #f7f7f7; */
     --color-text-input: var(--color-text-default);
     --quote-background-color: #f9fafb;
   }
 }
 
 :root {
+  --color-text-default: oklch(calc(var(--color-fg) + 0 * var(--color-fg-inc)) 0 0);
   --color-bg-default: oklch(var(--color-bg) 0 0);
+  --color-pre-bg: oklch(calc(var(--color-bg) + 10 * var(--color-bg-inc)) 0 0);
   --color-text-input-bg: oklch(calc(var(--color-bg) + 3 * var(--color-bg-inc)) 0 0);
   --color-button-bg: oklch(calc(var(--color-bg) + 10 * var(--color-bg-inc)) 0 0);
   --color-button-bg-hover: oklch(calc(var(--color-bg) + 5 * var(--color-bg-inc)) 0 0);
@@ -143,12 +139,11 @@ blockquote {
 
 pre,
 code {
-  background: #f5f5f5;
-  border-radius: 6px;
+  background-color: var(--color-pre-bg);
+  border-radius: 4px;
   padding: 4px 6px;
   font-size: 1rem;
   font-family: monospace;
-  background-clip: white;
 }
 
 button {
@@ -674,8 +669,8 @@ img {
 
 .o-unlockScreen__form {
   padding: clamp(0px, 2.5vw, 2rem) clamp(0px, 5vw, 4rem);
-  border-radius: 8px;
-  box-shadow: 0 2px 4px var(--color-border);
+  border: solid 1px;
+  border-radius: 5px;
 
   display: flex;
   flex-direction: column;
