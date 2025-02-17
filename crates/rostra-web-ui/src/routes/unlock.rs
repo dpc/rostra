@@ -130,7 +130,7 @@ impl UiState {
                         input ."o-unlockScreen__id"
                             type="username"
                             name="username"
-                            placeholder="Id..."
+                            placeholder="Id (Public Key)"
                             autocomplete="username"
                             title="Id is a single, long string of characters encoding your public identifier"
                             value=(current_rostra_id.map(|id| id.to_string()).unwrap_or_default())
@@ -148,7 +148,7 @@ impl UiState {
                             type="password"
                             name="password"
                             autocomplete="current-password"
-                            placeholder="Mnemonic... (optional in read-only mode)"
+                            placeholder="Mnemonic (Secret Key) - if empty, read-only mode"
                             title="Mnemonic is 12 words passphrase encoding secret key of your identity"
                             value=(current_mnemonic)
                             { }
