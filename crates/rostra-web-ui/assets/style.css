@@ -28,9 +28,9 @@
 
 @media (prefers-color-scheme: light) {
   :root {
-    --color-bg: 99%;
+    --color-bg: 97%;
     --color-bg-inc: -1%;
-    --color-fg: 1%;
+    --color-fg: 10%;
     --color-fg-inc: 1%;
 
     --invert: 0%;
@@ -49,7 +49,7 @@
 }
 
 :root {
-  --color-text-default: oklch(calc(var(--color-fg) + 0 * var(--color-fg-inc)) 0 0);
+  --color-text-default: oklch(calc(var(--color-fg) + 2 * var(--color-fg-inc)) 0 0);
   --color-bg-default: oklch(var(--color-bg) 0 0);
   --color-pre-bg: oklch(calc(var(--color-bg) + 10 * var(--color-bg-inc)) 0 0);
   --color-text-input-bg: oklch(calc(var(--color-bg) + 3 * var(--color-bg-inc)) 0 0);
