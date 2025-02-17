@@ -108,6 +108,7 @@ pub async fn post_new_post(
         div hx-swap-oob="afterend: .o-mainBarTimeline__item.-preview" {
             div ."o-mainBarTimeline__item"
                 ."-reply"[reply_to.is_some()]
+                ."-post"[reply_to.is_none()]
              {
                 (state.post_overview(
                     &client_ref,
@@ -134,7 +135,10 @@ pub async fn get_post_preview(
     let self_id = client.client_ref()?.rostra_id();
     Ok(Maud(html! {
         @if !form.content.is_empty() {
-            div ."o-mainBarTimeline__item -preview" {
+            div ."o-mainBarTimeline__item -preview"
+                ."-reply"[form.reply_to.is_some()]
+                ."-post"[form.reply_to.is_none()]
+            {
                 (state.post_overview(
                     &client.client_ref()?,
                     self_id

@@ -266,19 +266,12 @@ impl UiState {
                         { }
                         span class="slider round" { }
                     }
-                    // div {
-                    //     label ."o-mainBarTimeline__hideRepliesLabel"
-                    //         for="hide-replies"
-                    //     { "Hide comments: " }
-                    //     input ."o-mainBarTimeline__hideRepliesCheckbox"
-                    //         type="checkbox" id="hide-replies" name="hide-replies"
-                    //     {}
-                    // }
                 }
                 div ."o-mainBarTimeline__item -preview -empty" { }
                 @for post in &posts {
                     div ."o-mainBarTimeline__item"
                     ."-reply"[post.reply_to.is_some()]
+                    ."-post"[post.reply_to.is_none()]
                     {
                         (self.post_overview(
                             &client_ref,
