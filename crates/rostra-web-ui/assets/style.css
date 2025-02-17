@@ -86,7 +86,7 @@ html {
 body {
   font-family: sans-serif;
   color: var(--color-text-default);
-  background: var(--color-bg-default);
+  background-color: var(--color-bg-default);
   line-height: 1.6;
   font-size: 16px;
 
@@ -674,9 +674,8 @@ img {
 
 .o-unlockScreen__form {
   padding: clamp(0px, 2.5vw, 2rem) clamp(0px, 5vw, 4rem);
-  background: white;
   border-radius: 8px;
-  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+  box-shadow: 0 2px 4px var(--color-border);
 
   display: flex;
   flex-direction: column;
