@@ -148,13 +148,15 @@ pub async fn not_found(_state: State<SharedState>, _req: Request<Body>) -> impl 
 pub fn route_handler(state: SharedState) -> Router {
     Router::new()
         .route("/", get(root))
-        .route("/ui", get(timeline::get))
-        .route("/ui/profile/{id}", get(profile::get))
+        .route("/ui", get(timeline::get_followees))
+        .route("/ui/followees", get(timeline::get_followees))
+        .route("/ui/network", get(timeline::get_network))
+        .route("/ui/notifications", get(timeline::get_notifications))
+        .route("/ui/profile/{id}", get(profile::get_profile))
         .route("/ui/profile/{id}/follow", post(profile::post_follow))
         .route("/ui/profile/{id}/unfollow", post(profile::post_unfollow))
         .route("/ui/avatar/{id}", get(avatar::get))
-        .route("/ui/timeline", get(timeline::get))
-        .route("/ui/timeline/updates", get(timeline::get_updates))
+        .route("/ui/updates", get(timeline::get_updates))
         .route("/ui/post", post(new_post::post_new_post))
         .route("/ui/post/preview", post(new_post::get_post_preview))
         .route("/ui/post/reply_to", get(new_post::get_reply_to))
@@ -162,10 +164,7 @@ pub fn route_handler(state: SharedState) -> Router {
         .route("/ui/unlock", get(unlock::get).post(unlock::post_unlock))
         .route("/ui/unlock/logout", get(unlock::get).post(unlock::logout))
         .route("/ui/unlock/random", get(unlock::get_random))
-        .route(
-            "/ui/timeline/comments/{event_id}",
-            get(timeline::get_post_comments),
-        )
+        .route("/ui/comments/{event_id}", get(timeline::get_post_comments))
         .route(
             "/ui/self/edit",
             get(profile_self::get_self_account_edit).post(profile_self::post_self_account_edit),

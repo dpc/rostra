@@ -26,10 +26,9 @@ use crate::{SharedState, UiState, LOG_TARGET};
 pub struct TimelinePaginationInput {
     pub ts: Option<Timestamp>,
     pub event_id: Option<ShortEventId>,
-    pub user: Option<RostraId>,
 }
 
-pub async fn get(
+pub async fn get_followees(
     state: State<SharedState>,
     session: UserSession,
     Form(form): Form<TimelinePaginationInput>,
@@ -38,32 +37,43 @@ pub async fn get(
         form.event_id
             .map(|event_id| EventPaginationCursor { ts, event_id })
     });
-    let navbar = html! {
-        nav ."o-navBar"
-            hx-ext="ws"
-            ws-connect="/ui/timeline/updates"
-            // doesn't work, gets lowercased, wait for https://github.com/lambda-fairy/maud/pull/445
-            // hx-on:htmx:wsError="console.log(JSON.stringify(event))"
-        {
-            div ."o-navBar__list" {
-                span ."o-navBar__header" { "Rostra:" }
-                a ."o-navBar__item" href="https://github.com/dpc/rostra/discussions" { "Support" }
-                a ."o-navBar__item" href="https://github.com/dpc/rostra/wiki" { "Wiki" }
-                a ."o-navBar__item" href="https://github.com/dpc/rostra" { "Github" }
-            }
-
-            div ."o-navBar__profileSummary" {
-                (state.render_self_profile_summary(&session, session.ro_mode()).await?)
-            }
-
-            (state.render_add_followee_form(None))
-
-            (state.new_post_form(None, session.ro_mode()))
-        }
-    };
+    let navbar = state.timeline_common_navbar(&session).await?;
     Ok(Maud(
         state
-            .render_timeline_page(navbar, pagination, &session, form.user)
+            .render_timeline_page(navbar, pagination, &session, TimelineMode::Followees)
+            .await?,
+    ))
+}
+
+pub async fn get_network(
+    state: State<SharedState>,
+    session: UserSession,
+    Form(form): Form<TimelinePaginationInput>,
+) -> RequestResult<impl IntoResponse> {
+    let pagination = form.ts.and_then(|ts| {
+        form.event_id
+            .map(|event_id| EventPaginationCursor { ts, event_id })
+    });
+    let navbar = state.timeline_common_navbar(&session).await?;
+    Ok(Maud(
+        state
+            .render_timeline_page(navbar, pagination, &session, TimelineMode::Network)
+            .await?,
+    ))
+}
+pub async fn get_notifications(
+    state: State<SharedState>,
+    session: UserSession,
+    Form(form): Form<TimelinePaginationInput>,
+) -> RequestResult<impl IntoResponse> {
+    let pagination = form.ts.and_then(|ts| {
+        form.event_id
+            .map(|event_id| EventPaginationCursor { ts, event_id })
+    });
+    let navbar = state.timeline_common_navbar(&session).await?;
+    Ok(Maud(
+        state
+            .render_timeline_page(navbar, pagination, &session, TimelineMode::Notifications)
             .await?,
     ))
 }
@@ -93,6 +103,32 @@ pub async fn get_post_comments(
 
 #[bon::bon]
 impl UiState {
+    async fn timeline_common_navbar(&self, session: &UserSession) -> RequestResult<Markup> {
+        Ok(html! {
+            nav ."o-navBar"
+                hx-ext="ws"
+                ws-connect="/ui/updates"
+                // doesn't work, gets lowercased, wait for https://github.com/lambda-fairy/maud/pull/445
+                // hx-on:htmx:wsError="console.log(JSON.stringify(event))"
+            {
+                div ."o-navBar__list" {
+                    span ."o-navBar__header" { "Rostra:" }
+                    a ."o-navBar__item" href="https://github.com/dpc/rostra/discussions" { "Support" }
+                    a ."o-navBar__item" href="https://github.com/dpc/rostra/wiki" { "Wiki" }
+                    a ."o-navBar__item" href="https://github.com/dpc/rostra" { "Github" }
+                }
+
+                div ."o-navBar__profileSummary" {
+                    (self.render_self_profile_summary(session, session.ro_mode()).await?)
+                }
+
+                (self.render_add_followee_form(None))
+
+                (self.new_post_form(None, session.ro_mode()))
+            }
+        })
+    }
+
     async fn handle_get_updates(&self, mut ws: WebSocket, user: &UserSession) -> RequestResult<()> {
         let client = self.client(user.id()).await?;
         let self_id = client.client_ref()?.rostra_id();
@@ -131,12 +167,12 @@ impl UiState {
         Ok(())
     }
 
-    pub async fn render_timeline_page(
+    pub(crate) async fn render_timeline_page(
         &self,
         navbar: Markup,
         pagination: Option<EventPaginationCursor>,
         session: &UserSession,
-        filter_user: Option<RostraId>,
+        mode: TimelineMode,
     ) -> RequestResult<Markup> {
         let content = html! {
 
@@ -144,7 +180,7 @@ impl UiState {
 
             main ."o-mainBar" {
                 (self.render_new_posts_alert(false, 0))
-                (self.render_main_bar_timeline(pagination, session, filter_user).await?)
+                (self.render_main_bar_timeline(pagination, session, mode).await?)
             }
             (re_typeset_mathjax())
 
@@ -211,26 +247,39 @@ impl UiState {
         }
     }
 
-    pub async fn render_main_bar_timeline(
+    pub(crate) async fn render_main_bar_timeline(
         &self,
         pagination: Option<EventPaginationCursor>,
         session: &UserSession,
-        filter_user: Option<RostraId>,
+        mode: TimelineMode,
     ) -> RequestResult<Markup> {
         let client = self.client(session.id()).await?;
         let client_ref = client.client_ref()?;
 
-        let filter = if let Some(filter) = filter_user {
-            HashSet::from([filter])
-        } else {
-            client
-                .db()?
-                .get_followees(session.id())
-                .await
-                .into_iter()
-                .map(|(k, _)| k)
-                .chain([session.id()])
-                .collect()
+        #[allow(clippy::type_complexity)]
+        let filter_fn: Box<dyn Fn(&SocialPostRecord<SocialPost>) -> bool + Send> = match mode {
+            TimelineMode::Followees => {
+                let followees: HashSet<RostraId> = client
+                    .db()?
+                    .get_followees(session.id())
+                    .await
+                    .into_iter()
+                    .map(|(k, _)| k)
+                    .chain([session.id()])
+                    .collect();
+                Box::new(move |post: &SocialPostRecord<SocialPost>| {
+                    post.author != session.id() && followees.contains(&post.author)
+                })
+            }
+            TimelineMode::Network => Box::new(
+                // TODO: actually verify against extended followees
+                |post| post.author != session.id(),
+            ),
+            TimelineMode::Notifications => Box::new(|post| {
+                post.author != session.id()
+                    && post.reply_to.map(|ext_id| ext_id.rostra_id()) == Some(session.id())
+            }),
+            TimelineMode::Profile(rostra_id) => Box::new(move |post| post.author == rostra_id),
         };
 
         let posts: Vec<_> = self
@@ -240,7 +289,7 @@ impl UiState {
             .paginate_social_posts_rev(pagination, 20)
             .await
             .into_iter()
-            .filter(|post| filter.contains(&post.author))
+            .filter(|post| (filter_fn)(post))
             .collect();
 
         let parents = self
@@ -253,8 +302,34 @@ impl UiState {
                     .flat_map(|post| post.reply_to.map(|ext_id| ext_id.event_id().to_short())),
             )
             .await;
+
         Ok(html! {
             div ."o-mainBarTimeline" {
+                div ."o-mainBarTimeline__tabs" {
+                    a ."o-mainBarTimeline__back" onclick="history.back()" { "<" }
+
+                    @if let TimelineMode::Profile(_) = mode {
+                        a ."o-mainBarTimeline__profile"
+                            ."-active"[mode.is_profile()]
+                            href=(mode.to_path())
+                        { "Profile" }
+
+                    } @else {
+
+                        a ."o-mainBarTimeline__followees"
+                            ."-active"[mode.is_followees()]
+                            href=(TimelineMode::Followees.to_path())
+                        { "Followees" }
+                        a  ."o-mainBarTimeline__network"
+                            ."-active"[mode.is_network()]
+                            href=(TimelineMode::Network.to_path())
+                        { "Network" }
+                        a ."o-mainBarTimeline__notifications"
+                            ."-active"[mode.is_notifications()]
+                            href=(TimelineMode::Notifications.to_path())
+                        { "Notifications" }
+                    }
+                }
                 div ."o-mainBarTimeline__switches" {
 
                     label ."o-mainBarTimeline__repliesLabel" for="show-replies" { "Replies" }
@@ -289,14 +364,12 @@ impl UiState {
                 }
                 @if let Some(last) = posts.last() {
                     div ."o-mainBarTimeline__rest -empty"
-                        hx-get=({
-                            let path = format!("/ui/timeline?ts={}&event_id={}", last.ts, last.event_id);
-                            if let Some(filter_user) = filter_user {
-                                format!("{path}&user={filter_user}")
-                            } else {
-                                path
-                            }
-                        })
+                        hx-get=(
+                            format!("{}?ts={}&event_id={}",
+                                mode.to_path(),
+                                last.ts,
+                                last.event_id)
+                        )
                         hx-select=".o-mainBarTimeline__item, .o-mainBarTimeline__rest, script.mathjax"
                         hx-trigger="intersect once, threshold:0.5"
                         hx-swap="outerHTML"
@@ -380,7 +453,7 @@ impl UiState {
                     @if let Some(reply_count) = reply_count {
                         @if reply_count > 0 {
                             button ."m-postOverview__commentsButton u-button"
-                                hx-get={"/ui/timeline/comments/"(ext_event_id.event_id().to_short())}
+                                hx-get={"/ui/comments/"(ext_event_id.event_id().to_short())}
                                 hx-target="next .m-postOverview__comments"
                                 hx-swap="outerHTML"
                             {
@@ -455,7 +528,7 @@ impl UiState {
                         client,
                         reply_to_author,
                         )
-                        .ro( ro).comment(post)
+                        .ro(ro).comment(post)
                         .call()
                     ).await?)
                 }
@@ -490,5 +563,38 @@ impl UiState {
                 }
             }
         }
+    }
+}
+
+#[derive(Clone, PartialEq, Eq, Hash, Debug)]
+pub(crate) enum TimelineMode {
+    Followees,
+    Network,
+    Notifications,
+    Profile(RostraId),
+}
+
+impl TimelineMode {
+    fn to_path(&self) -> String {
+        match self {
+            TimelineMode::Followees => "/ui/followees".to_string(),
+            TimelineMode::Network => "/ui/network".to_string(),
+            TimelineMode::Notifications => "/ui/notifications".to_string(),
+            TimelineMode::Profile(rostra_id) => format!("/ui/profile/{rostra_id}"),
+        }
+    }
+
+    fn is_followees(&self) -> bool {
+        *self == TimelineMode::Followees
+    }
+    fn is_network(&self) -> bool {
+        *self == TimelineMode::Network
+    }
+    fn is_notifications(&self) -> bool {
+        *self == TimelineMode::Notifications
+    }
+
+    fn is_profile(&self) -> bool {
+        matches!(self, TimelineMode::Profile(_))
     }
 }

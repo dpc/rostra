@@ -5,13 +5,13 @@ use maud::{html, Markup, PreEscaped};
 use rostra_client_db::social::EventPaginationCursor;
 use rostra_core::id::RostraId;
 
-use super::timeline::TimelinePaginationInput;
+use super::timeline::{TimelineMode, TimelinePaginationInput};
 use super::unlock::session::{RoMode, UserSession};
 use super::Maud;
 use crate::error::RequestResult;
 use crate::{SharedState, UiState};
 
-pub async fn get(
+pub async fn get_profile(
     state: State<SharedState>,
     session: UserSession,
     Path(profile_id): Path<RostraId>,
@@ -28,7 +28,7 @@ pub async fn get(
                 state.render_navbar(profile_id, &session).await?,
                 pagination,
                 &session,
-                Some(profile_id),
+                TimelineMode::Profile(profile_id),
             )
             .await?,
     ))

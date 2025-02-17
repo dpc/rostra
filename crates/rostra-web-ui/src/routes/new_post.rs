@@ -245,8 +245,9 @@ impl UiState {
                         (n)
                     }
                     a href="https://htmlpreview.github.io/?https://github.com/jgm/djot/blob/master/doc/syntax.html" target="_blank" { "Formatting" }
-                    div
+                    a
                         ."m-newPostForm__emojiButton"
+                        href="#"
                     { "😀" }
                     button ."m-newPostForm__postButton u-button"
                         disabled[ro.to_disabled()]

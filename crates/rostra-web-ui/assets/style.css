@@ -272,10 +272,7 @@ img {
   display: flex;
   flex-direction: column;
   justify-content: center;
-  align-items: center;
-  /* justify-content: center; */
-  /* height: 100dvh; */
-  /* overflow: auto; */
+  align-items: flex-start;
 }
 
 .o-navBar {
@@ -323,13 +320,14 @@ img {
   flex-grow: 1;
   max-width: 50rem;
   padding: 4pt;
+  width: 100%;
 }
 
 .o-mainBar__newPostsAlert {
   position: fixed;
   top: 20px;
   right: 20px;
-  z-index: 50;
+  z-index: 150;
   background: white;
   padding: 4pt;
   border: 1px solid var(--color-timeline-item-border);
@@ -342,6 +340,7 @@ img {
 .o-mainBarTimeline {
   background-color: var(--color-timeline-bg);
   border: 1px solid var(--color-timeline-item-border);
+  width: 100%;
 }
 
 
@@ -475,6 +474,11 @@ img {
   font-weight: bold;
 }
 
+.m-newPostForm__emojiButton {
+  padding-left: 1rem;
+  padding-right: 1rem;
+}
+
 .m-newPostForm__emojiBar.-hidden {
   display: none;
 }
@@ -530,7 +534,6 @@ img {
   line-height: 1.1rem;
   vertical-align: middle;
   font-size: 1rem;
-  width: 100%;
 }
 
 .m-profileSummary__bio {
@@ -628,13 +631,16 @@ img {
 .m-addFolloweeForm {
   display: flex;
   flex-direction: row;
+  flex-wrap: wrap;
+  justify-content: flex-end;
   align-items: center;
 }
 
 .m-addFolloweeForm__content {
   border: 1px solid var(--color-timeline-item-border);
   border-radius: 4pt;
-  width: 100%;
+  flex-grow: 1;
+  /* width: 100%; */
   /* min-width: 100%; */
 }
 
@@ -688,6 +694,8 @@ img {
 
 .o-unlockScreen__idLine {
   display: flex;
+  flex-direction: row;
+  justify-content: flex-end;
   flex-wrap: wrap;
   gap: 5pt;
 }
@@ -699,6 +707,9 @@ img {
 .o-unlockScreen__mnemonicLine {
   display: flex;
   flex-wrap: wrap;
+  display: flex;
+  flex-direction: row;
+  justify-content: flex-end;
   gap: 5pt;
 }
 
@@ -723,7 +734,38 @@ img {
   background: url('/assets/icons/dice.svg') center/contain no-repeat;
 }
 
+.o-mainBarTimeline {
+  position: static;
+}
 
+.o-mainBarTimeline__tabs {
+  display: grid;
+  grid-auto-flow: column;
+  grid-template-columns: 4rem repeat(auto-fit, minmax(200px, 4fr));
+  align-items: center;
+
+  position: sticky;
+  top: 0;
+
+  z-index: 100;
+  background-color: var(--color-timeline-bg);
+  border-bottom: 1px solid var(--color-timeline-item-border);
+}
+
+.o-mainBarTimeline__tabs>* {
+  font-weight: 600;
+
+  padding: clamp(0px, 1vw, 0.5rem) clamp(0px, 2vw, 2rem);
+  text-align: center;
+}
+
+.o-mainBarTimeline__tabs>*.-active {
+  background-color: var(--color-post-highlight-bg);
+}
+
+.o-mainBarTimeline__tabs>*:hover {
+  background-color: var(--color-post-highlight-bg);
+}
 
 
 /* TOGGLE SWITCH CHECKBOXES */
