@@ -5,7 +5,7 @@ use serde::{Deserialize, Serialize};
 use tower_sessions::Session;
 
 use crate::error::{
-    InternalServerSnafu, LoginRequiredSnafu, RequestError, RequestResult, SecretKeyMissingSnafu,
+    InternalServerSnafu, LoginRequiredSnafu, ReadOnlyModeSnafu, RequestError, RequestResult,
 };
 
 #[derive(Clone, Deserialize, Serialize)]
@@ -20,7 +20,7 @@ impl UserSession {
     }
 
     pub(crate) fn id_secret(&self) -> RequestResult<RostraIdSecretKey> {
-        self.id_secret.ok_or_else(|| SecretKeyMissingSnafu.build())
+        self.id_secret.ok_or_else(|| ReadOnlyModeSnafu.build())
     }
 
     pub(crate) fn new(rostra_id: RostraId, secret_key: Option<RostraIdSecretKey>) -> Self {

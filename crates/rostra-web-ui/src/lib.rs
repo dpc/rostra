@@ -4,6 +4,8 @@ mod fragment;
 pub mod html_utils;
 pub mod is_htmx;
 mod routes;
+// TODO: move to own crate
+mod serde_util;
 
 use std::net::{AddrParseError, SocketAddr};
 use std::path::{Path, PathBuf};
@@ -16,13 +18,13 @@ use asset_cache::AssetCache;
 use axum::http::header::{ACCEPT, CONTENT_TYPE};
 use axum::http::{HeaderName, HeaderValue, Method};
 use axum::{middleware, Router};
-use rostra_client::error::{ActivateError, IdSecretReadError, InitError};
-use rostra_client::multiclient::{MultiClient, MultiClientError};
+use error::{IdMismatchSnafu, UnlockError, UnlockResult};
+use rostra_client::error::IdSecretReadError;
+use rostra_client::multiclient::MultiClient;
 use rostra_client::{ClientHandle, ClientRefError};
-use rostra_client_db::DbError;
 use rostra_core::id::{RostraId, RostraIdSecretKey};
 use rostra_util::is_rostra_dev_mode_set;
-use rostra_util_error::{BoxedError, WhateverResult};
+use rostra_util_error::WhateverResult;
 use routes::cache_control;
 use snafu::{ensure, ResultExt as _, Snafu, Whatever};
 use tokio::net::{TcpListener, TcpSocket};
@@ -89,33 +91,6 @@ pub enum UiStateClientError {
 }
 pub type UiStateClientResult<T> = result::Result<T, UiStateClientError>;
 
-#[derive(Debug, Snafu)]
-pub enum UiStateClientUnlockError {
-    IdMismatch,
-    InvalidMnemonic {
-        source: BoxedError,
-    },
-    #[snafu(transparent)]
-    Io {
-        source: io::Error,
-    },
-    Database {
-        source: DbError,
-    },
-    Init {
-        source: InitError,
-    },
-    #[snafu(transparent)]
-    MultiClient {
-        source: MultiClientError,
-    },
-    #[snafu(transparent)]
-    MultiClientActivate {
-        source: ActivateError,
-    },
-}
-pub type UiStateClientUnlockResult<T> = result::Result<T, UiStateClientUnlockError>;
-
 pub struct UiState {
     clients: MultiClient,
 }
@@ -132,21 +107,17 @@ impl UiState {
     pub async fn unlock(
         &self,
         rostra_id: RostraId,
-        mnemonic: &str,
-    ) -> UiStateClientUnlockResult<Option<RostraIdSecretKey>> {
-        let res = if mnemonic.trim().is_empty() {
-            self.clients.load(rostra_id).await?;
-            None
-        } else {
-            let secret_id = RostraIdSecretKey::from_str(mnemonic)
-                .boxed()
-                .context(InvalidMnemonicSnafu)?;
-
+        secret_id: Option<RostraIdSecretKey>,
+    ) -> UnlockResult<Option<RostraIdSecretKey>> {
+        let res = if let Some(secret_id) = secret_id {
             ensure!(secret_id.id() == rostra_id, IdMismatchSnafu);
-            let client = self.clients.load(rostra_id).await?;
+            let client = self.clients.load(secret_id.id()).await?;
             client.unlock_active(secret_id).await?;
 
             Some(secret_id)
+        } else {
+            self.clients.load(rostra_id).await?;
+            None
         };
         Ok(res)
     }
@@ -173,7 +144,7 @@ pub enum WebUiServerError {
     },
 
     SecretUnlock {
-        source: UiStateClientUnlockError,
+        source: UnlockError,
     },
 
     ListenAddr {

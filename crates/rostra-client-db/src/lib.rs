@@ -125,7 +125,7 @@ pub enum DbError {
     },
     #[snafu(visibility(pub))]
     #[snafu(display("Provided Id does not match one used previously"))]
-    IdMismatch {
+    DbIdMismatch {
         #[snafu(implicit)]
         location: Location,
     },
@@ -536,7 +536,7 @@ impl Database {
     pub fn verify_self_tx(self_id: RostraId, ids_self_t: &mut ids_self::Table) -> DbResult<()> {
         if let Some(existing_self_id_record) = Self::read_self_id_tx(ids_self_t)? {
             if existing_self_id_record.rostra_id != self_id {
-                return IdMismatchSnafu.fail();
+                return DbIdMismatchSnafu.fail();
             }
         } else {
             Self::write_self_id_tx(self_id, ids_self_t)?;

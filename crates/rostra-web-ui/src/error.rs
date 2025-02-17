@@ -1,7 +1,11 @@
+use std::io;
+
 use axum::http::{HeaderName, HeaderValue, StatusCode};
 use axum::response::{IntoResponse, Redirect, Response};
-use rostra_client::error::PostError;
+use rostra_client::error::{ActivateError, InitError, PostError};
+use rostra_client::multiclient::MultiClientError;
 use rostra_client::ClientRefError;
+use rostra_client_db::DbError;
 use rostra_util_error::BoxedError;
 use serde::Serialize;
 use snafu::Snafu;
@@ -35,6 +39,33 @@ pub struct UserErrorResponse {
 }
 
 #[derive(Debug, Snafu)]
+pub enum UnlockError {
+    #[snafu(visibility(pub(crate)))]
+    PublicKeyMissing,
+    #[snafu(visibility(pub(crate)))]
+    IdMismatch,
+    #[snafu(transparent)]
+    Io {
+        source: io::Error,
+    },
+    Database {
+        source: DbError,
+    },
+    Init {
+        source: InitError,
+    },
+    #[snafu(transparent)]
+    MultiClient {
+        source: MultiClientError,
+    },
+    #[snafu(transparent)]
+    MultiClientActivate {
+        source: ActivateError,
+    },
+}
+pub type UnlockResult<T> = std::result::Result<T, UnlockError>;
+
+#[derive(Debug, Snafu)]
 pub enum RequestError {
     #[snafu(transparent)]
     Client { source: ClientRefError },
@@ -49,7 +80,9 @@ pub enum RequestError {
     #[snafu(visibility(pub(crate)))]
     LoginRequired,
     #[snafu(visibility(pub(crate)))]
-    SecretKeyMissing,
+    Unlock { source: UnlockError },
+    #[snafu(visibility(pub(crate)))]
+    ReadOnlyMode,
     #[snafu(visibility(pub(crate)))]
     User { source: UserRequestError },
 }

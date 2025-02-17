@@ -12,8 +12,11 @@ use snafu::ResultExt as _;
 use tower_sessions::Session;
 
 use super::Maud;
-use crate::error::{OtherSnafu, RequestResult};
+use crate::error::{
+    LoginRequiredSnafu, OtherSnafu, PublicKeyMissingSnafu, RequestResult, UnlockResult, UnlockSnafu,
+};
 use crate::is_htmx::IsHtmx;
+use crate::serde_util::empty_string_as_none;
 use crate::{SharedState, UiState};
 
 pub async fn get(
@@ -31,18 +34,14 @@ pub async fn get(
         )];
         return Ok((StatusCode::OK, headers).into_response());
     }
-    Ok(Maud(state.unlock_page(None, "", None).await?).into_response())
+    Ok(Maud(state.unlock_page(None, None, None).await?).into_response())
 }
 
 pub async fn get_random(state: State<SharedState>) -> RequestResult<impl IntoResponse> {
     let random_secret_key = RostraIdSecretKey::generate();
     Ok(Maud(
         state
-            .unlock_page(
-                Some(random_secret_key.id()),
-                &random_secret_key.to_string(),
-                None,
-            )
+            .unlock_page(Some(random_secret_key.id()), Some(random_secret_key), None)
             .await?,
     ))
 }
@@ -50,9 +49,19 @@ pub async fn get_random(state: State<SharedState>) -> RequestResult<impl IntoRes
 #[derive(Deserialize)]
 pub struct Input {
     #[serde(rename = "username")]
-    rostra_id: RostraId,
+    #[serde(deserialize_with = "empty_string_as_none")]
+    rostra_id: Option<RostraId>,
     #[serde(rename = "password")]
-    mnemonic: String,
+    #[serde(deserialize_with = "empty_string_as_none")]
+    mnemonic: Option<RostraIdSecretKey>,
+}
+
+impl Input {
+    fn rostra_id(&self) -> UnlockResult<RostraId> {
+        self.rostra_id
+            .or_else(|| self.mnemonic.map(|m| m.id()))
+            .ok_or_else(|| PublicKeyMissingSnafu.build())
+    }
 }
 
 pub async fn post_unlock(
@@ -60,35 +69,41 @@ pub async fn post_unlock(
     session: Session,
     Form(form): Form<Input>,
 ) -> RequestResult<Response> {
-    Ok(match state.unlock(form.rostra_id, &form.mnemonic).await {
-        Ok(secret_key_opt) => {
-            session
-                .insert(
-                    SESSION_KEY,
-                    &UserSession::new(form.rostra_id, secret_key_opt),
-                )
-                .await
-                .boxed()
-                .context(OtherSnafu)?;
-            let headers = [(
-                HeaderName::from_static("hx-redirect"),
-                HeaderValue::from_static("/ui"),
-            )];
-            (StatusCode::SEE_OTHER, headers).into_response()
-        }
-        Err(e) => Maud(
-            state
-                .unlock_page(
-                    Some(form.rostra_id),
-                    &form.mnemonic,
-                    html! {
-                        span ."o-unlockScreen_notice" { (e)}
-                    },
-                )
-                .await?,
-        )
-        .into_response(),
-    })
+    Ok(
+        match state
+            .unlock(form.rostra_id().context(UnlockSnafu)?, form.mnemonic)
+            .await
+        {
+            Ok(secret_key_opt) => {
+                let rostra_id = secret_key_opt
+                    .map(|secret| secret.id())
+                    .or(form.rostra_id)
+                    .ok_or_else(|| LoginRequiredSnafu.build())?;
+                session
+                    .insert(SESSION_KEY, &UserSession::new(rostra_id, secret_key_opt))
+                    .await
+                    .boxed()
+                    .context(OtherSnafu)?;
+                let headers = [(
+                    HeaderName::from_static("hx-redirect"),
+                    HeaderValue::from_static("/ui"),
+                )];
+                (StatusCode::SEE_OTHER, headers).into_response()
+            }
+            Err(e) => Maud(
+                state
+                    .unlock_page(
+                        form.rostra_id,
+                        form.mnemonic,
+                        html! {
+                            span ."o-unlockScreen_notice" { (e)}
+                        },
+                    )
+                    .await?,
+            )
+            .into_response(),
+        },
+    )
 }
 
 pub async fn logout(session: Session) -> RequestResult<impl IntoResponse> {
@@ -105,7 +120,7 @@ impl UiState {
     async fn unlock_page(
         &self,
         current_rostra_id: Option<RostraId>,
-        current_mnemonic: &str,
+        current_secret_key: Option<RostraIdSecretKey>,
         notification: impl Into<Option<Markup>>,
     ) -> RequestResult<Markup> {
         let random_rostra_id_secret = &RostraIdSecretKey::generate();
@@ -150,7 +165,7 @@ impl UiState {
                             autocomplete="current-password"
                             placeholder="Mnemonic (Secret Key) - if empty, read-only mode"
                             title="Mnemonic is 12 words passphrase encoding secret key of your identity"
-                            value=(current_mnemonic)
+                            value=(current_secret_key.as_ref().map(ToString::to_string).unwrap_or_default())
                             { }
                         button
                             type="button" // do not submit the form!
