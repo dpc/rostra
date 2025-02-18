@@ -770,11 +770,7 @@ emoji-picker {
   text-align: center;
 }
 
-.o-mainBarTimeline__tabs>*.-active {
-  background-color: var(--color-post-highlight-bg);
-}
-
-.o-mainBarTimeline__tabs>*:hover {
+.o-mainBarTimeline__tabs>*:not(.-active) {
   background-color: var(--color-post-highlight-bg);
 }
 
