@@ -256,36 +256,10 @@ impl UiState {
         let client = self.client(session.id()).await?;
         let client_ref = client.client_ref()?;
 
-        #[allow(clippy::type_complexity)]
-        let filter_fn: Box<dyn Fn(&SocialPostRecord<SocialPost>) -> bool + Send> = match mode {
-            TimelineMode::Followees => {
-                let followees: HashSet<RostraId> = client
-                    .db()?
-                    .get_followees(session.id())
-                    .await
-                    .into_iter()
-                    .map(|(k, _)| k)
-                    .chain([session.id()])
-                    .collect();
-                Box::new(move |post: &SocialPostRecord<SocialPost>| {
-                    post.author != session.id() && followees.contains(&post.author)
-                })
-            }
-            TimelineMode::Network => Box::new(
-                // TODO: actually verify against extended followees
-                |post| post.author != session.id(),
-            ),
-            TimelineMode::Notifications => Box::new(|post| {
-                post.author != session.id()
-                    && post.reply_to.map(|ext_id| ext_id.rostra_id()) == Some(session.id())
-            }),
-            TimelineMode::Profile(rostra_id) => Box::new(move |post| post.author == rostra_id),
-        };
+        let filter_fn = mode.to_filter_fn(&client_ref, session).await;
 
-        let posts: Vec<_> = self
-            .client(session.id())
-            .await?
-            .db()?
+        let posts: Vec<_> = client_ref
+            .db()
             .paginate_social_posts_rev(pagination, 20)
             .await
             .into_iter()
@@ -566,7 +540,7 @@ impl UiState {
     }
 }
 
-#[derive(Clone, PartialEq, Eq, Hash, Debug)]
+#[derive(Copy, Clone, PartialEq, Eq, Hash, Debug)]
 pub(crate) enum TimelineMode {
     Followees,
     Network,
@@ -575,7 +549,7 @@ pub(crate) enum TimelineMode {
 }
 
 impl TimelineMode {
-    fn to_path(&self) -> String {
+    fn to_path(self) -> String {
         match self {
             TimelineMode::Followees => "/ui/followees".to_string(),
             TimelineMode::Network => "/ui/network".to_string(),
@@ -596,5 +570,37 @@ impl TimelineMode {
 
     fn is_profile(&self) -> bool {
         matches!(self, TimelineMode::Profile(_))
+    }
+
+    #[allow(clippy::type_complexity)]
+    async fn to_filter_fn(
+        self,
+        client: &ClientRef<'_>,
+        session: &UserSession,
+    ) -> Box<dyn Fn(&SocialPostRecord<SocialPost>) -> bool + Send> {
+        let self_id = session.id();
+        match self {
+            TimelineMode::Followees => {
+                let followees: HashSet<RostraId> = client
+                    .db()
+                    .get_followees(self_id)
+                    .await
+                    .into_iter()
+                    .map(|(k, _)| k)
+                    .collect();
+                Box::new(move |post: &SocialPostRecord<SocialPost>| {
+                    post.author != self_id && followees.contains(&post.author)
+                })
+            }
+            TimelineMode::Network => Box::new(
+                // TODO: actually verify against extended followees
+                move |post| post.author != self_id,
+            ),
+            TimelineMode::Notifications => Box::new(move |post| {
+                post.author != self_id
+                    && post.reply_to.map(|ext_id| ext_id.rostra_id()) == Some(self_id)
+            }),
+            TimelineMode::Profile(rostra_id) => Box::new(move |post| post.author == rostra_id),
+        }
     }
 }
