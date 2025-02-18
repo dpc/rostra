@@ -137,7 +137,11 @@ impl UiState {
                     { }
 
                 div ."m-profileSummary__content" {
-                    span ."m-profileSummary__displayName" { (profile.display_name) }
+                    a ."m-profileSummary__displayName"
+                        href=(format!("/ui/profile/{}", profile_id))
+                    {
+                        (profile.display_name)
+                    }
                     div ."m-profileSummary__buttons" {
                         button
                             ."m-profileSummary__copyButton u-button"

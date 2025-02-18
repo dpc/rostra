@@ -320,6 +320,7 @@ img {
   flex-grow: 1;
   max-width: 50rem;
   padding: 4pt;
+  padding-top: 0;
   width: 100%;
 }
 
@@ -354,6 +355,11 @@ img {
   justify-content: flex-start;
   align-items: center;
   padding: 1rem;
+}
+
+/* Disable, until we figure out if we really want it. */
+.o-mainBarTimeline__switches {
+  display: none;
 }
 
 .o-mainBarTimeline__repliesLabel {
@@ -481,6 +487,10 @@ img {
 
 .m-newPostForm__emojiBar.-hidden {
   display: none;
+}
+
+emoji-picker {
+  width: 100%;
 }
 
 .m-postOverview__content {
@@ -745,7 +755,8 @@ img {
   align-items: center;
 
   position: sticky;
-  top: 0;
+  /* 0 + border */
+  top: 1;
 
   z-index: 100;
   background-color: var(--color-timeline-bg);
