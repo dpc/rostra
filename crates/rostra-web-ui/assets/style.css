@@ -2,6 +2,8 @@
   --link-color: oklch(33.68% 0.1567 257.82);
   --link-hover-color: oklch(33.68% 0.1567 351.52);
   --layout-break-width: 768px;
+
+  --border-radius-std: 4px;
 }
 
 @media (prefers-color-scheme: dark) {
@@ -140,7 +142,7 @@ blockquote {
 pre,
 code {
   background-color: var(--color-pre-bg);
-  border-radius: 4px;
+  border-radius: var(--border-radius-std);
   padding: 4px 6px;
   font-size: 1rem;
   font-family: monospace;
@@ -153,7 +155,7 @@ button {
   background: none;
   background-color: var(--color-button-bg);
   border: solid 1px;
-  border-radius: 5px;
+  border-radius: var(--border-radius-std);
   border-color: var(--color-button-border);
   appearance: none;
   -webkit-appearance: none;
@@ -188,7 +190,7 @@ input[type="search"] {
   color: var(--color-text-default);
   background: none;
   border: solid 1px;
-  border-radius: 5px;
+  border-radius: var(--border-radius-std);
   border-color: var(--color-button-border);
   appearance: none;
   -webkit-appearance: none;
@@ -262,6 +264,12 @@ img {
   width: 32pt;
   height: 32pt;
   display: inline-block;
+
+  background-color: whitesmoke;
+  border-radius: var(--border-radius-std);
+  border: 1px solid var(--color-button-border);
+  padding: 1pt;
+
 }
 
 [disabled]>.u-buttonIcon {
@@ -622,7 +630,7 @@ emoji-picker {
   padding: 5pt;
   height: 10rem;
   border: 1px solid var(--color-timeline-item-border);
-  border-radius: 4pt;
+  border-radius: var(--border-radius-std);
 }
 
 .m-newPostForm__footer {
@@ -651,7 +659,7 @@ emoji-picker {
 
 .m-addFolloweeForm__content {
   border: 1px solid var(--color-timeline-item-border);
-  border-radius: 4pt;
+  border-radius: var(--border-radius-std);
   flex-grow: 1;
   /* width: 100%; */
   /* min-width: 100%; */
@@ -689,7 +697,7 @@ emoji-picker {
 .o-unlockScreen__form {
   padding: clamp(0px, 2.5vw, 2rem) clamp(0px, 5vw, 4rem);
   border: solid 1px;
-  border-radius: 5px;
+  border-radius: var(--border-radius-std);
 
   display: flex;
   flex-direction: column;
