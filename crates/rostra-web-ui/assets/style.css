@@ -349,6 +349,7 @@ img {
 .o-mainBarTimeline {
   background-color: var(--color-timeline-bg);
   border: 1px solid var(--color-timeline-item-border);
+  border-top: 0px;
   width: 100%;
 }
 
@@ -766,18 +767,17 @@ emoji-picker {
   align-items: center;
 
   position: sticky;
-  /* 0 + border */
-  top: 1;
+  top: 0;
 
   z-index: 100;
   background-color: var(--color-timeline-bg);
-  border-bottom: 1px solid var(--color-timeline-item-border);
+  border-top: 1px solid var(--color-timeline-item-border);
 }
 
 .o-mainBarTimeline__tabs>* {
   font-weight: 600;
 
-  padding: clamp(0px, 1vw, 0.5rem) clamp(0px, 2vw, 2rem);
+  padding: clamp(0px, 0.4vw, 0.5rem) clamp(0px, 0.5vw, 2rem);
   text-align: center;
 }
 
