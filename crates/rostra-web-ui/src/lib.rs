@@ -234,7 +234,7 @@ impl Server {
 
         let session_store = MemoryStore::default();
         let session_layer = SessionManagerLayer::new(session_store)
-            .with_expiry(Expiry::OnInactivity(time::Duration::minutes(60)));
+            .with_expiry(Expiry::OnInactivity(time::Duration::minutes(2 * 24 * 60)));
 
         axum::serve(
             self.listener,
