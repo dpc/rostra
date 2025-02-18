@@ -4,6 +4,7 @@ use axum::Form;
 use maud::{html, Markup, PreEscaped};
 use rostra_client_db::social::EventPaginationCursor;
 use rostra_core::id::RostraId;
+use tower_cookies::Cookies;
 
 use super::timeline::{TimelineMode, TimelinePaginationInput};
 use super::unlock::session::{RoMode, UserSession};
@@ -14,6 +15,7 @@ use crate::{SharedState, UiState};
 pub async fn get_profile(
     state: State<SharedState>,
     session: UserSession,
+    mut cookies: Cookies,
     Path(profile_id): Path<RostraId>,
     Form(form): Form<TimelinePaginationInput>,
 ) -> RequestResult<impl IntoResponse> {
@@ -28,6 +30,7 @@ pub async fn get_profile(
                 state.render_navbar(profile_id, &session).await?,
                 pagination,
                 &session,
+                &mut cookies,
                 TimelineMode::Profile(profile_id),
             )
             .await?,

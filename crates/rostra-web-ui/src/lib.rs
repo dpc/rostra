@@ -29,6 +29,7 @@ use routes::cache_control;
 use snafu::{ensure, ResultExt as _, Snafu, Whatever};
 use tokio::net::{TcpListener, TcpSocket};
 use tokio::signal;
+use tower_cookies::CookieManagerLayer;
 use tower_http::compression::predicate::SizeAbove;
 use tower_http::compression::CompressionLayer;
 use tower_http::cors::CorsLayer;
@@ -239,6 +240,7 @@ impl Server {
         axum::serve(
             self.listener,
             router
+                .layer(CookieManagerLayer::new())
                 .layer(middleware::from_fn(cache_control))
                 .layer(session_layer)
                 .layer(cors_layer(&self.opts, listen)?)

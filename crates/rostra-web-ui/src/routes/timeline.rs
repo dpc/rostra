@@ -14,6 +14,7 @@ use rostra_core::id::{RostraId, ToShort as _};
 use rostra_core::{ExternalEventId, ShortEventId, Timestamp};
 use rostra_util_error::FmtCompact as _;
 use serde::Deserialize;
+use tower_cookies::{Cookie, Cookies};
 use tracing::debug;
 
 use super::super::error::RequestResult;
@@ -21,6 +22,37 @@ use super::unlock::session::{RoMode, UserSession};
 use super::Maud;
 use crate::html_utils::re_typeset_mathjax;
 use crate::{SharedState, UiState, LOG_TARGET};
+
+const NOTIFICATIONS_LAST_SEEN_COOKIE_NAME: &str = "notifications-last-seen";
+trait CookiesExt {
+    fn get_last_seen(&self) -> Option<EventPaginationCursor>;
+
+    fn save_last_seen(&mut self, pagination: EventPaginationCursor);
+}
+
+impl CookiesExt for Cookies {
+    fn get_last_seen(&self) -> Option<EventPaginationCursor> {
+        if let Some(s) = self.get(NOTIFICATIONS_LAST_SEEN_COOKIE_NAME) {
+            serde_json::from_str(s.value())
+                .inspect_err(|err| {
+                    debug!(target: LOG_TARGET, err = %err.fmt_compact(), "Invalid cookie value");
+                })
+                .ok()
+        } else {
+            None
+        }
+    }
+
+    fn save_last_seen(&mut self, pagination: EventPaginationCursor) {
+        let mut cookie = Cookie::new(
+            NOTIFICATIONS_LAST_SEEN_COOKIE_NAME,
+            serde_json::to_string(&pagination).expect("can't fail"),
+        );
+        cookie.set_path("/ui");
+        cookie.set_max_age(time::Duration::weeks(50));
+        self.add(cookie);
+    }
+}
 
 #[derive(Deserialize)]
 pub struct TimelinePaginationInput {
@@ -31,6 +63,7 @@ pub struct TimelinePaginationInput {
 pub async fn get_followees(
     state: State<SharedState>,
     session: UserSession,
+    mut cookies: Cookies,
     Form(form): Form<TimelinePaginationInput>,
 ) -> RequestResult<impl IntoResponse> {
     let pagination = form.ts.and_then(|ts| {
@@ -40,7 +73,13 @@ pub async fn get_followees(
     let navbar = state.timeline_common_navbar(&session).await?;
     Ok(Maud(
         state
-            .render_timeline_page(navbar, pagination, &session, TimelineMode::Followees)
+            .render_timeline_page(
+                navbar,
+                pagination,
+                &session,
+                &mut cookies,
+                TimelineMode::Followees,
+            )
             .await?,
     ))
 }
@@ -48,6 +87,7 @@ pub async fn get_followees(
 pub async fn get_network(
     state: State<SharedState>,
     session: UserSession,
+    mut cookies: Cookies,
     Form(form): Form<TimelinePaginationInput>,
 ) -> RequestResult<impl IntoResponse> {
     let pagination = form.ts.and_then(|ts| {
@@ -57,13 +97,21 @@ pub async fn get_network(
     let navbar = state.timeline_common_navbar(&session).await?;
     Ok(Maud(
         state
-            .render_timeline_page(navbar, pagination, &session, TimelineMode::Network)
+            .render_timeline_page(
+                navbar,
+                pagination,
+                &session,
+                &mut cookies,
+                TimelineMode::Network,
+            )
             .await?,
     ))
 }
+
 pub async fn get_notifications(
     state: State<SharedState>,
     session: UserSession,
+    mut cookies: Cookies,
     Form(form): Form<TimelinePaginationInput>,
 ) -> RequestResult<impl IntoResponse> {
     let pagination = form.ts.and_then(|ts| {
@@ -73,7 +121,13 @@ pub async fn get_notifications(
     let navbar = state.timeline_common_navbar(&session).await?;
     Ok(Maud(
         state
-            .render_timeline_page(navbar, pagination, &session, TimelineMode::Notifications)
+            .render_timeline_page(
+                navbar,
+                pagination,
+                &session,
+                &mut cookies,
+                TimelineMode::Notifications,
+            )
             .await?,
     ))
 }
@@ -172,15 +226,26 @@ impl UiState {
         navbar: Markup,
         pagination: Option<EventPaginationCursor>,
         session: &UserSession,
+        cookies: &mut Cookies,
         mode: TimelineMode,
     ) -> RequestResult<Markup> {
+        let client = self.client(session.id()).await?;
+        let client_ref = client.client_ref()?;
+        let pending_notifications = self
+            .handle_notification_cookies(&client_ref, pagination, cookies, mode)
+            .await?;
+
         let content = html! {
 
             (navbar)
 
             main ."o-mainBar" {
                 (self.render_new_posts_alert(false, 0))
-                (self.render_main_bar_timeline(pagination, session, mode).await?)
+                (self.render_main_bar_timeline(session, mode)
+                    .maybe_pagination(pagination)
+                    .maybe_pending_notifications(pending_notifications)
+                    .call()
+                    .await?)
             }
             (re_typeset_mathjax())
 
@@ -189,16 +254,64 @@ impl UiState {
         self.render_html_page("Rostra", content).await
     }
 
+    pub(crate) async fn handle_notification_cookies(
+        &self,
+        client: &ClientRef<'_>,
+        pagination: Option<EventPaginationCursor>,
+        cookies: &mut Cookies,
+        mode: TimelineMode,
+    ) -> RequestResult<Option<usize>> {
+        // If this is a non-first page, we don't need to do anything
+        if pagination.is_some() {
+            return Ok(None);
+        }
+
+        match mode {
+            TimelineMode::Profile(_) => {
+                // We're not displaying notifications on profile timelines
+                Ok(None)
+            }
+            TimelineMode::Notifications => {
+                if let Some(latest_event) = client
+                    .db()
+                    .paginate_social_posts_with_filter(None, 1, |_| true)
+                    .await
+                    .into_iter()
+                    .next()
+                {
+                    cookies.save_last_seen(EventPaginationCursor {
+                        ts: latest_event.ts,
+                        event_id: latest_event.event_id,
+                    });
+                }
+                Ok(None)
+            }
+            TimelineMode::Followees | TimelineMode::Network => {
+                let pending_len = client
+                    .db()
+                    .paginate_social_posts_rev_with_filter(
+                        cookies.get_last_seen(),
+                        10,
+                        TimelineMode::Notifications.to_filter_fn(client).await,
+                    )
+                    .await
+                    .len();
+
+                Ok(Some(pending_len))
+            }
+        }
+    }
+
     pub async fn render_post_comments(
         &self,
         post_id: ShortEventId,
-        user: &UserSession,
+        session: &UserSession,
     ) -> RequestResult<Markup> {
-        let client = self.client(user.id()).await?;
+        let client = self.client(session.id()).await?;
         let client_ref = client.client_ref()?;
 
         let comments = self
-            .client(user.id())
+            .client(session.id())
             .await?
             .db()?
             .paginate_social_post_comments_rev(post_id, None, 100)
@@ -214,7 +327,7 @@ impl UiState {
                             ).event_id(comment.event_id)
                             .content(&comment.content.djot_content)
                             .reply_count(comment.reply_count)
-                            .ro(user.ro_mode())
+                            .ro(session.ro_mode())
                             .is_comment(true)
                             .call().await?)
                     }
@@ -247,16 +360,19 @@ impl UiState {
         }
     }
 
+    #[builder]
     pub(crate) async fn render_main_bar_timeline(
         &self,
+        #[builder(start_fn)] session: &UserSession,
+        #[builder(start_fn)] mode: TimelineMode,
         pagination: Option<EventPaginationCursor>,
-        session: &UserSession,
-        mode: TimelineMode,
+        pending_notifications: Option<usize>,
     ) -> RequestResult<Markup> {
+        let pending_notifications = pending_notifications.unwrap_or_default();
         let client = self.client(session.id()).await?;
         let client_ref = client.client_ref()?;
 
-        let filter_fn = mode.to_filter_fn(&client_ref, session).await;
+        let filter_fn = mode.to_filter_fn(&client_ref).await;
 
         let post_page = client_ref
             .db()
@@ -299,7 +415,15 @@ impl UiState {
                         a ."o-mainBarTimeline__notifications"
                             ."-active"[mode.is_notifications()]
                             href=(TimelineMode::Notifications.to_path())
-                        { "Notifications" }
+                            ."-pending"[0 < pending_notifications]
+                        {
+                            "Notifications"
+                            @if 9 < pending_notifications {
+                                span ."o-mainBarTimeline__pendingNotifications" { "(9+)" }
+                            } @else if 0 < pending_notifications {
+                                span ."o-mainBarTimeline__pendingNotifications" { "("(pending_notifications) ")" }
+                            }
+                        }
                     }
                 }
                 div ."o-mainBarTimeline__switches" {
@@ -585,9 +709,8 @@ impl TimelineMode {
     async fn to_filter_fn(
         self,
         client: &ClientRef<'_>,
-        session: &UserSession,
-    ) -> Box<dyn Fn(&SocialPostRecord<SocialPost>) -> bool + Send> {
-        let self_id = session.id();
+    ) -> Box<dyn Fn(&SocialPostRecord<SocialPost>) -> bool + Send + Sync + 'static> {
+        let self_id = client.rostra_id();
         match self {
             TimelineMode::Followees => {
                 let followees: HashSet<RostraId> = client

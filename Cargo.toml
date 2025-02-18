@@ -85,6 +85,7 @@ snafu = { version = "0.8.5", features = ["rust_1_81"] }
 time = "0.3.36"
 tokio = { version = "1.42.0", features = ["macros"] }
 tokio-stream = "*"
+tower-cookies = "*"
 tower-http = "0.5"
 tower-sessions = "0.14.0"
 tracing = "0.1.41"

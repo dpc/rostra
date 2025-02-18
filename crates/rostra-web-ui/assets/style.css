@@ -344,6 +344,9 @@ img {
   width: 100%;
 }
 
+.o-mainBarTimeline__pendingNotifications {
+  padding: .5rem .1rem;
+}
 
 .o-mainBarTimeline.-hideReplies .o-mainBarTimeline__item.-reply {
   display: none;
