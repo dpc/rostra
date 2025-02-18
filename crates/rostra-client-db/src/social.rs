@@ -21,6 +21,16 @@ pub struct EventPaginationCursor {
     pub event_id: ShortEventId,
 }
 
+impl EventPaginationCursor {
+    pub const ZERO: Self = Self {
+        ts: Timestamp::ZERO,
+        event_id: ShortEventId::ZERO,
+    };
+    pub const MAX: Self = Self {
+        ts: Timestamp::MAX,
+        event_id: ShortEventId::MAX,
+    };
+}
 #[derive(Clone)]
 pub struct SocialPostRecord<C> {
     pub ts: Timestamp,
@@ -105,7 +115,10 @@ impl Database {
         upper_bound: Option<EventPaginationCursor>,
         limit: usize,
         filter_fn: impl Fn(&SocialPostRecord<SocialPost>) -> bool + Send + 'static,
-    ) -> Vec<SocialPostRecord<content_kind::SocialPost>> {
+    ) -> (
+        Vec<SocialPostRecord<content_kind::SocialPost>>,
+        EventPaginationCursor,
+    ) {
         let upper_bound = upper_bound
             .map(|b| (b.ts, b.event_id))
             .unwrap_or((Timestamp::MAX, ShortEventId::MAX));
@@ -116,6 +129,7 @@ impl Database {
             let events_content_table = tx.open_table(&events_content::TABLE)?;
 
             let mut ret = vec![];
+            let mut last = EventPaginationCursor { ts: Timestamp::ZERO, event_id: ShortEventId::ZERO };
 
             for event in social_posts_by_time_table
                 .range(&(Timestamp::ZERO, ShortEventId::ZERO)..&upper_bound)?
@@ -127,6 +141,7 @@ impl Database {
                 let (k, _) = event?;
                 let (ts, event_id) = k.value();
 
+                last = EventPaginationCursor { ts, event_id};
 
                 let Some(content_state) =
                     Database::get_event_content_tx(event_id, &events_content_table)?
@@ -168,7 +183,7 @@ impl Database {
                 ret.push(social_post_record);
             }
 
-            Ok(ret)
+            Ok((ret, last))
         })
         .await
         .expect("Storage error")
@@ -179,7 +194,10 @@ impl Database {
         lower_bound: Option<EventPaginationCursor>,
         limit: usize,
         filter_fn: impl Fn(&SocialPostRecord<SocialPost>) -> bool + Send + 'static,
-    ) -> Vec<SocialPostRecord<content_kind::SocialPost>> {
+    ) -> (
+        Vec<SocialPostRecord<content_kind::SocialPost>>,
+        EventPaginationCursor,
+    ) {
         let lower_bound = lower_bound
             .map(|b| (b.ts, b.event_id))
             .unwrap_or((Timestamp::ZERO, ShortEventId::ZERO));
@@ -190,6 +208,7 @@ impl Database {
             let events_content_table = tx.open_table(&events_content::TABLE)?;
 
             let mut ret = vec![];
+            let mut last = EventPaginationCursor { ts: Timestamp::MAX, event_id: ShortEventId::MAX };
 
             for event in social_posts_by_time_table
                 .range(&lower_bound..&(Timestamp::MAX, ShortEventId::MAX))?
@@ -201,6 +220,12 @@ impl Database {
                 let (k, _) = event?;
                 let (ts, event_id) = k.value();
 
+                // Since we don't have exclusive lower bound range, we need to skip it manually
+                if (ts, event_id)  == lower_bound {
+                    continue;
+                }
+
+                last = EventPaginationCursor { ts, event_id};
 
                 let Some(content_state) =
                     Database::get_event_content_tx(event_id, &events_content_table)?
@@ -243,7 +268,7 @@ impl Database {
 
             }
 
-            Ok(ret)
+            Ok((ret, last))
         })
         .await
         .expect("Storage error")

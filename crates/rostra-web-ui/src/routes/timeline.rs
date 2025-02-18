@@ -274,8 +274,9 @@ impl UiState {
             TimelineMode::Notifications => {
                 if let Some(latest_event) = client
                     .db()
-                    .paginate_social_posts_with_filter(None, 1, |_| true)
+                    .paginate_social_posts_rev_with_filter(None, 1, |_| true)
                     .await
+                    .0
                     .into_iter()
                     .next()
                 {
@@ -289,12 +290,13 @@ impl UiState {
             TimelineMode::Followees | TimelineMode::Network => {
                 let pending_len = client
                     .db()
-                    .paginate_social_posts_rev_with_filter(
+                    .paginate_social_posts_with_filter(
                         cookies.get_last_seen(),
                         10,
                         TimelineMode::Notifications.to_filter_fn(client).await,
                     )
                     .await
+                    .0
                     .len();
 
                 Ok(Some(pending_len))
@@ -374,11 +376,10 @@ impl UiState {
 
         let filter_fn = mode.to_filter_fn(&client_ref).await;
 
-        let post_page = client_ref
+        let (filtered_posts, last_seen) = client_ref
             .db()
-            .paginate_social_posts_rev(pagination, mode.db_page_size())
+            .paginate_social_posts_rev_with_filter(pagination, 30, filter_fn)
             .await;
-        let filtered_posts: Vec<_> = post_page.iter().filter(|post| (filter_fn)(post)).collect();
 
         let parents = self
             .client(session.id())
@@ -458,13 +459,13 @@ impl UiState {
                                 .call().await?)
                     }
                 }
-                @if let Some(last) = post_page.last() {
+                @if last_seen != EventPaginationCursor::ZERO {
                     div ."o-mainBarTimeline__rest -empty"
                         hx-get=(
                             format!("{}?ts={}&event_id={}",
                                 mode.to_path(),
-                                last.ts,
-                                last.event_id)
+                                last_seen.ts,
+                                last_seen.event_id)
                         )
                         hx-select=".o-mainBarTimeline__item, .o-mainBarTimeline__rest, script.mathjax"
                         hx-trigger="intersect once, threshold:0.5"
@@ -671,17 +672,6 @@ pub(crate) enum TimelineMode {
 }
 
 impl TimelineMode {
-    /// How many records in a page to query, to have something reasonable to
-    /// show
-    fn db_page_size(self) -> usize {
-        match self {
-            TimelineMode::Followees => 100,
-            TimelineMode::Network => 50,
-            TimelineMode::Notifications => 200,
-            TimelineMode::Profile(_) => 200,
-        }
-    }
-
     fn to_path(self) -> String {
         match self {
             TimelineMode::Followees => "/ui/followees".to_string(),
