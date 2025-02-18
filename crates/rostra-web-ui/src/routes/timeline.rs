@@ -258,20 +258,18 @@ impl UiState {
 
         let filter_fn = mode.to_filter_fn(&client_ref, session).await;
 
-        let posts: Vec<_> = client_ref
+        let post_page = client_ref
             .db()
-            .paginate_social_posts_rev(pagination, 20)
-            .await
-            .into_iter()
-            .filter(|post| (filter_fn)(post))
-            .collect();
+            .paginate_social_posts_rev(pagination, mode.db_page_size())
+            .await;
+        let filtered_posts: Vec<_> = post_page.iter().filter(|post| (filter_fn)(post)).collect();
 
         let parents = self
             .client(session.id())
             .await?
             .db()?
             .get_posts_by_id(
-                posts
+                filtered_posts
                     .iter()
                     .flat_map(|post| post.reply_to.map(|ext_id| ext_id.event_id().to_short())),
             )
@@ -317,7 +315,7 @@ impl UiState {
                     }
                 }
                 div ."o-mainBarTimeline__item -preview -empty" { }
-                @for post in &posts {
+                @for post in &filtered_posts {
                     div ."o-mainBarTimeline__item"
                     ."-reply"[post.reply_to.is_some()]
                     ."-post"[post.reply_to.is_none()]
@@ -336,7 +334,7 @@ impl UiState {
                                 .call().await?)
                     }
                 }
-                @if let Some(last) = posts.last() {
+                @if let Some(last) = post_page.last() {
                     div ."o-mainBarTimeline__rest -empty"
                         hx-get=(
                             format!("{}?ts={}&event_id={}",
@@ -549,6 +547,17 @@ pub(crate) enum TimelineMode {
 }
 
 impl TimelineMode {
+    /// How many records in a page to query, to have something reasonable to
+    /// show
+    fn db_page_size(self) -> usize {
+        match self {
+            TimelineMode::Followees => 100,
+            TimelineMode::Network => 50,
+            TimelineMode::Notifications => 200,
+            TimelineMode::Profile(_) => 200,
+        }
+    }
+
     fn to_path(self) -> String {
         match self {
             TimelineMode::Followees => "/ui/followees".to_string(),
