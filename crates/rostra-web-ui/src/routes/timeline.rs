@@ -10,7 +10,7 @@ use rostra_client::ClientRef;
 use rostra_client_db::social::{EventPaginationCursor, SocialPostRecord};
 use rostra_client_db::IdSocialProfileRecord;
 use rostra_core::event::{EventKind, SocialPost};
-use rostra_core::id::{RostraId, ToShort as _};
+use rostra_core::id::{RostraId, ShortRostraId, ToShort as _};
 use rostra_core::{ExternalEventId, ShortEventId, Timestamp};
 use rostra_util_error::FmtCompact as _;
 use serde::Deserialize;
@@ -25,14 +25,22 @@ use crate::{SharedState, UiState, LOG_TARGET};
 
 const NOTIFICATIONS_LAST_SEEN_COOKIE_NAME: &str = "notifications-last-seen";
 trait CookiesExt {
-    fn get_last_seen(&self) -> Option<EventPaginationCursor>;
+    fn get_last_seen(&self, self_id: impl Into<ShortRostraId>) -> Option<EventPaginationCursor>;
 
-    fn save_last_seen(&mut self, pagination: EventPaginationCursor);
+    fn save_last_seen(
+        &mut self,
+        self_id: impl Into<ShortRostraId>,
+        pagination: EventPaginationCursor,
+    );
 }
 
 impl CookiesExt for Cookies {
-    fn get_last_seen(&self) -> Option<EventPaginationCursor> {
-        if let Some(s) = self.get(NOTIFICATIONS_LAST_SEEN_COOKIE_NAME) {
+    fn get_last_seen(&self, self_id: impl Into<ShortRostraId>) -> Option<EventPaginationCursor> {
+        let self_id = self_id.into();
+        if let Some(s) = self.get(&format!(
+            "{self_id}-{}",
+            NOTIFICATIONS_LAST_SEEN_COOKIE_NAME
+        )) {
             serde_json::from_str(s.value())
                 .inspect_err(|err| {
                     debug!(target: LOG_TARGET, err = %err.fmt_compact(), "Invalid cookie value");
@@ -43,9 +51,14 @@ impl CookiesExt for Cookies {
         }
     }
 
-    fn save_last_seen(&mut self, pagination: EventPaginationCursor) {
+    fn save_last_seen(
+        &mut self,
+        self_id: impl Into<ShortRostraId>,
+        pagination: EventPaginationCursor,
+    ) {
+        let self_id = self_id.into();
         let mut cookie = Cookie::new(
-            NOTIFICATIONS_LAST_SEEN_COOKIE_NAME,
+            format!("{self_id}-{}", NOTIFICATIONS_LAST_SEEN_COOKIE_NAME),
             serde_json::to_string(&pagination).expect("can't fail"),
         );
         cookie.set_path("/ui");
@@ -280,10 +293,13 @@ impl UiState {
                     .into_iter()
                     .next()
                 {
-                    cookies.save_last_seen(EventPaginationCursor {
-                        ts: latest_event.ts,
-                        event_id: latest_event.event_id,
-                    });
+                    cookies.save_last_seen(
+                        client.rostra_id(),
+                        EventPaginationCursor {
+                            ts: latest_event.ts,
+                            event_id: latest_event.event_id,
+                        },
+                    );
                 }
                 Ok(None)
             }
@@ -291,7 +307,7 @@ impl UiState {
                 let pending_len = client
                     .db()
                     .paginate_social_posts_with_filter(
-                        cookies.get_last_seen(),
+                        cookies.get_last_seen(client.rostra_id()),
                         10,
                         TimelineMode::Notifications.to_filter_fn(client).await,
                     )
