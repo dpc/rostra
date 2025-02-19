@@ -13,6 +13,9 @@ Don't want to see nude pictures? Don't follow users posting nude pictures, or wh
 follow people posting nude pictures. Don't like certain radical political opinions,
 don't follow people who voice them. Thanks to this no central policing is necessary.
 
+In a world of abundant and too cheap of meter AI SLOP, there's really
+no choice, but navigate along the lines of existing trust.
+
 In all forms of "discoverability" (viewing content indirection through one of the users
 we follow), it should be always easy to attribute which user is it.
 
