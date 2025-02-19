@@ -171,7 +171,7 @@ impl UiState {
                     "#))
                 }
                 label for="avatar-upload" ."m-profileSummary__userImageLabel" {
-                    img ."m-profileSummary__userImage"
+                    img ."m-profileSummary__userImage u-userImage"
                         src=(self.avatar_url(user.id()))
                         width="32pt"
                         height="32pt" {

@@ -762,8 +762,8 @@ emoji-picker {
 
 .o-mainBarTimeline__tabs {
   display: grid;
-  grid-auto-flow: column;
-  grid-template-columns: 4rem repeat(auto-fit, minmax(200px, 4fr));
+  grid-auto-flow: row;
+  grid-template-columns: 4rem repeat(auto-fit, minmax(100px, 4fr));
   align-items: center;
 
   position: sticky;
