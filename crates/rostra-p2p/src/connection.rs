@@ -120,7 +120,7 @@ pub trait RpcRequest: RpcMessage {}
 pub trait RpcResponse: RpcMessage {}
 
 macro_rules! define_rpc {
-    ($id:expr, $req:ident, $req_body:item, $resp:ident, $resp_body:item) => {
+    ($id:expr_2021, $req:ident, $req_body:item, $resp:ident, $resp_body:item) => {
 
         #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
         #[derive(Encode, Decode, Clone, Debug)]

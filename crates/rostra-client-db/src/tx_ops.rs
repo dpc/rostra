@@ -188,25 +188,28 @@ impl Database {
         let (id_short, id_rest) = event.author().split();
         ids_full_t.insert(&id_short, &id_rest)?;
 
-        let (was_missing, is_deleted) = if let Some(prev_missing) = events_missing_table
+        let (was_missing, is_deleted) = match events_missing_table
             .remove(&(author, event_id))?
             .map(|g| g.value())
         {
-            // if the missing was marked as deleted, we'll record it
-            (
-                true,
-                if let Some(deleted_by) = prev_missing.deleted_by {
-                    events_content_table
-                        .insert(&event_id, &EventContentState::Deleted { deleted_by })?;
-                    true
-                } else {
-                    false
-                },
-            )
-        } else {
-            // since nothing was expecting this event yet, it must be a "head"
-            events_heads_table.insert(&(author, event_id), &EventsHeadsTableRecord)?;
-            (false, false)
+            Some(prev_missing) => {
+                // if the missing was marked as deleted, we'll record it
+                (
+                    true,
+                    if let Some(deleted_by) = prev_missing.deleted_by {
+                        events_content_table
+                            .insert(&event_id, &EventContentState::Deleted { deleted_by })?;
+                        true
+                    } else {
+                        false
+                    },
+                )
+            }
+            _ => {
+                // since nothing was expecting this event yet, it must be a "head"
+                events_heads_table.insert(&(author, event_id), &EventsHeadsTableRecord)?;
+                (false, false)
+            }
         };
 
         // When both parents point at same thing, process only one: one that can
@@ -481,7 +484,7 @@ impl Database {
     ) -> DbResult<IdSelfAccountRecord> {
         let id_self_record = IdSelfAccountRecord {
             rostra_id: self_id,
-            iroh_secret: thread_rng().gen(),
+            iroh_secret: thread_rng().r#gen(),
         };
         let _ = id_self_table.insert(&(), &id_self_record)?;
         Ok(id_self_record)
@@ -523,21 +526,25 @@ impl Database {
         let before_pivot = (ShortEventId::ZERO)..(pivot);
         let after_pivot = (pivot)..=(ShortEventId::MAX);
 
-        Ok(Some(if thread_rng().gen() {
-            if let Some(k) = get_first_in_range(events_self_table, after_pivot)? {
-                k
-            } else if let Some(k) = get_last_in_range(events_self_table, before_pivot)? {
-                k
-            } else {
-                return Ok(None);
+        Ok(Some(if thread_rng().r#gen() {
+            match get_first_in_range(events_self_table, after_pivot)? {
+                Some(k) => k,
+                _ => match get_last_in_range(events_self_table, before_pivot)? {
+                    Some(k) => k,
+                    _ => {
+                        return Ok(None);
+                    }
+                },
             }
         } else {
-            if let Some(k) = get_first_in_range(events_self_table, before_pivot)? {
-                k
-            } else if let Some(k) = get_last_in_range(events_self_table, after_pivot)? {
-                k
-            } else {
-                return Ok(None);
+            match get_first_in_range(events_self_table, before_pivot)? {
+                Some(k) => k,
+                _ => match get_last_in_range(events_self_table, after_pivot)? {
+                    Some(k) => k,
+                    _ => {
+                        return Ok(None);
+                    }
+                },
             }
         }))
     }

@@ -13,6 +13,6 @@ impl rand::distributions::Distribution<ShortEventId> for rand::distributions::St
 impl ShortEventId {
     pub fn random() -> Self {
         let mut csprng = OsRng;
-        csprng.gen()
+        csprng.r#gen()
     }
 }

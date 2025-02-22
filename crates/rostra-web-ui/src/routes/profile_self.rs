@@ -177,7 +177,7 @@ impl UiState {
                         height="32pt" {
                     }
                 }
-                input #"avatar-upload"
+                input # "avatar-upload"
                     ."m-profileSummary__userImageInput"
                     type="file"
                     name="avatar"

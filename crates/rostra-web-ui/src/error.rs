@@ -92,34 +92,36 @@ impl IntoResponse for RequestError {
     fn into_response(self) -> Response {
         info!(err=%self, "Request Error");
 
-        let (status_code, message) = if let Some(user_err) =
-            root_cause(&self).downcast_ref::<UserRequestError>()
-        {
-            return user_err.into_response();
-        } else {
-            match self {
-                RequestError::StateClient { .. } => {
-                    return Redirect::temporary("/ui/unlock").into_response();
-                }
-                RequestError::LoginRequired => {
-                    let headers = [
-                        (
-                            HeaderName::from_static("hx-redirect"),
-                            HeaderValue::from_static("/ui/unlock"),
-                        ),
-                        (
-                            HeaderName::from_static("location"),
-                            HeaderValue::from_static("/ui/unlock"),
-                        ),
-                    ];
-                    return (StatusCode::SEE_OTHER, headers).into_response();
+        let (status_code, message) = match root_cause(&self).downcast_ref::<UserRequestError>() {
+            Some(user_err) => {
+                return user_err.into_response();
+            }
+            _ => {
+                match self {
+                    RequestError::StateClient { .. } => {
+                        return Redirect::temporary("/ui/unlock").into_response();
+                    }
+                    RequestError::LoginRequired => {
+                        let headers = [
+                            (
+                                HeaderName::from_static("hx-redirect"),
+                                HeaderValue::from_static("/ui/unlock"),
+                            ),
+                            (
+                                HeaderName::from_static("location"),
+                                HeaderValue::from_static("/ui/unlock"),
+                            ),
+                        ];
+                        return (StatusCode::SEE_OTHER, headers).into_response();
 
-                    // return Redirect::temporary("/ui/unlock").into_response();
+                        // return Redirect::temporary("/ui/unlock").
+                        // into_response();
+                    }
+                    _ => (
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        "Internal Service Error".to_owned(),
+                    ),
                 }
-                _ => (
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    "Internal Service Error".to_owned(),
-                ),
             }
         };
 

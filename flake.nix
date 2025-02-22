@@ -35,6 +35,7 @@
             just.importPaths = [ "justfile.rostra.just" ];
             just.rules.watch.enable = false;
             toolchain.channel = "latest";
+            rust.rustfmt.enable = false;
           };
         };
 

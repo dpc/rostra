@@ -165,11 +165,12 @@ impl Client {
         let endpoint = Self::make_iroh_endpoint(db.as_ref().map(|s| s.iroh_secret())).await?;
         let (check_for_updates_tx, _) = watch::channel(());
 
-        let db = if let Some(db) = db {
-            db
-        } else {
-            debug!(target: LOG_TARGET, id = %id, "Creating temporary in-memory database");
-            Database::new_in_memory(id).await?
+        let db = match db {
+            Some(db) => db,
+            _ => {
+                debug!(target: LOG_TARGET, id = %id, "Creating temporary in-memory database");
+                Database::new_in_memory(id).await?
+            }
         }
         .into();
         trace!(target: LOG_TARGET, id = %id, "Creating client");
@@ -225,10 +226,13 @@ impl Client {
         {
             debug!(target: LOG_TARGET, "Existing node announcement found");
         } else {
-            if let Err(err) = self.publish_node_announcement(id_secret).await {
-                warn!(target: LOG_TARGET, err = %err.fmt_compact(), "Could not publish node announcement");
-            } else {
-                info!(target: LOG_TARGET, "Published node announcement");
+            match self.publish_node_announcement(id_secret).await {
+                Err(err) => {
+                    warn!(target: LOG_TARGET, err = %err.fmt_compact(), "Could not publish node announcement");
+                }
+                _ => {
+                    info!(target: LOG_TARGET, "Published node announcement");
+                }
             }
         }
 

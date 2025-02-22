@@ -6,15 +6,16 @@ where
     D: Deserializer<'de>,
     T: Deserialize<'de>,
 {
-    if let Some(str) = Option::<String>::deserialize(deserializer)? {
-        let str = str.trim();
-        if str.is_empty() {
-            Ok(None)
-        } else {
-            T::deserialize(str.into_deserializer()).map(Some)
+    match Option::<String>::deserialize(deserializer)? {
+        Some(str) => {
+            let str = str.trim();
+            if str.is_empty() {
+                Ok(None)
+            } else {
+                T::deserialize(str.into_deserializer()).map(Some)
+            }
         }
-    } else {
-        Ok(None)
+        _ => Ok(None),
     }
 }
 

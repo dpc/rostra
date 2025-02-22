@@ -98,10 +98,9 @@ pub struct UiState {
 
 impl UiState {
     pub async fn client(&self, id: RostraId) -> UiStateClientResult<ClientHandle> {
-        if let Some(handle) = self.clients.get(id).await {
-            Ok(handle)
-        } else {
-            ClientNotLoadedSnafu.fail()
+        match self.clients.get(id).await {
+            Some(handle) => Ok(handle),
+            _ => ClientNotLoadedSnafu.fail(),
         }
     }
 
@@ -224,13 +223,16 @@ impl Server {
         );
         let mut router = Router::new().merge(routes::route_handler(self.state.clone()));
 
-        if let Some(assets) = self.assets {
-            router = router.nest("/assets", routes::static_file_handler(assets));
-        } else {
-            router = router.nest_service(
-                "/assets",
-                ServeDir::new(format!("{}/assets", env!("CARGO_MANIFEST_DIR"))),
-            );
+        match self.assets {
+            Some(assets) => {
+                router = router.nest("/assets", routes::static_file_handler(assets));
+            }
+            _ => {
+                router = router.nest_service(
+                    "/assets",
+                    ServeDir::new(format!("{}/assets", env!("CARGO_MANIFEST_DIR"))),
+                );
+            }
         }
 
         let session_store = MemoryStore::default();

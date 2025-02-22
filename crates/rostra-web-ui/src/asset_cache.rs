@@ -87,7 +87,7 @@ impl AssetCache {
                         filename.to_string(),
                         StaticAsset {
                             path: stored_path,
-                            raw: if let Some(compressed) = compressed.as_ref() {
+                            raw: match compressed.as_ref() { Some(compressed) => {
                                 // if we have compressed copy, don't store raw data
                                 // decompress the raw one one the fly if anyone actually asks
                                 let compressed = compressed.clone();
@@ -95,9 +95,9 @@ impl AssetCache {
                                     debug!(target: LOG_TARGET, "Decompressing raw data from compressed version");
                                     Bytes::from(decompress_data(&compressed))
                                 }))
-                            } else {
+                            } _ => {
                                 LazyLock::new(Box::new(|| Bytes::from(raw)))
-                            },
+                            }},
                             compressed,
                         },
                     )))
