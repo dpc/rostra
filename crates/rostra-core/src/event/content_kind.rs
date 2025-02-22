@@ -2,6 +2,7 @@ use std::collections::BTreeSet;
 use std::str::FromStr as _;
 
 use snafu::Snafu;
+use unicode_segmentation::UnicodeSegmentation as _;
 
 use super::{EventContent, EventKind, PersonaId};
 use crate::id::RostraId;
@@ -144,11 +145,53 @@ pub struct SocialPost {
     #[serde(rename = "p")]
     pub persona: PersonaId,
     #[serde(rename = "c")]
-    pub djot_content: String,
+    pub djot_content: Option<String>,
     #[serde(rename = "r")]
     pub reply_to: Option<ExternalEventId>,
+    // "e" for "emoji"
+    #[serde(rename = "e")]
+    pub reaction: Option<String>,
 }
 
+impl SocialPost {
+    pub fn is_reaction(text: &str) -> Option<&str> {
+        if 8 < text.len() {
+            // Nah...
+            return None;
+        }
+        let text = text.trim();
+
+        // Get the first grapheme cluster
+        let first_grapheme = text.graphemes(true).next()?;
+
+        // Check if it contains only characters that *can't* be emojis
+        let is_not_emoji = first_grapheme.chars().all(|c| {
+            // Filter out common non-emoji characters
+            //
+            // Letters and digits (A-Z, a-z, 0-9)
+            c.is_ascii_alphanumeric() ||
+                // Common punctuation like .,!? etc.
+                c.is_ascii_punctuation() ||
+                // Spaces, tabs, etc.        
+                c.is_ascii_whitespace() ||
+                // Control chars like \n, \r        
+                c.is_ascii_control()
+        });
+
+        // If it's not entirely non-emoji characters, assume it’s an emoji
+        if !is_not_emoji {
+            Some(first_grapheme)
+        } else {
+            None
+        }
+    }
+
+    pub fn get_reaction(&self) -> Option<&str> {
+        let reaction = self.reaction.as_ref()?.trim();
+
+        Self::is_reaction(reaction)
+    }
+}
 impl EventContentKind for SocialPost {
     const KIND: EventKind = EventKind::SOCIAL_POST;
 }

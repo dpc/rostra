@@ -338,16 +338,18 @@ impl UiState {
         Ok(html! {
             div ."m-postOverview__comments" {
                 @for comment in comments {
-                    div ."o-postOverview__commentsItem" {
-                        (self.post_overview(
-                            &client_ref,
-                            comment.author
-                            ).event_id(comment.event_id)
-                            .content(&comment.content.djot_content)
-                            .reply_count(comment.reply_count)
-                            .ro(session.ro_mode())
-                            .is_comment(true)
-                            .call().await?)
+                    @if let Some(djot_content) = comment.content.djot_content.as_ref() {
+                        div ."o-postOverview__commentsItem" {
+                            (self.post_overview(
+                                &client_ref,
+                                comment.author
+                                ).event_id(comment.event_id)
+                                .content(djot_content)
+                                .reply_count(comment.reply_count)
+                                .ro(session.ro_mode())
+                                .is_comment(true)
+                                .call().await?)
+                        }
                     }
                 }
 
@@ -457,22 +459,24 @@ impl UiState {
                 }
                 div ."o-mainBarTimeline__item -preview -empty" { }
                 @for post in &filtered_posts {
-                    div ."o-mainBarTimeline__item"
-                    ."-reply"[post.reply_to.is_some()]
-                    ."-post"[post.reply_to.is_none()]
-                    {
-                        (self.post_overview(
-                            &client_ref,
-                            post.author,
-                            ).maybe_reply_to(
-                                post.reply_to
-                                    .map(|reply_to| (reply_to.rostra_id(), parents.get(&reply_to.event_id().to_short())))
-                                )
-                                .event_id(post.event_id)
-                                .content(&post.content.djot_content)
-                                .reply_count(post.reply_count)
-                                .ro(session.ro_mode())
-                                .call().await?)
+                    @if let Some(djot_content) = post.content.djot_content.as_ref() {
+                        div ."o-mainBarTimeline__item"
+                        ."-reply"[post.reply_to.is_some()]
+                        ."-post"[post.reply_to.is_none()]
+                        {
+                            (self.post_overview(
+                                &client_ref,
+                                post.author,
+                                ).maybe_reply_to(
+                                    post.reply_to
+                                        .map(|reply_to| (reply_to.rostra_id(), parents.get(&reply_to.event_id().to_short())))
+                                    )
+                                    .event_id(post.event_id)
+                                    .content(djot_content)
+                                    .reply_count(post.reply_count)
+                                    .ro(session.ro_mode())
+                                    .call().await?)
+                        }
                     }
                 }
                 @if last_seen != EventPaginationCursor::ZERO {
@@ -521,6 +525,28 @@ impl UiState {
         let external_event_id = event_id.map(|e| ExternalEventId::new(author, e));
         let user_profile = self.get_social_profile_opt(author, client).await;
 
+        let reactions = if let Some(event_id) = event_id {
+            client
+                .db()
+                .paginate_social_post_reactions_rev(event_id, None, 1000)
+                .await
+        } else {
+            vec![]
+        };
+
+        let reactions_html = html! {
+            @for reaction in reactions {
+                @if let Some(reaction_text) = reaction.content.get_reaction() {
+
+                    span .m-postOverview__reaction
+                        title=(format!("by {}", reaction.author))
+                    {
+                        (reaction_text)
+                    }
+                }
+            }
+        };
+
         let post_content_rendered = if let Some(content) = content.as_ref() {
             Some(self.render_content(client, content).await)
         } else {
@@ -563,6 +589,7 @@ impl UiState {
         let button_bar = html! {
             @if let Some(ext_event_id) = external_event_id {
                 div ."m-postOverview__buttonBar" {
+                    (reactions_html)
                     @if let Some(reply_count) = reply_count {
                         @if reply_count > 0 {
                             button ."m-postOverview__commentsButton u-button"
@@ -625,17 +652,19 @@ impl UiState {
         Ok(html! {
             @if let Some((reply_to_author, reply_to_post)) = reply_to {
                 @if let Some(reply_to_post) = reply_to_post {
-                    (Box::pin(self.post_overview(
-                        client,
-                        reply_to_post.author
+                    @if let Some(djot_content) = reply_to_post.content.djot_content.as_ref() {
+                        (Box::pin(self.post_overview(
+                            client,
+                            reply_to_post.author
+                            )
+                            .event_id(reply_to_post.event_id)
+                            .content(djot_content)
+                            .ro(ro)
+                            .comment(post)
+                            .call()
                         )
-                        .event_id(reply_to_post.event_id)
-                        .content(&reply_to_post.content.djot_content)
-                        .ro(ro)
-                        .comment(post)
-                        .call()
-                    )
-                    .await?)
+                        .await?)
+                    }
                 } @else {
                     (Box::pin(self.post_overview(
                         client,

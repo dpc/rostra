@@ -543,7 +543,7 @@ impl Client {
             )
             .when(|e|
                 // Retry only problems with doing the query itself
-                 matches!(e, IdResolveError::PkarrResolve { .. }))
+                 matches!(e, IdResolveError::PkarrResolve))
             .notify(|e, _| debug!(target: LOG_TARGET, err = %e.fmt_compact(), "Could not determine the state of published id"))
             .await
     }
@@ -596,12 +596,19 @@ impl Client {
         body: String,
         reply_to: Option<ExternalEventId>,
     ) -> PostResult<VerifiedEvent> {
+        let (content, reaction) =
+            if let Some(reaction) = content_kind::SocialPost::is_reaction(&body) {
+                (None, Some(reaction.to_owned()))
+            } else {
+                (Some(body), None)
+            };
         self.publish_event(
             id_secret,
             content_kind::SocialPost {
-                djot_content: body,
+                djot_content: content,
                 persona: PersonaId(0),
                 reply_to,
+                reaction,
             },
         )
         .call()

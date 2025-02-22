@@ -63,8 +63,10 @@ def_table!(events_by_time: (Timestamp, ShortEventId) => ());
 // SOCIAL
 def_table!(social_profiles_v0: RostraId => Latest<IdSocialProfileRecordV0>);
 def_table!(social_profiles: RostraId => Latest<IdSocialProfileRecord>);
+def_table!(social_posts_v0: (ShortEventId)=> SocialPostRecordV0);
 def_table!(social_posts: (ShortEventId)=> SocialPostRecord);
-def_table!(social_posts_reply: (ShortEventId, Timestamp, ShortEventId)=> ());
+def_table!(social_posts_replies: (ShortEventId, Timestamp, ShortEventId)=> SocialPostsRepliesRecord);
+def_table!(social_posts_reactions: (ShortEventId, Timestamp, ShortEventId)=> SocialPostsReactionsRecord);
 def_table!(social_posts_by_time: (Timestamp, ShortEventId) => ());
 
 #[derive(Debug, Encode, Decode, Clone)]
@@ -72,6 +74,11 @@ pub struct Latest<T> {
     pub ts: Timestamp,
     pub inner: T,
 }
+
+#[derive(Debug, Encode, Decode, Clone, Copy)]
+pub struct SocialPostsRepliesRecord;
+#[derive(Debug, Encode, Decode, Clone, Copy)]
+pub struct SocialPostsReactionsRecord;
 
 #[derive(Debug, Encode, Decode, Clone)]
 pub struct IdSocialProfileRecordV0 {
@@ -99,8 +106,22 @@ pub struct IdSocialProfileRecord {
     // replied to
     Default,
 )]
+pub struct SocialPostRecordV0 {
+    pub reply_count: u64,
+}
+
+#[derive(
+    Debug,
+    Encode,
+    Decode,
+    Clone,
+    // Note: needs to be default so we can track number of replies even before we get what was
+    // replied to
+    Default,
+)]
 pub struct SocialPostRecord {
     pub reply_count: u64,
+    pub reaction_count: u64,
 }
 
 #[derive(Debug, Encode, Decode, Clone)]

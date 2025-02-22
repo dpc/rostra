@@ -7,8 +7,9 @@ use snafu::{Location, OptionExt as _, ResultExt as _, Snafu};
 use tracing::debug;
 
 use crate::{
-    social_posts, social_posts_by_time, social_posts_reply, Database, DbError,
-    IdSocialProfileRecord, IrohNodeRecord, OverflowSnafu, WriteTransactionCtx, LOG_TARGET,
+    social_posts, social_posts_by_time, social_posts_reactions, social_posts_replies, Database,
+    DbError, IdSocialProfileRecord, IrohNodeRecord, OverflowSnafu, SocialPostsReactionsRecord,
+    SocialPostsRepliesRecord, WriteTransactionCtx, LOG_TARGET,
 };
 
 #[derive(Debug, Snafu)]
@@ -189,33 +190,58 @@ impl Database {
                     if let Some(reply_to) = content.reply_to {
                         let mut social_post_tbl =
                             tx.open_table(&social_posts::TABLE).map_err(DbError::from)?;
-                        let mut social_post_reply_tbl = tx
-                            .open_table(&social_posts_reply::TABLE)
+                        let mut social_post_replies_tbl = tx
+                            .open_table(&social_posts_replies::TABLE)
                             .map_err(DbError::from)?;
 
-                        social_post_reply_tbl
-                            .insert(
-                                &(
-                                    reply_to.event_id(),
-                                    event_content.event.event.timestamp.into(),
-                                    event_content.event.event_id.to_short(),
-                                ),
-                                &(),
-                            )
+                        let mut social_post_reactions_tbl = tx
+                            .open_table(&social_posts_reactions::TABLE)
                             .map_err(DbError::from)?;
-                        let mut social_post_record = social_post_tbl
+
+                        let mut reply_to_social_post_record = social_post_tbl
                             .get(&reply_to.event_id())
                             .map_err(DbError::from)?
                             .map(|g| g.value())
                             .unwrap_or_default();
 
-                        social_post_record.reply_count = social_post_record
-                            .reply_count
-                            .checked_add(1)
-                            .context(OverflowSnafu)?;
+                        if content.djot_content.is_some() {
+                            reply_to_social_post_record.reply_count = reply_to_social_post_record
+                                .reply_count
+                                .checked_add(1)
+                                .context(OverflowSnafu)?;
 
+                            social_post_replies_tbl
+                                .insert(
+                                    &(
+                                        reply_to.event_id(),
+                                        event_content.event.event.timestamp.into(),
+                                        event_content.event.event_id.to_short(),
+                                    ),
+                                    &SocialPostsRepliesRecord,
+                                )
+                                .map_err(DbError::from)?;
+                        }
+
+                        if content.reaction.is_some() {
+                            reply_to_social_post_record.reaction_count =
+                                reply_to_social_post_record
+                                    .reaction_count
+                                    .checked_add(1)
+                                    .context(OverflowSnafu)?;
+
+                            social_post_reactions_tbl
+                                .insert(
+                                    &(
+                                        reply_to.event_id(),
+                                        event_content.event.event.timestamp.into(),
+                                        event_content.event.event_id.to_short(),
+                                    ),
+                                    &SocialPostsReactionsRecord,
+                                )
+                                .map_err(DbError::from)?;
+                        }
                         social_post_tbl
-                            .insert(&reply_to.event_id(), &social_post_record)
+                            .insert(&reply_to.event_id(), &reply_to_social_post_record)
                             .map_err(DbError::from)?;
                     }
                 }
@@ -251,31 +277,51 @@ impl Database {
                     .map_err(DbError::from)?;
 
                 if let Some(reply_to) = content.reply_to {
-                    let mut social_reply_tbl = tx
-                        .open_table(&social_posts_reply::TABLE)
-                        .map_err(DbError::from)?;
-                    let mut social_post_tbl =
+                    let mut social_posts_tbl =
                         tx.open_table(&social_posts::TABLE).map_err(DbError::from)?;
-                    social_reply_tbl
-                        .remove(&(
-                            reply_to.event_id(),
-                            event_content.timestamp(),
-                            event_content.event_id().to_short(),
-                        ))
+                    let mut social_replies_tbl = tx
+                        .open_table(&social_posts_replies::TABLE)
+                        .map_err(DbError::from)?;
+                    let mut social_reactions_tbl = tx
+                        .open_table(&social_posts_reactions::TABLE)
                         .map_err(DbError::from)?;
 
-                    let mut social_post_record = social_post_tbl
+                    let mut social_post_record = social_posts_tbl
                         .get(&reply_to.event_id())
                         .map_err(DbError::from)?
                         .map(|g| g.value())
                         .unwrap_or_default();
 
-                    social_post_record.reply_count = social_post_record
-                        .reply_count
-                        .checked_sub(1)
-                        .context(OverflowSnafu)?;
+                    if content.djot_content.is_some() {
+                        social_replies_tbl
+                            .remove(&(
+                                reply_to.event_id(),
+                                event_content.timestamp(),
+                                event_content.event_id().to_short(),
+                            ))
+                            .map_err(DbError::from)?;
 
-                    social_post_tbl
+                        social_post_record.reply_count = social_post_record
+                            .reply_count
+                            .checked_sub(1)
+                            .context(OverflowSnafu)?;
+                    }
+
+                    if content.reaction.is_some() {
+                        social_reactions_tbl
+                            .remove(&(
+                                reply_to.event_id(),
+                                event_content.timestamp(),
+                                event_content.event_id().to_short(),
+                            ))
+                            .map_err(DbError::from)?;
+
+                        social_post_record.reaction_count = social_post_record
+                            .reaction_count
+                            .checked_sub(1)
+                            .context(OverflowSnafu)?;
+                    }
+                    social_posts_tbl
                         .insert(&reply_to.event_id(), &social_post_record)
                         .map_err(DbError::from)?;
                 }

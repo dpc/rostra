@@ -1,9 +1,7 @@
 use std::collections::{HashMap, HashSet};
-use std::ops::Not as _;
 
 use ids::{IdsFollowersRecord, IdsUnfollowedRecord};
 use rand::{thread_rng, Rng as _};
-use redb::ReadableTable as _;
 use redb_bincode::{ReadableTable, Table};
 use rostra_core::event::{
     content_kind, EventContent, EventExt as _, VerifiedEvent, VerifiedEventContent,
@@ -13,131 +11,20 @@ use rostra_core::{ShortEventId, Timestamp};
 use tables::event::{EventContentState, EventsMissingRecord};
 use tables::ids::IdsFolloweesRecord;
 use tables::EventRecord;
-use tracing::{debug, info};
+use tracing::debug;
 
 use super::id_self::IdSelfAccountRecord;
 use super::{
-    db_version, events, events_by_time, events_content, events_heads, events_missing, events_self,
-    get_first_in_range, get_last_in_range, ids, ids_followees, ids_followers, ids_personas,
-    ids_self, ids_unfollowed, tables, Database, DbError, DbResult, EventsHeadsTableRecord,
-    InsertEventOutcome, WriteTransactionCtx,
+    events, events_by_time, events_content, events_heads, events_missing, events_self,
+    get_first_in_range, get_last_in_range, ids, ids_followees, ids_followers, ids_self, tables,
+    Database, DbError, DbResult, EventsHeadsTableRecord, InsertEventOutcome,
 };
 use crate::{
-    ids_full, social_posts, social_posts_by_time, social_posts_reply, social_profiles,
-    social_profiles_v0, DbVersionTooHighSnafu, IdSocialProfileRecord, Latest, SocialPostRecord,
+    ids_full, social_posts, social_profiles, IdSocialProfileRecord, Latest, SocialPostRecord,
     LOG_TARGET,
 };
 
 impl Database {
-    pub(crate) fn init_tables_tx(tx: &WriteTransactionCtx) -> DbResult<()> {
-        tx.open_table(&db_version::TABLE)?;
-
-        tx.open_table(&ids_self::TABLE)?;
-        tx.open_table(&ids_full::TABLE)?;
-        tx.open_table(&ids_followers::TABLE)?;
-        tx.open_table(&ids_followees::TABLE)?;
-        tx.open_table(&ids_unfollowed::TABLE)?;
-        tx.open_table(&ids_personas::TABLE)?;
-
-        tx.open_table(&events::TABLE)?;
-        tx.open_table(&events_by_time::TABLE)?;
-        tx.open_table(&events_content::TABLE)?;
-        tx.open_table(&events_self::TABLE)?;
-        tx.open_table(&events_missing::TABLE)?;
-        tx.open_table(&events_heads::TABLE)?;
-
-        tx.open_table(&social_profiles::TABLE)?;
-        tx.open_table(&social_posts::TABLE)?;
-        tx.open_table(&social_posts_by_time::TABLE)?;
-        tx.open_table(&social_posts_reply::TABLE)?;
-        Ok(())
-    }
-
-    pub(crate) fn handle_db_ver_migrations(dbtx: &WriteTransactionCtx) -> DbResult<()> {
-        const DB_VER: u64 = 1;
-
-        let mut table_db_ver = dbtx.open_table(&db_version::TABLE)?;
-
-        let Some(mut cur_db_ver) = table_db_ver.first()?.map(|g| g.1.value()) else {
-            info!(target: LOG_TARGET, "Initializing new database");
-            table_db_ver.insert(&(), &DB_VER)?;
-
-            return Ok(());
-        };
-
-        if DB_VER < cur_db_ver {
-            return DbVersionTooHighSnafu {
-                db_ver: cur_db_ver,
-                code_ver: DB_VER,
-            }
-            .fail();
-        }
-
-        // migration code will go here
-        //
-        while cur_db_ver < DB_VER {
-            debug!(target: LOG_TARGET, db_ver=%cur_db_ver, "Running migration");
-            match cur_db_ver {
-                0 => Self::migrate_v0(dbtx)?,
-                x => panic!("Unexpected db ver: {x}"),
-            }
-
-            cur_db_ver += 1;
-        }
-
-        table_db_ver.insert(&(), &cur_db_ver)?;
-        debug!(target: LOG_TARGET, db_ver = cur_db_ver, "Db version");
-
-        Ok(())
-    }
-
-    pub(crate) fn migrate_v0(dbtx: &WriteTransactionCtx) -> DbResult<()> {
-        let mut raw_v0_table = dbtx
-            .as_raw()
-            .open_table(social_profiles_v0::TABLE.as_raw())?;
-        let mut raw_table = dbtx.as_raw().open_table(social_profiles::TABLE.as_raw())?;
-        for record in raw_table.range::<&[u8]>(..)? {
-            let (k, v) = record?;
-            raw_v0_table.insert(k.value(), v.value())?;
-        }
-        raw_table.retain(|_, _| false)?;
-        drop(raw_table);
-        drop(raw_v0_table);
-
-        let table_v0 = dbtx.open_table(&social_profiles_v0::TABLE)?;
-        let mut table = dbtx.open_table(&social_profiles::TABLE)?;
-
-        for g in table_v0.range(..)? {
-            let (k, v_v0) = g?;
-            let v_v0 = v_v0.value();
-            table.insert(
-                &k.value(),
-                &Latest {
-                    ts: v_v0.ts,
-                    inner: IdSocialProfileRecord {
-                        event_id: v_v0.inner.event_id,
-                        display_name: v_v0.inner.display_name,
-                        bio: v_v0.inner.bio,
-                        avatar: if !v_v0.inner.img.is_empty() && v_v0.inner.img_mime.is_empty() {
-                            Some((v_v0.inner.img_mime, v_v0.inner.img))
-                        } else {
-                            None
-                        },
-                    },
-                },
-            )?;
-        }
-
-        drop(table);
-        drop(table_v0);
-
-        dbtx.as_raw()
-            .delete_table(social_profiles_v0::TABLE.as_raw())?
-            .not()
-            .then(|| panic!("Expected to delete the table"));
-        Ok(())
-    }
-
     pub fn read_followees_tx(
         id: RostraId,
         ids_followees_table: &impl ids_followees::ReadableTable,

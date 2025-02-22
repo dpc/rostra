@@ -57,7 +57,7 @@ impl RostraId {
             return Err(InvalidPrefixSnafu.build());
         }
 
-        let bytes = z32::decode(s[2..].as_bytes())
+        let bytes = z32::decode(&s.as_bytes()[2..])
             .ok()
             .context(DecodingZ32Snafu)?;
 

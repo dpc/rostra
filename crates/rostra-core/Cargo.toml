@@ -37,6 +37,7 @@ serde_bytes = { workspace = true, optional = true }
 cbor4ii = { workspace = true, optional = true, features = ["serde1"] }
 snafu = { workspace = true }
 pkarr = { workspace = true, optional = true }
+unicode-segmentation = { workspace = true }
 z32 = { workspace = true }
 
 [dev-dependencies]
