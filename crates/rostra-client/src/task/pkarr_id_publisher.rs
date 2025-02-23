@@ -97,6 +97,7 @@ impl PkarrIdPublisher {
                     }
                 }
             }
+            trace!(target: LOG_TARGET, "Woke up");
 
             self.wait_for_your_turn().await;
             debug!(target: LOG_TARGET, "Detect no other peer alive, assuming the role of Pkarr ID publisher");

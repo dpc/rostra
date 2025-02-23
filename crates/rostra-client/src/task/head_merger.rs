@@ -5,7 +5,7 @@ use rostra_core::event::{EventKind, VerifiedEvent};
 use rostra_core::id::{RostraId, RostraIdSecretKey};
 use rostra_core::{Event, ShortEventId};
 use tokio::sync::watch;
-use tracing::{debug, instrument};
+use tracing::{debug, instrument, trace};
 
 use crate::client::Client;
 const LOG_TARGET: &str = "rostra::head_merger";
@@ -33,6 +33,7 @@ impl HeadMerger {
     pub async fn run(self) {
         let mut head_rx = self.self_head_rx.clone();
         while let Ok(_head) = head_rx.changed().await {
+            trace!(target: LOG_TARGET, "Woke up" );
             // To avoid two active nodes merging heads together at the same time, producing
             // more heads, that require more merging, etc., we just sleep a random period of
             // time here, which should be enough to propagate and eventually desynchronize.

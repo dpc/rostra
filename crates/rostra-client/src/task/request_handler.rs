@@ -97,6 +97,7 @@ impl RequestHandler {
                 return;
             };
 
+            trace!(target: LOG_TARGET, "New connection" );
             tokio::spawn(self.clone().handle_incoming(incoming));
         }
     }

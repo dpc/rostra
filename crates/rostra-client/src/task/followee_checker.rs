@@ -65,6 +65,7 @@ impl FolloweeChecker {
 
                 }
             }
+            trace!(target: LOG_TARGET, "Woke up");
 
             // Query only new followees
             for (followee_id, _persona_id) in &self_followees {

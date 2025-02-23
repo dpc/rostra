@@ -6,7 +6,7 @@ use rostra_core::ShortEventId;
 use rostra_p2p::Connection;
 use rostra_util_error::{BoxedErrorResult, FmtCompact, WhateverResult};
 use snafu::ResultExt as _;
-use tracing::{debug, instrument, warn};
+use tracing::{debug, instrument, trace, warn};
 
 use crate::client::Client;
 use crate::{ClientHandle, LOG_TARGET};
@@ -43,6 +43,7 @@ impl MissingEventFetcher {
                     continue;
                 }
             };
+            trace!(target: LOG_TARGET, "Woke up");
 
             let Ok(db) = self.client.db() else {
                 break;

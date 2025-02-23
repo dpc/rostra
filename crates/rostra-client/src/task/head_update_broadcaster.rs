@@ -9,7 +9,7 @@ use rostra_p2p::connection::{Connection, FeedEventRequest};
 use rostra_util_error::{FmtCompact, WhateverResult};
 use snafu::ResultExt as _;
 use tokio::sync::watch;
-use tracing::{debug, instrument, warn};
+use tracing::{debug, instrument, trace, warn};
 
 use crate::client::Client;
 use crate::ClientRef;
@@ -54,6 +54,7 @@ impl HeadUpdateBroadcaster {
                     }
                 }
             }
+            trace!(target: LOG_TARGET, "Woke up");
 
             let Some(head) = *self_head_rx.borrow() else {
                 warn!(target: LOG_TARGET, "Empty head!?");

@@ -12,7 +12,7 @@ use rostra_util_error::{BoxedErrorResult, FmtCompact, WhateverResult};
 use rostra_util_fmt::AsFmtOption as _;
 use snafu::ResultExt as _;
 use tokio::sync::watch;
-use tracing::{debug, info, instrument};
+use tracing::{debug, info, instrument, trace};
 
 use crate::client::Client;
 use crate::ClientRef;
@@ -64,6 +64,7 @@ impl FolloweeHeadChecker {
                     }
                 }
             }
+            trace!(target: LOG_TARGET, "Woke up");
 
             let Ok(storage) = self.client.db() else {
                 break;
