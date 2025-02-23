@@ -6,7 +6,7 @@ macro_rules! array_type_define {
     ) => {
         $(#[$outer])*
         #[cfg_attr(feature = "bincode", derive(::bincode::Encode, ::bincode::Decode))]
-        #[derive(Copy, Clone, Hash, Debug)]
+        #[derive(Copy, Clone, Hash)]
         pub struct $t([u8; $n]);
 
         impl $t {
@@ -24,6 +24,12 @@ macro_rules! array_type_define {
 
             pub fn to_bytes(self) -> [u8; $n] {
                 self.0
+            }
+        }
+
+        impl std::fmt::Debug for $t {
+            fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                <Self as std::fmt::Display>::fmt(self, f)
             }
         }
     }

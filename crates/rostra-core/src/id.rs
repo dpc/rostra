@@ -131,6 +131,11 @@ array_type_define_public!(struct ShortRostraId, 16);
 
 array_type_define_public!(struct RestRostraId, 16);
 
+impl fmt::Display for RestRostraId {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        data_encoding::BASE64URL_NOPAD.encode_write(&self.0, f)
+    }
+}
 impl fmt::Display for ShortRostraId {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str("rs")?;

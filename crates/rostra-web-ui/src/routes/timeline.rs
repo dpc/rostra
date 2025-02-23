@@ -1,4 +1,4 @@
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::time::Duration;
 
 use axum::extract::ws::WebSocket;
@@ -534,12 +534,37 @@ impl UiState {
             vec![]
         };
 
+        let mut reaction_social_profiles: HashMap<RostraId, IdSocialProfileRecord> = HashMap::new();
+
+        for reaction_author in reactions
+            .iter()
+            .map(|reaction| reaction.author)
+            // collect to deduplicate
+            .collect::<HashSet<_>>()
+        {
+            // TODO: make a batched request for all profiles in one go
+            if let Some(reaction_user_profile) =
+                self.get_social_profile_opt(reaction_author, client).await
+            {
+                // HashSet above must have deduped it
+                assert!(reaction_social_profiles
+                    .insert(reaction_author, reaction_user_profile)
+                    .is_none());
+            }
+        }
+
         let reactions_html = html! {
             @for reaction in reactions {
                 @if let Some(reaction_text) = reaction.content.get_reaction() {
 
                     span .m-postOverview__reaction
-                        title=(format!("by {}", reaction.author))
+                        title=(
+                            format!("by {}",
+                                reaction_social_profiles.get(&reaction.author)
+                                    .map(|r| r.display_name.clone())
+                                    .unwrap_or_else(|| reaction.author.to_string())
+                            )
+                        )
                     {
                         (reaction_text)
                     }

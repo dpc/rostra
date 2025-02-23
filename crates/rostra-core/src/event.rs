@@ -237,6 +237,12 @@ array_type_define!(
     64
 );
 
+impl fmt::Display for EventSignature {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        data_encoding::BASE64URL_NOPAD.encode_write(&self.0, f)
+    }
+}
+
 #[cfg_attr(feature = "bincode", derive(::bincode::Encode, ::bincode::Decode))]
 #[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
 pub struct EventKind([u8; 2]);
