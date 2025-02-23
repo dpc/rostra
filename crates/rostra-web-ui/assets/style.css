@@ -431,6 +431,7 @@ img {
   max-width: 50rem;
 }
 
+
 .m-postOverview__userImage {
   margin: 2pt;
 }
@@ -516,8 +517,19 @@ emoji-picker {
 
 .m-postOverview__buttonBar {
   display: flex;
-  justify-content: flex-end;
+  justify-content: space-between;
   gap: 5pt;
+}
+
+
+.m-postOverview__reactions {
+  display: flex;
+  gap: .5rem;
+}
+
+.m-postOverview__buttons {
+  display: flex;
+  gap: .5rem;
 }
 
 .m-postOverview__commentsButtonIcon {
