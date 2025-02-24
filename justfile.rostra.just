@@ -33,3 +33,5 @@ dev PORT="2345":
             --secret-file "$ROSTRA_DATA_DIR/secret" \
             --reuseport \
           "
+aider:
+  aider Cargo.toml --no-auto-commits --model anthropic/claude-3-7-sonnet-20250219
