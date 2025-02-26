@@ -1334,9 +1334,9 @@ dependencies = [
 
 [[package]]
 name = "futures-buffered"
-version = "0.2.10"
+version = "0.2.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "675cc4d9adabdbfe43e69586f418938e5ac343ac6dd41170662761f06d63b8c0"
+checksum = "fe940397c8b744b9c2c974791c2c08bca2c3242ce0290393249e98f215a00472"
 dependencies = [
  "cordyceps",
  "diatomic-waker",

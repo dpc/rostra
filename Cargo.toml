@@ -95,7 +95,7 @@ z32 = "1.1.1"
 
 
 [profile.dev]
-debug = "line-tables-only"
+# debug = "line-tables-only"
 lto = "off"
 incremental = true
 
@@ -119,7 +119,7 @@ inherits = "dev"
 incremental = false
 
 [profile.release]
-debug = "line-tables-only"
+# debug = "line-tables-only"
 # super-slow, and we don't need so much speed
 # lto = "fat"
 # codegen-units = 1
