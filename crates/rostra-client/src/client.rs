@@ -597,7 +597,7 @@ impl Client {
         reply_to: Option<ExternalEventId>,
     ) -> PostResult<VerifiedEvent> {
         let (content, reaction) =
-            if let Some(reaction) = content_kind::SocialPost::is_reaction(&body) {
+            if let Some(reaction) = content_kind::SocialPost::is_reaction(&reply_to, &body) {
                 (None, Some(reaction.to_owned()))
             } else {
                 (Some(body), None)

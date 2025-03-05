@@ -154,7 +154,14 @@ pub struct SocialPost {
 }
 
 impl SocialPost {
-    pub fn is_reaction(text: &str) -> Option<&str> {
+    pub fn is_reaction<'t>(
+        reply_to: &'_ Option<ExternalEventId>,
+        text: &'t str,
+    ) -> Option<&'t str> {
+        // Can't be a reaction, if there's nothing it reacts to.
+        if reply_to.is_none() {
+            return None;
+        }
         if 8 < text.len() {
             // Nah...
             return None;
@@ -189,7 +196,7 @@ impl SocialPost {
     pub fn get_reaction(&self) -> Option<&str> {
         let reaction = self.reaction.as_ref()?.trim();
 
-        Self::is_reaction(reaction)
+        Self::is_reaction(&self.reply_to, reaction)
     }
 }
 impl EventContentKind for SocialPost {
