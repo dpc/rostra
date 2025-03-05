@@ -353,10 +353,6 @@ impl UiState {
                     }
                 }
 
-                // Hide the button that created us
-                div hx-swap-oob={"outerHTML: #post-" (post_id) " .m-postOverview__commentsButton"} {
-
-                }
                 (re_typeset_mathjax())
             }
         })
@@ -624,6 +620,7 @@ impl UiState {
                                     hx-get={"/ui/comments/"(ext_event_id.event_id().to_short())}
                                     hx-target="next .m-postOverview__comments"
                                     hx-swap="outerHTML"
+                                    hx-on::after-request="this.classList.add('u-hidden')"
                                 {
                                     span ."m-postOverview__commentsButtonIcon u-buttonIcon" width="1rem" height="1rem" {}
                                     @if reply_count == 1 {

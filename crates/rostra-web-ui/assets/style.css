@@ -272,6 +272,10 @@ img {
 
 }
 
+.u-hidden {
+  display: none;
+}
+
 [disabled]>.u-buttonIcon {
   opacity: 0.6;
 }
