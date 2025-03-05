@@ -32,7 +32,7 @@ impl EventPaginationCursor {
         event_id: ShortEventId::MAX,
     };
 }
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct SocialPostRecord<C> {
     pub ts: Timestamp,
     pub event_id: ShortEventId,
