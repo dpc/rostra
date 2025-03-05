@@ -10,11 +10,11 @@ use futures::future::pending;
 use rostra_client::error::{ConnectError, IdResolveError, IdSecretReadError, InitError, PostError};
 use rostra_client::multiclient::MultiClient;
 use rostra_client::Client;
-use rostra_client_db::DbError;
+use rostra_client_db::{Database, DbError};
 use rostra_core::id::RostraIdSecretKey;
 use rostra_p2p::connection::{Connection, PingRequest, PingResponse};
 use rostra_p2p::RpcError;
-use rostra_util_error::FmtCompact as _;
+use rostra_util_error::{BoxedError, FmtCompact as _};
 use rostra_web_ui::{Server, WebUiServerError};
 use snafu::{FromString, ResultExt, Snafu, Whatever};
 use tokio::time::Instant;
@@ -49,6 +49,8 @@ pub enum CliError {
     DataDir { source: io::Error },
     #[snafu(display("Database error: {source}"))]
     Database { source: DbError },
+    #[snafu(display("Miscellaneous error: {source}"))]
+    Other { source: BoxedError },
 }
 
 pub type CliResult<T> = std::result::Result<T, CliError>;
@@ -156,6 +158,20 @@ async fn handle_cmd(opts: Opts) -> CliResult<serde_json::Value> {
                 }
 
                 serde_json::to_value(&resp).expect("Can't fail")
+            }
+            cli::DevCmd::DbDump {
+                rostra_id: id,
+                table,
+            } => {
+                let db_path = Database::mk_db_path(opts.global.data_dir(), id)
+                    .await
+                    .context(DataDirSnafu)?;
+
+                let db = Database::open(&db_path, id).await.context(DatabaseSnafu)?;
+
+                db.dump_table(&table).await.boxed().context(OtherSnafu)?;
+
+                serde_json::to_value(serde_json::Value::Null).expect("Can't fail")
             }
         },
         cli::OptsCmd::Serve { secret_file } => {

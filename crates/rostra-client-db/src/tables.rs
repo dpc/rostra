@@ -6,6 +6,7 @@ use ids::{IdsFolloweesRecord, IdsFollowersRecord, IdsPersonaRecord, IdsUnfollowe
 use rostra_core::event::{IrohNodeId, PersonaId};
 use rostra_core::id::{RestRostraId, RostraId, ShortRostraId};
 use rostra_core::{ShortEventId, Timestamp};
+use serde::Serialize;
 
 pub use self::event::EventsHeadsTableRecord;
 pub(crate) mod event;
@@ -75,9 +76,9 @@ pub struct Latest<T> {
     pub inner: T,
 }
 
-#[derive(Debug, Encode, Decode, Clone, Copy)]
+#[derive(Debug, Encode, Serialize, Decode, Clone, Copy)]
 pub struct SocialPostsRepliesRecord;
-#[derive(Debug, Encode, Decode, Clone, Copy)]
+#[derive(Debug, Encode, Serialize, Decode, Clone, Copy)]
 pub struct SocialPostsReactionsRecord;
 
 #[derive(Debug, Encode, Decode, Clone)]
@@ -114,6 +115,7 @@ pub struct SocialPostRecordV0 {
     Debug,
     Encode,
     Decode,
+    Serialize,
     Clone,
     // Note: needs to be default so we can track number of replies even before we get what was
     // replied to

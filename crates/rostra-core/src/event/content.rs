@@ -1,12 +1,19 @@
 use std::borrow::Borrow;
 use std::ops;
 use std::sync::Arc;
+#[cfg(feature = "serde")]
+mod serde;
 
 #[derive(Debug)]
 #[cfg_attr(feature = "bincode", derive(::bincode::Encode))]
 #[repr(transparent)]
 pub struct EventContentUnsized([u8]);
 
+impl std::fmt::Display for EventContentUnsized {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        data_encoding::HEXLOWER.encode_write(self.as_slice(), f)
+    }
+}
 impl EventContentUnsized {
     pub fn as_slice(&self) -> &[u8] {
         &self.0

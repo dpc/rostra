@@ -4,6 +4,7 @@ mod models;
 mod process_event_content_ops;
 mod process_event_ops;
 pub mod social;
+mod table_ops;
 mod tables;
 mod tx_ops;
 
@@ -79,6 +80,13 @@ impl WriteTransactionCtx {
 }
 
 #[derive(Debug, Snafu)]
+pub enum TableDumpError {
+    #[snafu(display("Unknown table `{name}`"))]
+    UnknownTable { name: String },
+}
+pub type TableDumpResult<T> = std::result::Result<T, TableDumpError>;
+
+#[derive(Debug, Snafu)]
 pub enum DbError {
     Database {
         source: redb::DatabaseError,
@@ -149,6 +157,7 @@ pub struct Database {
 }
 
 impl Database {
+    const MAX_CONTENT_LEN: u32 = 1_000_000u32;
     pub async fn mk_db_path(
         data_dir: &Path,
         self_id: RostraId,
@@ -234,7 +243,30 @@ impl Database {
         tokio::task::block_in_place(|| self.inner.as_raw_mut().compact())
     }
 
-    const MAX_CONTENT_LEN: u32 = 1_000_000u32;
+    pub async fn dump_table(&self, name: &str) -> TableDumpResult<()> {
+        self.read_with(|tx| {
+            match name {
+                "events" => Self::dump_table_dbtx(tx, &tables::events::TABLE)?,
+                "events_content" => Self::dump_table_dbtx(tx, &tables::events_content::TABLE)?,
+                "social_posts" => Self::dump_table_dbtx(tx, &tables::social_posts::TABLE)?,
+                "social_posts_replies" => {
+                    Self::dump_table_dbtx(tx, &tables::social_posts_replies::TABLE)?
+                }
+                "social_posts_reactions" => {
+                    Self::dump_table_dbtx(tx, &tables::social_posts_reactions::TABLE)?
+                }
+                _ => {
+                    return Ok(Err(UnknownTableSnafu {
+                        name: name.to_string(),
+                    }
+                    .build()));
+                }
+            }
+            Ok(Ok(()))
+        })
+        .await
+        .expect("Database panic")
+    }
 
     pub fn self_followees_subscribe(
         &self,

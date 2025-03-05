@@ -38,6 +38,7 @@ rostra-util-fmt = { workspace = true }
 dedup-chan = { workspace = true }
 rostra-util = { workspace = true }
 serde = { workspace = true }
+serde_json = { workspace = true }
 snafu = { workspace = true }
 rand = { workspace = true }
 tokio = { workspace = true }

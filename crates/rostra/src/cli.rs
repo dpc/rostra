@@ -131,4 +131,11 @@ pub enum DevCmd {
     },
     /// Run tests
     Test,
+    /// Dump database
+    DbDump {
+        #[arg(long)]
+        table: String,
+        #[arg(long)]
+        rostra_id: RostraId,
+    },
 }

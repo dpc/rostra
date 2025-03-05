@@ -3,8 +3,9 @@ use std::borrow::Cow;
 use bincode::{Decode, Encode};
 use rostra_core::event::{EventContentUnsized, EventExt, SignedEvent};
 use rostra_core::ShortEventId;
+use serde::Serialize;
 
-#[derive(Debug, Encode, Decode, Clone)]
+#[derive(Debug, Encode, Decode, Clone, Serialize)]
 pub enum EventContentState<'a> {
     /// The event content is present and we processed it without problems
     Present(Cow<'a, EventContentUnsized>),
@@ -27,7 +28,7 @@ pub enum EventContentState<'a> {
 
 pub type EventContentStateOwned = EventContentState<'static>;
 
-#[derive(Debug, Encode, Decode, Clone)]
+#[derive(Debug, Encode, Decode, Clone, Serialize)]
 pub struct EventRecord {
     pub signed: SignedEvent,
 }

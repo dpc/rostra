@@ -3914,6 +3914,7 @@ dependencies = [
  "rostra-util-error",
  "rostra-util-fmt",
  "serde",
+ "serde_json",
  "snafu",
  "tempfile",
  "test-log",
