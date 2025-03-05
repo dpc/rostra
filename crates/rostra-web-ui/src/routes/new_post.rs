@@ -274,7 +274,14 @@ impl UiState {
                         const tooltip = document.querySelector('.m-newPostForm__emojiBar')
 
                         button.onclick = () => {
-                            tooltip.classList.toggle('-hidden')
+                            tooltip.classList.toggle('-hidden');
+                            const isHidden = tooltip.classList.contains('-hidden');
+
+                            if (!isHidden) {
+                                const emojiPicker = document.querySelector('emoji-picker');
+                                const searchInput = emojiPicker.shadowRoot.querySelector('#search');
+                                searchInput.focus();
+                            }
                         }
 
                         document.querySelector('emoji-picker').addEventListener('emoji-click', e => {
