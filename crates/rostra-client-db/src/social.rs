@@ -73,7 +73,6 @@ impl Database {
                 let Some(content_state) =
                     Database::get_event_content_tx(event_id, &events_content_table)?
                 else {
-                    warn!(target: LOG_TARGET, %event_id, "Missing content for a post with social_post_record?!");
                     continue;
                 };
                 let EventContentState::Present(content) = content_state else {

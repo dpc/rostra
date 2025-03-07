@@ -74,7 +74,7 @@ impl HeadUpdateBroadcaster {
                 continue;
             };
             let Some(event_content) = self.db.get_event_content(head).await else {
-                warn!(target: LOG_TARGET, event_id = %head.to_short(), "No head event content!?");
+                debug!(target: LOG_TARGET, event_id = %head.to_short(), "No head event content.");
                 continue;
             };
 

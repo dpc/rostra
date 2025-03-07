@@ -208,7 +208,23 @@ impl FolloweeHeadChecker {
                     let verified_content = VerifiedEventContent::verify(event, content)
                         .expect("Bao transfer should guarantee correct content was received");
                     storage.process_event_content(&verified_content).await;
+                } else {
+                    debug!(
+                        target: LOG_TARGET,
+                        %depth,
+                        node_id = %peer_id.fmt_option(),
+                        %rostra_id,
+                        %event_id,
+                        "Event content not found"
+                    );
                 }
+            } else {
+                debug!(
+                    target: LOG_TARGET,
+                    %rostra_id,
+                    %event_id,
+                    "Event content not wanted"
+                );
             }
         }
 
