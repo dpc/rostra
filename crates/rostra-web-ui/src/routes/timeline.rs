@@ -287,7 +287,7 @@ impl UiState {
             TimelineMode::Notifications => {
                 if let Some(latest_event) = client
                     .db()
-                    .paginate_social_posts_rev_with_filter(None, 1, |_| true)
+                    .paginate_social_posts_rev(None, 1, |_| true)
                     .await
                     .0
                     .into_iter()
@@ -306,7 +306,7 @@ impl UiState {
             TimelineMode::Followees | TimelineMode::Network => {
                 let pending_len = client
                     .db()
-                    .paginate_social_posts_with_filter(
+                    .paginate_social_posts(
                         cookies.get_last_seen(client.rostra_id()),
                         10,
                         TimelineMode::Notifications.to_filter_fn(client).await,
@@ -328,7 +328,8 @@ impl UiState {
         let client = self.client(session.id()).await?;
         let client_ref = client.client_ref()?;
 
-        let comments = self
+        // Note: we actually are not doing any pagination
+        let (comments, _) = self
             .client(session.id())
             .await?
             .db()?
@@ -390,9 +391,9 @@ impl UiState {
 
         let filter_fn = mode.to_filter_fn(&client_ref).await;
 
-        let (filtered_posts, last_seen) = client_ref
+        let (filtered_posts, cursor) = client_ref
             .db()
-            .paginate_social_posts_rev_with_filter(pagination, 30, filter_fn)
+            .paginate_social_posts_rev(pagination, 30, filter_fn)
             .await;
 
         let parents = self
@@ -475,13 +476,13 @@ impl UiState {
                         }
                     }
                 }
-                @if last_seen != EventPaginationCursor::ZERO {
+                @if let Some(cursor) = cursor {
                     div ."o-mainBarTimeline__rest -empty"
                         hx-get=(
                             format!("{}?ts={}&event_id={}",
                                 mode.to_path(),
-                                last_seen.ts,
-                                last_seen.event_id)
+                                cursor.ts,
+                                cursor.event_id)
                         )
                         hx-select=".o-mainBarTimeline__item, .o-mainBarTimeline__rest, script.mathjax"
                         hx-trigger="intersect once, threshold:0.5"
@@ -521,13 +522,15 @@ impl UiState {
         let external_event_id = event_id.map(|e| ExternalEventId::new(author, e));
         let user_profile = self.get_social_profile_opt(author, client).await;
 
-        let reactions = if let Some(event_id) = event_id {
+        // Note: we are actually not doing pagiantion, and just ignore
+        // everything after first page
+        let (reactions, _) = if let Some(event_id) = event_id {
             client
                 .db()
                 .paginate_social_post_reactions_rev(event_id, None, 1000)
                 .await
         } else {
-            vec![]
+            (vec![], None)
         };
 
         let mut reaction_social_profiles: HashMap<RostraId, IdSocialProfileRecord> = HashMap::new();
