@@ -10,8 +10,10 @@ use convi::{CastInto, ExpectFrom};
 use iroh::endpoint::{RecvStream, SendStream};
 use iroh_io::{TokioStreamReader, TokioStreamWriter};
 use rostra_core::bincode::STD_BINCODE_CONFIG;
-use rostra_core::event::{EventContent, EventExt as _, SignedEvent, VerifiedEvent};
-use rostra_core::id::RostraId;
+use rostra_core::event::{
+    EventContent, EventExt as _, SignedEvent, VerifiedEvent, VerifiedEventContent,
+};
+use rostra_core::id::{RostraId, ToShort as _};
 use rostra_core::{ContentHash, MsgLen, ShortEventId};
 use rostra_util_error::BoxedErrorResult;
 use snafu::{OptionExt as _, ResultExt as _};
@@ -489,26 +491,35 @@ impl Connection {
 
     pub async fn get_event_content(
         &self,
-        event_id: impl Into<ShortEventId>,
-        len: u32,
-        hash: ContentHash,
-    ) -> RpcResult<Option<EventContent>> {
-        let event_id = event_id.into();
-
+        event: VerifiedEvent,
+    ) -> RpcResult<Option<VerifiedEventContent>> {
         let (_resp, content) = self
-            .make_rpc_with_extra_data_recv(&GetEventContentRequest(event_id), |recv, resp| {
-                let resp = resp.to_owned();
-                Box::pin(async move {
-                    if resp.0 {
-                        Ok(Some(EventContent::new(
-                            Connection::read_bao_content(recv, len, hash).await?,
-                        )))
-                    } else {
-                        Ok(None)
-                    }
-                })
-            })
+            .make_rpc_with_extra_data_recv(
+                &GetEventContentRequest(event.event_id.to_short()),
+                |recv, resp| {
+                    let resp = resp.to_owned();
+                    Box::pin(async move {
+                        if resp.0 {
+                            Ok(Some(EventContent::new(
+                                Connection::read_bao_content(
+                                    recv,
+                                    event.content_len(),
+                                    event.content_hash(),
+                                )
+                                .await?,
+                            )))
+                        } else {
+                            Ok(None)
+                        }
+                    })
+                },
+            )
             .await?;
-        Ok(content)
+
+        let verified_content = content.map(|content| {
+            VerifiedEventContent::verify(event, content)
+                .expect("Bao transfer should guarantee correct content was received")
+        });
+        Ok(verified_content)
     }
 }

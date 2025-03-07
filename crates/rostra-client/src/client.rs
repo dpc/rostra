@@ -42,6 +42,7 @@ use crate::error::{
 };
 use crate::id::{CompactTicket, IdPublishedData, IdResolvedData};
 use crate::task::head_merger::HeadMerger;
+use crate::task::missing_event_content_fetcher::MissingEventContentFetcher;
 use crate::task::missing_event_fetcher::MissingEventFetcher;
 use crate::task::pkarr_id_publisher::PkarrIdPublisher;
 use crate::task::request_handler::RequestHandler;
@@ -193,6 +194,7 @@ impl Client {
             client.start_followee_head_checker();
             client.start_head_update_broadcaster();
             client.start_missing_event_fetcher();
+            client.start_missing_event_content_fetcher();
         }
 
         trace!(target: LOG_TARGET, %id, "Client complete");
@@ -373,6 +375,9 @@ impl Client {
     }
     pub(crate) fn start_missing_event_fetcher(&self) {
         tokio::spawn(MissingEventFetcher::new(self).run());
+    }
+    pub(crate) fn start_missing_event_content_fetcher(&self) {
+        tokio::spawn(MissingEventContentFetcher::new(self).run());
     }
 
     pub(crate) async fn iroh_address(&self) -> IrohResult<NodeAddr> {

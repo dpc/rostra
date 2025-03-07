@@ -3,7 +3,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use rostra_client_db::{Database, IdsFolloweesRecord, InsertEventOutcome};
-use rostra_core::event::{EventExt as _, PersonaId, VerifiedEventContent};
+use rostra_core::event::PersonaId;
 use rostra_core::id::RostraId;
 use rostra_core::ShortEventId;
 use rostra_p2p::connection::GetHeadRequest;
@@ -200,14 +200,12 @@ impl FolloweeHeadChecker {
 
             if storage.wants_content(event_id, process_state).await {
                 let content = conn
-                    .get_event_content(event_id, event.content_len(), event.content_hash())
+                    .get_event_content(event)
                     .await
                     .whatever_context("Failed to download peer data")?;
 
                 if let Some(content) = content {
-                    let verified_content = VerifiedEventContent::verify(event, content)
-                        .expect("Bao transfer should guarantee correct content was received");
-                    storage.process_event_content(&verified_content).await;
+                    storage.process_event_content(&content).await;
                 } else {
                     debug!(
                         target: LOG_TARGET,
