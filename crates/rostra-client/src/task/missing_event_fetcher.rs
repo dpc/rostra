@@ -1,6 +1,6 @@
 use std::collections::BTreeMap;
 
-use rostra_core::event::{EventExt as _, VerifiedEvent, VerifiedEventContent};
+use rostra_core::event::{EventExt as _, SignedEventExt as _, VerifiedEvent, VerifiedEventContent};
 use rostra_core::id::RostraId;
 use rostra_core::ShortEventId;
 use rostra_p2p::Connection;
@@ -141,7 +141,7 @@ impl MissingEventFetcher {
         storage: &rostra_client_db::Database,
     ) -> WhateverResult<bool> {
         let event = conn
-            .get_event(event_id)
+            .get_event(author_id, event_id)
             .await
             .whatever_context("Failed to query peer")?;
 

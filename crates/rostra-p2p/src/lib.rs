@@ -2,6 +2,7 @@ pub mod connection;
 pub mod error;
 
 pub use connection::Connection;
+use rostra_core::event::VerifiedEventError;
 use rostra_util_error::BoxedError;
 use snafu::Snafu;
 pub const ROSTRA_P2P_V0_ALPN: &[u8] = b"rostra-p2p-v0";
@@ -34,6 +35,9 @@ pub enum RpcError {
     },
     Trailer {
         source: BoxedError,
+    },
+    EventVerification {
+        source: VerifiedEventError,
     },
     /// Other side responded with rpc failure
     Failed {

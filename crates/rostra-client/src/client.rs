@@ -190,7 +190,6 @@ impl Client {
         }
 
         if is_mode_full {
-            client.start_followee_checker();
             client.start_followee_head_checker();
             client.start_head_update_broadcaster();
             client.start_missing_event_fetcher();
@@ -366,9 +365,6 @@ impl Client {
         tokio::spawn(RequestHandler::new(self, self.endpoint.clone()).run());
     }
 
-    pub(crate) fn start_followee_checker(&self) {
-        tokio::spawn(crate::task::followee_checker::FolloweeChecker::new(self).run());
-    }
     pub(crate) fn start_followee_head_checker(&self) {
         tokio::spawn(crate::task::followee_head_checker::FolloweeHeadChecker::new(self).run());
     }

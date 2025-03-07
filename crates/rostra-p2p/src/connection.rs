@@ -10,7 +10,7 @@ use convi::{CastInto, ExpectFrom};
 use iroh::endpoint::{RecvStream, SendStream};
 use iroh_io::{TokioStreamReader, TokioStreamWriter};
 use rostra_core::bincode::STD_BINCODE_CONFIG;
-use rostra_core::event::{EventContent, SignedEvent};
+use rostra_core::event::{EventContent, EventExt as _, SignedEvent, VerifiedEvent};
 use rostra_core::id::RostraId;
 use rostra_core::{ContentHash, MsgLen, ShortEventId};
 use rostra_util_error::BoxedErrorResult;
@@ -18,8 +18,8 @@ use snafu::{OptionExt as _, ResultExt as _};
 use tracing::trace;
 
 use crate::{
-    ConnectionSnafu, DecodingBaoSnafu, DecodingSnafu, EncodingBaoSnafu, FailedSnafu,
-    MessageTooLargeSnafu, ReadSnafu, RpcResult, TrailerSnafu, WriteSnafu, LOG_TARGET,
+    ConnectionSnafu, DecodingBaoSnafu, DecodingSnafu, EncodingBaoSnafu, EventVerificationSnafu,
+    FailedSnafu, MessageTooLargeSnafu, ReadSnafu, RpcResult, TrailerSnafu, WriteSnafu, LOG_TARGET,
 };
 
 pub struct Connection(iroh::endpoint::Connection);
@@ -460,13 +460,31 @@ impl Connection {
 }
 
 impl Connection {
-    pub async fn get_event(
+    pub async fn get_event_unverified(
         &self,
         event_id: impl Into<ShortEventId>,
     ) -> RpcResult<Option<SignedEvent>> {
         let event = self.make_rpc(&GetEventRequest(event_id.into())).await?;
 
         Ok(event.0)
+    }
+
+    pub async fn get_event(
+        &self,
+        rostra_id: RostraId,
+        event_id: impl Into<ShortEventId>,
+    ) -> RpcResult<Option<VerifiedEvent>> {
+        let event_id = event_id.into();
+        let signed_event = self.get_event_unverified(event_id).await?;
+
+        let Some(event) = signed_event else {
+            return Ok(None);
+        };
+        let event =
+            VerifiedEvent::verify_response(rostra_id, event_id, *event.event(), event.sig())
+                .context(EventVerificationSnafu)?;
+
+        Ok(Some(event))
     }
 
     pub async fn get_event_content(

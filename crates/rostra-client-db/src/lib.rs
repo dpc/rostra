@@ -18,7 +18,8 @@ pub use ids::{IdsFolloweesRecord, IdsFollowersRecord};
 use process_event_content_ops::ProcessEventError;
 use redb_bincode::{ReadTransaction, ReadableTable, WriteTransaction};
 use rostra_core::event::{
-    content_kind, EventContent, IrohNodeId, PersonaId, VerifiedEvent, VerifiedEventContent,
+    content_kind, EventContent, EventExt as _, IrohNodeId, PersonaId, VerifiedEvent,
+    VerifiedEventContent,
 };
 use rostra_core::id::{RostraId, ToShort as _};
 use rostra_core::{ShortEventId, Timestamp};
@@ -466,6 +467,13 @@ impl Database {
                             &event_content.event_id().to_short(),
                             &EventContentState::Present(Cow::Owned(content.clone())),
                         )?;
+                        info!(target: LOG_TARGET,
+                            kind = %event_content.kind(),
+                            event_id = %event_content.event_id().to_short(),
+                            author = %event_content.author().to_short(),
+                            len = %event_content.content_len(),
+                            "New event content inserted"
+                        );
                     }
                     Err(ProcessEventError::Invalid { source, location }) => {
                         info!(
