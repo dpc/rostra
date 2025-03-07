@@ -13,6 +13,7 @@ pub(crate) mod event;
 pub(crate) mod id_self;
 pub(crate) mod ids;
 
+#[macro_export]
 macro_rules! def_table {
     ($(#[$outer:meta])*
         $name:ident : $k:ty => $v:ty) => {

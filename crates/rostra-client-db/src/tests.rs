@@ -11,7 +11,13 @@ use crate::{
     events, events_by_time, events_content, events_heads, events_missing, ids_full, Database,
 };
 
-async fn temp_db(self_id: RostraId) -> BoxedErrorResult<(TempDir, super::Database)> {
+pub(crate) async fn temp_db_rng() -> BoxedErrorResult<(TempDir, super::Database)> {
+    let id_secret = RostraIdSecretKey::generate();
+    let author = id_secret.id();
+    temp_db(author).await
+}
+
+pub(crate) async fn temp_db(self_id: RostraId) -> BoxedErrorResult<(TempDir, super::Database)> {
     let dir = tempdir()?;
     let db = super::Database::open(dir.path().join("db.redb"), self_id)
         .await
