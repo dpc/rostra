@@ -1,3 +1,4 @@
+mod events_content_missing_ops;
 mod id_nodes_ops;
 mod migration_ops;
 mod models;
@@ -250,6 +251,9 @@ impl Database {
             match name {
                 "events" => Self::dump_table_dbtx(tx, &tables::events::TABLE)?,
                 "events_content" => Self::dump_table_dbtx(tx, &tables::events_content::TABLE)?,
+                "events_content_missing" => {
+                    Self::dump_table_dbtx(tx, &tables::events_content_missing::TABLE)?
+                }
                 "social_posts" => Self::dump_table_dbtx(tx, &tables::social_posts::TABLE)?,
                 "social_posts_replies" => {
                     Self::dump_table_dbtx(tx, &tables::social_posts_replies::TABLE)?
@@ -448,10 +452,15 @@ impl Database {
         let events_table = tx.open_table(&events::TABLE)?;
         let mut events_content_table = tx.open_table(&events_content::TABLE)?;
 
+        let mut events_content_missing_table =
+            tx.open_table(&tables::events_content_missing::TABLE)?;
+
         debug_assert!(Database::has_event_tx(
             event_content.event.event_id,
             &events_table
         )?);
+
+        events_content_missing_table.remove(&event_content.event_id().to_short())?;
 
         let can_insert = if u32::from(event_content.event.event.content_len) < Self::MAX_CONTENT_LEN
         {
@@ -722,6 +731,8 @@ impl InsertEventOutcome {
         self
     }
 }
+
+#[derive(Clone, Copy, PartialEq, Eq)]
 pub enum ProcessEventState {
     New,
     Existing,

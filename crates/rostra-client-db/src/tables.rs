@@ -60,6 +60,7 @@ def_table!(events_missing: (RostraId, ShortEventId) => EventsMissingRecord);
 def_table!(events_heads: (RostraId, ShortEventId) => EventsHeadsTableRecord);
 def_table!(events_self: ShortEventId => ());
 def_table!(events_content: ShortEventId => event::EventContentStateOwned);
+def_table!(events_content_missing: ShortEventId => ());
 def_table!(events_by_time: (Timestamp, ShortEventId) => ());
 
 // SOCIAL

@@ -20,8 +20,8 @@ use super::{
     Database, DbError, DbResult, EventsHeadsTableRecord, InsertEventOutcome,
 };
 use crate::{
-    ids_full, social_posts, social_profiles, IdSocialProfileRecord, Latest, SocialPostRecord,
-    LOG_TARGET,
+    events_content_missing, ids_full, social_posts, social_profiles, IdSocialProfileRecord, Latest,
+    SocialPostRecord, LOG_TARGET,
 };
 
 impl Database {
@@ -56,14 +56,16 @@ impl Database {
     /// Insert an event and do all the accounting for it
     ///
     /// Return `true`
+    #[allow(clippy::too_many_arguments)]
     pub fn insert_event_tx(
         event: VerifiedEvent,
         ids_full_t: &mut ids_full::Table,
         events_table: &mut events::Table,
-        events_by_time_table: &mut events_by_time::Table,
-        events_content_table: &mut events_content::Table,
         events_missing_table: &mut events_missing::Table,
         events_heads_table: &mut events_heads::Table,
+        events_by_time_table: &mut events_by_time::Table,
+        events_content_table: &mut events_content::Table,
+        events_content_missing_table: &mut events_content_missing::Table,
     ) -> DbResult<InsertEventOutcome> {
         let author = event.author();
         let event_id = event.event_id.to_short();
@@ -121,6 +123,7 @@ impl Database {
             if let Some(_parent_event) = parent_event {
                 if event.is_delete_parent_aux_content_set() && parent_is_aux {
                     deleted_parent = Some(parent_id);
+                    events_content_missing_table.remove(&parent_id)?;
                     reverted_parent_content = events_content_table
                         .insert(
                             &parent_id,
@@ -194,6 +197,7 @@ impl Database {
     pub fn prune_event_content_tx(
         event_id: impl Into<ShortEventId>,
         events_content_table: &mut events_content::Table,
+        events_content_missing_table: &mut events_content_missing::Table,
     ) -> DbResult<bool> {
         let event_id = event_id.into();
         if let Some(existing_content) = events_content_table.get(&event_id)?.map(|g| g.value()) {
@@ -212,6 +216,7 @@ impl Database {
         }
 
         events_content_table.insert(&event_id, &EventContentState::Pruned)?;
+        events_content_missing_table.remove(&event_id)?;
 
         Ok(true)
     }

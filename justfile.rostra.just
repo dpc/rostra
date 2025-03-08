@@ -21,6 +21,7 @@ dev PORT="2345":
       ROSTRA_DEV_MODE=1 \
       RUST_LOG=${RUST_LOG:-rostra=debug,info,iroh=error,mainline=error} \
       cargo watch \
+        -d .1 \
         -i 'dev/**' \
         -i 'crates/rostra-web-ui/assets/**' \
         -i 'assets/**' \

@@ -5,8 +5,9 @@ use tracing::{info, warn};
 
 use crate::process_event_content_ops::ProcessEventError;
 use crate::{
-    events, events_by_time, events_content, events_heads, events_missing, ids_full, Database,
-    DbResult, InsertEventOutcome, ProcessEventState, WriteTransactionCtx, LOG_TARGET,
+    events, events_by_time, events_content, events_content_missing, events_heads, events_missing,
+    ids_full, Database, DbResult, InsertEventOutcome, ProcessEventState, WriteTransactionCtx,
+    LOG_TARGET,
 };
 
 impl Database {
@@ -17,6 +18,7 @@ impl Database {
     ) -> DbResult<(InsertEventOutcome, ProcessEventState)> {
         let mut events_tbl = tx.open_table(&events::TABLE)?;
         let mut events_content_tbl = tx.open_table(&events_content::TABLE)?;
+        let mut events_content_missing_tbl = tx.open_table(&events_content_missing::TABLE)?;
         let mut events_missing_tbl = tx.open_table(&events_missing::TABLE)?;
         let mut events_heads_tbl = tx.open_table(&events_heads::TABLE)?;
         let mut events_by_time_tbl = tx.open_table(&events_by_time::TABLE)?;
@@ -26,10 +28,11 @@ impl Database {
             *event,
             &mut ids_full_tbl,
             &mut events_tbl,
-            &mut events_by_time_tbl,
-            &mut events_content_tbl,
             &mut events_missing_tbl,
             &mut events_heads_tbl,
+            &mut events_by_time_tbl,
+            &mut events_content_tbl,
+            &mut events_content_missing_tbl,
         )?;
 
         if let InsertEventOutcome::Inserted {
@@ -109,7 +112,11 @@ impl Database {
 
         let process_event_content_state =
             if Self::MAX_CONTENT_LEN < u32::from(event.event.content_len) {
-                if Database::prune_event_content_tx(event.event_id, &mut events_content_tbl)? {
+                if Database::prune_event_content_tx(
+                    event.event_id,
+                    &mut events_content_tbl,
+                    &mut events_content_missing_tbl,
+                )? {
                     ProcessEventState::Pruned
                 } else {
                     ProcessEventState::Deleted
@@ -128,6 +135,10 @@ impl Database {
                     }
                 }
             };
+
+        if process_event_content_state == ProcessEventState::New {
+            events_content_missing_tbl.insert(&event.event_id.to_short(), &())?;
+        }
         Ok((insert_event_outcome, process_event_content_state))
     }
 }

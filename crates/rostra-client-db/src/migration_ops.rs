@@ -4,11 +4,12 @@ use redb::ReadableTable as _;
 use tracing::{debug, info};
 
 use crate::{
-    db_version, events, events_by_time, events_content, events_heads, events_missing, events_self,
-    ids_followees, ids_followers, ids_full, ids_personas, ids_self, ids_unfollowed, social_posts,
-    social_posts_by_time, social_posts_reactions, social_posts_replies, social_posts_v0,
-    social_profiles, social_profiles_v0, Database, DbResult, DbVersionTooHighSnafu,
-    IdSocialProfileRecord, Latest, SocialPostRecord, WriteTransactionCtx, LOG_TARGET,
+    db_version, events, events_by_time, events_content, events_content_missing, events_heads,
+    events_missing, events_self, ids_followees, ids_followers, ids_full, ids_personas, ids_self,
+    ids_unfollowed, social_posts, social_posts_by_time, social_posts_reactions,
+    social_posts_replies, social_posts_v0, social_profiles, social_profiles_v0, Database, DbResult,
+    DbVersionTooHighSnafu, IdSocialProfileRecord, Latest, SocialPostRecord, WriteTransactionCtx,
+    LOG_TARGET,
 };
 
 impl Database {
@@ -23,10 +24,11 @@ impl Database {
         tx.open_table(&ids_personas::TABLE)?;
 
         tx.open_table(&events::TABLE)?;
+        tx.open_table(&events_missing::TABLE)?;
         tx.open_table(&events_by_time::TABLE)?;
         tx.open_table(&events_content::TABLE)?;
+        tx.open_table(&events_content_missing::TABLE)?;
         tx.open_table(&events_self::TABLE)?;
-        tx.open_table(&events_missing::TABLE)?;
         tx.open_table(&events_heads::TABLE)?;
 
         tx.open_table(&social_profiles::TABLE)?;

@@ -8,7 +8,8 @@ use tracing::info;
 
 use crate::event::EventContentState;
 use crate::{
-    events, events_by_time, events_content, events_heads, events_missing, ids_full, Database,
+    events, events_by_time, events_content, events_content_missing, events_heads, events_missing,
+    ids_full, Database,
 };
 
 pub(crate) async fn temp_db_rng() -> BoxedErrorResult<(TempDir, super::Database)> {
@@ -64,9 +65,11 @@ async fn test_store_event() -> BoxedErrorResult<()> {
     db.write_with(|tx| {
         let mut ids_full_tbl = tx.open_table(&ids_full::TABLE).boxed()?;
         let mut events_table = tx.open_table(&events::TABLE).boxed()?;
+        let mut events_missing_table = tx.open_table(&events_missing::TABLE).boxed()?;
         let mut events_by_time_table = tx.open_table(&events_by_time::TABLE)?;
         let mut events_content_table = tx.open_table(&events_content::TABLE).boxed()?;
-        let mut events_missing_table = tx.open_table(&events_missing::TABLE).boxed()?;
+        let mut events_content_missing_table =
+            tx.open_table(&events_content_missing::TABLE).boxed()?;
         let mut events_heads_table = tx.open_table(&events_heads::TABLE).boxed()?;
 
         for (event, missing_expect, heads_expect) in [
@@ -89,10 +92,11 @@ async fn test_store_event() -> BoxedErrorResult<()> {
                     event,
                     &mut ids_full_tbl,
                     &mut events_table,
-                    &mut events_by_time_table,
-                    &mut events_content_table,
                     &mut events_missing_table,
                     &mut events_heads_table,
+                    &mut events_by_time_table,
+                    &mut events_content_table,
+                    &mut events_content_missing_table,
                 )?;
 
                 info!(event_id = %event.event_id, "Checking missing");
@@ -158,6 +162,8 @@ async fn test_store_deleted_event() -> BoxedErrorResult<()> {
         let mut events_table = tx.open_table(&events::TABLE).boxed()?;
         let mut events_by_time_table = tx.open_table(&events_by_time::TABLE)?;
         let mut events_content_table = tx.open_table(&events_content::TABLE).boxed()?;
+        let mut events_content_missing_table =
+            tx.open_table(&events_content_missing::TABLE).boxed()?;
         let mut events_missing_table = tx.open_table(&events_missing::TABLE).boxed()?;
         let mut events_heads_table = tx.open_table(&events_heads::TABLE).boxed()?;
 
@@ -189,10 +195,11 @@ async fn test_store_deleted_event() -> BoxedErrorResult<()> {
                     event,
                     &mut ids_full_tbl,
                     &mut events_table,
-                    &mut events_by_time_table,
-                    &mut events_content_table,
                     &mut events_missing_table,
                     &mut events_heads_table,
+                    &mut events_by_time_table,
+                    &mut events_content_table,
+                    &mut events_content_missing_table,
                 )?;
 
                 for (event_id, expected_state) in [event_a_id, event_b_id, event_c_id, event_d_id]
