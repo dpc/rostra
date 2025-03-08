@@ -1,5 +1,6 @@
 use rostra_core::event::{EventExt as _, VerifiedEvent, VerifiedEventContent};
 use rostra_core::id::ToShort as _;
+use rostra_core::ContentHash;
 use rostra_util_error::FmtCompact as _;
 use tracing::{info, warn};
 
@@ -110,31 +111,32 @@ impl Database {
             }
         }
 
-        let process_event_content_state =
-            if Self::MAX_CONTENT_LEN < u32::from(event.event.content_len) {
-                if Database::prune_event_content_tx(
-                    event.event_id,
-                    &mut events_content_tbl,
-                    &mut events_content_missing_tbl,
-                )? {
-                    ProcessEventState::Pruned
-                } else {
-                    ProcessEventState::Deleted
-                }
+        let process_event_content_state = if event.event.content_hash() == ContentHash::ZERO {
+            ProcessEventState::NoContent
+        } else if Self::MAX_CONTENT_LEN < u32::from(event.event.content_len) {
+            if Database::prune_event_content_tx(
+                event.event_id,
+                &mut events_content_tbl,
+                &mut events_content_missing_tbl,
+            )? {
+                ProcessEventState::Pruned
             } else {
-                match insert_event_outcome {
-                    InsertEventOutcome::AlreadyPresent => ProcessEventState::Existing,
-                    InsertEventOutcome::Inserted { is_deleted, .. } => {
-                        if is_deleted {
-                            ProcessEventState::Deleted
-                        } else {
-                            // If the event was not there, and it wasn't deleted
-                            // it definitely does not have content yet.
-                            ProcessEventState::New
-                        }
+                ProcessEventState::Deleted
+            }
+        } else {
+            match insert_event_outcome {
+                InsertEventOutcome::AlreadyPresent => ProcessEventState::Existing,
+                InsertEventOutcome::Inserted { is_deleted, .. } => {
+                    if is_deleted {
+                        ProcessEventState::Deleted
+                    } else {
+                        // If the event was not there, and it wasn't deleted
+                        // it definitely does not have content yet.
+                        ProcessEventState::New
                     }
                 }
-            };
+            }
+        };
 
         if process_event_content_state == ProcessEventState::New {
             events_content_missing_tbl.insert(&event.event_id.to_short(), &())?;

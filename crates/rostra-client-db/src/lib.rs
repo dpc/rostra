@@ -738,6 +738,7 @@ pub enum ProcessEventState {
     Existing,
     Pruned,
     Deleted,
+    NoContent,
 }
 
 pub enum ContentWantState {
@@ -753,6 +754,7 @@ impl ProcessEventState {
             ProcessEventState::Existing => ContentWantState::MaybeWants,
             ProcessEventState::Pruned => ContentWantState::DoesNotWant,
             ProcessEventState::Deleted => ContentWantState::DoesNotWant,
+            ProcessEventState::NoContent => ContentWantState::DoesNotWant,
         }
     }
 }
