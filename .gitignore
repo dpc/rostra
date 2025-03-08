@@ -5,3 +5,4 @@
 /.env
 /tmp
 .aider*
+!/.aider.conf.yml

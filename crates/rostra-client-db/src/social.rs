@@ -62,7 +62,7 @@ impl Database {
                 cursor.map(|c| (c.ts, c.event_id)),
                 limit,
                 move |(ts, event_id), _| {
-                
+
                 let Some(content_state) =
                     Database::get_event_content_tx(event_id, &events_content_table)?
                 else {
@@ -129,7 +129,7 @@ impl Database {
                 cursor.map(|c| (c.ts, c.event_id)),
                 limit,
                 move |(ts, event_id), _| {
-                
+
                 let Some(content_state) =
                     Database::get_event_content_tx(event_id, &events_content_table)?
                 else {
@@ -182,22 +182,22 @@ impl Database {
         post_event_id: ShortEventId,
         cursor: Option<EventPaginationCursor>,
         limit: usize,
-    ) -> (Vec<SocialPostRecord<content_kind::SocialPost>>, Option<EventPaginationCursor>) {
+    ) -> (
+        Vec<SocialPostRecord<content_kind::SocialPost>>,
+        Option<EventPaginationCursor>,
+    ) {
         self.read_with(|tx| {
             let events_table = tx.open_table(&events::TABLE)?;
             let social_posts_tbl = tx.open_table(&social_posts::TABLE)?;
             let social_post_replies_tbl = tx.open_table(&social_posts_replies::TABLE)?;
             let events_content_table = tx.open_table(&events_content::TABLE)?;
 
-
             let (ret, cursor) = Database::paginate_table_partition_rev(&social_post_replies_tbl,
-                (post_event_id, Timestamp::ZERO, ShortEventId::ZERO),
+                (post_event_id, Timestamp::ZERO, ShortEventId::ZERO)..=
                 (post_event_id, Timestamp::MAX, ShortEventId::MAX),
                 |(_, ts, event_id)| (post_event_id, ts, event_id),
 
                  cursor.map(|c| (post_event_id, c.ts, c.event_id)), limit, move |(_, ts, event_id), _| {
-                
-
 
                 let social_post_record = Database::get_social_post_tx(event_id, &social_posts_tbl)?.unwrap_or_default();
 
@@ -236,7 +236,6 @@ impl Database {
         })
         .await
         .expect("Storage error")
-
     }
 
     pub async fn paginate_social_post_reactions_rev(
@@ -244,7 +243,10 @@ impl Database {
         post_event_id: ShortEventId,
         cursor: Option<EventPaginationCursor>,
         limit: usize,
-    ) -> (Vec<SocialPostRecord<content_kind::SocialPost>>, Option<EventPaginationCursor>) {
+    ) -> (
+        Vec<SocialPostRecord<content_kind::SocialPost>>,
+        Option<EventPaginationCursor>,
+    ) {
         self.read_with(|tx| {
             let events_table = tx.open_table(&events::TABLE)?;
             let social_posts_tbl = tx.open_table(&social_posts::TABLE)?;
@@ -253,13 +255,10 @@ impl Database {
 
 
             let (ret, cursor) = Database::paginate_table_partition_rev(&social_post_reactions_tbl,
-                (post_event_id, Timestamp::ZERO, ShortEventId::ZERO),
-                (post_event_id, Timestamp::MAX, ShortEventId::MAX),
+                (post_event_id, Timestamp::ZERO, ShortEventId::ZERO)..=(post_event_id, Timestamp::MAX, ShortEventId::MAX),
                 |(_, ts, event_id)| (post_event_id, ts, event_id),
 
-                 cursor.map(|c| (post_event_id, c.ts, c.event_id)), limit, move |(_, ts, event_id), _| {
-                
-
+                cursor.map(|c| (post_event_id, c.ts, c.event_id)), limit, move |(_, ts, event_id), _| {
 
                 let social_post_record = Database::get_social_post_tx(event_id, &social_posts_tbl)?.unwrap_or_default();
 

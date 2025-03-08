@@ -1,3 +1,5 @@
+use std::{cmp, ops};
+
 use crate::{Database, DbResult};
 
 impl Database {
@@ -69,19 +71,27 @@ impl Database {
 
     pub fn paginate_table_partition<K, V, C, R>(
         table: &impl redb_bincode::ReadableTable<K, V>,
-        prefix_cursor_min: impl Fn(Option<C>) -> K,
-        prefix_max: K,
+        prefix: ops::RangeInclusive<K>,
+        cursor_to_key: impl Fn(C) -> K,
         cursor: Option<C>,
         limit: usize,
         filter_fn: impl Fn(K, V) -> DbResult<Option<R>> + Send + 'static,
     ) -> DbResult<(Vec<R>, Option<K>)>
     where
-        K: bincode::Decode + bincode::Encode,
+        K: bincode::Decode + bincode::Encode + cmp::Ord,
         V: bincode::Decode + bincode::Encode,
     {
         let mut ret = vec![];
 
-        for event in table.range(&prefix_cursor_min(cursor)..=&prefix_max)? {
+        let (prefix_start, prefix_end) = prefix.into_inner();
+
+        let start = if let Some(cursor) = cursor {
+            cursor_to_key(cursor).max(prefix_start)
+        } else {
+            prefix_start
+        };
+
+        for event in table.range(&start..=&prefix_end)? {
             let (k, v) = event?;
 
             let k = k.value();
@@ -99,23 +109,26 @@ impl Database {
 
     pub fn paginate_table_partition_rev<K, V, C, R>(
         table: &impl redb_bincode::ReadableTable<K, V>,
-        prefix_min: K,
-        prefix_max: K,
-        cursor_to_prefix: impl Fn(C) -> K,
+        prefix: ops::RangeInclusive<K>,
+        cursor_to_key: impl Fn(C) -> K,
         cursor: Option<C>,
         limit: usize,
         filter_fn: impl Fn(K, V) -> DbResult<Option<R>> + Send + 'static,
     ) -> DbResult<(Vec<R>, Option<K>)>
     where
-        K: bincode::Decode + bincode::Encode,
+        K: bincode::Decode + bincode::Encode + cmp::Ord,
         V: bincode::Decode + bincode::Encode,
     {
         let mut ret = vec![];
 
-        for event in table
-            .range(&prefix_min..&cursor.map(cursor_to_prefix).unwrap_or(prefix_max))?
-            .rev()
-        {
+        let (prefix_start, prefix_end) = prefix.into_inner();
+
+        let end = if let Some(cursor) = cursor {
+            cursor_to_key(cursor).min(prefix_end)
+        } else {
+            prefix_end
+        };
+        for event in table.range(&prefix_start..&end)?.rev() {
             let (k, v) = event?;
 
             let k = k.value();

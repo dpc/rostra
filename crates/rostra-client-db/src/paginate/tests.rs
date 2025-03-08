@@ -134,8 +134,8 @@ async fn paginate_partition() -> BoxedErrorResult<()> {
         assert_eq!(
             Database::paginate_table_partition(
                 &table,
-                |cursor: Option<u64>| cursor.unwrap_or(10),
-                19,
+                10..=19,
+                |c: u64| c,
                 None,
                 1,
                 |k, v| Ok(Some(format!("{k}-{v}")))
@@ -147,8 +147,8 @@ async fn paginate_partition() -> BoxedErrorResult<()> {
         assert_eq!(
             Database::paginate_table_partition(
                 &table,
-                |cursor: Option<u64>| cursor.unwrap_or(10),
-                19,
+                10..=19,
+                |c: u64| c,
                 Some(11),
                 1,
                 |k, v| Ok(Some(format!("{k}-{v}")))
@@ -160,8 +160,8 @@ async fn paginate_partition() -> BoxedErrorResult<()> {
         assert_eq!(
             Database::paginate_table_partition(
                 &table,
-                |cursor: Option<u64>| cursor.unwrap_or(20),
-                29,
+                20..=29,
+                |c: u64| c,
                 None,
                 2,
                 |k, v| Ok(Some(format!("{k}-{v}")))
@@ -173,8 +173,8 @@ async fn paginate_partition() -> BoxedErrorResult<()> {
         assert_eq!(
             Database::paginate_table_partition(
                 &table,
-                |cursor: Option<u64>| cursor.unwrap_or(10),
-                29,
+                10..=29,
+                |c: u64| c,
                 None,
                 3,
                 |k, v| Ok((k % 2 == 0).then_some(format!("{k}-{v}")))
@@ -207,9 +207,8 @@ async fn paginate_partition_rev() -> BoxedErrorResult<()> {
         assert_eq!(
             Database::paginate_table_partition_rev(
                 &table,
-                10,
-                19,
-                |cursor: u64| cursor,
+                10..=19,
+                |c: u64| c,
                 None,
                 1,
                 |k, v| Ok(Some(format!("{k}-{v}")))
@@ -221,9 +220,8 @@ async fn paginate_partition_rev() -> BoxedErrorResult<()> {
         assert_eq!(
             Database::paginate_table_partition_rev(
                 &table,
-                10,
-                19,
-                |cursor: u64| cursor,
+                10..=19,
+                |c: u64| c,
                 Some(11),
                 1,
                 |k, v| Ok(Some(format!("{k}-{v}")))
@@ -235,9 +233,8 @@ async fn paginate_partition_rev() -> BoxedErrorResult<()> {
         assert_eq!(
             Database::paginate_table_partition_rev(
                 &table,
-                20,
-                29,
-                |cursor: u64| cursor,
+                20..=29,
+                |c: u64| c,
                 None,
                 2,
                 |k, v| Ok(Some(format!("{k}-{v}")))
@@ -249,9 +246,8 @@ async fn paginate_partition_rev() -> BoxedErrorResult<()> {
         assert_eq!(
             Database::paginate_table_partition_rev(
                 &table,
-                10,
-                29,
-                |cursor: u64| cursor,
+                10..=29,
+                |c: u64| c,
                 None,
                 3,
                 |k, v| Ok((k % 2 == 0).then_some(format!("{k}-{v}")))
