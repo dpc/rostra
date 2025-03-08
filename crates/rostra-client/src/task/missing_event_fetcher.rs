@@ -30,17 +30,29 @@ impl MissingEventFetcher {
     }
 
     /// Run the thread
-    #[instrument(skip(self), ret)]
+    #[instrument(name = "missing-event-fetcher", skip(self), ret)]
     pub async fn run(self) {
+        let mut initial_followers = {
+            let Ok(db) = self.client.db() else {
+                return;
+            };
+            db
+        }
+        .get_followees(self.self_id)
+        .await;
         let mut ids_with_missing_events_rx = self.ids_with_missing_events_rx.clone();
 
         loop {
-            let author_id = match ids_with_missing_events_rx.recv().await {
-                Ok(id) => id,
-                Err(dedup_chan::RecvError::Closed) => break,
-                Err(dedup_chan::RecvError::Lagging) => {
-                    warn!(target: LOG_TARGET, "Missing event fetcher missed some notifications");
-                    continue;
+            let author_id = if let Some(initial_follower_id) = initial_followers.pop() {
+                initial_follower_id.0
+            } else {
+                match ids_with_missing_events_rx.recv().await {
+                    Ok(id) => id,
+                    Err(dedup_chan::RecvError::Closed) => break,
+                    Err(dedup_chan::RecvError::Lagging) => {
+                        warn!(target: LOG_TARGET, "Missing event fetcher missed some notifications");
+                        continue;
+                    }
                 }
             };
             trace!(target: LOG_TARGET, "Woke up");
@@ -52,6 +64,7 @@ impl MissingEventFetcher {
             let followers = db.get_followers(author_id).await;
             let missing_events = db.get_missing_events_for_id(author_id).await;
 
+            debug!(target: LOG_TARGET, len=missing_events.len(), id=%author_id, "Missing events for id");
             if missing_events.is_empty() {
                 continue;
             }

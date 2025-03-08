@@ -30,7 +30,7 @@ impl MissingEventContentFetcher {
     }
 
     /// Run the thread
-    #[instrument(skip(self), ret)]
+    #[instrument(name = "missing-event-content-fetcher", skip(self), ret)]
     pub async fn run(self) {
         let mut interval = tokio::time::interval(if is_rostra_dev_mode_set() {
             Duration::from_secs(10)
