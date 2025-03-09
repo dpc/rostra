@@ -11,7 +11,11 @@ pub const LOG_TARGET: &str = "rostra::p2p";
 
 #[derive(Debug, Snafu)]
 pub enum RpcError {
+    #[snafu(visibility(pub))]
     Connection {
+        source: anyhow::Error,
+    },
+    StreamConnection {
         source: iroh::endpoint::ConnectionError,
     },
     Write {

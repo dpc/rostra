@@ -11,29 +11,30 @@ use std::sync::{Arc, Weak};
 use std::time::Duration;
 
 use backon::Retryable as _;
+use iroh::NodeAddr;
+use iroh::discovery::ConcurrentDiscovery;
 use iroh::discovery::dns::DnsDiscovery;
 use iroh::discovery::pkarr::PkarrPublisher;
-use iroh::discovery::ConcurrentDiscovery;
-use iroh::NodeAddr;
 use itertools::Itertools as _;
 use rostra_client_db::{Database, DbResult, IdsFolloweesRecord, IdsFollowersRecord};
 use rostra_core::event::{
-    content_kind, Event, EventExt as _, EventKind, IrohNodeId, PersonaId, SignedEvent,
-    VerifiedEvent, VerifiedEventContent,
+    Event, EventExt as _, EventKind, IrohNodeId, PersonaId, SignedEvent, VerifiedEvent,
+    VerifiedEventContent, content_kind,
 };
 use rostra_core::id::{RostraId, RostraIdSecretKey, ToShort as _};
 use rostra_core::{ExternalEventId, ShortEventId};
 use rostra_p2p::connection::{Connection, FeedEventRequest, FeedEventResponse, PingRequest};
-use rostra_p2p::RpcError;
+use rostra_p2p::{ConnectionSnafu, RpcError};
 use rostra_p2p_api::ROSTRA_P2P_V0_ALPN;
 use rostra_util_error::FmtCompact as _;
 use rostra_util_fmt::AsFmtOption as _;
-use snafu::{ensure, Location, OptionExt as _, ResultExt as _, Snafu};
+use snafu::{Location, OptionExt as _, ResultExt as _, Snafu, ensure};
 use tokio::sync::{broadcast, watch};
 use tokio::time::Instant;
 use tracing::{debug, info, trace, warn};
 
-use super::{get_rrecord_typed, RRECORD_HEAD_KEY, RRECORD_P2P_KEY};
+use super::{RRECORD_HEAD_KEY, RRECORD_P2P_KEY, get_rrecord_typed};
+use crate::LOG_TARGET;
 use crate::error::{
     ActivateResult, ConnectIrohSnafu, ConnectResult, IdResolveError, IdResolveResult,
     IdSecretReadResult, InitIrohClientSnafu, InitPkarrClientSnafu, InitResult, InvalidIdSnafu,
@@ -46,7 +47,6 @@ use crate::task::missing_event_content_fetcher::MissingEventContentFetcher;
 use crate::task::missing_event_fetcher::MissingEventFetcher;
 use crate::task::pkarr_id_publisher::PkarrIdPublisher;
 use crate::task::request_handler::RequestHandler;
-use crate::LOG_TARGET;
 
 #[derive(Debug, Snafu)]
 #[snafu(visibility(pub))]
@@ -254,51 +254,59 @@ impl Client {
     }
 
     pub async fn connect(&self, id: RostraId) -> ConnectResult<Connection> {
-        // TODO: maintain connection attempt stats and use them to prioritize best
-        // endpoints
-        for ((_ts, node_id), _stats) in self.db.get_id_endpoints(id).await.into_iter().rev() {
+        let endpoints = self.db.get_id_endpoints(id).await;
+
+        // Try all known endpoints in parallel
+        let mut connection_attempts = Vec::new();
+        for ((_ts, node_id), _stats) in endpoints {
             let Ok(node_id) = iroh::NodeId::from_bytes(&node_id.to_bytes()) else {
                 debug!(target: LOG_TARGET, %id, "Invalid iroh id for rostra id found");
                 continue;
             };
 
             if node_id == self.endpoint.node_id() {
-                // If we are trying to connect to our own Id, we want to connect (if possible)
-                // with some other node.
+                // Skip connecting to our own Id
                 continue;
             }
 
-            let conn = match self.endpoint.connect(node_id, ROSTRA_P2P_V0_ALPN).await {
-                Ok(conn) => Connection::from(conn),
-                Err(err) => {
-                    debug!(
-                        target: LOG_TARGET,
-                        %id,
-                        %node_id,
-                        our_id = %self.endpoint.node_id(),
-                        err = %format!("{err:#}"),
-                        "Failed to connect to a know iroh endpoint"
-                    );
-                    continue;
-                }
-            };
+            let endpoint = self.endpoint.clone();
+            connection_attempts.push(tokio::spawn(async move {
+                let conn = endpoint
+                    .connect(node_id, ROSTRA_P2P_V0_ALPN)
+                    .await
+                    .context(ConnectionSnafu)?;
+                let conn = Connection::from(conn);
 
-            // Make a ping request, just to make sure we can talk
-            match conn.make_rpc(&PingRequest(0)).await {
-                Ok(_) => return Ok(conn),
-                Err(err) => {
-                    debug!(
-                        target: LOG_TARGET,
-                        %id,
-                        %node_id,
-                        err = %format!("{err:#}"),
-                        "Failed to ping a know iroh endpoint"
-                    );
-                    continue;
+                // Verify connection with ping
+                conn.make_rpc(&PingRequest(0)).await?;
+                Ok::<_, RpcError>(conn)
+            }));
+        }
+
+        if !connection_attempts.is_empty() {
+            // Wait for first successful connection or all failures
+            for attempt in connection_attempts {
+                match attempt.await {
+                    Ok(Ok(conn)) => return Ok(conn),
+                    Ok(Err(err)) => {
+                        debug!(
+                            target: LOG_TARGET,
+                            %id,
+                            err = %err.fmt_compact(),
+                            "Failed to connect to endpoint"
+                        );
+                    }
+                    Err(_) => continue,
                 }
             }
         }
+        debug!(
+            target: LOG_TARGET,
+            %id,
+            "All known endpoints failed, trying pkarr resolution"
+        );
 
+        // Fall back to pkarr if no known endpoints worked
         self.connect_by_pkarr_resolution(id).await
     }
 

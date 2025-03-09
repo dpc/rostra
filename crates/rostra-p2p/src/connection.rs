@@ -4,7 +4,7 @@ use std::pin::Pin;
 
 use bao_tree::io::outboard::{EmptyOutboard, PreOrderMemOutboard};
 use bao_tree::io::round_up_to_chunks;
-use bao_tree::{blake3, BlockSize, ByteRanges};
+use bao_tree::{BlockSize, ByteRanges, blake3};
 use bincode::{Decode, Encode};
 use convi::{CastInto, ExpectFrom};
 use iroh::endpoint::{RecvStream, SendStream};
@@ -20,8 +20,9 @@ use snafu::{OptionExt as _, ResultExt as _};
 use tracing::trace;
 
 use crate::{
-    ConnectionSnafu, DecodingBaoSnafu, DecodingSnafu, EncodingBaoSnafu, EventVerificationSnafu,
-    FailedSnafu, MessageTooLargeSnafu, ReadSnafu, RpcResult, TrailerSnafu, WriteSnafu, LOG_TARGET,
+    DecodingBaoSnafu, DecodingSnafu, EncodingBaoSnafu, EventVerificationSnafu, FailedSnafu,
+    LOG_TARGET, MessageTooLargeSnafu, ReadSnafu, RpcResult, StreamConnectionSnafu, TrailerSnafu,
+    WriteSnafu,
 };
 
 #[derive(Debug)]
@@ -241,7 +242,7 @@ fn rpc_request_to_bytes_test() {
 
 impl Connection {
     pub async fn make_rpc<R: Rpc>(&self, request: &R) -> RpcResult<<R as Rpc>::Response> {
-        let (mut send, mut recv) = self.0.open_bi().await.context(ConnectionSnafu)?;
+        let (mut send, mut recv) = self.0.open_bi().await.context(StreamConnectionSnafu)?;
 
         Self::write_rpc_request(&mut send, request).await?;
 
@@ -270,7 +271,7 @@ impl Connection {
         )
             -> Pin<Box<dyn Future<Output = BoxedErrorResult<()>> + 's + Send + Sync>>,
     {
-        let (mut send, mut recv) = self.0.open_bi().await.context(ConnectionSnafu)?;
+        let (mut send, mut recv) = self.0.open_bi().await.context(StreamConnectionSnafu)?;
 
         Self::write_rpc_request(&mut send, request).await?;
 
@@ -296,7 +297,7 @@ impl Connection {
         )
             -> Pin<Box<dyn Future<Output = BoxedErrorResult<T>> + 's + Send + Sync>>,
     {
-        let (mut send, mut recv) = self.0.open_bi().await.context(ConnectionSnafu)?;
+        let (mut send, mut recv) = self.0.open_bi().await.context(StreamConnectionSnafu)?;
 
         Self::write_rpc_request(&mut send, request).await?;
 
