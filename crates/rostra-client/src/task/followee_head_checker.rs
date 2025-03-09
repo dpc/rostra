@@ -1,11 +1,12 @@
-use std::collections::{BinaryHeap, HashMap};
+use std::collections::{BTreeMap, BinaryHeap, HashMap};
 use std::sync::Arc;
 use std::time::Duration;
 
 use rostra_client_db::{Database, IdsFolloweesRecord, InsertEventOutcome};
+use rostra_core::ShortEventId;
 use rostra_core::event::PersonaId;
 use rostra_core::id::RostraId;
-use rostra_core::ShortEventId;
+use rostra_p2p::Connection;
 use rostra_p2p::connection::GetHeadRequest;
 use rostra_util::is_rostra_dev_mode_set;
 use rostra_util_error::{BoxedErrorResult, FmtCompact, WhateverResult};
@@ -14,8 +15,9 @@ use snafu::ResultExt as _;
 use tokio::sync::watch;
 use tracing::{debug, info, instrument, trace};
 
-use crate::client::Client;
+use super::connection_cache::ConnectionCache;
 use crate::ClientRef;
+use crate::client::Client;
 const LOG_TARGET: &str = "rostra::head_checker";
 
 pub struct FolloweeHeadChecker {
@@ -33,7 +35,6 @@ impl FolloweeHeadChecker {
             client: client.handle(),
             db: client.db().to_owned(),
             self_id: client.rostra_id(),
-
             followee_updated: client.self_followees_subscribe(),
             check_for_updates_rx: client.check_for_updates_tx_subscribe(),
         }
@@ -70,6 +71,9 @@ impl FolloweeHeadChecker {
                 break;
             };
 
+            let mut connections = ConnectionCache::new();
+            let mut followers_by_followee = BTreeMap::new();
+
             let self_followees = storage.get_self_followees().await;
 
             for (followee, _persona_id) in [&(self.self_id, PersonaId::default())]
@@ -98,9 +102,16 @@ impl FolloweeHeadChecker {
                         }
                         Ok(Some(head)) => {
                             info!(target: LOG_TARGET, id = %followee, %source, "Has updates");
-                            if let Err(err) = self.download_new_data(&client, *followee, head).await
+                            if let Err(err) = self
+                                .download_new_data(
+                                    *followee,
+                                    head,
+                                    &mut connections,
+                                    &mut followers_by_followee,
+                                )
+                                .await
                             {
-                                info!(target: LOG_TARGET, err = %err.fmt_compact(), id = %followee, "Failed to download new data");
+                                info!(target: LOG_TARGET, err = %(&*err).fmt_compact(), id = %followee, "Failed to download new data");
                             }
                         }
                     }
@@ -148,18 +159,71 @@ impl FolloweeHeadChecker {
 
     async fn download_new_data(
         &self,
-        client: &ClientRef<'_>,
         rostra_id: RostraId,
         head: ShortEventId,
-    ) -> WhateverResult<()> {
+        connections: &mut ConnectionCache,
+        followers_by_followee: &mut BTreeMap<RostraId, Vec<RostraId>>,
+    ) -> BoxedErrorResult<()> {
+        let followers = if let Some(followers) = followers_by_followee.get(&rostra_id) {
+            followers
+        } else {
+            let client = self.client.client_ref().boxed()?;
+            let storage = client.db();
+            let followers = storage.get_followers(rostra_id).await;
+            followers_by_followee.insert(rostra_id, followers);
+
+            followers_by_followee
+                .get(&rostra_id)
+                .expect("Just inserted")
+        };
+
+        for follower_id in followers.iter().chain([rostra_id, self.self_id].iter()) {
+            let Ok(client) = self.client.client_ref().boxed() else {
+                break;
+            };
+            let Some(conn) = connections.get_or_connect(&client, *follower_id).await else {
+                continue;
+            };
+
+            debug!(target: LOG_TARGET,
+                rostra_id = %rostra_id,
+                head = %head,
+                follower_id = %follower_id,
+                "Getting event data from a peer"
+            );
+
+            match self
+                .download_new_data_from(&client, rostra_id, conn, head)
+                .await
+            {
+                Ok(true) => {
+                    return Ok(());
+                }
+                Ok(false) => {}
+                Err(err) => {
+                    debug!(target: LOG_TARGET,
+                        rostra_id = %rostra_id,
+                        head = %head,
+                        follower_id = %follower_id,
+                        err = %err.fmt_compact(),
+                        "Error getting event from a peer"
+                    );
+                }
+            }
+        }
+        Ok(())
+    }
+    async fn download_new_data_from(
+        &self,
+        client: &ClientRef<'_>,
+        rostra_id: RostraId,
+        conn: &mut Connection,
+        head: ShortEventId,
+    ) -> WhateverResult<bool> {
         let mut events = BinaryHeap::from([(0, head)]);
+        let mut downloaded_anything = false;
 
         let storage = client.db();
-
-        let conn = client
-            .connect(rostra_id)
-            .await
-            .whatever_context("Failed to connect")?;
 
         let peer_id = conn.remote_node_id();
 
@@ -187,6 +251,7 @@ impl FolloweeHeadChecker {
                 );
                 continue;
             };
+            downloaded_anything = true;
             let (insert_outcome, process_state) = storage.process_event(&event).await;
 
             if let InsertEventOutcome::Inserted {
@@ -226,6 +291,6 @@ impl FolloweeHeadChecker {
             }
         }
 
-        Ok(())
+        Ok(downloaded_anything)
     }
 }

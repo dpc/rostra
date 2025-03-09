@@ -1,17 +1,17 @@
 use std::collections::BTreeMap;
 use std::time::Duration;
 
+use rostra_core::ShortEventId;
 use rostra_core::event::VerifiedEvent;
 use rostra_core::id::RostraId;
-use rostra_core::ShortEventId;
-use rostra_p2p::Connection;
 use rostra_util::is_rostra_dev_mode_set;
 use rostra_util_error::{BoxedErrorResult, FmtCompact, WhateverResult};
 use snafu::ResultExt as _;
 use tracing::{debug, instrument, trace};
 
+use super::connection_cache::ConnectionCache;
+use crate::LOG_TARGET;
 use crate::client::Client;
-use crate::{ClientHandle, LOG_TARGET};
 
 #[derive(Clone)]
 pub struct MissingEventContentFetcher {
@@ -50,7 +50,7 @@ impl MissingEventContentFetcher {
 
             let mut cursor: Option<ShortEventId> = None;
 
-            let mut connections = BTreeMap::new();
+            let mut connections = ConnectionCache::new();
             let mut followers_by_followee = BTreeMap::new();
 
             loop {
@@ -58,8 +58,7 @@ impl MissingEventContentFetcher {
 
                 for (author_id, event_id) in events {
                     let _ = self
-                        .get_event_from_followers(
-                            &self.client,
+                        .get_event_content_from_followers(
                             author_id,
                             event_id,
                             &mut connections,
@@ -78,12 +77,11 @@ impl MissingEventContentFetcher {
         }
     }
 
-    async fn get_event_from_followers(
+    async fn get_event_content_from_followers(
         &self,
-        client: &ClientHandle,
         author_id: RostraId,
         event_id: ShortEventId,
-        connections: &mut BTreeMap<RostraId, Connection>,
+        connections: &mut ConnectionCache,
         followers_by_followee: &mut BTreeMap<RostraId, Vec<RostraId>>,
         db: &rostra_client_db::Database,
     ) -> BoxedErrorResult<()> {
@@ -99,16 +97,12 @@ impl MissingEventContentFetcher {
         };
 
         for follower_id in followers.iter().chain([author_id, self.self_id].iter()) {
-            if connections.get(follower_id).is_none() {
-                let conn = client
-                    .client_ref()
-                    .boxed()?
-                    .connect(*follower_id)
-                    .await
-                    .boxed()?;
-                connections.insert(*follower_id, conn);
-            }
-            let conn = connections.get_mut(follower_id).expect("Must exist");
+            let Ok(client) = self.client.client_ref().boxed() else {
+                break;
+            };
+            let Some(conn) = connections.get_or_connect(&client, *follower_id).await else {
+                continue;
+            };
 
             debug!(target:  LOG_TARGET,
                 author_id = %author_id,

@@ -1,4 +1,2 @@
-lint-cmd: cargo check -q
 test-cmd: cargo nextest run --cargo-quiet
 cache-prompts: true
-stream: false

@@ -1,3 +1,4 @@
+pub(crate) mod connection_cache;
 pub(crate) mod followee_head_checker;
 pub(crate) mod head_merger;
 pub(crate) mod head_update_broadcaster;

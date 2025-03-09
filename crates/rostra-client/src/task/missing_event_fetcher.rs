@@ -1,15 +1,14 @@
-use std::collections::BTreeMap;
-
+use rostra_core::ShortEventId;
 use rostra_core::event::{EventExt as _, SignedEventExt as _, VerifiedEvent};
 use rostra_core::id::RostraId;
-use rostra_core::ShortEventId;
 use rostra_p2p::Connection;
 use rostra_util_error::{BoxedErrorResult, FmtCompact, WhateverResult};
 use snafu::ResultExt as _;
 use tracing::{debug, instrument, trace, warn};
 
+use super::connection_cache::ConnectionCache;
+use crate::LOG_TARGET;
 use crate::client::Client;
-use crate::{ClientHandle, LOG_TARGET};
 
 #[derive(Clone)]
 pub struct MissingEventFetcher {
@@ -69,22 +68,22 @@ impl MissingEventFetcher {
                 continue;
             }
 
-            let mut connections = BTreeMap::new();
+            let mut connections = ConnectionCache::new();
 
             for follower_id in followers.iter().chain([self.self_id].iter()) {
+                let Ok(client) = self.client.client_ref().boxed() else {
+                    break;
+                };
+                let Some(conn) = connections.get_or_connect(&client, *follower_id).await else {
+                    continue;
+                };
+
                 for missing_event in &missing_events {
                     if db.has_event(*missing_event).await {
                         continue;
                     }
                     match self
-                        .get_event_from(
-                            &self.client,
-                            author_id,
-                            *missing_event,
-                            *follower_id,
-                            &mut connections,
-                            &db,
-                        )
+                        .get_event_from(author_id, *missing_event, *follower_id, conn, &db)
                         .await
                     {
                         Ok(_) => {}
@@ -97,7 +96,6 @@ impl MissingEventFetcher {
                                 err = %(&*err).fmt_compact(),
                                 "Error while getting id from a peer"
                             );
-                            connections.remove(follower_id);
                         }
                     }
                 }
@@ -107,24 +105,12 @@ impl MissingEventFetcher {
 
     async fn get_event_from(
         &self,
-        client: &ClientHandle,
         author_id: RostraId,
         event_id: ShortEventId,
         follower_id: RostraId,
-        connections: &mut BTreeMap<RostraId, Connection>,
+        conn: &mut Connection,
         db: &rostra_client_db::Database,
     ) -> BoxedErrorResult<()> {
-        if connections.get(&follower_id).is_none() {
-            let conn = client
-                .client_ref()
-                .boxed()?
-                .connect(follower_id)
-                .await
-                .boxed()?;
-            connections.insert(follower_id, conn);
-        }
-        let conn = connections.get_mut(&follower_id).expect("Must exist");
-
         debug!(target:  LOG_TARGET,
             author_id = %author_id,
             event_id = %event_id,

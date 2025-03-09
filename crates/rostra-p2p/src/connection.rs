@@ -24,6 +24,7 @@ use crate::{
     FailedSnafu, MessageTooLargeSnafu, ReadSnafu, RpcResult, TrailerSnafu, WriteSnafu, LOG_TARGET,
 };
 
+#[derive(Debug)]
 pub struct Connection(iroh::endpoint::Connection);
 
 impl Connection {
