@@ -257,7 +257,7 @@ impl Client {
         let endpoints = self.db.get_id_endpoints(id).await;
 
         // Try all known endpoints in parallel
-        let mut connection_attempts = Vec::new();
+        let mut connection_futures = Vec::new();
         for ((_ts, node_id), _stats) in endpoints {
             let Ok(node_id) = iroh::NodeId::from_bytes(&node_id.to_bytes()) else {
                 debug!(target: LOG_TARGET, %id, "Invalid iroh id for rostra id found");
@@ -270,7 +270,7 @@ impl Client {
             }
 
             let endpoint = self.endpoint.clone();
-            connection_attempts.push(tokio::spawn(async move {
+            connection_futures.push(Box::pin(async move {
                 let conn = endpoint
                     .connect(node_id, ROSTRA_P2P_V0_ALPN)
                     .await
@@ -283,12 +283,17 @@ impl Client {
             }));
         }
 
-        if !connection_attempts.is_empty() {
-            // Wait for first successful connection or all failures
-            for attempt in connection_attempts {
-                match attempt.await {
-                    Ok(Ok(conn)) => return Ok(conn),
-                    Ok(Err(err)) => {
+        if !connection_futures.is_empty() {
+            use futures::future::select_all;
+            
+            // Try all connections in parallel, take first success
+            while !connection_futures.is_empty() {
+                let (result, _index, remaining) = select_all(connection_futures).await;
+                connection_futures = remaining;
+                
+                match result {
+                    Ok(conn) => return Ok(conn),
+                    Err(err) => {
                         debug!(
                             target: LOG_TARGET,
                             %id,
@@ -296,15 +301,14 @@ impl Client {
                             "Failed to connect to endpoint"
                         );
                     }
-                    Err(_) => continue,
                 }
             }
+            debug!(
+                target: LOG_TARGET,
+                %id,
+                "All known endpoints failed, trying pkarr resolution"
+            );
         }
-        debug!(
-            target: LOG_TARGET,
-            %id,
-            "All known endpoints failed, trying pkarr resolution"
-        );
 
         // Fall back to pkarr if no known endpoints worked
         self.connect_by_pkarr_resolution(id).await
