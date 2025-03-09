@@ -1,5 +1,6 @@
 pub mod connection;
 pub mod error;
+pub mod util;
 
 pub use connection::Connection;
 use rostra_core::event::VerifiedEventError;

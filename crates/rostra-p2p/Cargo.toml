@@ -11,6 +11,7 @@ anyhow = { workspace = true }
 bao-tree = { workspace = true }
 bincode = { workspace = true }
 convi = { workspace = true }
+data-encoding = { workspace = true }
 futures = { workspace = true }
 iroh-io = { workspace = true }
 iroh = { workspace = true }

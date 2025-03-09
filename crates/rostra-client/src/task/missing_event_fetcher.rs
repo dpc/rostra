@@ -1,6 +1,6 @@
 use rostra_core::ShortEventId;
 use rostra_core::event::{EventExt as _, SignedEventExt as _, VerifiedEvent};
-use rostra_core::id::RostraId;
+use rostra_core::id::{RostraId, ToShort as _};
 use rostra_p2p::Connection;
 use rostra_util_error::{BoxedErrorResult, FmtCompact, WhateverResult};
 use snafu::ResultExt as _;
@@ -63,7 +63,7 @@ impl MissingEventFetcher {
             let followers = db.get_followers(author_id).await;
             let missing_events = db.get_missing_events_for_id(author_id).await;
 
-            debug!(target: LOG_TARGET, len=missing_events.len(), id=%author_id, "Missing events for id");
+            debug!(target: LOG_TARGET, len=missing_events.len(), id=%author_id.to_short(), "Missing events for id");
             if missing_events.is_empty() {
                 continue;
             }

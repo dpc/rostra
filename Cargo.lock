@@ -3851,6 +3851,7 @@ dependencies = [
  "bao-tree",
  "bincode",
  "convi",
+ "data-encoding",
  "futures",
  "iroh",
  "iroh-io",

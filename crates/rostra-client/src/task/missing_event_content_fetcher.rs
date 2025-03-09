@@ -3,7 +3,7 @@ use std::time::Duration;
 
 use rostra_core::ShortEventId;
 use rostra_core::event::VerifiedEvent;
-use rostra_core::id::RostraId;
+use rostra_core::id::{RostraId, ToShort as _};
 use rostra_util::is_rostra_dev_mode_set;
 use rostra_util_error::{BoxedErrorResult, FmtCompact, WhateverResult};
 use snafu::ResultExt as _;
@@ -105,9 +105,9 @@ impl MissingEventContentFetcher {
             };
 
             debug!(target:  LOG_TARGET,
-                author_id = %author_id,
-                event_id = %event_id,
-                follower_id = %follower_id,
+                author_id = %author_id.to_short(),
+                event_id = %event_id.to_short(),
+                follower_id = %follower_id.to_short(),
                 "Getting event content from a peer"
             );
             match Self::get_event_content(event_id, conn, db).await {
@@ -117,9 +117,9 @@ impl MissingEventContentFetcher {
                 Ok(false) => {}
                 Err(err) => {
                     debug!(target:  LOG_TARGET,
-                        author_id = %author_id,
-                        event_id = %event_id,
-                        follower_id = %follower_id,
+                        author_id = %author_id.to_short(),
+                        event_id = %event_id.to_short(),
+                        follower_id = %follower_id.to_short(),
                         err = %err.fmt_compact(),
                         "Error getting event from a peer"
                     );

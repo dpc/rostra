@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 
 use bincode::{Decode, Encode};
-use rostra_core::event::{content_kind, EventExt as _, SocialPost};
+use rostra_core::event::{EventExt as _, SocialPost, content_kind};
 use rostra_core::id::RostraId;
 use rostra_core::{ExternalEventId, ShortEventId, Timestamp};
 use serde::{Deserialize, Serialize};
@@ -10,8 +10,8 @@ use tracing::{debug, warn};
 use super::Database;
 use crate::event::EventContentState;
 use crate::{
-    events, events_content, social_posts, social_posts_by_time, social_posts_reactions,
-    social_posts_replies, LOG_TARGET,
+    LOG_TARGET, events, events_content, social_posts, social_posts_by_time, social_posts_reactions,
+    social_posts_replies,
 };
 
 #[derive(
@@ -66,7 +66,6 @@ impl Database {
                 let Some(content_state) =
                     Database::get_event_content_tx(event_id, &events_content_table)?
                 else {
-                    warn!(target: LOG_TARGET, %event_id, "Missing content for a post with social_post_record?!");
                     return Ok(None);
                 };
                 let EventContentState::Present(content) = content_state else {
@@ -133,7 +132,6 @@ impl Database {
                 let Some(content_state) =
                     Database::get_event_content_tx(event_id, &events_content_table)?
                 else {
-                    warn!(target: LOG_TARGET, %event_id, "Missing content for a post with social_post_record?!");
                     return Ok(None);
                 };
                 let EventContentState::Present(content) = content_state else {
@@ -204,7 +202,6 @@ impl Database {
                 let Some(content_state) =
                     Database::get_event_content_tx(event_id, &events_content_table)?
                 else {
-                    warn!(target: LOG_TARGET, %event_id, "Missing content for a post with social_post_record?!");
                     return Ok(None);
                 };
                 let EventContentState::Present(content) = content_state else {
@@ -265,7 +262,6 @@ impl Database {
                 let Some(content_state) =
                     Database::get_event_content_tx(event_id, &events_content_table)?
                 else {
-                    warn!(target: LOG_TARGET, %event_id, "Missing content for a post with social_post_record?!");
                     return Ok(None);
                 };
                 let EventContentState::Present(content) = content_state else {
@@ -314,7 +310,6 @@ impl Database {
                 let Some(content_state) =
                     Database::get_event_content_tx(event_id, &events_content_table)?
                 else {
-                    warn!(target: LOG_TARGET, %event_id, "Missing content for a post with social_post_record?!");
                     continue;
                 };
                 let EventContentState::Present(content) = content_state else {

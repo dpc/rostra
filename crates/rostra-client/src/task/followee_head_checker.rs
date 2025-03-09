@@ -5,7 +5,7 @@ use std::time::Duration;
 use rostra_client_db::{Database, IdsFolloweesRecord, InsertEventOutcome};
 use rostra_core::ShortEventId;
 use rostra_core::event::PersonaId;
-use rostra_core::id::RostraId;
+use rostra_core::id::{RostraId, ToShort as _};
 use rostra_p2p::Connection;
 use rostra_p2p::connection::GetHeadRequest;
 use rostra_util::is_rostra_dev_mode_set;
@@ -94,14 +94,14 @@ impl FolloweeHeadChecker {
                 for (source, res) in [("pkarr", head_pkarr), ("iroh", head_iroh)] {
                     match res {
                         Err(err) => {
-                            info!(target: LOG_TARGET, err = %err, id = %followee, %source, "Failed to check for updates");
+                            info!(target: LOG_TARGET, err = %err, id = %followee.to_short(), %source, "Failed to check for updates");
                         }
                         Ok(None) => {
-                            info!(target: LOG_TARGET, id = %followee, %source, "No updates");
+                            info!(target: LOG_TARGET, id = %followee.to_short(), %source, "No updates");
                             continue;
                         }
                         Ok(Some(head)) => {
-                            info!(target: LOG_TARGET, id = %followee, %source, "Has updates");
+                            info!(target: LOG_TARGET, id = %followee.to_short(), %source, "Has updates");
                             if let Err(err) = self
                                 .download_new_data(
                                     *followee,
@@ -111,7 +111,7 @@ impl FolloweeHeadChecker {
                                 )
                                 .await
                             {
-                                info!(target: LOG_TARGET, err = %(&*err).fmt_compact(), id = %followee, "Failed to download new data");
+                                info!(target: LOG_TARGET, err = %(&*err).fmt_compact(), id = %followee.to_short(), "Failed to download new data");
                             }
                         }
                     }

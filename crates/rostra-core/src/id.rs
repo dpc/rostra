@@ -4,7 +4,7 @@ use std::str::FromStr;
 use data_encoding::Specification;
 use snafu::{OptionExt as _, Snafu};
 
-use crate::{array_type_define_public, array_type_impl_serde, EventId, ShortEventId};
+use crate::{EventId, ShortEventId, array_type_define_public, array_type_impl_serde};
 
 #[cfg(feature = "ed25519-dalek")]
 mod ed25519;
@@ -245,11 +245,11 @@ impl ExternalEventId {
         Self((rostra_id, event_id.into()))
     }
     pub fn rostra_id(self) -> RostraId {
-        self.0 .0
+        self.0.0
     }
 
     pub fn event_id(self) -> ShortEventId {
-        self.0 .1
+        self.0.1
     }
 }
 #[derive(Debug, Snafu)]
@@ -277,6 +277,6 @@ impl FromStr for ExternalEventId {
 impl fmt::Display for ExternalEventId {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         // Dash was picked because it well uurlencodes and such
-        f.write_fmt(format_args!("{}-{}", self.0 .0, self.0 .1))
+        f.write_fmt(format_args!("{}-{}", self.0.0, self.0.1))
     }
 }

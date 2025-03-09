@@ -1,18 +1,19 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use iroh::endpoint::Incoming;
 use iroh::Endpoint;
+use iroh::endpoint::Incoming;
 use rostra_client_db::{DbError, IdsFolloweesRecord};
 use rostra_core::event::{EventContent, EventExt as _, VerifiedEvent, VerifiedEventContent};
 use rostra_core::id::RostraId;
+use rostra_p2p::RpcError;
 use rostra_p2p::connection::{
     Connection, FeedEventRequest, FeedEventResponse, GetEventContentRequest,
     GetEventContentResponse, GetEventRequest, GetEventResponse, GetHeadRequest, GetHeadResponse,
-    PingRequest, PingResponse, RpcId, RpcMessage as _, WaitHeadUpdateRequest,
-    WaitHeadUpdateResponse, MAX_REQUEST_SIZE,
+    MAX_REQUEST_SIZE, PingRequest, PingResponse, RpcId, RpcMessage as _, WaitHeadUpdateRequest,
+    WaitHeadUpdateResponse,
 };
-use rostra_p2p::RpcError;
+use rostra_p2p::util::ToShort as _;
 use rostra_util_error::{BoxedError, FmtCompact as _};
 use rostra_util_fmt::AsFmtOption as _;
 use snafu::{Location, OptionExt as _, ResultExt as _, Snafu};
@@ -131,7 +132,7 @@ impl RequestHandler {
             debug!(
                 target: LOG_TARGET,
                 rpc_id = %rpc_id,
-                from = %conn.remote_node_id().ok().fmt_option(),
+                from = %conn.remote_node_id().ok().map(|id| id.to_short()).fmt_option(),
                 "Rpc request"
             );
 

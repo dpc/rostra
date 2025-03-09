@@ -1,12 +1,10 @@
 #[macro_export]
-macro_rules! array_type_define {
+macro_rules! array_type_define_minimum {
     (
         $(#[$outer:meta])*
         struct $t:tt, $n:literal
     ) => {
         $(#[$outer])*
-        #[cfg_attr(feature = "bincode", derive(::bincode::Encode, ::bincode::Decode))]
-        #[derive(Copy, Clone, Hash)]
         pub struct $t([u8; $n]);
 
         impl $t {
@@ -32,6 +30,21 @@ macro_rules! array_type_define {
                 <Self as std::fmt::Display>::fmt(self, f)
             }
         }
+    }
+}
+
+#[macro_export]
+macro_rules! array_type_define {
+    (
+        $(#[$outer:meta])*
+        struct $t:tt, $n:literal
+    ) => {
+        $crate::array_type_define_minimum!(
+            #[derive(Copy, Clone, Hash)]
+            #[cfg_attr(feature = "bincode", derive(::bincode::Encode, ::bincode::Decode))]
+            $(#[$outer])*
+            struct $t, $n
+        );
     }
 }
 
