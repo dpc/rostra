@@ -1,27 +1,29 @@
 use std::collections::{HashMap, HashSet};
 
 use ids::{IdsFollowersRecord, IdsUnfollowedRecord};
-use rand::{thread_rng, Rng as _};
+use itertools::Itertools as _;
+use rand::{Rng as _, thread_rng};
+use redb::StorageError;
 use redb_bincode::{ReadableTable, Table};
 use rostra_core::event::{
-    content_kind, EventContent, EventExt as _, VerifiedEvent, VerifiedEventContent,
+    EventContent, EventExt as _, VerifiedEvent, VerifiedEventContent, content_kind,
 };
 use rostra_core::id::{RostraId, ToShort as _};
 use rostra_core::{ShortEventId, Timestamp};
+use tables::EventRecord;
 use tables::event::{EventContentState, EventsMissingRecord};
 use tables::ids::IdsFolloweesRecord;
-use tables::EventRecord;
 use tracing::debug;
 
 use super::id_self::IdSelfAccountRecord;
 use super::{
-    events, events_by_time, events_content, events_heads, events_missing, events_self,
-    get_first_in_range, get_last_in_range, ids, ids_followees, ids_followers, ids_self, tables,
-    Database, DbError, DbResult, EventsHeadsTableRecord, InsertEventOutcome,
+    Database, DbError, DbResult, EventsHeadsTableRecord, InsertEventOutcome, events,
+    events_by_time, events_content, events_heads, events_missing, events_self, get_first_in_range,
+    get_last_in_range, ids, ids_followees, ids_followers, ids_self, tables,
 };
 use crate::{
-    events_content_missing, ids_full, social_posts, social_profiles, IdSocialProfileRecord, Latest,
-    SocialPostRecord, LOG_TARGET,
+    IdSocialProfileRecord, LOG_TARGET, Latest, SocialPostRecord, events_content_missing, ids_full,
+    social_posts, social_profiles,
 };
 
 impl Database {
@@ -33,6 +35,14 @@ impl Database {
             .range((id, RostraId::ZERO)..=(id, RostraId::MAX))?
             .map(|res| res.map(|(k, v)| (k.value().1, v.value())))
             .collect::<Result<HashMap<_, _>, _>>()?)
+    }
+    pub fn read_followees_tx_iter(
+        id: RostraId,
+        ids_followees_table: &impl ids_followees::ReadableTable,
+    ) -> DbResult<impl Iterator<Item = Result<(RostraId, IdsFolloweesRecord), StorageError>>> {
+        Ok(ids_followees_table
+            .range((id, RostraId::ZERO)..=(id, RostraId::MAX))?
+            .map_ok(|(k, v)| (k.value().1, v.value())))
     }
 
     pub fn read_followers_tx(

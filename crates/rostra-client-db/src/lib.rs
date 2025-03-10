@@ -17,11 +17,12 @@ use std::{io, ops, result};
 
 use event::EventContentState;
 pub use ids::{IdsFolloweesRecord, IdsFollowersRecord};
+use itertools::Itertools as _;
 use process_event_content_ops::ProcessEventError;
 use redb_bincode::{ReadTransaction, ReadableTable, WriteTransaction};
 use rostra_core::event::{
-    content_kind, EventContent, EventExt as _, IrohNodeId, PersonaId, VerifiedEvent,
-    VerifiedEventContent,
+    EventContent, EventExt as _, IrohNodeId, PersonaId, VerifiedEvent, VerifiedEventContent,
+    content_kind,
 };
 use rostra_core::id::{RostraId, ToShort as _};
 use rostra_core::{ShortEventId, Timestamp};
@@ -339,6 +340,36 @@ impl Database {
                 .into_iter()
                 .map(|(id, record)| (id, record.persona))
                 .collect())
+        })
+        .await
+        .expect("Database panic")
+    }
+
+    pub async fn get_followees_extended(
+        &self,
+        id: RostraId,
+    ) -> (HashMap<RostraId, PersonaId>, HashSet<RostraId>) {
+        self.read_with(|tx| {
+            let ids_followees_table = tx.open_table(&ids_followees::TABLE)?;
+            let followees: HashMap<RostraId, PersonaId> =
+                Database::read_followees_tx_iter(id, &ids_followees_table)?
+                    .map_ok(|(id, record)| (id, record.persona))
+                    .collect::<Result<_, _>>()?;
+
+            let mut extended = HashSet::new();
+
+            for followee in followees.keys() {
+                for extended_followee in
+                    Database::read_followees_tx_iter(*followee, &ids_followees_table)?
+                        .map_ok(|(id, record)| (id, record.persona))
+                {
+                    let extended_followee = extended_followee?.0;
+                    if !followees.contains_key(&extended_followee) {
+                        extended.insert(extended_followee);
+                    }
+                }
+            }
+            Ok((followees, extended))
         })
         .await
         .expect("Database panic")

@@ -74,11 +74,17 @@ impl FolloweeHeadChecker {
             let mut connections = ConnectionCache::new();
             let mut followers_by_followee = BTreeMap::new();
 
-            let self_followees = storage.get_self_followees().await;
+            let (followees_direct, followees_ext) =
+                storage.get_followees_extended(self.self_id).await;
 
-            for (followee, _persona_id) in [&(self.self_id, PersonaId::default())]
+            for (id, _persona_id) in [(self.self_id, PersonaId::default())]
                 .into_iter()
-                .chain(&self_followees)
+                .chain(followees_direct)
+                .chain(
+                    followees_ext
+                        .into_iter()
+                        .map(|id| (id, PersonaId::default())),
+                )
             {
                 let Some(client) = self.client.app_ref_opt() else {
                     debug!(target: LOG_TARGET, "Client gone, quitting");
@@ -87,31 +93,31 @@ impl FolloweeHeadChecker {
                 };
 
                 let (head_pkarr, head_iroh) = tokio::join!(
-                    self.check_for_new_head_pkarr(&client, *followee),
-                    self.check_for_new_head_iroh(&client, *followee),
+                    self.check_for_new_head_pkarr(&client, id),
+                    self.check_for_new_head_iroh(&client, id),
                 );
 
                 for (source, res) in [("pkarr", head_pkarr), ("iroh", head_iroh)] {
                     match res {
                         Err(err) => {
-                            info!(target: LOG_TARGET, err = %err, id = %followee.to_short(), %source, "Failed to check for updates");
+                            info!(target: LOG_TARGET, err = %err, id = %id.to_short(), %source, "Failed to check for updates");
                         }
                         Ok(None) => {
-                            info!(target: LOG_TARGET, id = %followee.to_short(), %source, "No updates");
+                            info!(target: LOG_TARGET, id = %id.to_short(), %source, "No updates");
                             continue;
                         }
                         Ok(Some(head)) => {
-                            info!(target: LOG_TARGET, id = %followee.to_short(), %source, "Has updates");
+                            info!(target: LOG_TARGET, id = %id.to_short(), %source, "Has updates");
                             if let Err(err) = self
                                 .download_new_data(
-                                    *followee,
+                                    id,
                                     head,
                                     &mut connections,
                                     &mut followers_by_followee,
                                 )
                                 .await
                             {
-                                info!(target: LOG_TARGET, err = %(&*err).fmt_compact(), id = %followee.to_short(), "Failed to download new data");
+                                info!(target: LOG_TARGET, err = %(&*err).fmt_compact(), id = %id.to_short(), "Failed to download new data");
                             }
                         }
                     }

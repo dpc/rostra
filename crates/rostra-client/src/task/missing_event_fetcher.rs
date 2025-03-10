@@ -31,19 +31,25 @@ impl MissingEventFetcher {
     /// Run the thread
     #[instrument(name = "missing-event-fetcher", skip(self), ret)]
     pub async fn run(self) {
-        let mut initial_followers = {
+        let initial_followers = {
             let Ok(db) = self.client.db() else {
                 return;
             };
             db
         }
-        .get_followees(self.self_id)
+        .get_followees_extended(self.self_id)
         .await;
+
+        let mut initial_followers: Vec<RostraId> = initial_followers
+            .0
+            .into_keys()
+            .chain(initial_followers.1.into_iter())
+            .collect();
         let mut ids_with_missing_events_rx = self.ids_with_missing_events_rx.clone();
 
         loop {
             let author_id = if let Some(initial_follower_id) = initial_followers.pop() {
-                initial_follower_id.0
+                initial_follower_id
             } else {
                 match ids_with_missing_events_rx.recv().await {
                     Ok(id) => id,
