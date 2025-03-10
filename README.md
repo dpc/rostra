@@ -27,6 +27,10 @@ Rostra is extensible, and can be used for applications other
 than Twitter-like-app, as long as it fits its general
 social-graph-based data model.
 
+## Screenshot
+
+![rostra web UI](https://i.imgur.com/mpWzFmT.png)
+
 ## Using
 
 The discoverability story is bleak ATM, so you
@@ -72,13 +76,6 @@ Pick the last build and at the bottom of the page look for "Artifacts".
 
 In the future, the official releases will come with prebuilt binaries as well.
 
-## Plan
-
-Status: early, but getting to something usable.
-
-* Figure out general idea and architecture (mostly done)
-* Implement data model, p2p rpc, replication, etc.
-* Implement a built-in UI (web-server, using htmx).
 
 ## More info about Rostra:
 
