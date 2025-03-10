@@ -27,9 +27,9 @@ impl UiState {
         });
 
         let mut in_profile_link = vec![];
-        let out = jotdown::html::render_to_string(sanitized.map(|event| match event {
+        let out = jotdown::html::render_to_string(sanitized.flat_map(|event| match event {
             Event::Start(Container::Link(s, jotdown::LinkType::AutoLink), attr) => {
-                let ret = if let Some(rostra_id) = Self::extra_rostra_id_link(&s) {
+                if let Some(rostra_id) = Self::extra_rostra_id_link(&s) {
                     // TODO: blocked on https://github.com/hellux/jotdown/issues/86
                     // let x = client
                     //     .db()
@@ -38,34 +38,64 @@ impl UiState {
                     //     .map(|record| record.display_name)
                     //     .unwrap_or_else(|| rostra_id.to_string());
                     in_profile_link.push(rostra_id);
-                    Event::Start(
+                    vec![Event::Start(
                         Container::Link(
                             format!("/ui/profile/{rostra_id}").into(),
                             jotdown::LinkType::Span(jotdown::SpanLinkType::Inline),
                         ),
                         attr,
-                    )
+                    )]
                 } else {
-                    Event::Start(Container::Link(s, jotdown::LinkType::AutoLink), attr)
-                };
-                ret
+                    vec![Event::Start(
+                        Container::Link(s, jotdown::LinkType::AutoLink),
+                        attr,
+                    )]
+                }
             }
             Event::End(Container::Link(s, jotdown::LinkType::AutoLink)) => {
                 if let Some(rostra_id) = Self::extra_rostra_id_link(&s) {
                     in_profile_link.pop();
-                    Event::End(Container::Link(
+                    vec![Event::End(Container::Link(
                         format!("/ui/profile/{rostra_id}").into(),
                         jotdown::LinkType::Span(jotdown::SpanLinkType::Inline),
-                    ))
+                    ))]
                 } else {
-                    Event::End(Container::Link(s, jotdown::LinkType::AutoLink))
+                    vec![Event::End(Container::Link(s, jotdown::LinkType::AutoLink))]
                 }
+            }
+            Event::Start(Container::Image(s, link_type), _attr) => {
+                vec![
+                    Event::Start(
+                        Container::Div {
+                            class: "lazyload-wrapper",
+                        },
+                        jotdown::Attributes::try_from(
+                            "{ onclick=\"this.classList.toggle('-expanded')\" }",
+                        )
+                        .expect("Can't fail"),
+                    ),
+                    Event::Start(Container::Paragraph, Attributes::new()),
+                    Event::Str(format!("Load: {}", s).into()),
+                    Event::End(Container::Paragraph),
+                    Event::Start(
+                        Container::Image(s, link_type),
+                        Attributes::try_from("{ loading=lazy }").expect("Can't fail"),
+                    ),
+                ]
+            }
+            Event::End(Container::Image(s, link_type)) => {
+                vec![
+                    Event::End(Container::Image(s, link_type)),
+                    Event::End(Container::Div {
+                        class: "img-wrapper",
+                    }),
+                ]
             }
             Event::Str(_s) if !in_profile_link.is_empty() => {
                 let profile = in_profile_link.last().expect("Not empty just checked");
-                Event::Str(format!("@{profile}").into())
+                vec![Event::Str(format!("@{profile}").into())]
             }
-            event => event,
+            event => vec![event],
         }));
 
         PreEscaped(out)

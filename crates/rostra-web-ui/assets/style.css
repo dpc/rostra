@@ -514,6 +514,22 @@ emoji-picker {
   word-break: break-word;
 }
 
+.m-postOverview__content .lazyload-wrapper img {
+  display: none;
+}
+
+.m-postOverview__content .lazyload-wrapper.-expanded img {
+  display: block;
+}
+
+.m-postOverview__content .lazyload-wrapper.-expanded p {
+  display: none;
+}
+
+.m-postOverview__content .lazyload-wrapper p {
+  font-style: italic;
+}
+
 .m-postOverview__content.-missing {
   color: red;
   font-style: italic;
