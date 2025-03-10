@@ -34,7 +34,7 @@ social-graph-based data model.
 ## Using
 
 The discoverability story is bleak ATM, so you
-probably want to follow me: `rstr1gjs29qd6qfam47y45ph87tdtpxzce9awy77cfjzfvgws4xfcpgxq6rc4ry`
+probably want to follow me: `rse1okfyp4yj75i6riwbz86mpmbgna3f7qr66aj1njceqoigjabegy`
 if you don't want to stare at an empty timeline.
 
 #### Demo public instance
