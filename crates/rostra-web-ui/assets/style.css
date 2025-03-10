@@ -514,12 +514,9 @@ emoji-picker {
   word-break: break-word;
 }
 
-.m-postOverview__content .lazyload-wrapper img {
+.m-postOverview__content .lazyload-wrapper:not(.-expanded) img,
+.m-postOverview__content .lazyload-wrapper:not(.-expanded) iframe {
   display: none;
-}
-
-.m-postOverview__content .lazyload-wrapper.-expanded img {
-  display: block;
 }
 
 .m-postOverview__content .lazyload-wrapper.-expanded p {
