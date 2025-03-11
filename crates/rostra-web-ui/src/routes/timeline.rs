@@ -1,14 +1,14 @@
 use std::collections::{HashMap, HashSet};
 use std::time::Duration;
 
+use axum::Form;
 use axum::extract::ws::WebSocket;
 use axum::extract::{Path, State, WebSocketUpgrade};
 use axum::response::IntoResponse;
-use axum::Form;
-use maud::{html, Markup, PreEscaped};
+use maud::{Markup, PreEscaped, html};
 use rostra_client::ClientRef;
-use rostra_client_db::social::{EventPaginationCursor, SocialPostRecord};
 use rostra_client_db::IdSocialProfileRecord;
+use rostra_client_db::social::{EventPaginationCursor, SocialPostRecord};
 use rostra_core::event::{EventKind, SocialPost};
 use rostra_core::id::{RostraId, ShortRostraId, ToShort as _};
 use rostra_core::{ExternalEventId, ShortEventId, Timestamp};
@@ -18,10 +18,10 @@ use tower_cookies::{Cookie, Cookies};
 use tracing::debug;
 
 use super::super::error::RequestResult;
-use super::unlock::session::{RoMode, UserSession};
 use super::Maud;
+use super::unlock::session::{RoMode, UserSession};
 use crate::html_utils::re_typeset_mathjax;
-use crate::{SharedState, UiState, LOG_TARGET};
+use crate::{LOG_TARGET, SharedState, UiState};
 
 const NOTIFICATIONS_LAST_SEEN_COOKIE_NAME: &str = "notifications-last-seen";
 trait CookiesExt {
@@ -546,9 +546,11 @@ impl UiState {
                 self.get_social_profile_opt(reaction_author, client).await
             {
                 // HashSet above must have deduped it
-                assert!(reaction_social_profiles
-                    .insert(reaction_author, reaction_user_profile)
-                    .is_none());
+                assert!(
+                    reaction_social_profiles
+                        .insert(reaction_author, reaction_user_profile)
+                        .is_none()
+                );
             }
         }
 
@@ -587,7 +589,7 @@ impl UiState {
                 { }
 
                 div ."m-postOverview__contentSide"
-                    onclick=[comment.as_ref().map(|_|"this.classList.toggle('-expanded')" )]
+                    onclick=[comment.as_ref().map(|_|"this.classList.add('-expanded')" )]
                 {
                     header ."m-postOverview__header" {
                         (self.render_user_handle(event_id, author, user_profile.as_ref()))
