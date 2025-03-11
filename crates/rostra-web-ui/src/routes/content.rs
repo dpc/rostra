@@ -173,6 +173,11 @@ fn extract_media(url: &Url) -> Option<ExternalMedia> {
 
             Some(ExternalMedia::YT(vid))
         }
+        "youtu.be" => {
+            let vid = url.path_segments()?.next_back()?;
+
+            Some(ExternalMedia::YT(vid.into()))
+        }
         _ => None,
     }
 }
