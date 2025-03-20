@@ -259,7 +259,10 @@ impl UiState {
                     .maybe_pending_notifications(pending_notifications)
                     .call()
                     .await?)
+
+
             }
+            div .o-previewDialog {}
             (re_typeset_mathjax())
 
         };

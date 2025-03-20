@@ -1,17 +1,17 @@
+use axum::Form;
 use axum::extract::{Query, State};
 use axum::response::IntoResponse;
-use axum::Form;
-use maud::{html, Markup, PreEscaped};
-use rostra_core::id::ToShort as _;
+use maud::{Markup, PreEscaped, html};
 use rostra_core::ExternalEventId;
+use rostra_core::id::ToShort as _;
 use serde::Deserialize;
 
-use super::super::error::RequestResult;
 use super::super::SharedState;
-use super::unlock::session::{RoMode, UserSession};
+use super::super::error::RequestResult;
 use super::Maud;
-use crate::html_utils::{re_typeset_mathjax, submit_on_ctrl_enter};
+use super::unlock::session::{RoMode, UserSession};
 use crate::UiState;
+use crate::html_utils::{re_typeset_mathjax, submit_on_ctrl_enter};
 
 #[derive(Deserialize)]
 pub struct Input {
@@ -31,7 +31,6 @@ fn focus_on_new_post_content_input() -> Markup {
                         // on small devices, we want to keep the input in view,
                         // so we scroll to it; on larger ones this breaks scrolling preview
                         // into view
-                        console.log(window.innerWidth);
                         if (window.innerWidth < 768) {
                             content.parentNode.scrollIntoView();
                         }
@@ -96,6 +95,8 @@ pub async fn post_new_post(
         .as_ref()
         .map(|(rostra_id, record)| (*rostra_id, record.as_ref()));
     Ok(Maud(html! {
+        // Close the preview dialog
+        div ."o-previewDialog -empty" hx-swap-oob="outerHTML:.o-previewDialog" {}
 
         (clean_form)
 
@@ -122,7 +123,65 @@ pub async fn post_new_post(
             }
         }
         (re_typeset_mathjax())
+    }))
+}
 
+pub async fn get_post_preview_dialog(
+    state: State<SharedState>,
+    session: UserSession,
+    Form(form): Form<Input>,
+) -> RequestResult<impl IntoResponse> {
+    let client = state.client(session.id()).await?;
+    let self_id = client.client_ref()?.rostra_id();
+
+    if form.content.is_empty() {
+        return Ok(Maud(html! {
+            div ."o-previewDialog -empty" {}
+        }));
+    }
+
+    Ok(Maud(html! {
+        div ."o-previewDialog -active" hx-swap-oob="outerHTML:.o-previewDialog" {
+            div ."o-previewDialog__content" {
+                div ."o-previewDialog__post" {
+                    (state.post_overview(
+                        &client.client_ref()?,
+                        self_id
+                        )
+                        .content(&form.content)
+                        .ro(session.ro_mode())
+                        .call().await?
+                    )
+                }
+
+                div ."o-previewDialog__actions" {
+                    form ."o-previewDialog__form" hx-post="/ui/post" hx-swap="outerHTML" {
+                        input type="hidden" name="content" value=(form.content) {}
+                        @if let Some(reply_to) = form.reply_to {
+                            input type="hidden" name="reply_to" value=(reply_to) {}
+                        }
+
+                        div ."o-previewDialog__actionButtons" {
+                            button ."o-previewDialog__cancelButton u-button"
+                                type="button"
+                                onclick="document.querySelector('.o-previewDialog').classList.remove('-active')"
+                            {
+                                span ."o-previewDialog__cancelButtonIcon u-buttonIcon"
+                                    width="1rem" height="1rem" {}
+                                "Cancel"
+                            }
+
+                            button ."o-previewDialog__submitButton u-button" type="submit" {
+                                span ."o-previewDialog__submitButtonIcon u-buttonIcon"
+                                    width="1rem" height="1rem" {}
+                                "Post"
+                            }
+                        }
+                    }
+                }
+            }
+            (re_typeset_mathjax())
+        }
     }))
 }
 
@@ -216,8 +275,8 @@ impl UiState {
         let notification = notification.into();
         html! {
             form ."m-newPostForm"
-                hx-post="/ui/post"
-                hx-swap="outerHTML"
+                hx-post="/ui/post/preview_dialog"
+                hx-swap="none"
             {
                 (self.render_reply_to_line(None, None))
                 textarea
@@ -249,12 +308,12 @@ impl UiState {
                         ."m-newPostForm__emojiButton"
                         href="#"
                     { "😀" }
-                    button ."m-newPostForm__postButton u-button"
+                    button ."m-newPostForm__previewButton u-button"
                         disabled[ro.to_disabled()]
                         type="submit"
                     {
-                        span ."m-newPostForm__postButtonIcon u-buttonIcon" width="1rem" height="1rem" {}
-                        "Post"
+                        span ."m-newPostForm__previewButtonIcon u-buttonIcon" width="1rem" height="1rem" {}
+                        "Preview"
                     }
                 }
                 div

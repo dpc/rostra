@@ -474,9 +474,19 @@ img {
   z-index: 1;
 }
 
-/* If the reply-parent's content is folded, we don't want to bother with any buttons */
-.m-postOverview.-reply-parent:has(>div>.m-postOverview__contentSide:not(.-expanded))>.m-postOverview__buttonBar {
+/* By default, hide buttons on reply parents */
+.m-postOverview.-reply-parent>.m-postOverview__buttonBar {
   display: none;
+}
+
+/* When expanded, show the buttons - this class will be added via JS */
+.m-postOverview.-reply-parent.-show-buttons>.m-postOverview__buttonBar {
+  display: flex;
+}
+
+/* But if it's expanded, show the buttons */
+.m-postOverview.-reply-parent:has(>div>.m-postOverview__contentSide.-expanded)>.m-postOverview__buttonBar {
+  display: flex;
 }
 
 .m-postOverview__contentSide>* {
@@ -669,14 +679,14 @@ emoji-picker {
   gap: 5pt;
 }
 
-.m-newPostForm__postButton {
+.m-newPostForm__previewButton {
   display: flex;
   align-items: center;
   gap: 0.5rem;
 }
 
-.m-newPostForm__postButtonIcon {
-  background: url('/assets/icons/upload.svg') center/contain no-repeat;
+.m-newPostForm__previewButtonIcon {
+  background: url('/assets/icons/arrow-right.svg') center/contain no-repeat;
 }
 
 .m-addFolloweeForm {
@@ -814,6 +824,129 @@ emoji-picker {
   background-color: var(--color-post-highlight-bg);
 }
 
+.o-previewDialog {
+  display: none;
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  background-color: rgba(0, 0, 0, 0.5);
+  z-index: 1000;
+  justify-content: center;
+  align-items: center;
+}
+
+.o-previewDialog.-active {
+  display: flex;
+}
+
+.o-previewDialog__content {
+  background-color: var(--color-bg-default);
+  border-radius: 8px;
+  padding: 20px;
+  width: 90%;
+  max-width: 600px;
+  max-height: 90vh;
+  overflow-y: auto;
+  box-shadow: 0 4px 8px rgba(0, 0, 0, 0.2);
+}
+
+.o-previewDialog__post {
+  margin-bottom: 20px;
+  border: 1px solid var(--color-timeline-item-border);
+  border-radius: 8px;
+  padding: 10px;
+}
+
+.o-previewDialog__actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  margin-top: 20px;
+}
+
+.o-previewDialog__actionButtons {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+}
+
+.o-previewDialog__cancelButton {
+  background-color: var(--color-button-bg);
+}
+
+.o-previewDialog__submitButton {
+  background-color: var(--color-button-bg);
+}
+
+.o-previewDialog__submitButtonIcon {
+  background: url('/assets/icons/upload.svg') center/contain no-repeat;
+}
+
+.o-previewDialog__cancelButtonIcon {
+  background: url('/assets/icons/arrow-left.svg') center/contain no-repeat;
+}
+
+
+
+.o-previewDialog {
+  display: none;
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  background-color: rgba(0, 0, 0, 0.5);
+  z-index: 1000;
+  justify-content: center;
+  align-items: center;
+}
+
+.o-previewDialog.-active {
+  display: flex;
+}
+
+.o-previewDialog__content {
+  background-color: var(--color-bg-default);
+  border-radius: 8px;
+  padding: 20px;
+  width: 90%;
+  max-width: 600px;
+  max-height: 90vh;
+  overflow-y: auto;
+  box-shadow: 0 4px 8px rgba(0, 0, 0, 0.2);
+}
+
+.o-previewDialog__title {
+  margin-top: 0;
+  margin-bottom: 16px;
+  font-size: 1.5rem;
+  font-weight: bold;
+  text-align: center;
+}
+
+.o-previewDialog__post {
+  margin-bottom: 20px;
+  border: 1px solid var(--color-timeline-item-border);
+  border-radius: 8px;
+  padding: 10px;
+}
+
+.o-previewDialog__actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  margin-top: 20px;
+}
+
+.o-previewDialog__cancelButton {
+  background-color: var(--color-button-bg);
+}
+
+.o-previewDialog__submitButton {
+  background-color: var(--color-button-bg);
+}
 
 /* TOGGLE SWITCH CHECKBOXES */
 .switch {

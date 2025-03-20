@@ -9,6 +9,7 @@ mod unlock;
 
 use std::sync::Arc;
 
+use axum::Router;
 use axum::body::Body;
 use axum::extract::{FromRequest, Path, Request, State};
 use axum::http::header::{self, ACCEPT_ENCODING, CONTENT_ENCODING, CONTENT_TYPE};
@@ -16,11 +17,10 @@ use axum::http::{HeaderMap, HeaderValue, StatusCode};
 use axum::middleware::{self, Next};
 use axum::response::{IntoResponse, Redirect, Response};
 use axum::routing::{get, post};
-use axum::Router;
 use maud::Markup;
 
-use super::error::{RequestError, UserErrorResponse};
 use super::SharedState;
+use super::error::{RequestError, UserErrorResponse};
 use crate::asset_cache::AssetCache;
 
 #[derive(Clone, Debug)]
@@ -34,7 +34,7 @@ impl IntoResponse for Maud {
                 header::CONTENT_TYPE,
                 HeaderValue::from_static("text/html; charset=utf-8"),
             )],
-            self.0 .0,
+            self.0.0,
         )
             .into_response()
     }
@@ -159,6 +159,10 @@ pub fn route_handler(state: SharedState) -> Router {
         .route("/ui/updates", get(timeline::get_updates))
         .route("/ui/post", post(new_post::post_new_post))
         .route("/ui/post/preview", post(new_post::get_post_preview))
+        .route(
+            "/ui/post/preview_dialog",
+            post(new_post::get_post_preview_dialog),
+        )
         .route("/ui/post/reply_to", get(new_post::get_reply_to))
         .route("/ui/followee", post(add_followee::add_followee))
         .route("/ui/unlock", get(unlock::get).post(unlock::post_unlock))
