@@ -10,62 +10,19 @@ use rostra_client::ClientRef;
 use rostra_client_db::IdSocialProfileRecord;
 use rostra_client_db::social::{EventPaginationCursor, SocialPostRecord};
 use rostra_core::event::{EventKind, SocialPost};
-use rostra_core::id::{RostraId, ShortRostraId, ToShort as _};
+use rostra_core::id::{RostraId, ToShort as _};
 use rostra_core::{ExternalEventId, ShortEventId, Timestamp};
 use rostra_util_error::FmtCompact as _;
 use serde::Deserialize;
-use tower_cookies::{Cookie, Cookies};
+use tower_cookies::Cookies;
 use tracing::debug;
 
 use super::super::error::RequestResult;
 use super::Maud;
+use super::cookies::CookiesExt as _;
 use super::unlock::session::{RoMode, UserSession};
 use crate::html_utils::re_typeset_mathjax;
 use crate::{LOG_TARGET, SharedState, UiState};
-
-const NOTIFICATIONS_LAST_SEEN_COOKIE_NAME: &str = "notifications-last-seen";
-trait CookiesExt {
-    fn get_last_seen(&self, self_id: impl Into<ShortRostraId>) -> Option<EventPaginationCursor>;
-
-    fn save_last_seen(
-        &mut self,
-        self_id: impl Into<ShortRostraId>,
-        pagination: EventPaginationCursor,
-    );
-}
-
-impl CookiesExt for Cookies {
-    fn get_last_seen(&self, self_id: impl Into<ShortRostraId>) -> Option<EventPaginationCursor> {
-        let self_id = self_id.into();
-        if let Some(s) = self.get(&format!(
-            "{self_id}-{}",
-            NOTIFICATIONS_LAST_SEEN_COOKIE_NAME
-        )) {
-            serde_json::from_str(s.value())
-                .inspect_err(|err| {
-                    debug!(target: LOG_TARGET, err = %err.fmt_compact(), "Invalid cookie value");
-                })
-                .ok()
-        } else {
-            None
-        }
-    }
-
-    fn save_last_seen(
-        &mut self,
-        self_id: impl Into<ShortRostraId>,
-        pagination: EventPaginationCursor,
-    ) {
-        let self_id = self_id.into();
-        let mut cookie = Cookie::new(
-            format!("{self_id}-{}", NOTIFICATIONS_LAST_SEEN_COOKIE_NAME),
-            serde_json::to_string(&pagination).expect("can't fail"),
-        );
-        cookie.set_path("/ui");
-        cookie.set_max_age(time::Duration::weeks(50));
-        self.add(cookie);
-    }
-}
 
 #[derive(Deserialize)]
 pub struct TimelinePaginationInput {
@@ -751,9 +708,18 @@ pub struct Persona {
 impl Persona {
     pub fn list() -> Vec<Self> {
         vec![
-            Persona { id: 0, name: "Personal" },
-            Persona { id: 1, name: "Professional" },
-            Persona { id: 2, name: "Civic" },
+            Persona {
+                id: 0,
+                name: "Personal",
+            },
+            Persona {
+                id: 1,
+                name: "Professional",
+            },
+            Persona {
+                id: 2,
+                name: "Civic",
+            },
         ]
     }
 }

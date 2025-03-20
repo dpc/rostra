@@ -6,10 +6,12 @@ use rostra_core::ExternalEventId;
 use rostra_core::event::PersonaId;
 use rostra_core::id::ToShort as _;
 use serde::Deserialize;
+use tower_cookies::Cookies;
 
 use super::super::SharedState;
 use super::super::error::RequestResult;
 use super::Maud;
+use super::cookies::CookiesExt as _;
 use super::unlock::session::{RoMode, UserSession};
 use crate::UiState;
 use crate::html_utils::{re_typeset_mathjax, submit_on_ctrl_enter};
@@ -62,10 +64,17 @@ fn scroll_preview_into_view() -> Markup {
 pub async fn post_new_post(
     state: State<SharedState>,
     session: UserSession,
+    mut cookies: Cookies,
     Form(form): Form<PostInput>,
 ) -> RequestResult<impl IntoResponse> {
     let client_handle = state.client(session.id()).await?;
     let client_ref = client_handle.client_ref()?;
+
+    // Save the selected persona in a cookie
+    if let Some(persona_id) = form.persona {
+        cookies.save_persona(client_ref.rostra_id(), persona_id);
+    }
+
     let event = client_ref
         .social_post(
             session.id_secret()?,
@@ -136,16 +145,21 @@ pub async fn post_new_post(
 pub async fn get_post_preview_dialog(
     state: State<SharedState>,
     session: UserSession,
+    cookies: Cookies,
     Form(form): Form<PostInput>,
 ) -> RequestResult<impl IntoResponse> {
     let client = state.client(session.id()).await?;
-    let self_id = client.client_ref()?.rostra_id();
+    let client_ref = client.client_ref()?;
+    let self_id = client_ref.rostra_id();
 
     if form.content.is_empty() {
         return Ok(Maud(html! {
             div ."o-previewDialog -empty" {}
         }));
     }
+
+    // Get the saved persona from cookie
+    let saved_persona = cookies.get_persona(self_id);
 
     Ok(Maud(html! {
         div ."o-previewDialog -active" hx-swap-oob="outerHTML:.o-previewDialog" {
@@ -176,7 +190,10 @@ pub async fn get_post_preview_dialog(
                                     ."o-previewDialog__personaSelect"
                                 {
                                     @for persona in super::timeline::Persona::list() {
-                                        option value=(persona.id) { (persona.name) }
+                                        option
+                                            value=(persona.id)
+                                            selected[saved_persona.map_or(false, |id| id == persona.id)]
+                                        { (persona.name) }
                                     }
                                 }
                             }
