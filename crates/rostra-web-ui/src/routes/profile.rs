@@ -1,14 +1,15 @@
-use axum::extract::{Path, State};
-use axum::response::IntoResponse;
 use axum::Form;
-use maud::{html, Markup, PreEscaped};
+use axum::extract::{Path, Query, State};
+use axum::response::IntoResponse;
+use maud::{Markup, PreEscaped, html};
 use rostra_client_db::social::EventPaginationCursor;
 use rostra_core::id::RostraId;
+use serde::Deserialize;
 use tower_cookies::Cookies;
 
+use super::Maud;
 use super::timeline::{TimelineMode, TimelinePaginationInput};
 use super::unlock::session::{RoMode, UserSession};
-use super::Maud;
 use crate::error::RequestResult;
 use crate::{SharedState, UiState};
 
@@ -37,42 +38,134 @@ pub async fn get_profile(
     ))
 }
 
+#[derive(Deserialize)]
+pub struct FollowFormData {
+    follow_type: String,
+    // We'll handle these later
+    #[allow(dead_code)]
+    #[serde(default)]
+    personas: Vec<u8>,
+}
+
+#[derive(Deserialize)]
+pub struct FollowQueryParams {
+    following: bool,
+}
+
+pub async fn get_follow_dialog(
+    state: State<SharedState>,
+    session: UserSession,
+    Path(profile_id): Path<RostraId>,
+    Query(params): Query<FollowQueryParams>,
+) -> RequestResult<impl IntoResponse> {
+    Ok(Maud(html! {
+        div ."o-followDialog__content" {
+            form ."o-followDialog__form"
+                hx-post=(format!("/ui/profile/{}/follow", profile_id))
+                hx-target=".m-profileSummary"
+                hx-swap="outerHTML"
+            {
+                div ."o-followDialog__optionsContainer" {
+                    div ."o-followDialog__selectContainer" {
+                        select
+                            name="follow_type"
+                            id="follow-type-select"
+                            ."o-followDialog__followTypeSelect"
+                            onchange="togglePersonaList()"
+                        {
+                            option
+                                value="unfollow"
+                                selected[params.following]
+                            { "Unfollow" }
+
+                            option
+                                value="follow_all"
+                                selected[!params.following]
+                            { "Follow All (except selected)" }
+
+                            option
+                                value="follow_only"
+                            { "Follow Only (selected)" }
+                        }
+                    }
+
+                    div ."o-followDialog__personaList" ."-visible"[!params.following] {
+                        @for persona in super::timeline::Persona::list() {
+                            div ."o-followDialog__personaOption" {
+                                input
+                                    type="checkbox"
+                                    id=(format!("persona_{}", persona.id))
+                                    name="personas[]"
+                                    value=(persona.id)
+                                {}
+                                label
+                                    for=(format!("persona_{}", persona.id))
+                                    ."o-followDialog__personaLabel"
+                                { (persona.name) }
+                            }
+                        }
+                    }
+                }
+
+                div ."o-followDialog__actions" {
+                    button
+                        ."o-followDialog__cancelButton u-button"
+                        type="button"
+                        onclick="document.querySelector('.o-followDialog').classList.remove('-active')"
+                    {
+                        span ."o-followDialog__cancelButtonIcon u-buttonIcon"
+                            width="1rem" height="1rem" {}
+                        "Cancel"
+                    }
+
+                    button ."o-followDialog__submitButton u-button" type="submit" {
+                        span ."o-followDialog__submitButtonIcon u-buttonIcon"
+                            width="1rem" height="1rem" {}
+                        "Submit"
+                    }
+                }
+            }
+        }
+    }))
+}
+
 pub async fn post_follow(
     state: State<SharedState>,
     session: UserSession,
     Path(profile_id): Path<RostraId>,
+    Form(form): Form<FollowFormData>,
 ) -> RequestResult<impl IntoResponse> {
-    state
-        .client(session.id())
-        .await?
-        .client_ref()?
-        .follow(session.id_secret()?, profile_id)
-        .await?;
+    match form.follow_type.as_str() {
+        "unfollow" => {
+            state
+                .client(session.id())
+                .await?
+                .client_ref()?
+                .unfollow(session.id_secret()?, profile_id)
+                .await?;
+        }
+        "follow_all" | "follow_only" => {
+            state
+                .client(session.id())
+                .await?
+                .client_ref()?
+                .follow(session.id_secret()?, profile_id)
+                .await?;
+        }
+        _ => {}
+    }
 
-    Ok(Maud(
-        state
+    Ok(Maud(html! {
+        // Update the profile summary
+        (state
             .render_profile_summary(profile_id, &session, session.ro_mode())
-            .await?,
-    ))
-}
+            .await?)
 
-pub async fn post_unfollow(
-    state: State<SharedState>,
-    session: UserSession,
-    Path(profile_id): Path<RostraId>,
-) -> RequestResult<impl IntoResponse> {
-    state
-        .client(session.id())
-        .await?
-        .client_ref()?
-        .unfollow(session.id_secret()?, profile_id)
-        .await?;
-
-    Ok(Maud(
-        state
-            .render_profile_summary(profile_id, &session, session.ro_mode())
-            .await?,
-    ))
+        // Close the follow dialog
+        div ."o-followDialog -empty"
+            hx-swap-oob="outerHTML:.o-followDialog"
+        {}
+    }))
 }
 
 impl UiState {
@@ -130,6 +223,18 @@ impl UiState {
                             target.classList.remove('-active');
                         }, 1000);
                     }
+                    
+                    function togglePersonaList() {
+                        const selectedOption = document.querySelector('#follow-type-select').value;
+                        const personaList = document.querySelector('.o-followDialog__personaList');
+                        
+                        if (selectedOption === 'follow_all' || selectedOption === 'follow_only') {
+                            personaList.classList.add('-visible');
+                        } else {
+                            personaList.classList.remove('-visible');
+                        }
+                    }
+                    
                     "#
                     ))
                 }
@@ -157,9 +262,10 @@ impl UiState {
                             @if following {
                                 button
                                     ."m-profileSummary__unfollowButton u-button"
-                                    hx-post=(format!("/ui/profile/{profile_id}/unfollow"))
-                                    hx-target="closest .m-profileSummary"
-                                    hx-swap="outerHTML"
+                                    hx-get=(format!("/ui/profile/{}/follow?following=true", profile_id))
+                                    hx-target=".o-followDialog"
+                                    hx-swap="innerHTML"
+                                    hx-on::after-request="document.querySelector('.o-followDialog').classList.add('-active')"
                                     disabled[ro.to_disabled()]
                                 {
                                     span ."m-profileSummary__unfollowButtonIcon u-buttonIcon" width="1rem" height="1rem"
@@ -169,9 +275,10 @@ impl UiState {
                             } @else {
                                 button
                                     ."m-profileSummary__followButton u-button"
-                                    hx-post=(format!("/ui/profile/{profile_id}/follow"))
-                                    hx-target="closest .m-profileSummary"
-                                    hx-swap="outerHTML"
+                                    hx-get=(format!("/ui/profile/{}/follow?following=false", profile_id))
+                                    hx-target=".o-followDialog"
+                                    hx-swap="innerHTML"
+                                    hx-on::after-request="document.querySelector('.o-followDialog').classList.add('-active')"
                                     disabled[ro.to_disabled()]
                                 {
                                     span ."m-profileSummary__followButtonIcon u-buttonIcon" width="1rem" height="1rem"
@@ -184,6 +291,7 @@ impl UiState {
                     p ."m-profileSummary__bio" { (profile.bio) }
                 }
             }
+
         })
     }
 }

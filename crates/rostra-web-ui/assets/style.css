@@ -917,7 +917,107 @@ emoji-picker {
   background: url('/assets/icons/arrow-left.svg') center/contain no-repeat;
 }
 
+/* Follow Dialog Styles */
+.o-followDialog {
+  display: none;
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  background-color: rgba(0, 0, 0, 0.7);
+  z-index: 1000;
+  justify-content: center;
+  align-items: center;
+}
 
+.o-followDialog.-active {
+  display: flex;
+}
+
+.o-followDialog__content {
+  background-color: var(--color-bg-default);
+  border-radius: 8px;
+  padding: 20px;
+  width: 90%;
+  max-width: 500px;
+  max-height: 90vh;
+  overflow-y: auto;
+  box-shadow: 0 4px 8px rgba(0, 0, 0, 0.4);
+}
+
+.o-followDialog__title {
+  margin-top: 0;
+  margin-bottom: 16px;
+  font-size: 1.5rem;
+  font-weight: bold;
+  text-align: center;
+}
+
+.o-followDialog__form {
+  width: 100%;
+}
+
+.o-followDialog__optionsContainer {
+  margin-bottom: 20px;
+}
+
+.o-followDialog__selectContainer {
+  margin-bottom: 15px;
+}
+
+.o-followDialog__followTypeSelect {
+  width: 100%;
+  padding: 8px;
+  border-radius: var(--border-radius-std);
+  border: 1px solid var(--color-button-border);
+  background-color: var(--color-text-input-bg);
+  color: var(--color-text-default);
+  font-size: 1rem;
+}
+
+.o-followDialog__personaList {
+  margin-top: 15px;
+  margin-left: 25px;
+  display: none;
+}
+
+.o-followDialog__personaList.-visible {
+  display: block;
+}
+
+.o-followDialog__personaOption {
+  display: flex;
+  align-items: center;
+  margin-bottom: 8px;
+}
+
+.o-followDialog__personaLabel {
+  margin-left: 8px;
+}
+
+.o-followDialog__actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  margin-top: 20px;
+}
+
+.o-followDialog__cancelButton {
+  background-color: var(--color-button-bg);
+}
+
+.o-followDialog__submitButton {
+  background-color: var(--color-button-bg);
+}
+
+.o-followDialog__submitButtonIcon {
+  background: url('/assets/icons/upload.svg') center/contain no-repeat;
+}
+
+.o-followDialog__cancelButtonIcon {
+  background: url('/assets/icons/arrow-left.svg') center/contain no-repeat;
+}
 
 .o-previewDialog {
   display: none;

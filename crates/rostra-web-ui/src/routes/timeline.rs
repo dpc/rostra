@@ -220,6 +220,7 @@ impl UiState {
 
             }
             div .o-previewDialog {}
+            div .o-followDialog {}
             (re_typeset_mathjax())
 
         };
