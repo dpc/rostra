@@ -3,6 +3,7 @@ use axum::extract::{Query, State};
 use axum::response::IntoResponse;
 use maud::{Markup, PreEscaped, html};
 use rostra_core::ExternalEventId;
+use rostra_core::event::PersonaId;
 use rostra_core::id::ToShort as _;
 use serde::Deserialize;
 
@@ -14,9 +15,10 @@ use crate::UiState;
 use crate::html_utils::{re_typeset_mathjax, submit_on_ctrl_enter};
 
 #[derive(Deserialize)]
-pub struct Input {
+pub struct PostInput {
     reply_to: Option<ExternalEventId>,
     content: String,
+    persona: Option<u8>,
 }
 
 fn focus_on_new_post_content_input() -> Markup {
@@ -60,12 +62,17 @@ fn scroll_preview_into_view() -> Markup {
 pub async fn post_new_post(
     state: State<SharedState>,
     session: UserSession,
-    Form(form): Form<Input>,
+    Form(form): Form<PostInput>,
 ) -> RequestResult<impl IntoResponse> {
     let client_handle = state.client(session.id()).await?;
     let client_ref = client_handle.client_ref()?;
     let event = client_ref
-        .social_post(session.id_secret()?, form.content.clone(), form.reply_to)
+        .social_post(
+            session.id_secret()?,
+            form.content.clone(),
+            form.reply_to,
+            PersonaId(form.persona.unwrap_or_default()),
+        )
         .await?;
 
     let clean_form = state.new_post_form(
@@ -129,7 +136,7 @@ pub async fn post_new_post(
 pub async fn get_post_preview_dialog(
     state: State<SharedState>,
     session: UserSession,
-    Form(form): Form<Input>,
+    Form(form): Form<PostInput>,
 ) -> RequestResult<impl IntoResponse> {
     let client = state.client(session.id()).await?;
     let self_id = client.client_ref()?.rostra_id();
@@ -161,20 +168,34 @@ pub async fn get_post_preview_dialog(
                             input type="hidden" name="reply_to" value=(reply_to) {}
                         }
 
-                        div ."o-previewDialog__actionButtons" {
-                            button ."o-previewDialog__cancelButton u-button"
-                                type="button"
-                                onclick="document.querySelector('.o-previewDialog').classList.remove('-active')"
-                            {
-                                span ."o-previewDialog__cancelButtonIcon u-buttonIcon"
-                                    width="1rem" height="1rem" {}
-                                "Cancel"
+                        div ."o-previewDialog__actionContainer" {
+                            div ."o-previewDialog__personaContainer" {
+                                select
+                                    name="persona"
+                                    id="persona-select"
+                                    ."o-previewDialog__personaSelect"
+                                {
+                                    @for persona in super::timeline::Persona::list() {
+                                        option value=(persona.id) { (persona.name) }
+                                    }
+                                }
                             }
 
-                            button ."o-previewDialog__submitButton u-button" type="submit" {
-                                span ."o-previewDialog__submitButtonIcon u-buttonIcon"
-                                    width="1rem" height="1rem" {}
-                                "Post"
+                            div ."o-previewDialog__actionButtons" {
+                                button ."o-previewDialog__cancelButton u-button"
+                                    type="button"
+                                    onclick="document.querySelector('.o-previewDialog').classList.remove('-active')"
+                                {
+                                    span ."o-previewDialog__cancelButtonIcon u-buttonIcon"
+                                        width="1rem" height="1rem" {}
+                                    "Cancel"
+                                }
+
+                                button ."o-previewDialog__submitButton u-button" type="submit" {
+                                    span ."o-previewDialog__submitButtonIcon u-buttonIcon"
+                                        width="1rem" height="1rem" {}
+                                    "Post"
+                                }
                             }
                         }
                     }
@@ -188,7 +209,7 @@ pub async fn get_post_preview_dialog(
 pub async fn get_post_preview(
     state: State<SharedState>,
     session: UserSession,
-    Form(form): Form<Input>,
+    Form(form): Form<PostInput>,
 ) -> RequestResult<impl IntoResponse> {
     let client = state.client(session.id()).await?;
     let self_id = client.client_ref()?.rostra_id();

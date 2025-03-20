@@ -285,12 +285,12 @@ impl Client {
 
         if !connection_futures.is_empty() {
             use futures::future::select_all;
-            
+
             // Try all connections in parallel, take first success
             while !connection_futures.is_empty() {
                 let (result, _index, remaining) = select_all(connection_futures).await;
                 connection_futures = remaining;
-                
+
                 match result {
                     Ok(conn) => return Ok(conn),
                     Err(err) => {
@@ -608,6 +608,7 @@ impl Client {
         id_secret: RostraIdSecretKey,
         body: String,
         reply_to: Option<ExternalEventId>,
+        persona: PersonaId,
     ) -> PostResult<VerifiedEvent> {
         let (content, reaction) =
             if let Some(reaction) = content_kind::SocialPost::is_reaction(&reply_to, &body) {
@@ -619,7 +620,7 @@ impl Client {
             id_secret,
             content_kind::SocialPost {
                 djot_content: content,
-                persona: PersonaId(0),
+                persona,
                 reply_to,
                 reaction,
             },

@@ -1,7 +1,7 @@
 pub mod content;
 pub mod content_kind;
 
-use std::fmt;
+use std::{fmt, str};
 
 pub use content::*;
 pub use content_kind::*;
@@ -23,8 +23,8 @@ pub use verified_event::*;
 
 use crate::id::RostraId;
 use crate::{
-    array_type_define, ContentHash, MsgLen, NullableShortEventId, ShortEventId, Timestamp,
-    TimestampFixed,
+    ContentHash, MsgLen, NullableShortEventId, ShortEventId, Timestamp, TimestampFixed,
+    array_type_define,
 };
 
 /// Convenience extension trait to unify getting event data from all versions
@@ -183,8 +183,15 @@ impl EventExt for Event {
 #[cfg_attr(feature = "serde", derive(::serde::Serialize, ::serde::Deserialize))]
 #[cfg_attr(feature = "bincode", derive(::bincode::Encode, ::bincode::Decode))]
 #[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Debug, Default)]
-pub struct PersonaId(pub u32);
+pub struct PersonaId(pub u8);
 
+impl str::FromStr for PersonaId {
+    type Err = <u8 as str::FromStr>::Err;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        Ok(PersonaId(u8::from_str(s)?))
+    }
+}
 pub trait SignedEventExt: EventExt {
     fn sig(&self) -> EventSignature;
 }

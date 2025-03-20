@@ -742,6 +742,22 @@ impl UiState {
     }
 }
 
+#[derive(Debug, Clone, Copy)]
+pub struct Persona {
+    pub id: u8,
+    pub name: &'static str,
+}
+
+impl Persona {
+    pub fn list() -> Vec<Self> {
+        vec![
+            Persona { id: 0, name: "Personal" },
+            Persona { id: 1, name: "Professional" },
+            Persona { id: 2, name: "Civic" },
+        ]
+    }
+}
+
 #[derive(Copy, Clone, PartialEq, Eq, Hash, Debug)]
 pub(crate) enum TimelineMode {
     Followees,

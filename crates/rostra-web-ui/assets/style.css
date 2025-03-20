@@ -866,6 +866,35 @@ emoji-picker {
   margin-top: 20px;
 }
 
+.o-previewDialog__form {
+  width: 100%;
+}
+
+.o-previewDialog__actionContainer {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  width: 100%;
+  gap: 4pt;
+}
+
+.o-previewDialog__personaContainer {
+  display: flex;
+  align-items: center;
+}
+
+.o-previewDialog__personaLabel {
+  display: none;
+}
+
+.o-previewDialog__personaSelect {
+  padding: 4px 8px;
+  border-radius: var(--border-radius-std);
+  border: 1px solid var(--color-button-border);
+  background-color: var(--color-text-input-bg);
+  color: var(--color-text-default);
+}
+
 .o-previewDialog__actionButtons {
   display: flex;
   justify-content: flex-end;

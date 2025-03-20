@@ -4,16 +4,17 @@ use std::io;
 use std::time::Duration;
 
 use clap::Parser;
-use cli::{make_web_opts, Opts};
+use cli::{Opts, make_web_opts};
 use duct::cmd;
 use futures::future::pending;
+use rostra_client::Client;
 use rostra_client::error::{ConnectError, IdResolveError, IdSecretReadError, InitError, PostError};
 use rostra_client::multiclient::MultiClient;
-use rostra_client::Client;
 use rostra_client_db::{Database, DbError};
+use rostra_core::event::PersonaId;
 use rostra_core::id::RostraIdSecretKey;
-use rostra_p2p::connection::{Connection, PingRequest, PingResponse};
 use rostra_p2p::RpcError;
+use rostra_p2p::connection::{Connection, PingRequest, PingResponse};
 use rostra_util_error::{BoxedError, FmtCompact as _};
 use rostra_web_ui::{Server, WebUiServerError};
 use snafu::{FromString, ResultExt, Snafu, Whatever};
@@ -221,7 +222,11 @@ async fn handle_cmd(opts: Opts) -> CliResult<serde_json::Value> {
             }))
             .expect("Can't fail")
         }
-        cli::OptsCmd::Post { body, secret_file } => {
+        cli::OptsCmd::Post {
+            body,
+            secret_file,
+            persona_id,
+        } => {
             let id_secret = Client::read_id_secret(&secret_file)
                 .await
                 .context(SecretSnafu)?;
@@ -232,7 +237,9 @@ async fn handle_cmd(opts: Opts) -> CliResult<serde_json::Value> {
                 .await
                 .context(InitSnafu)?;
 
-            client.social_post(id_secret, body, None).await?;
+            client
+                .social_post(id_secret, body, None, persona_id.unwrap_or(PersonaId(0)))
+                .await?;
 
             serde_json::Value::Bool(true)
         }
