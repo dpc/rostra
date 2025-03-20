@@ -84,6 +84,7 @@ pub async fn post_new_post(
         )
         .await?;
 
+    // Clear the form content after posting
     let clean_form = state.new_post_form(
         html! {
             div {
@@ -111,10 +112,11 @@ pub async fn post_new_post(
         .as_ref()
         .map(|(rostra_id, record)| (*rostra_id, record.as_ref()));
     Ok(Maud(html! {
+        // new clean form
+        (clean_form)
+
         // Close the preview dialog
         div ."o-previewDialog -empty" hx-swap-oob="outerHTML:.o-previewDialog" {}
-
-        (clean_form)
 
         // clean up the preview
         div ."o-mainBarTimeline__item -preview -empty"
@@ -176,7 +178,11 @@ pub async fn get_post_preview_dialog(
                 }
 
                 div ."o-previewDialog__actions" {
-                    form ."o-previewDialog__form" hx-post="/ui/post" hx-swap="outerHTML" {
+                    form ."o-previewDialog__form"
+                        hx-post="/ui/post"
+                        hx-swap="outerHTML"
+                        hx-target=".m-newPostForm"
+                    {
                         input type="hidden" name="content" value=(form.content) {}
                         @if let Some(reply_to) = form.reply_to {
                             input type="hidden" name="reply_to" value=(reply_to) {}
