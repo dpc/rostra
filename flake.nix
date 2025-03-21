@@ -119,6 +119,7 @@
           toolchain = toolchainAll;
           packages = [
             pkgs.jq
+            pkgs.systemfd
             (pkgs-unstable.callPackage ./nix/pkgs/wild.nix { })
           ];
           shellHook = ''

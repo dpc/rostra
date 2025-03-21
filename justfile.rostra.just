@@ -20,6 +20,7 @@ dev PORT="2345":
     env \
       ROSTRA_DEV_MODE=1 \
       RUST_LOG=${RUST_LOG:-rostra=debug,info,iroh=error,mainline=error} \
+      systemfd --no-pid -s http::[::1]:{{PORT}} -- \
       cargo watch \
         -d .1 \
         -i 'dev/**' \

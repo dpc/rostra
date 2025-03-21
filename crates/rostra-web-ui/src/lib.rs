@@ -17,8 +17,9 @@ use std::{io, result};
 use asset_cache::AssetCache;
 use axum::http::header::{ACCEPT, CONTENT_TYPE};
 use axum::http::{HeaderName, HeaderValue, Method};
-use axum::{middleware, Router};
+use axum::{Router, middleware};
 use error::{IdMismatchSnafu, UnlockError, UnlockResult};
+use listenfd::ListenFd;
 use rostra_client::error::IdSecretReadError;
 use rostra_client::multiclient::MultiClient;
 use rostra_client::{ClientHandle, ClientRefError};
@@ -26,15 +27,15 @@ use rostra_core::id::{RostraId, RostraIdSecretKey};
 use rostra_util::is_rostra_dev_mode_set;
 use rostra_util_error::WhateverResult;
 use routes::cache_control;
-use snafu::{ensure, ResultExt as _, Snafu, Whatever};
+use snafu::{ResultExt as _, Snafu, Whatever, ensure};
 use tokio::net::{TcpListener, TcpSocket};
 use tokio::signal;
 use tower_cookies::CookieManagerLayer;
-use tower_http::compression::predicate::SizeAbove;
+use tower_http::CompressionLevel;
 use tower_http::compression::CompressionLayer;
+use tower_http::compression::predicate::SizeAbove;
 use tower_http::cors::CorsLayer;
 use tower_http::services::ServeDir;
-use tower_http::CompressionLevel;
 use tower_sessions::{Expiry, MemoryStore, SessionManagerLayer};
 use tracing::info;
 
@@ -191,6 +192,9 @@ impl Server {
     }
 
     pub async fn get_listener(opts: &Opts) -> ServerResult<TcpListener> {
+        if let Some(listener) = ListenFd::from_env().take_tcp_listener(0)? {
+            return Ok(TcpListener::from_std(listener)?);
+        }
         let socket = {
             let addr = SocketAddr::from_str(&opts.listen).context(ListenAddrSnafu)?;
 
