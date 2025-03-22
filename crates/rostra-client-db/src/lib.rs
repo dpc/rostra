@@ -21,7 +21,7 @@ use itertools::Itertools as _;
 use process_event_content_ops::ProcessEventError;
 use redb_bincode::{ReadTransaction, ReadableTable, WriteTransaction};
 use rostra_core::event::{
-    EventContent, EventExt as _, IrohNodeId, PersonaId, VerifiedEvent, VerifiedEventContent,
+    EventContent, EventExt as _, IrohNodeId, PersonaSelector, VerifiedEvent, VerifiedEventContent,
     content_kind,
 };
 use rostra_core::id::{RostraId, ToShort as _};
@@ -329,16 +329,16 @@ impl Database {
         .expect("Database panic")
     }
 
-    pub async fn get_self_followees(&self) -> Vec<(RostraId, PersonaId)> {
+    pub async fn get_self_followees(&self) -> Vec<(RostraId, PersonaSelector)> {
         self.get_followees(self.self_id).await
     }
 
-    pub async fn get_followees(&self, id: RostraId) -> Vec<(RostraId, PersonaId)> {
+    pub async fn get_followees(&self, id: RostraId) -> Vec<(RostraId, PersonaSelector)> {
         self.read_with(|tx| {
             let ids_followees_table = tx.open_table(&ids_followees::TABLE)?;
             Ok(Database::read_followees_tx(id, &ids_followees_table)?
                 .into_iter()
-                .map(|(id, record)| (id, record.persona))
+                .filter_map(|(id, record)| record.selector.map(|selector| (id, selector)))
                 .collect())
         })
         .await
@@ -348,12 +348,12 @@ impl Database {
     pub async fn get_followees_extended(
         &self,
         id: RostraId,
-    ) -> (HashMap<RostraId, PersonaId>, HashSet<RostraId>) {
+    ) -> (HashMap<RostraId, PersonaSelector>, HashSet<RostraId>) {
         self.read_with(|tx| {
             let ids_followees_table = tx.open_table(&ids_followees::TABLE)?;
-            let followees: HashMap<RostraId, PersonaId> =
+            let followees: HashMap<RostraId, PersonaSelector> =
                 Database::read_followees_tx_iter(id, &ids_followees_table)?
-                    .map_ok(|(id, record)| (id, record.persona))
+                    .filter_map_ok(|(id, record)| record.selector.map(|selector| (id, selector)))
                     .collect::<Result<_, _>>()?;
 
             let mut extended = HashSet::new();
@@ -361,7 +361,7 @@ impl Database {
             for followee in followees.keys() {
                 for extended_followee in
                     Database::read_followees_tx_iter(*followee, &ids_followees_table)?
-                        .map_ok(|(id, record)| (id, record.persona))
+                        .map_ok(|(id, record)| (id, record.selector))
                 {
                     let extended_followee = extended_followee?.0;
                     if !followees.contains_key(&extended_followee) {

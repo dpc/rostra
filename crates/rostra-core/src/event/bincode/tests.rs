@@ -11,6 +11,7 @@ fn event_size() {
         .author(id_secret.id())
         .kind(EventKind::RAW)
         .content(&EventContent::new(vec![1, 2, 3]))
+        .singleton(false)
         .build();
 
     let event_encoded = bincode::encode_to_vec(event, STD_BINCODE_CONFIG).expect("Can't fail");

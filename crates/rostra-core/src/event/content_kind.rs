@@ -7,8 +7,8 @@ use unicode_segmentation::UnicodeSegmentation as _;
 use super::{EventContent, EventKind, PersonaId};
 use crate::id::RostraId;
 use crate::{
-    array_type_define, array_type_impl_base32_str, array_type_impl_serde, ExternalEventId,
-    ShortEventId,
+    ExternalEventId, ShortEventId, array_type_define, array_type_impl_base32_str,
+    array_type_impl_serde,
 };
 
 #[derive(Debug, Snafu)]
@@ -21,6 +21,8 @@ pub type ContentValidationResult<T> = std::result::Result<T, ContentValidationEr
 pub trait EventContentKind: ::serde::Serialize + ::serde::de::DeserializeOwned {
     /// The [`EventKind`] corresponding to this content kind
     const KIND: EventKind;
+
+    const SINGLETON: bool = false;
 
     /// Deserialize cbor-encoded content
     ///
@@ -48,20 +50,38 @@ pub struct Follow {
     #[serde(rename = "i")]
     pub followee: RostraId,
     #[serde(rename = "p")]
-    pub persona: PersonaId,
+    pub persona: Option<PersonaId>,
+    #[serde(rename = "s")]
+    pub selector: Option<PersonaSelector>,
 }
 
+impl Follow {
+    pub fn selector(self) -> Option<PersonaSelector> {
+        if let Some(selector) = self.selector {
+            return Some(selector);
+        }
+        if let Some(persona) = self.persona {
+            return Some(PersonaSelector::Only { ids: vec![persona] });
+        }
+        None
+    }
+}
 impl EventContentKind for Follow {
     const KIND: EventKind = EventKind::FOLLOW;
+    const SINGLETON: bool = true;
 }
 
+#[allow(deprecated)]
 #[cfg_attr(feature = "serde", derive(::serde::Serialize, ::serde::Deserialize))]
 #[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
+#[deprecated(note = "Use Follow with selector: None")]
 pub struct Unfollow {
     #[serde(rename = "i")]
+    #[allow(deprecated)]
     pub followee: RostraId,
 }
 
+#[allow(deprecated)]
 impl EventContentKind for Unfollow {
     const KIND: EventKind = EventKind::UNFOLLOW;
 }
@@ -267,6 +287,29 @@ impl EventContentKind for SocialProfileUpdate {
             }
         }
         Ok(())
+    }
+}
+
+#[cfg_attr(feature = "serde", derive(::serde::Serialize, ::serde::Deserialize))]
+#[cfg_attr(feature = "bincode", derive(::bincode::Encode, ::bincode::Decode))]
+#[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
+pub enum PersonaSelector {
+    Only { ids: Vec<PersonaId> },
+    Except { ids: Vec<PersonaId> },
+}
+
+impl PersonaSelector {
+    pub fn matches(&self, persona: PersonaId) -> bool {
+        match self {
+            PersonaSelector::Only { ids } => ids.contains(&persona),
+            PersonaSelector::Except { ids } => !ids.contains(&persona),
+        }
+    }
+}
+
+impl Default for PersonaSelector {
+    fn default() -> Self {
+        Self::Except { ids: vec![] }
     }
 }
 

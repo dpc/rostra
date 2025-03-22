@@ -18,8 +18,8 @@ use iroh::discovery::pkarr::PkarrPublisher;
 use itertools::Itertools as _;
 use rostra_client_db::{Database, DbResult, IdsFolloweesRecord, IdsFollowersRecord};
 use rostra_core::event::{
-    Event, EventExt as _, EventKind, IrohNodeId, PersonaId, SignedEvent, VerifiedEvent,
-    VerifiedEventContent, content_kind,
+    Event, EventExt as _, EventKind, IrohNodeId, PersonaId, PersonaSelector, SignedEvent,
+    VerifiedEvent, VerifiedEventContent, content_kind,
 };
 use rostra_core::id::{RostraId, RostraIdSecretKey, ToShort as _};
 use rostra_core::{ExternalEventId, ShortEventId};
@@ -587,6 +587,7 @@ impl Client {
             .maybe_parent_prev(current_head)
             .maybe_parent_aux(aux_event)
             .maybe_delete(replace)
+            .singleton(C::SINGLETON)
             .build()
             .signed_by(id_secret);
 
@@ -657,12 +658,14 @@ impl Client {
         &self,
         id_secret: RostraIdSecretKey,
         followee_id: RostraId,
+        selector: PersonaSelector,
     ) -> PostResult<VerifiedEvent> {
         self.publish_event(
             id_secret,
             content_kind::Follow {
                 followee: followee_id,
-                persona: PersonaId(0),
+                selector: Some(selector),
+                persona: None,
             },
         )
         .call()
@@ -674,9 +677,16 @@ impl Client {
         id_secret: RostraIdSecretKey,
         followee: RostraId,
     ) -> PostResult<VerifiedEvent> {
-        self.publish_event(id_secret, content_kind::Unfollow { followee })
-            .call()
-            .await
+        self.publish_event(
+            id_secret,
+            content_kind::Follow {
+                followee,
+                persona: None,
+                selector: None,
+            },
+        )
+        .call()
+        .await
     }
     pub async fn publish_omni_tbd(
         &self,
@@ -723,6 +733,7 @@ impl Client {
                             .author(self.id)
                             .kind(EventKind::SOCIAL_POST)
                             .content(&body.as_bytes().to_owned().into())
+                            .singleton(false)
                             .build()
                             .signed_by(id_secret)
                     }));

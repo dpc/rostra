@@ -1,15 +1,15 @@
+use rostra_core::EventId;
 use rostra_core::event::{Event, EventContent, EventKind, VerifiedEvent};
 use rostra_core::id::{RostraId, RostraIdSecretKey};
-use rostra_core::EventId;
 use rostra_util_error::BoxedErrorResult;
 use snafu::ResultExt as _;
-use tempfile::{tempdir, TempDir};
+use tempfile::{TempDir, tempdir};
 use tracing::info;
 
 use crate::event::EventContentState;
 use crate::{
-    events, events_by_time, events_content, events_content_missing, events_heads, events_missing,
-    ids_full, Database,
+    Database, events, events_by_time, events_content, events_content_missing, events_heads,
+    events_missing, ids_full,
 };
 
 pub(crate) async fn temp_db_rng() -> BoxedErrorResult<(TempDir, super::Database)> {
@@ -40,6 +40,7 @@ fn build_test_event(
         .kind(EventKind::SOCIAL_POST)
         .maybe_parent_prev(parent.map(Into::into))
         .content(&content)
+        .singleton(false)
         .build();
 
     let signed_event = event.signed_by(id_secret);
@@ -136,6 +137,7 @@ fn build_test_event_2(
         .maybe_parent_prev(parent.map(Into::into))
         .maybe_delete(delete.map(Into::into))
         .content(&content)
+        .singleton(false)
         .build();
 
     let signed_event = event.signed_by(id_secret);

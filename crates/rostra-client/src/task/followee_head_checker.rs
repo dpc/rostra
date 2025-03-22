@@ -4,7 +4,6 @@ use std::time::Duration;
 
 use rostra_client_db::{Database, IdsFolloweesRecord, InsertEventOutcome};
 use rostra_core::ShortEventId;
-use rostra_core::event::PersonaId;
 use rostra_core::id::{RostraId, ToShort as _};
 use rostra_p2p::Connection;
 use rostra_p2p::connection::GetHeadRequest;
@@ -77,14 +76,10 @@ impl FolloweeHeadChecker {
             let (followees_direct, followees_ext) =
                 storage.get_followees_extended(self.self_id).await;
 
-            for (id, _persona_id) in [(self.self_id, PersonaId::default())]
+            for id in [self.self_id]
                 .into_iter()
-                .chain(followees_direct)
-                .chain(
-                    followees_ext
-                        .into_iter()
-                        .map(|id| (id, PersonaId::default())),
-                )
+                .chain(followees_direct.into_keys())
+                .chain(followees_ext)
             {
                 let Some(client) = self.client.app_ref_opt() else {
                     debug!(target: LOG_TARGET, "Client gone, quitting");

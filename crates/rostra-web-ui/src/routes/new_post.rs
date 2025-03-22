@@ -159,6 +159,7 @@ pub async fn get_post_preview_dialog(
             div ."o-previewDialog -empty" {}
         }));
     }
+    let personas = client_ref.db().get_personas_for_id(self_id).await;
 
     // Get the saved persona from cookie
     let saved_persona = cookies.get_persona(self_id);
@@ -195,11 +196,11 @@ pub async fn get_post_preview_dialog(
                                     id="persona-select"
                                     ."o-previewDialog__personaSelect"
                                 {
-                                    @for persona in super::timeline::Persona::list() {
+                                    @for (persona_id, persona_display_name) in personas {
                                         option
-                                            value=(persona.id)
-                                            selected[saved_persona.map_or(false, |id| id == persona.id)]
-                                        { (persona.name) }
+                                            value=(persona_id)
+                                            selected[saved_persona.map_or(false, |id| PersonaId(id) == persona_id)]
+                                        { (persona_display_name) }
                                     }
                                 }
                             }

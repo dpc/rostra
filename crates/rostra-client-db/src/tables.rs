@@ -2,7 +2,10 @@ use bincode::{Decode, Encode};
 pub use event::EventRecord;
 use event::EventsMissingRecord;
 use id_self::IdSelfAccountRecord;
-use ids::{IdsFolloweesRecord, IdsFollowersRecord, IdsPersonaRecord, IdsUnfollowedRecord};
+use ids::{
+    IdsFolloweesRecord, IdsFolloweesRecordV0, IdsFollowersRecord, IdsPersonaRecord,
+    IdsUnfollowedRecord,
+};
 use rostra_core::event::{IrohNodeId, PersonaId};
 use rostra_core::id::{RestRostraId, RostraId, ShortRostraId};
 use rostra_core::{ShortEventId, Timestamp};
@@ -49,6 +52,7 @@ def_table! {
     ids_full: ShortRostraId => RestRostraId
 }
 def_table!(ids_nodes: (RostraId, IrohNodeId) => IrohNodeRecord);
+def_table!(ids_followees_v0: (RostraId, RostraId) => IdsFolloweesRecordV0);
 def_table!(ids_followees: (RostraId, RostraId) => IdsFolloweesRecord);
 def_table!(ids_followers: (RostraId, RostraId) => IdsFollowersRecord);
 def_table!(ids_unfollowed: (RostraId, RostraId) => IdsUnfollowedRecord);

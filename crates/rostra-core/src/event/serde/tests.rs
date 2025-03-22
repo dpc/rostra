@@ -11,6 +11,7 @@ fn event_size() {
         .author(id_secret.id())
         .kind(EventKind::RAW)
         .content(&EventContent::new(b"test".to_vec()))
+        .singleton(false)
         .build();
 
     let event_signed = event.signed_by(id_secret);

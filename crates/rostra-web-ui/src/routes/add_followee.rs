@@ -1,12 +1,13 @@
+use axum::Form;
 use axum::extract::State;
 use axum::response::IntoResponse;
-use axum::Form;
-use maud::{html, Markup};
+use maud::{Markup, html};
+use rostra_core::event::PersonaSelector;
 use rostra_core::id::RostraId;
 use serde::Deserialize;
 
-use super::unlock::session::UserSession;
 use super::Maud;
+use super::unlock::session::UserSession;
 use crate::error::RequestResult;
 use crate::{SharedState, UiState};
 
@@ -24,7 +25,11 @@ pub async fn add_followee(
         .client(session.id())
         .await?
         .client_ref()?
-        .follow(session.id_secret()?, form.rostra_id)
+        .follow(
+            session.id_secret()?,
+            form.rostra_id,
+            PersonaSelector::Except { ids: vec![] },
+        )
         .await?;
     Ok(Maud(state.render_add_followee_form(html! {
         span { "Followed!" }

@@ -59,6 +59,7 @@ impl HeadMerger {
                 .kind(EventKind::NULL)
                 .parent_prev(head1)
                 .parent_aux(head2)
+                .singleton(false)
                 .build()
                 .signed_by(self.id_secret);
 

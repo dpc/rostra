@@ -9,7 +9,7 @@ use maud::{Markup, PreEscaped, html};
 use rostra_client::ClientRef;
 use rostra_client_db::IdSocialProfileRecord;
 use rostra_client_db::social::{EventPaginationCursor, SocialPostRecord};
-use rostra_core::event::{EventKind, SocialPost};
+use rostra_core::event::{EventKind, PersonaId, PersonaSelector, SocialPost};
 use rostra_core::id::{RostraId, ToShort as _};
 use rostra_core::{ExternalEventId, ShortEventId, Timestamp};
 use rostra_util_error::FmtCompact as _;
@@ -368,6 +368,18 @@ impl UiState {
             )
             .await;
 
+        let author_personas: HashSet<(RostraId, PersonaId)> = filtered_posts
+            .iter()
+            .map(|post| (post.author, post.content.persona))
+            .chain(
+                parents
+                    .iter()
+                    .map(|post| (post.1.author, post.1.content.persona)),
+            )
+            .collect();
+
+        let author_personas = client.db()?.get_personas(author_personas.into_iter()).await;
+
         Ok(html! {
             div ."o-mainBarTimeline" {
                 div ."o-mainBarTimeline__tabs" {
@@ -425,7 +437,11 @@ impl UiState {
                             (self.post_overview(
                                 &client_ref,
                                 post.author,
-                                ).maybe_reply_to(
+                                ).maybe_persona_display_name(
+                                author_personas.get(&(post.author, post.content.persona)).map(AsRef::as_ref)
+
+                                    )
+                                    .maybe_reply_to(
                                     post.reply_to
                                         .map(|reply_to| (reply_to.rostra_id(), parents.get(&reply_to.event_id().to_short())))
                                     )
@@ -469,6 +485,7 @@ impl UiState {
         &self,
         #[builder(start_fn)] client: &ClientRef<'_>,
         #[builder(start_fn)] author: RostraId,
+        persona_display_name: Option<&str>,
         reply_to: Option<(RostraId, Option<&SocialPostRecord<SocialPost>>)>,
         event_id: Option<ShortEventId>,
         content: Option<&str>,
@@ -553,7 +570,14 @@ impl UiState {
                     onclick=[comment.as_ref().map(|_|"this.classList.add('-expanded')" )]
                 {
                     header ."m-postOverview__header" {
-                        (self.render_user_handle(event_id, author, user_profile.as_ref()))
+                        span ."m-postOverview__userHandle" {
+                            (self.render_user_handle(event_id, author, user_profile.as_ref()))
+                        }
+                        @if let Some(persona_display_name) = persona_display_name {
+                            span ."m-postOverview__personaDisplayName" {
+                                (format!("({})", persona_display_name))
+                            }
+                        }
                     }
 
                     div ."m-postOverview__content"
@@ -700,31 +724,6 @@ impl UiState {
     }
 }
 
-#[derive(Debug, Clone, Copy)]
-pub struct Persona {
-    pub id: u8,
-    pub name: &'static str,
-}
-
-impl Persona {
-    pub fn list() -> Vec<Self> {
-        vec![
-            Persona {
-                id: 0,
-                name: "Personal",
-            },
-            Persona {
-                id: 1,
-                name: "Professional",
-            },
-            Persona {
-                id: 2,
-                name: "Civic",
-            },
-        ]
-    }
-}
-
 #[derive(Copy, Clone, PartialEq, Eq, Hash, Debug)]
 pub(crate) enum TimelineMode {
     Followees,
@@ -765,15 +764,17 @@ impl TimelineMode {
         let self_id = client.rostra_id();
         match self {
             TimelineMode::Followees => {
-                let followees: HashSet<RostraId> = client
+                let followees: HashMap<RostraId, PersonaSelector> = client
                     .db()
                     .get_followees(self_id)
                     .await
                     .into_iter()
-                    .map(|(k, _)| k)
                     .collect();
                 Box::new(move |post: &SocialPostRecord<SocialPost>| {
-                    post.author != self_id && followees.contains(&post.author)
+                    post.author != self_id
+                        && followees
+                            .get(&post.author)
+                            .is_some_and(|selector| selector.matches(post.content.persona))
                 })
             }
             TimelineMode::Network => Box::new(

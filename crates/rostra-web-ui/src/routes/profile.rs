@@ -1,10 +1,14 @@
+use std::fmt;
+
 use axum::Form;
 use axum::extract::{Path, Query, State};
 use axum::response::IntoResponse;
 use maud::{Markup, PreEscaped, html};
 use rostra_client_db::social::EventPaginationCursor;
+use rostra_core::event::PersonaId;
 use rostra_core::id::RostraId;
 use serde::Deserialize;
+use serde::de::Deserializer;
 use tower_cookies::Cookies;
 
 use super::Maud;
@@ -39,15 +43,6 @@ pub async fn get_profile(
 }
 
 #[derive(Deserialize)]
-pub struct FollowFormData {
-    follow_type: String,
-    // We'll handle these later
-    #[allow(dead_code)]
-    #[serde(default)]
-    personas: Vec<u8>,
-}
-
-#[derive(Deserialize)]
 pub struct FollowQueryParams {
     following: bool,
 }
@@ -58,6 +53,9 @@ pub async fn get_follow_dialog(
     Path(profile_id): Path<RostraId>,
     Query(params): Query<FollowQueryParams>,
 ) -> RequestResult<impl IntoResponse> {
+    let client = state.client(session.id()).await?;
+    let client_ref = client.client_ref()?;
+    let personas = client_ref.db().get_personas_for_id(profile_id).await;
     Ok(Maud(html! {
         div ."o-followDialog__content" {
             form ."o-followDialog__form"
@@ -90,18 +88,18 @@ pub async fn get_follow_dialog(
                     }
 
                     div ."o-followDialog__personaList" ."-visible"[!params.following] {
-                        @for persona in super::timeline::Persona::list() {
+                        @for (persona_id, persona_display_name) in personas {
                             div ."o-followDialog__personaOption" {
                                 input
                                     type="checkbox"
-                                    id=(format!("persona_{}", persona.id))
-                                    name="personas[]"
-                                    value=(persona.id)
+                                    id=(format!("persona_{}", persona_id))
+                                    name="personas"
+                                    value=(persona_id)
                                 {}
                                 label
-                                    for=(format!("persona_{}", persona.id))
+                                    for=(format!("persona_{}", persona_id))
                                     ."o-followDialog__personaLabel"
-                                { (persona.name) }
+                                { (persona_display_name) }
                             }
                         }
                     }
@@ -115,7 +113,7 @@ pub async fn get_follow_dialog(
                     {
                         span ."o-followDialog__cancelButtonIcon u-buttonIcon"
                             width="1rem" height="1rem" {}
-                        "Cancel"
+                        "Back"
                     }
 
                     button ."o-followDialog__submitButton u-button" type="submit" {
@@ -129,11 +127,18 @@ pub async fn get_follow_dialog(
     }))
 }
 
+#[derive(Deserialize)]
+pub struct FollowFormData {
+    follow_type: String,
+    #[serde(default)]
+    personas: Vec<PersonaId>,
+}
+
 pub async fn post_follow(
     state: State<SharedState>,
     session: UserSession,
     Path(profile_id): Path<RostraId>,
-    Form(form): Form<FollowFormData>,
+    axum_extra::extract::Form(form): axum_extra::extract::Form<FollowFormData>,
 ) -> RequestResult<impl IntoResponse> {
     match form.follow_type.as_str() {
         "unfollow" => {
@@ -145,11 +150,20 @@ pub async fn post_follow(
                 .await?;
         }
         "follow_all" | "follow_only" => {
+            let ids = form.personas;
             state
                 .client(session.id())
                 .await?
                 .client_ref()?
-                .follow(session.id_secret()?, profile_id)
+                .follow(
+                    session.id_secret()?,
+                    profile_id,
+                    match form.follow_type.as_str() {
+                        "follow_all" => rostra_core::event::PersonaSelector::Except { ids },
+                        "follow_only" => rostra_core::event::PersonaSelector::Only { ids },
+                        _ => unreachable!(),
+                    },
+                )
                 .await?;
         }
         _ => {}
@@ -259,31 +273,20 @@ impl UiState {
                             "RostraId"
                         }
                         @if session.id() != profile_id {
-                            @if following {
-                                button
-                                    ."m-profileSummary__unfollowButton u-button"
-                                    hx-get=(format!("/ui/profile/{}/follow?following=true", profile_id))
-                                    hx-target=".o-followDialog"
-                                    hx-swap="innerHTML"
-                                    hx-on::after-request="document.querySelector('.o-followDialog').classList.add('-active')"
-                                    disabled[ro.to_disabled()]
-                                {
-                                    span ."m-profileSummary__unfollowButtonIcon u-buttonIcon" width="1rem" height="1rem"
-                                    {}
-                                    "Unfollow"
-                                }
-                            } @else {
-                                button
-                                    ."m-profileSummary__followButton u-button"
-                                    hx-get=(format!("/ui/profile/{}/follow?following=false", profile_id))
-                                    hx-target=".o-followDialog"
-                                    hx-swap="innerHTML"
-                                    hx-on::after-request="document.querySelector('.o-followDialog').classList.add('-active')"
-                                    disabled[ro.to_disabled()]
-                                {
-                                    span ."m-profileSummary__followButtonIcon u-buttonIcon" width="1rem" height="1rem"
-                                    {}
-                                    "Follow"
+                            button
+                                ."m-profileSummary__unfollowButton u-button"
+                                hx-get=(format!("/ui/profile/{profile_id}/follow?following={following}"))
+                                hx-target=".o-followDialog"
+                                hx-swap="innerHTML"
+                                hx-on::after-request="document.querySelector('.o-followDialog').classList.add('-active')"
+                                disabled[ro.to_disabled()]
+                            {
+                                span ."m-profileSummary__followButtonIcon u-buttonIcon" width="1rem" height="1rem"
+                                {}
+                                @if following {
+                                    "Following..."
+                                } @else {
+                                    "Follow..."
                                 }
                             }
                         }

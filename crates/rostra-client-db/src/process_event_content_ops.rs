@@ -1,15 +1,15 @@
 use std::cmp;
 
-use rostra_core::event::{content_kind, EventExt as _, EventKind, VerifiedEventContent};
+use rostra_core::event::{EventExt as _, EventKind, VerifiedEventContent, content_kind};
 use rostra_core::id::ToShort as _;
 use rostra_util_error::{BoxedError, FmtCompact as _};
 use snafu::{Location, OptionExt as _, ResultExt as _, Snafu};
 use tracing::debug;
 
 use crate::{
-    social_posts, social_posts_by_time, social_posts_reactions, social_posts_replies, Database,
-    DbError, IdSocialProfileRecord, IrohNodeRecord, OverflowSnafu, SocialPostsReactionsRecord,
-    SocialPostsRepliesRecord, WriteTransactionCtx, LOG_TARGET,
+    Database, DbError, IdSocialProfileRecord, IrohNodeRecord, LOG_TARGET, OverflowSnafu,
+    SocialPostsReactionsRecord, SocialPostsRepliesRecord, WriteTransactionCtx, social_posts,
+    social_posts_by_time, social_posts_reactions, social_posts_replies,
 };
 
 #[derive(Debug, Snafu)]
@@ -65,11 +65,13 @@ impl Database {
                         )
                     }
                     EventKind::UNFOLLOW => {
+                        #[allow(deprecated)]
                         let content = event_content
                             .deserialize_cbor::<content_kind::Unfollow>()
                             .boxed()
                             .context(InvalidSnafu)?;
                         (
+                            #[allow(deprecated)]
                             content.followee,
                             Database::insert_unfollow_tx(
                                 author,

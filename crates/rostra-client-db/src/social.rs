@@ -1,7 +1,7 @@
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 
 use bincode::{Decode, Encode};
-use rostra_core::event::{EventExt as _, SocialPost, content_kind};
+use rostra_core::event::{EventExt as _, PersonaId, SocialPost, content_kind};
 use rostra_core::id::RostraId;
 use rostra_core::{ExternalEventId, ShortEventId, Timestamp};
 use serde::{Deserialize, Serialize};
@@ -11,7 +11,7 @@ use super::Database;
 use crate::event::EventContentState;
 use crate::{
     LOG_TARGET, events, events_content, social_posts, social_posts_by_time, social_posts_reactions,
-    social_posts_replies,
+    social_posts_replies, tables,
 };
 
 #[derive(
@@ -339,6 +339,57 @@ impl Database {
                 });
             }
 
+            Ok(ret)
+        })
+        .await
+        .expect("Storage error")
+    }
+    pub async fn get_personas_for_id(&self, id: RostraId) -> BTreeMap<PersonaId, String> {
+        self.read_with(|tx| {
+            let personas = tx.open_table(&tables::ids_personas::TABLE)?;
+
+            // Default predefined personas
+            let mut ret = BTreeMap::from([
+                (PersonaId(0), "Personal".into()),
+                (PersonaId(1), "Professional".into()),
+                (PersonaId(2), "Civic".into()),
+            ]);
+
+            for record in personas.range(&(id, PersonaId::MIN)..=&(id, PersonaId::MAX))? {
+                let (k, v) = record?;
+                ret.insert(k.value().1, v.value().display_name);
+            }
+
+            Ok(ret)
+        })
+        .await
+        .expect("Storage error")
+    }
+
+    pub async fn get_personas(
+        &self,
+        iter: impl Iterator<Item = (RostraId, PersonaId)>,
+    ) -> BTreeMap<(RostraId, PersonaId), String> {
+        self.read_with(|tx| {
+            let personas = tx.open_table(&tables::ids_personas::TABLE)?;
+
+            // Default predefined personas
+            let default_personas: BTreeMap<PersonaId, String> = BTreeMap::from([
+                (PersonaId(0), "Personal".into()),
+                (PersonaId(1), "Professional".into()),
+                (PersonaId(2), "Civic".into()),
+            ]);
+
+            let mut ret = BTreeMap::new();
+            for (rostra_id, persona_id) in iter {
+                if let Some(record) = personas.get(&(rostra_id, persona_id))? {
+                    ret.insert((rostra_id, persona_id), record.value().display_name);
+                } else {
+                    if let Some(d) = default_personas.get(&persona_id) {
+                        ret.insert((rostra_id, persona_id), d.clone());
+                    }
+                }
+            }
             Ok(ret)
         })
         .await

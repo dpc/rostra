@@ -95,6 +95,9 @@ pub struct Event {
     /// protocols should accommodate such missing events as a core
     /// feature of the protocol and no longer store or return content data.
     ///
+    /// Big `1` - singleton - only the last value of this event kind really
+    /// matters, and previous ones can be considered deleted.
+    ///
     /// All other bits MUST be 0 when producing headers, but might
     /// gain meaning in the future, so should still be accepted and
     /// ignored by client that don't understand them.
@@ -184,6 +187,17 @@ impl EventExt for Event {
 #[cfg_attr(feature = "bincode", derive(::bincode::Encode, ::bincode::Decode))]
 #[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Debug, Default)]
 pub struct PersonaId(pub u8);
+
+impl PersonaId {
+    pub const MIN: Self = Self(0);
+    pub const MAX: Self = Self(u8::MAX);
+}
+
+impl fmt::Display for PersonaId {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        self.0.fmt(f)
+    }
+}
 
 impl str::FromStr for PersonaId {
     type Err = <u8 as str::FromStr>::Err;

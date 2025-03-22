@@ -287,11 +287,12 @@ impl Database {
     pub(crate) fn insert_follow_tx(
         author: RostraId,
         timestamp: Timestamp,
-        content_kind::Follow { followee, persona }: content_kind::Follow,
+        content: content_kind::Follow,
         followees_table: &mut Table<(RostraId, RostraId), IdsFolloweesRecord>,
         followers_table: &mut Table<(RostraId, RostraId), IdsFollowersRecord>,
         unfollowed_table: &mut Table<(RostraId, RostraId), IdsUnfollowedRecord>,
     ) -> DbResult<bool> {
+        let followee = content.followee;
         let db_key = (author, followee);
         if let Some(followees) = followees_table.get(&db_key)?.map(|v| v.value()) {
             if timestamp <= followees.ts {
@@ -304,12 +305,15 @@ impl Database {
             }
         }
 
-        unfollowed_table.remove(&db_key)?;
+        let selector = content.selector();
+        if selector.is_some() {
+            unfollowed_table.remove(&db_key)?;
+        }
         followees_table.insert(
             &db_key,
             &IdsFolloweesRecord {
                 ts: timestamp,
-                persona,
+                selector,
             },
         )?;
         followers_table.insert(&(followee, author), &IdsFollowersRecord {})?;
@@ -319,6 +323,7 @@ impl Database {
         Ok(true)
     }
 
+    #[allow(deprecated)]
     pub(crate) fn insert_unfollow_tx(
         author: RostraId,
         timestamp: Timestamp,

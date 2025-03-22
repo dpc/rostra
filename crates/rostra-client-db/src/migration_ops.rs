@@ -1,15 +1,17 @@
 use std::ops::Not as _;
 
 use redb::ReadableTable as _;
+use rostra_core::event::PersonaSelector;
 use tracing::{debug, info};
 
+use crate::ids::IdsFolloweesRecordV0;
 use crate::{
-    db_version, events, events_by_time, events_content, events_content_missing, events_heads,
-    events_missing, events_self, ids_followees, ids_followers, ids_full, ids_personas, ids_self,
+    Database, DbResult, DbVersionTooHighSnafu, IdSocialProfileRecord, IdsFolloweesRecord,
+    LOG_TARGET, Latest, SocialPostRecord, WriteTransactionCtx, db_version, events, events_by_time,
+    events_content, events_content_missing, events_heads, events_missing, events_self,
+    ids_followees, ids_followees_v0, ids_followers, ids_full, ids_personas, ids_self,
     ids_unfollowed, social_posts, social_posts_by_time, social_posts_reactions,
-    social_posts_replies, social_posts_v0, social_profiles, social_profiles_v0, Database, DbResult,
-    DbVersionTooHighSnafu, IdSocialProfileRecord, Latest, SocialPostRecord, WriteTransactionCtx,
-    LOG_TARGET,
+    social_posts_replies, social_posts_v0, social_profiles, social_profiles_v0,
 };
 
 impl Database {
@@ -40,7 +42,7 @@ impl Database {
     }
 
     pub(crate) fn handle_db_ver_migrations(dbtx: &WriteTransactionCtx) -> DbResult<()> {
-        const DB_VER: u64 = 2;
+        const DB_VER: u64 = 3;
 
         let mut table_db_ver = dbtx.open_table(&db_version::TABLE)?;
 
@@ -64,6 +66,7 @@ impl Database {
             match cur_db_ver {
                 0 => Self::migrate_v0(dbtx)?,
                 1 => Self::migrate_v1(dbtx)?,
+                2 => Self::migrate_v2(dbtx)?,
                 DB_VER => { /* ensures we didn't forget to increment DB_VER */ }
                 x => panic!("Unexpected db ver: {x}"),
             }
@@ -152,6 +155,34 @@ impl Database {
 
         dbtx.as_raw()
             .delete_table(social_posts_v0::TABLE.as_raw())?
+            .not()
+            .then(|| panic!("Expected to delete the table"));
+        Ok(())
+    }
+
+    pub(crate) fn migrate_v2(dbtx: &WriteTransactionCtx) -> DbResult<()> {
+        Self::rename_table(dbtx, &ids_followees::TABLE, &ids_followees_v0::TABLE)?;
+
+        let table_v0 = dbtx.open_table(&ids_followees_v0::TABLE)?;
+        let mut table = dbtx.open_table(&ids_followees::TABLE)?;
+
+        for g in table_v0.range(..)? {
+            let (k, v_v0) = g?;
+            let IdsFolloweesRecordV0 { ts, persona: _ } = v_v0.value();
+            table.insert(
+                &k.value(),
+                &IdsFolloweesRecord {
+                    ts,
+                    selector: Some(PersonaSelector::Except { ids: vec![] }),
+                },
+            )?;
+        }
+
+        drop(table);
+        drop(table_v0);
+
+        dbtx.as_raw()
+            .delete_table(ids_followees_v0::TABLE.as_raw())?
             .not()
             .then(|| panic!("Expected to delete the table"));
         Ok(())

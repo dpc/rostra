@@ -24,6 +24,7 @@ impl Event {
         parent_aux: Option<ShortEventId>,
         timestamp: Option<SystemTime>,
         content: Option<&EventContent>,
+        singleton: bool,
     ) -> Self {
         if delete.is_some() && parent_aux.is_some() {
             panic!("Can't set both both delete and parent_aux");
@@ -41,7 +42,7 @@ impl Event {
 
         Self {
             version: 0,
-            flags: if replace.is_some() { 1 } else { 0 },
+            flags: if replace.is_some() { 1 } else { 0 } | if singleton { 2 } else { 0 },
             kind: kind.into(),
             content_len: content
                 .as_ref()
