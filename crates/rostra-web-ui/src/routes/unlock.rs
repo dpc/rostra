@@ -131,7 +131,9 @@ impl UiState {
             div ."o-unlockScreen" {
 
                 form ."o-unlockScreen__form"
-                    autocomplete="on" {
+                    method="post"
+                    autocomplete="on"
+                {
                     @if let Some(n) = notification {
                         (n)
                     }

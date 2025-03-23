@@ -16,6 +16,10 @@ impl UiState {
                 link rel="icon" type="image/png" href="/assets/favicon.png";
                 // link rel="stylesheet" type="text/css" href="/assets/style-htmx-send-error.css";
                 title { (page_title) }
+                // Load htmx right away so it's immediately available, use defer to make it
+                // non-blocking
+                script defer src="/assets/libs/htmx.org@2.0.4.js" {}
+                script defer src="/assets/libs/htmx-ext-ws@2.0.1.ws.js" {}
             }
         }
     }
@@ -41,7 +45,6 @@ impl UiState {
 /// A static footer.
 pub(crate) fn render_html_footer() -> Markup {
     html! {
-        // script src="https://unpkg.com/htmx.org@2.0.4" {}
         script src="/assets/libs/htmx.org@2.0.4.js" {}
         script src="/assets/libs/htmx-ext-ws@2.0.1.ws.js" {}
 

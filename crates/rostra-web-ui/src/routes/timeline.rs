@@ -354,7 +354,7 @@ impl UiState {
 
         let (filtered_posts, cursor) = client_ref
             .db()
-            .paginate_social_posts_rev(pagination, 30, filter_fn)
+            .paginate_social_posts_rev(pagination, 20, filter_fn)
             .await;
 
         let parents = self
@@ -557,13 +557,20 @@ impl UiState {
             None
         };
 
+        let display_name = if let Some(ref profile) = user_profile {
+            profile.display_name.clone()
+        } else {
+            author.to_short().to_string()
+        };
         let post_main = html! {
             div ."m-postOverview__main"
             {
                 img ."m-postOverview__userImage u-userImage"
                     src=(self.avatar_url(author))
+                    alt=(format!("{display_name}'s avatar"))
                     width="32pt"
                     height="32pt"
+                    loading="lazy"
                 { }
 
                 div ."m-postOverview__contentSide"
@@ -588,7 +595,7 @@ impl UiState {
                             @if let Some(post_content_rendered) = post_content_rendered {
                                 (post_content_rendered)
                             } @else {
-                                    "Post missing"
+                                "Post missing"
                             }
                         }
                     }

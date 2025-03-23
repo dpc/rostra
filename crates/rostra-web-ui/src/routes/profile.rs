@@ -251,8 +251,10 @@ impl UiState {
                 }
                 img ."m-profileSummary__userImage u-userImage"
                     src=(self.avatar_url(profile_id))
+                    alt=(format!("{}'s avatar", profile.display_name))
                     width="32pt"
                     height="32pt"
+                    loading="lazy"
                     { }
 
                 div ."m-profileSummary__content" {
