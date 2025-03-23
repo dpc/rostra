@@ -68,7 +68,6 @@ impl Follow {
 }
 impl EventContentKind for Follow {
     const KIND: EventKind = EventKind::FOLLOW;
-    const SINGLETON: bool = true;
 }
 
 #[allow(deprecated)]
