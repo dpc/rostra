@@ -1,5 +1,5 @@
-use rand::rngs::OsRng;
 use rand::Rng as _;
+use rand::rngs::OsRng;
 
 use super::ShortEventId;
 

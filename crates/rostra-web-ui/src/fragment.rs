@@ -1,7 +1,7 @@
-use maud::{html, Markup, DOCTYPE};
+use maud::{DOCTYPE, Markup, html};
 
-use crate::error::RequestResult;
 use crate::UiState;
+use crate::error::RequestResult;
 
 impl UiState {
     /// Html page header

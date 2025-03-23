@@ -1,11 +1,11 @@
 use std::collections::HashMap;
+use std::collections::hash_map::DefaultHasher;
 use std::future::ready;
+use std::hash::{Hash, Hasher};
 use std::io::{self, Write as _};
 use std::path::{self, PathBuf};
 use std::string::String;
 use std::sync::LazyLock;
-use std::hash::{Hash, Hasher};
-use std::collections::hash_map::DefaultHasher;
 
 use axum::extract::Path;
 use bytes::Bytes;

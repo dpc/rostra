@@ -1,6 +1,5 @@
 use axum::extract::{Path, State};
-use axum::http::header::{ETAG, IF_NONE_MATCH};
-use axum::http::{HeaderMap, HeaderValue, StatusCode, header};
+use axum::http::{HeaderMap, HeaderValue, header};
 use axum::response::{IntoResponse, Redirect};
 use rostra_core::id::RostraId;
 
@@ -31,22 +30,16 @@ pub async fn get(
     };
 
     let mut resp_headers = HeaderMap::new();
-    // Add ETag header
     let etag = profile.event_id.to_string();
-    resp_headers.insert(
-        ETAG,
-        HeaderValue::from_str(&etag).expect("ETag should be valid header value"),
-    );
 
-    // Check if client already has this version
-    if let Some(if_none_match) = req_headers.get(IF_NONE_MATCH) {
-        if if_none_match.as_bytes() == etag.as_bytes() {
-            return Ok((StatusCode::NOT_MODIFIED, resp_headers).into_response());
-        }
+    // Handle ETag and conditional request
+    if let Some(response) = crate::handle_etag(&req_headers, &etag, &mut resp_headers) {
+        return Ok(response);
     }
 
     let Ok(mime) = HeaderValue::from_str(&avatar.0) else {
         return Ok(not_found_resp);
     };
-    Ok(([(header::CONTENT_TYPE, mime)], avatar.1).into_response())
+    resp_headers.insert(header::CONTENT_TYPE, mime);
+    Ok((resp_headers, avatar.1).into_response())
 }

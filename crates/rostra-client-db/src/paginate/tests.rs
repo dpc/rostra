@@ -1,7 +1,7 @@
 use rostra_util_error::BoxedErrorResult;
 
 use crate::tests::temp_db_rng;
-use crate::{def_table, Database};
+use crate::{Database, def_table};
 
 def_table!(test_table: u64 => String);
 

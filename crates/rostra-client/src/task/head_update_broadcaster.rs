@@ -2,17 +2,17 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use rostra_client_db::{Database, IdsFollowersRecord};
+use rostra_core::ShortEventId;
 use rostra_core::event::{EventContent, EventExt as _, SignedEvent};
 use rostra_core::id::{RostraId, ToShort as _};
-use rostra_core::ShortEventId;
 use rostra_p2p::connection::{Connection, FeedEventRequest};
 use rostra_util_error::{FmtCompact, WhateverResult};
 use snafu::ResultExt as _;
 use tokio::sync::watch;
 use tracing::{debug, instrument, trace, warn};
 
-use crate::client::Client;
 use crate::ClientRef;
+use crate::client::Client;
 const LOG_TARGET: &str = "rostra::head_broadcaster";
 
 pub struct HeadUpdateBroadcaster {

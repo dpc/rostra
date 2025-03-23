@@ -1,10 +1,10 @@
 use std::collections::{BTreeMap, BTreeSet};
 
+use rostra_core::Timestamp;
 use rostra_core::event::IrohNodeId;
 use rostra_core::id::RostraId;
-use rostra_core::Timestamp;
 
-use crate::{ids_nodes, Database, DbResult, IrohNodeRecord};
+use crate::{Database, DbResult, IrohNodeRecord, ids_nodes};
 
 impl Database {
     pub fn trim_iroh_nodes_to_limit_tx(id: RostraId, table: &mut ids_nodes::Table) -> DbResult<()> {

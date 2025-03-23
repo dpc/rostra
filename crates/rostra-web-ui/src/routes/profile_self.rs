@@ -2,14 +2,14 @@ mod extractor;
 
 use axum::extract::State;
 use axum::response::IntoResponse;
-use maud::{html, Markup, PreEscaped};
+use maud::{Markup, PreEscaped, html};
 use rostra_client::ClientRef;
 use rostra_client_db::IdSocialProfileRecord;
-use rostra_core::id::{RostraId, ToShort as _};
 use rostra_core::ShortEventId;
+use rostra_core::id::{RostraId, ToShort as _};
 
-use super::unlock::session::{RoMode, UserSession};
 use super::Maud;
+use super::unlock::session::{RoMode, UserSession};
 use crate::error::RequestResult;
 use crate::html_utils::submit_on_ctrl_enter;
 use crate::{SharedState, UiState};

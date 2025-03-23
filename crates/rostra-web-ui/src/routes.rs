@@ -13,7 +13,7 @@ use std::sync::Arc;
 use axum::Router;
 use axum::body::Body;
 use axum::extract::{FromRequest, Path, Request, State};
-use axum::http::header::{self, ACCEPT_ENCODING, CONTENT_ENCODING, CONTENT_TYPE, IF_NONE_MATCH, ETAG};
+use axum::http::header::{self, ACCEPT_ENCODING, CONTENT_ENCODING, CONTENT_TYPE};
 use axum::http::{HeaderMap, HeaderValue, StatusCode};
 use axum::middleware::{self, Next};
 use axum::response::{IntoResponse, Redirect, Response};
@@ -58,62 +58,51 @@ pub fn static_file_handler(assets: AssetCache) -> Router {
     let assets = Arc::new(assets);
     Router::new().route(
         "/{*file}",
-        get(
-            // |state: State<SharedState>, path: Path<String>, req_headers: HeaderMap| async move {
-            |path: Path<String>, req_headers: HeaderMap| async move {
-                let Some(asset) = assets.get_from_path(&path) else {
-                    return StatusCode::NOT_FOUND.into_response();
-                };
+        get(|path: Path<String>, req_headers: HeaderMap| async move {
+            let Some(asset) = assets.get_from_path(&path) else {
+                return StatusCode::NOT_FOUND.into_response();
+            };
 
-                let mut resp_headers = HeaderMap::new();
+            let mut resp_headers = HeaderMap::new();
 
-                // We set the content type explicitly here as it will otherwise
-                // be inferred as an `octet-stream`
-                resp_headers.insert(
-                    CONTENT_TYPE,
-                    HeaderValue::from_static(
-                        asset.content_type().unwrap_or("application/octet-stream"),
-                    ),
-                );
-                
-                // Add ETag header
-                let etag = asset.etag.clone();
-                resp_headers.insert(
-                    ETAG,
-                    HeaderValue::from_str(&etag).expect("ETag should be valid header value"),
-                );
-                
-                // Check if client already has this version
-                if let Some(if_none_match) = req_headers.get(IF_NONE_MATCH) {
-                    if if_none_match.as_bytes() == etag.as_bytes() {
-                        return (StatusCode::NOT_MODIFIED, resp_headers).into_response();
-                    }
+            // We set the content type explicitly here as it will otherwise
+            // be inferred as an `octet-stream`
+            resp_headers.insert(
+                CONTENT_TYPE,
+                HeaderValue::from_static(
+                    asset.content_type().unwrap_or("application/octet-stream"),
+                ),
+            );
+
+            // Handle ETag and conditional request
+            let etag = asset.etag.clone();
+            if let Some(response) = crate::handle_etag(&req_headers, &etag, &mut resp_headers) {
+                return response;
+            }
+
+            let accepts_brotli =
+                req_headers
+                    .get_all(ACCEPT_ENCODING)
+                    .into_iter()
+                    .any(|encodings| {
+                        let Ok(str) = encodings.to_str() else {
+                            return false;
+                        };
+
+                        str.split(',').any(|s| s.trim() == "br")
+                    });
+
+            let content = match (accepts_brotli, asset.compressed.as_ref()) {
+                (true, Some(compressed)) => {
+                    resp_headers.insert(CONTENT_ENCODING, HeaderValue::from_static("br"));
+
+                    compressed.clone()
                 }
+                _ => asset.raw.clone(),
+            };
 
-                let accepts_brotli =
-                    req_headers
-                        .get_all(ACCEPT_ENCODING)
-                        .into_iter()
-                        .any(|encodings| {
-                            let Ok(str) = encodings.to_str() else {
-                                return false;
-                            };
-
-                            str.split(',').any(|s| s.trim() == "br")
-                        });
-
-                let content = match (accepts_brotli, asset.compressed.as_ref()) {
-                    (true, Some(compressed)) => {
-                        resp_headers.insert(CONTENT_ENCODING, HeaderValue::from_static("br"));
-
-                        compressed.clone()
-                    }
-                    _ => asset.raw.clone(),
-                };
-
-                (resp_headers, content).into_response()
-            },
-        ),
+            (resp_headers, content).into_response()
+        }),
     )
 }
 
@@ -135,7 +124,7 @@ pub async fn cache_control(request: Request, next: Next) -> Response {
         {
             None
         } else {
-            Some(24 * 60 * 60)
+            Some(60 * 60)
         };
 
         if let Some(dur) = cache_duration_secs {
@@ -168,7 +157,10 @@ pub fn route_handler(state: SharedState) -> Router {
         .route("/ui/network", get(timeline::get_network))
         .route("/ui/notifications", get(timeline::get_notifications))
         .route("/ui/profile/{id}", get(profile::get_profile))
-        .route("/ui/profile/{id}/follow", get(profile::get_follow_dialog).post(profile::post_follow))
+        .route(
+            "/ui/profile/{id}/follow",
+            get(profile::get_follow_dialog).post(profile::post_follow),
+        )
         .route("/ui/avatar/{id}", get(avatar::get))
         .route("/ui/updates", get(timeline::get_updates))
         .route("/ui/post", post(new_post::post_new_post))

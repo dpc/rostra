@@ -13,8 +13,8 @@ use error::{
     WrongTypeSnafu,
 };
 use futures::future::{self, Either};
-use pkarr::dns::rdata::RData;
 use pkarr::dns::Name;
+use pkarr::dns::rdata::RData;
 use snafu::{OptionExt as _, ResultExt};
 
 const RRECORD_P2P_KEY: &str = "rostra-p2p";

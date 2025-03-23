@@ -1,13 +1,13 @@
 pub mod session;
 
+use axum::Form;
 use axum::extract::State;
 use axum::http::{HeaderName, HeaderValue, StatusCode};
 use axum::response::{IntoResponse, Response};
-use axum::Form;
-use maud::{html, Markup};
+use maud::{Markup, html};
 use rostra_core::id::{RostraId, RostraIdSecretKey};
 use serde::Deserialize;
-use session::{UserSession, SESSION_KEY};
+use session::{SESSION_KEY, UserSession};
 use snafu::ResultExt as _;
 use tower_sessions::Session;
 

@@ -1,8 +1,8 @@
 use std::borrow::Cow;
 
 use bincode::{Decode, Encode};
-use rostra_core::event::{EventContentUnsized, EventExt, SignedEvent};
 use rostra_core::ShortEventId;
+use rostra_core::event::{EventContentUnsized, EventExt, SignedEvent};
 use serde::Serialize;
 
 #[derive(Debug, Encode, Decode, Clone, Serialize)]

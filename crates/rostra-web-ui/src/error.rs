@@ -2,9 +2,9 @@ use std::io;
 
 use axum::http::{HeaderName, HeaderValue, StatusCode};
 use axum::response::{IntoResponse, Redirect, Response};
+use rostra_client::ClientRefError;
 use rostra_client::error::{ActivateError, InitError, PostError};
 use rostra_client::multiclient::MultiClientError;
-use rostra_client::ClientRefError;
 use rostra_client_db::DbError;
 use rostra_util_error::BoxedError;
 use serde::Serialize;

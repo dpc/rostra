@@ -1,9 +1,9 @@
+use rostra_core::ShortEventId;
 use rostra_core::event::EventExt as _;
 use rostra_core::id::RostraId;
-use rostra_core::ShortEventId;
 use tracing::warn;
 
-use crate::{events, tables, Database, LOG_TARGET};
+use crate::{Database, LOG_TARGET, events, tables};
 
 impl Database {
     pub async fn paginate_missing_events_contents(

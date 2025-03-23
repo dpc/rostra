@@ -1,14 +1,14 @@
+use rostra_core::ContentHash;
 use rostra_core::event::{EventExt as _, VerifiedEvent, VerifiedEventContent};
 use rostra_core::id::ToShort as _;
-use rostra_core::ContentHash;
 use rostra_util_error::FmtCompact as _;
 use tracing::{info, warn};
 
 use crate::process_event_content_ops::ProcessEventError;
 use crate::{
+    Database, DbResult, InsertEventOutcome, LOG_TARGET, ProcessEventState, WriteTransactionCtx,
     events, events_by_time, events_content, events_content_missing, events_heads, events_missing,
-    ids_full, Database, DbResult, InsertEventOutcome, ProcessEventState, WriteTransactionCtx,
-    LOG_TARGET,
+    ids_full,
 };
 
 impl Database {
