@@ -299,7 +299,8 @@ impl Server {
 
 fn compression_layer() -> CompressionLayer<SizeAbove> {
     CompressionLayer::new()
-        .quality(CompressionLevel::Precise(4))
+        .quality(CompressionLevel::Fastest)
+        .br(true)
         .compress_when(SizeAbove::new(512))
 }
 
