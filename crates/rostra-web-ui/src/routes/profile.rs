@@ -1,5 +1,3 @@
-use std::fmt;
-
 use axum::Form;
 use axum::extract::{Path, Query, State};
 use axum::response::IntoResponse;
@@ -8,7 +6,6 @@ use rostra_client_db::social::EventPaginationCursor;
 use rostra_core::event::PersonaId;
 use rostra_core::id::RostraId;
 use serde::Deserialize;
-use serde::de::Deserializer;
 use tower_cookies::Cookies;
 
 use super::Maud;
