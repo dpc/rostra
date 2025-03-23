@@ -1,4 +1,4 @@
-use maud::{DOCTYPE, Markup, html};
+use maud::{DOCTYPE, Markup, PreEscaped, html};
 
 use crate::UiState;
 use crate::error::RequestResult;
@@ -45,14 +45,25 @@ impl UiState {
 /// A static footer.
 pub(crate) fn render_html_footer() -> Markup {
     html! {
-        script src="/assets/libs/htmx.org@2.0.4.js" {}
-        script src="/assets/libs/htmx-ext-ws@2.0.1.ws.js" {}
-
 
         // script id="MathJax-script" async src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js" {}
-        script src="/assets/libs/mathjax-3.2.2/tex-mml-chtml.js" {}
+        script defer src="/assets/libs/mathjax-3.2.2/tex-mml-chtml.js" {}
 
         // script type="module" src="/assets/script.js" {};
         // script type="module" src="/assets/script-htmx-send-error.js" {};
+
+        // Prevent flickering of images when they are already in the cache
+        (PreEscaped(r#"
+            document.addEventListener("DOMContentLoaded", () => {
+              const images = document.querySelectorAll('img[loading="lazy"]');
+              images.forEach(img => {
+                const testImg = new Image();
+                testImg.src = img.src;
+                if (testImg.complete) {
+                  img.removeAttribute("loading");
+                }
+              });
+            });
+        "#))
     }
 }
