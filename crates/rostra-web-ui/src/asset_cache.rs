@@ -4,6 +4,8 @@ use std::io::{self, Write as _};
 use std::path::{self, PathBuf};
 use std::string::String;
 use std::sync::LazyLock;
+use std::hash::{Hash, Hasher};
+use std::collections::hash_map::DefaultHasher;
 
 use axum::extract::Path;
 use bytes::Bytes;
@@ -83,6 +85,9 @@ impl AssetCache {
                     }
                     .map(Bytes::from);
 
+                    let raw_for_etag = raw.clone();
+                    let path_for_etag = stored_path.clone();
+                    
                     Ok(Some((
                         filename.to_string(),
                         StaticAsset {
@@ -99,6 +104,10 @@ impl AssetCache {
                                 LazyLock::new(Box::new(|| Bytes::from(raw)))
                             }},
                             compressed,
+                            etag: LazyLock::new(Box::new(move || {
+                                debug!(target: LOG_TARGET, path = %path_for_etag, "Calculating ETag for asset");
+                                calculate_etag(&raw_for_etag)
+                            })),
                         },
                     )))
                 })
@@ -134,6 +143,7 @@ pub struct StaticAsset {
     pub path: String,
     pub compressed: Option<Bytes>,
     pub raw: LazyLock<Bytes, Box<dyn FnOnce() -> Bytes + Send>>,
+    pub etag: LazyLock<String, Box<dyn FnOnce() -> String + Send>>,
 }
 
 impl StaticAsset {
@@ -179,6 +189,14 @@ fn decompress_data(input: &[u8]) -> Vec<u8> {
 
     bytes
 }
+
+/// Calculate a hash-based ETag for the given data
+fn calculate_etag(data: &[u8]) -> String {
+    let mut hasher = DefaultHasher::new();
+    data.hash(&mut hasher);
+    format!("\"{}\"", hasher.finish())
+}
+
 // async fn read_dir_stream(dir: impl AsRef<path::Path>) -> impl Stream<Item =
 // io::Result<PathBuf>> {
 fn read_dir_stream(dir: PathBuf) -> BoxStream<'static, io::Result<PathBuf>> {
