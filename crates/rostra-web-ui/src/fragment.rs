@@ -53,17 +53,19 @@ pub(crate) fn render_html_footer() -> Markup {
         // script type="module" src="/assets/script-htmx-send-error.js" {};
 
         // Prevent flickering of images when they are already in the cache
-        (PreEscaped(r#"
-            document.addEventListener("DOMContentLoaded", () => {
-              const images = document.querySelectorAll('img[loading="lazy"]');
-              images.forEach(img => {
-                const testImg = new Image();
-                testImg.src = img.src;
-                if (testImg.complete) {
-                  img.removeAttribute("loading");
-                }
-              });
-            });
-        "#))
+        script {
+            (PreEscaped(r#"
+                document.addEventListener("DOMContentLoaded", () => {
+                  const images = document.querySelectorAll('img[loading="lazy"]');
+                  images.forEach(img => {
+                    const testImg = new Image();
+                    testImg.src = img.src;
+                    if (testImg.complete) {
+                      img.removeAttribute("loading");
+                    }
+                  });
+                });
+            "#))
+        }
     }
 }
