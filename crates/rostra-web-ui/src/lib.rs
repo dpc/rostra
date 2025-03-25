@@ -17,6 +17,7 @@ use std::{io, result};
 use asset_cache::AssetCache;
 use axum::http::header::{ACCEPT, CONTENT_TYPE};
 use axum::http::{HeaderName, HeaderValue, Method};
+use axum::routing::get;
 use axum::{Router, middleware};
 use error::{IdMismatchSnafu, UnlockError, UnlockResult};
 use listenfd::ListenFd;
@@ -26,7 +27,7 @@ use rostra_client::{ClientHandle, ClientRefError};
 use rostra_core::id::{RostraId, RostraIdSecretKey};
 use rostra_util::is_rostra_dev_mode_set;
 use rostra_util_error::WhateverResult;
-use routes::cache_control;
+use routes::{cache_control, get_static_asset};
 use snafu::{ResultExt as _, Snafu, Whatever, ensure};
 use tokio::net::{TcpListener, TcpSocket};
 use tokio::signal;
@@ -128,6 +129,7 @@ pub type UiStateClientResult<T> = result::Result<T, UiStateClientError>;
 
 pub struct UiState {
     clients: MultiClient,
+    assets: Option<Arc<AssetCache>>,
 }
 
 impl UiState {
@@ -162,7 +164,7 @@ pub struct Server {
     listener: TcpListener,
 
     state: SharedState,
-    assets: Option<AssetCache>,
+    assets: Option<Arc<AssetCache>>,
     opts: Opts,
 }
 
@@ -208,12 +210,16 @@ impl Server {
         let assets = if is_rostra_dev_mode_set() {
             None
         } else {
-            AssetCache::load_files(&opts.assets_dir)
-                .await
-                .context(AssetsLoadSnafu)?
-                .into()
+            Some(Arc::new(
+                AssetCache::load_files(&opts.assets_dir)
+                    .await
+                    .context(AssetsLoadSnafu)?,
+            ))
         };
-        let state = Arc::new(UiState { clients });
+        let state = Arc::new(UiState {
+            clients,
+            assets: assets.clone(),
+        });
 
         info!("Listening on {}", listener.local_addr()?);
         Ok(Self {
@@ -261,8 +267,13 @@ impl Server {
         let mut router = Router::new().merge(routes::route_handler(self.state.clone()));
 
         match self.assets {
-            Some(assets) => {
-                router = router.nest("/assets", routes::static_file_handler(assets));
+            Some(_assets) => {
+                router = router.nest("/assets", {
+                    let state = self.state.clone();
+                    Router::new()
+                        .route("/{*file}", get(get_static_asset))
+                        .with_state(state)
+                });
             }
             _ => {
                 router = router.nest_service(
@@ -279,6 +290,7 @@ impl Server {
         axum::serve(
             self.listener,
             router
+                .with_state(self.state.clone())
                 .layer(CookieManagerLayer::new())
                 .layer(middleware::from_fn(cache_control))
                 .layer(session_layer)
