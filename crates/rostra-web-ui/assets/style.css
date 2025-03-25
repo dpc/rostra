@@ -239,6 +239,21 @@ img {
   max-width: 100%;
 }
 
+img[loading="lazy"] {
+  display: block;
+  /* Start invisible */
+  opacity: 0;
+  /* Very fast fade to minimize perceived flicker */
+  transition: opacity 0.1s ease-in;
+}
+
+/* Cached images (or loaded ones) fade in instantly */
+img[src]:not([loading="lazy"]),
+/* Non-lazy images */
+img[loading="lazy"][src][width][height] {
+  /* Lazy images with dimensions */
+  opacity: 1;
+}
 
 /* UTILITY CLASSES */
 .u-tooltip:not(.shown) {
