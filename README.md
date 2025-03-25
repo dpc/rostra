@@ -84,6 +84,7 @@ In the future, the official releases will come with prebuilt binaries as well.
 * [FAQ](/docs/FAQ.md)
 * [Comparison with other social protocols](/docs/comparison.md)
 * [`HACKING.md`](./HACKING.md)
+* [Github Discussions](https://github.com/dpc/rostra/discussions)
 
 ## License
 
