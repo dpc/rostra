@@ -22,7 +22,7 @@ impl bincode::Encode for MsgLen {
     }
 }
 
-impl<'de> bincode::BorrowDecode<'de> for MsgLen {
+impl<'de, C> bincode::BorrowDecode<'de, C> for MsgLen {
     fn borrow_decode<D: bincode::de::BorrowDecoder<'de>>(
         decoder: &mut D,
     ) -> Result<Self, bincode::error::DecodeError> {
@@ -30,7 +30,7 @@ impl<'de> bincode::BorrowDecode<'de> for MsgLen {
     }
 }
 
-impl bincode::Decode for MsgLen {
+impl<C> bincode::Decode<C> for MsgLen {
     fn decode<D: bincode::de::Decoder>(
         decoder: &mut D,
     ) -> core::result::Result<Self, bincode::error::DecodeError> {
@@ -48,7 +48,7 @@ impl bincode::Encode for TimestampFixed {
     }
 }
 
-impl<'de> bincode::BorrowDecode<'de> for TimestampFixed {
+impl<'de, C> bincode::BorrowDecode<'de, C> for TimestampFixed {
     fn borrow_decode<D: bincode::de::BorrowDecoder<'de>>(
         decoder: &mut D,
     ) -> Result<Self, bincode::error::DecodeError> {
@@ -56,7 +56,7 @@ impl<'de> bincode::BorrowDecode<'de> for TimestampFixed {
     }
 }
 
-impl bincode::Decode for TimestampFixed {
+impl<C> bincode::Decode<C> for TimestampFixed {
     fn decode<D: bincode::de::Decoder>(
         decoder: &mut D,
     ) -> core::result::Result<Self, bincode::error::DecodeError> {
@@ -77,7 +77,7 @@ impl bincode::Encode for NullableShortEventId {
     }
 }
 
-impl<'de> bincode::BorrowDecode<'de> for NullableShortEventId {
+impl<'de, C> bincode::BorrowDecode<'de, C> for NullableShortEventId {
     fn borrow_decode<D: bincode::de::BorrowDecoder<'de>>(
         decoder: &mut D,
     ) -> Result<Self, bincode::error::DecodeError> {
@@ -90,7 +90,7 @@ impl<'de> bincode::BorrowDecode<'de> for NullableShortEventId {
     }
 }
 
-impl bincode::Decode for NullableShortEventId {
+impl<C> bincode::Decode<C> for NullableShortEventId {
     fn decode<D: bincode::de::Decoder>(
         decoder: &mut D,
     ) -> core::result::Result<Self, bincode::error::DecodeError> {

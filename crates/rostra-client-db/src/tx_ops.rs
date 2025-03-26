@@ -359,8 +359,8 @@ impl Database {
         table: &mut redb_bincode::Table<'_, K, Latest<V>>,
     ) -> DbResult<bool>
     where
-        K: bincode::Encode + bincode::Decode,
-        V: bincode::Encode + bincode::Decode,
+        K: bincode::Encode + bincode::Decode<()>,
+        V: bincode::Encode + bincode::Decode<()>,
     {
         if let Some(existing_value) = table.get(key)?.map(|v| v.value()) {
             if timestamp <= existing_value.ts {

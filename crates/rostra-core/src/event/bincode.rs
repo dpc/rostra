@@ -80,7 +80,7 @@ impl SignedEvent {
     }
 }
 
-impl<'a, 'de: 'a> bincode::BorrowDecode<'de> for &'a EventContentUnsized {
+impl<'a, 'de: 'a, C> bincode::BorrowDecode<'de, C> for &'a EventContentUnsized {
     fn borrow_decode<D: bincode::de::BorrowDecoder<'de>>(
         decoder: &mut D,
     ) -> Result<Self, bincode::error::DecodeError> {

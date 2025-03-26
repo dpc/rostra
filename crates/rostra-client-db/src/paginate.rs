@@ -10,8 +10,8 @@ impl Database {
         filter_fn: impl Fn(K, V) -> DbResult<Option<R>> + Send + 'static,
     ) -> DbResult<(Vec<R>, Option<K>)>
     where
-        K: bincode::Decode + bincode::Encode,
-        V: bincode::Decode + bincode::Encode,
+        K: bincode::Decode<()> + bincode::Encode,
+        V: bincode::Decode<()> + bincode::Encode,
     {
         let mut ret = vec![];
 
@@ -42,8 +42,8 @@ impl Database {
         filter_fn: impl Fn(K, V) -> DbResult<Option<R>> + Send + 'static,
     ) -> DbResult<(Vec<R>, Option<K>)>
     where
-        K: bincode::Decode + bincode::Encode,
-        V: bincode::Decode + bincode::Encode,
+        K: bincode::Decode<()> + bincode::Encode,
+        V: bincode::Decode<()> + bincode::Encode,
     {
         let mut ret = vec![];
 
@@ -78,8 +78,8 @@ impl Database {
         filter_fn: impl Fn(K, V) -> DbResult<Option<R>> + Send + 'static,
     ) -> DbResult<(Vec<R>, Option<K>)>
     where
-        K: bincode::Decode + bincode::Encode + cmp::Ord,
-        V: bincode::Decode + bincode::Encode,
+        K: bincode::Decode<()> + bincode::Encode + cmp::Ord,
+        V: bincode::Decode<()> + bincode::Encode,
     {
         let mut ret = vec![];
 
@@ -116,8 +116,8 @@ impl Database {
         filter_fn: impl Fn(K, V) -> DbResult<Option<R>> + Send + 'static,
     ) -> DbResult<(Vec<R>, Option<K>)>
     where
-        K: bincode::Decode + bincode::Encode + cmp::Ord,
-        V: bincode::Decode + bincode::Encode,
+        K: bincode::Decode<()> + bincode::Encode + cmp::Ord,
+        V: bincode::Decode<()> + bincode::Encode,
     {
         let mut ret = vec![];
 

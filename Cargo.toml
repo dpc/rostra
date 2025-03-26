@@ -38,7 +38,7 @@ axum-extra = { version = "0.10.0" }
 backon = "1.3.0"
 bao-tree = "0.13"
 bech32 = "0.11.0"
-bincode = { version = "2.0.0-rc.3", features = ["derive"] }
+bincode = { version = "2.0.0", features = ["derive"] }
 blake3 = "1.5.5"
 brotli = "*"
 bon = "3.3.0"
@@ -135,5 +135,5 @@ debug = false
 [profile.release.build-override]
 debug = false
 
-# [patch.crates-io]
-# redb-bincode = { git = "https://github.com/rustshop/redb-bincode", rev = "24c07171aa74a56a2f5448c17563fc34f5b99893" }
+[patch.crates-io]
+redb-bincode = { git = "https://github.com/rustshop/redb-bincode", rev = "b33cedb787d452dc3735a153aca55086fea7c306" }

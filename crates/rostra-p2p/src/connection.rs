@@ -60,7 +60,7 @@ impl bincode::Encode for RpcId {
     }
 }
 
-impl bincode::Decode for RpcId {
+impl<C> bincode::Decode<C> for RpcId {
     fn decode<D: bincode::de::Decoder>(
         decoder: &mut D,
     ) -> core::result::Result<Self, bincode::error::DecodeError> {
@@ -103,7 +103,7 @@ pub trait Rpc: RpcRequest {
     type Response: RpcResponse;
 }
 
-pub trait RpcMessage: bincode::Encode + bincode::Decode {
+pub trait RpcMessage: bincode::Encode + bincode::Decode<()> {
     fn decode_whole<const LIMIT: u32>(bytes: &[u8]) -> Result<Self, bincode::error::DecodeError> {
         if CastInto::<usize>::cast_into(LIMIT) < bytes.len() {
             return Err(bincode::error::DecodeError::LimitExceeded);

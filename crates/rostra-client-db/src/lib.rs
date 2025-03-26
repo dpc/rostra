@@ -688,8 +688,8 @@ fn get_first_in_range<K, V>(
     range: impl ops::RangeBounds<K>,
 ) -> Result<Option<K>, DbError>
 where
-    K: bincode::Decode + bincode::Encode,
-    V: bincode::Decode + bincode::Encode,
+    K: bincode::Decode<()> + bincode::Encode,
+    V: bincode::Decode<()> + bincode::Encode,
 {
     Ok(events_table
         .range(range)?
@@ -703,8 +703,8 @@ fn get_last_in_range<K, V>(
     range: impl ops::RangeBounds<K>,
 ) -> Result<Option<K>, DbError>
 where
-    K: bincode::Decode + bincode::Encode,
-    V: bincode::Decode + bincode::Encode,
+    K: bincode::Decode<()> + bincode::Encode,
+    V: bincode::Decode<()> + bincode::Encode,
 {
     Ok(events_table
         .range(range)?
