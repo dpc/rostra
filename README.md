@@ -42,6 +42,10 @@ if you don't want to stare at an empty timeline.
 A public instance is available at https://rostra.me/ , but
 it's advised to run Rostra directly on your system.
 
+**You can log-in in a read-only mode** (eg. as me `rse1okfyp4yj75i6riwbz86mpmbgna3f7qr66aj1njceqoigjabegy`)
+by not providing any secret, and view Rostra UI from the perspective of that user. You will not be
+able to post or do any other actions that require the secret key.
+
 #### Using Cargo
 
 You can clone the git repository locally and run:
