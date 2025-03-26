@@ -6,7 +6,6 @@ use rostra_client_db::{Database, IdsFolloweesRecord, InsertEventOutcome};
 use rostra_core::ShortEventId;
 use rostra_core::id::{RostraId, ToShort as _};
 use rostra_p2p::Connection;
-use rostra_p2p::connection::GetHeadRequest;
 use rostra_util::is_rostra_dev_mode_set;
 use rostra_util_error::{BoxedErrorResult, FmtCompact, WhateverResult};
 use rostra_util_fmt::AsFmtOption as _;
@@ -128,8 +127,8 @@ impl FolloweeHeadChecker {
     ) -> BoxedErrorResult<Option<ShortEventId>> {
         let conn = client.connect(id).await?;
 
-        let head = conn.make_rpc(&GetHeadRequest(id)).await.boxed()?;
-        if let Some(head) = head.0 {
+        let head = conn.get_head(id).await.boxed()?;
+        if let Some(head) = head {
             if self.db.has_event(head).await {
                 return Ok(None);
             } else {

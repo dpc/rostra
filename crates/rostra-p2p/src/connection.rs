@@ -241,7 +241,7 @@ fn rpc_request_to_bytes_test() {
 }
 
 impl Connection {
-    pub async fn make_rpc<R: Rpc>(&self, request: &R) -> RpcResult<<R as Rpc>::Response> {
+    async fn make_rpc<R: Rpc>(&self, request: &R) -> RpcResult<<R as Rpc>::Response> {
         let (mut send, mut recv) = self.0.open_bi().await.context(StreamConnectionSnafu)?;
 
         Self::write_rpc_request(&mut send, request).await?;
@@ -260,7 +260,7 @@ impl Connection {
     /// * read response
     /// * send extra data
     /// * read response
-    pub async fn make_rpc_with_extra_data_send<R: Rpc, F>(
+    async fn make_rpc_with_extra_data_send<R: Rpc, F>(
         &self,
         request: &R,
         extra_data_f: F,
@@ -285,7 +285,7 @@ impl Connection {
         resp
     }
 
-    pub async fn make_rpc_with_extra_data_recv<R: Rpc, F, T>(
+    async fn make_rpc_with_extra_data_recv<R: Rpc, F, T>(
         &self,
         request: &R,
         extra_data_f: F,
@@ -312,7 +312,7 @@ impl Connection {
         Ok((resp, extra))
     }
 
-    pub async fn write_rpc_request<R: Rpc>(send: &mut SendStream, rpc: &R) -> RpcResult<()> {
+    async fn write_rpc_request<R: Rpc>(send: &mut SendStream, rpc: &R) -> RpcResult<()> {
         trace!(target: LOG_TARGET, kind = %<R as Rpc>::RPC_ID, "Writing rpc request");
         send.write_all(&rpc_request_to_bytes(rpc))
             .await
@@ -321,7 +321,7 @@ impl Connection {
         Ok(())
     }
 
-    pub async fn read_success_error_code(recv: &mut RecvStream) -> RpcResult<u8> {
+    async fn read_success_error_code(recv: &mut RecvStream) -> RpcResult<u8> {
         let mut res = [0u8; 1];
         recv.read_exact(&mut res).await.boxed().context(ReadSnafu)?;
 
@@ -523,5 +523,31 @@ impl Connection {
                 .expect("Bao transfer should guarantee correct content was received")
         });
         Ok(verified_content)
+    }
+
+    pub async fn feed_event(
+        &self,
+        event: SignedEvent,
+        content: EventContent,
+    ) -> RpcResult<FeedEventResponse> {
+        self.make_rpc_with_extra_data_send(&FeedEventRequest(event), move |send| {
+            Box::pin({
+                let content = content.clone();
+                async move {
+                    Connection::write_bao_content(send, content.as_slice(), event.content_hash())
+                        .await?;
+                    Ok(())
+                }
+            })
+        })
+        .await
+    }
+
+    pub async fn ping(&self, n: u64) -> RpcResult<u64> {
+        Ok(self.make_rpc(&PingRequest(n)).await?.0)
+    }
+
+    pub async fn get_head(&self, id: RostraId) -> RpcResult<Option<ShortEventId>> {
+        Ok(self.make_rpc(&GetHeadRequest(id)).await?.0)
     }
 }

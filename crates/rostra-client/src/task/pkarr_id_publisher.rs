@@ -6,7 +6,6 @@ use pkarr::{Keypair, SignedPacket};
 use rand::Rng as _;
 use rostra_core::ShortEventId;
 use rostra_core::id::{RostraId, RostraIdSecretKey, ToShort as _};
-use rostra_p2p::connection::PingRequest;
 use rostra_util_error::BoxedErrorResult;
 use rostra_util_fmt::AsFmtOption as _;
 use snafu::ResultExt as _;
@@ -188,7 +187,7 @@ impl PkarrIdPublisher {
             .connect_by_pkarr_resolution(self.self_id())
             .await?;
 
-        conn.make_rpc(&PingRequest(3)).await?;
+        conn.ping(3).await?;
 
         Ok(())
     }

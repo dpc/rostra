@@ -14,7 +14,7 @@ use rostra_client_db::{Database, DbError};
 use rostra_core::event::PersonaId;
 use rostra_core::id::RostraIdSecretKey;
 use rostra_p2p::RpcError;
-use rostra_p2p::connection::{Connection, PingRequest, PingResponse};
+use rostra_p2p::connection::Connection;
 use rostra_util_error::{BoxedError, FmtCompact as _};
 use rostra_web_ui::{Server, WebUiServerError};
 use snafu::{FromString, ResultExt, Snafu, Whatever};
@@ -112,18 +112,12 @@ async fn handle_cmd(opts: Opts) -> CliResult<serde_json::Value> {
                     connection: Option<&Connection>,
                     id: rostra_core::id::RostraId,
                     seq: u64,
-                ) -> CliResult<PingResponse> {
+                ) -> CliResult<u64> {
                     if let Some(connection) = connection {
-                        connection
-                            .make_rpc(&PingRequest(seq))
-                            .await
-                            .context(RpcSnafu)
+                        connection.ping(seq).await.context(RpcSnafu)
                     } else {
                         let connection = client.connect(id).await.context(ConnectSnafu)?;
-                        connection
-                            .make_rpc(&PingRequest(seq))
-                            .await
-                            .context(RpcSnafu)
+                        connection.ping(seq).await.context(RpcSnafu)
                     }
                 }
                 let client = Client::builder(id)
@@ -158,7 +152,7 @@ async fn handle_cmd(opts: Opts) -> CliResult<serde_json::Value> {
                     seq = seq.wrapping_add(1);
                 }
 
-                serde_json::to_value(&resp).expect("Can't fail")
+                serde_json::to_value(resp).expect("Can't fail")
             }
             cli::DevCmd::DbDump {
                 rostra_id: id,

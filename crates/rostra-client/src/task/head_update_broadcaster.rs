@@ -3,9 +3,8 @@ use std::sync::Arc;
 
 use rostra_client_db::{Database, IdsFollowersRecord};
 use rostra_core::ShortEventId;
-use rostra_core::event::{EventContent, EventExt as _, SignedEvent};
+use rostra_core::event::{EventContent, SignedEvent};
 use rostra_core::id::{RostraId, ToShort as _};
-use rostra_p2p::connection::{Connection, FeedEventRequest};
 use rostra_util_error::{FmtCompact, WhateverResult};
 use snafu::ResultExt as _;
 use tokio::sync::watch;
@@ -113,23 +112,9 @@ impl HeadUpdateBroadcaster {
             .await
             .whatever_context("Couldn't connect")?;
 
-        conn.make_rpc_with_extra_data_send(&FeedEventRequest(*signed_event), |send| {
-            Box::pin({
-                let event_content = event_content.clone();
-                let signed_event = *signed_event;
-                async move {
-                    Connection::write_bao_content(
-                        send,
-                        event_content.as_ref(),
-                        signed_event.content_hash(),
-                    )
-                    .await?;
-                    Ok(())
-                }
-            })
-        })
-        .await
-        .whatever_context("Failed broadcasting head event")?;
+        conn.feed_event(*signed_event, event_content.clone())
+            .await
+            .whatever_context("Failed broadcasting head event")?;
 
         Ok(())
     }

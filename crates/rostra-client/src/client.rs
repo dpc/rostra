@@ -18,12 +18,12 @@ use iroh::discovery::pkarr::PkarrPublisher;
 use itertools::Itertools as _;
 use rostra_client_db::{Database, DbResult, IdsFolloweesRecord, IdsFollowersRecord};
 use rostra_core::event::{
-    Event, EventExt as _, EventKind, IrohNodeId, PersonaId, PersonaSelector, SignedEvent,
-    VerifiedEvent, VerifiedEventContent, content_kind,
+    Event, EventKind, IrohNodeId, PersonaId, PersonaSelector, SignedEvent, VerifiedEvent,
+    VerifiedEventContent, content_kind,
 };
 use rostra_core::id::{RostraId, RostraIdSecretKey, ToShort as _};
 use rostra_core::{ExternalEventId, ShortEventId};
-use rostra_p2p::connection::{Connection, FeedEventRequest, FeedEventResponse, PingRequest};
+use rostra_p2p::connection::{Connection, FeedEventResponse};
 use rostra_p2p::{ConnectionSnafu, RpcError};
 use rostra_p2p_api::ROSTRA_P2P_V0_ALPN;
 use rostra_util_error::FmtCompact as _;
@@ -278,7 +278,7 @@ impl Client {
                 let conn = Connection::from(conn);
 
                 // Verify connection with ping
-                conn.make_rpc(&PingRequest(0)).await?;
+                conn.ping(0).await?;
                 Ok::<_, RpcError>(conn)
             }));
         }
@@ -728,32 +728,19 @@ impl Client {
                         continue;
                     };
 
+                    let body = body.as_bytes().to_owned().into();
                     signed_event = Some(signed_event.unwrap_or_else(|| {
                         Event::builder()
                             .author(self.id)
                             .kind(EventKind::SOCIAL_POST)
-                            .content(&body.as_bytes().to_owned().into())
+                            .content(&body)
                             .singleton(false)
                             .build()
                             .signed_by(id_secret)
                     }));
 
                     let signed_event = signed_event.expect("Must be set by now");
-                    match conn
-                        .make_rpc_with_extra_data_send(&FeedEventRequest(signed_event), |send| {
-                            let body = body.clone();
-                            Box::pin(async move {
-                                Connection::write_bao_content(
-                                    send,
-                                    body.as_bytes(),
-                                    signed_event.content_hash(),
-                                )
-                                .await?;
-                                Ok(())
-                            })
-                        })
-                        .await
-                    {
+                    match conn.feed_event(signed_event, body).await {
                         Ok(_) => {
                             debug!(target: LOG_TARGET, "Published");
                             return Ok(());
