@@ -129,7 +129,7 @@ pub async fn post_new_post(
                 ."-reply"[reply_to.is_some()]
                 ."-post"[reply_to.is_none()]
              {
-                (state.post_overview(
+                (state.render_post_overview(
                     &client_ref,
                     client_ref.rostra_id())
                     .maybe_reply_to(reply_to)
@@ -168,7 +168,7 @@ pub async fn get_post_preview_dialog(
         div ."o-previewDialog -active" hx-swap-oob="outerHTML:.o-previewDialog" {
             div ."o-previewDialog__content" {
                 div ."o-previewDialog__post" {
-                    (state.post_overview(
+                    (state.render_post_overview(
                         &client.client_ref()?,
                         self_id
                         )
@@ -243,7 +243,7 @@ pub async fn get_post_preview(
                 ."-reply"[form.reply_to.is_some()]
                 ."-post"[form.reply_to.is_none()]
             {
-                (state.post_overview(
+                (state.render_post_overview(
                     &client.client_ref()?,
                     self_id
                     )

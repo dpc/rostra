@@ -11,16 +11,16 @@ use rostra_client_db::IdSocialProfileRecord;
 use rostra_client_db::social::{EventPaginationCursor, SocialPostRecord};
 use rostra_core::event::{EventKind, PersonaId, PersonaSelector, SocialPost};
 use rostra_core::id::{RostraId, ToShort as _};
-use rostra_core::{ExternalEventId, ShortEventId, Timestamp};
+use rostra_core::{ShortEventId, Timestamp};
 use rostra_util_error::FmtCompact as _;
 use serde::Deserialize;
 use tower_cookies::Cookies;
-use tracing::debug;
+use tracing::{debug, warn};
 
 use super::super::error::RequestResult;
 use super::Maud;
 use super::cookies::CookiesExt as _;
-use super::unlock::session::{RoMode, UserSession};
+use super::unlock::session::UserSession;
 use crate::html_utils::re_typeset_mathjax;
 use crate::{LOG_TARGET, SharedState, UiState};
 
@@ -127,7 +127,10 @@ pub async fn get_post_comments(
 
 #[bon::bon]
 impl UiState {
-    async fn timeline_common_navbar(&self, session: &UserSession) -> RequestResult<Markup> {
+    pub(crate) async fn timeline_common_navbar(
+        &self,
+        session: &UserSession,
+    ) -> RequestResult<Markup> {
         Ok(html! {
             nav ."o-navBar"
                 hx-ext="ws"
@@ -241,7 +244,7 @@ impl UiState {
         }
 
         match mode {
-            TimelineMode::Profile(_) => {
+            TimelineMode::Profile(_) | TimelineMode::ProfileSingle(_, _) => {
                 // We're not displaying notifications on profile timelines
                 Ok(None)
             }
@@ -302,7 +305,7 @@ impl UiState {
                 @for comment in comments {
                     @if let Some(djot_content) = comment.content.djot_content.as_ref() {
                         div ."o-postOverview__commentsItem" {
-                            (self.post_overview(
+                            (self.render_post_overview(
                                 &client_ref,
                                 comment.author
                                 ).event_id(comment.event_id)
@@ -350,12 +353,7 @@ impl UiState {
         let client = self.client(session.id()).await?;
         let client_ref = client.client_ref()?;
 
-        let filter_fn = mode.to_filter_fn(&client_ref).await;
-
-        let (filtered_posts, cursor) = client_ref
-            .db()
-            .paginate_social_posts_rev(pagination, 20, filter_fn)
-            .await;
+        let (filtered_posts, cursor) = mode.get_posts(&client_ref, pagination).await;
 
         let parents = self
             .client(session.id())
@@ -434,7 +432,7 @@ impl UiState {
                         ."-reply"[post.reply_to.is_some()]
                         ."-post"[post.reply_to.is_none()]
                         {
-                            (self.post_overview(
+                            (self.render_post_overview(
                                 &client_ref,
                                 post.author,
                                 ).maybe_persona_display_name(
@@ -479,231 +477,7 @@ impl UiState {
         })
     }
 
-    #[allow(clippy::too_many_arguments)]
-    #[builder]
-    pub async fn post_overview(
-        &self,
-        #[builder(start_fn)] client: &ClientRef<'_>,
-        #[builder(start_fn)] author: RostraId,
-        persona_display_name: Option<&str>,
-        reply_to: Option<(RostraId, Option<&SocialPostRecord<SocialPost>>)>,
-        event_id: Option<ShortEventId>,
-        content: Option<&str>,
-        reply_count: Option<u64>,
-        ro: RoMode,
-        // Render the post including a comment, right away
-        comment: Option<Markup>,
-        // Is the post loaded as a comment to an existing post (already being
-        // displayed)
-        #[builder(default = false)] is_comment: bool,
-    ) -> RequestResult<Markup> {
-        let external_event_id = event_id.map(|e| ExternalEventId::new(author, e));
-        let user_profile = self.get_social_profile_opt(author, client).await;
-
-        // Note: we are actually not doing pagiantion, and just ignore
-        // everything after first page
-        let (reactions, _) = if let Some(event_id) = event_id {
-            client
-                .db()
-                .paginate_social_post_reactions_rev(event_id, None, 1000)
-                .await
-        } else {
-            (vec![], None)
-        };
-
-        let mut reaction_social_profiles: HashMap<RostraId, IdSocialProfileRecord> = HashMap::new();
-
-        for reaction_author in reactions
-            .iter()
-            .map(|reaction| reaction.author)
-            // collect to deduplicate
-            .collect::<HashSet<_>>()
-        {
-            // TODO: make a batched request for all profiles in one go
-            if let Some(reaction_user_profile) =
-                self.get_social_profile_opt(reaction_author, client).await
-            {
-                // HashSet above must have deduped it
-                assert!(
-                    reaction_social_profiles
-                        .insert(reaction_author, reaction_user_profile)
-                        .is_none()
-                );
-            }
-        }
-
-        let reactions_html = html! {
-            @for reaction in reactions {
-                @if let Some(reaction_text) = reaction.content.get_reaction() {
-
-                    span .m-postOverview__reaction
-                        title=(
-                            format!("by {}",
-                                reaction_social_profiles.get(&reaction.author)
-                                    .map(|r| r.display_name.clone())
-                                    .unwrap_or_else(|| reaction.author.to_string())
-                            )
-                        )
-                    {
-                        (reaction_text)
-                    }
-                }
-            }
-        };
-
-        let post_content_rendered = if let Some(content) = content.as_ref() {
-            Some(self.render_content(client, content).await)
-        } else {
-            None
-        };
-
-        let display_name = if let Some(ref profile) = user_profile {
-            profile.display_name.clone()
-        } else {
-            author.to_short().to_string()
-        };
-        let post_main = html! {
-            div ."m-postOverview__main"
-            {
-                img ."m-postOverview__userImage u-userImage"
-                    src=(self.avatar_url(author))
-                    alt=(format!("{display_name}'s avatar"))
-                    width="32pt"
-                    height="32pt"
-                    loading="lazy"
-                { }
-
-                div ."m-postOverview__contentSide"
-                    onclick=[comment.as_ref().map(|_|"this.classList.add('-expanded')" )]
-                {
-                    header ."m-postOverview__header" {
-                        span ."m-postOverview__userHandle" {
-                            (self.render_user_handle(event_id, author, user_profile.as_ref()))
-                        }
-                        @if let Some(persona_display_name) = persona_display_name {
-                            span ."m-postOverview__personaDisplayName" {
-                                (format!("({})", persona_display_name))
-                            }
-                        }
-                    }
-
-                    div ."m-postOverview__content"
-                     ."-missing"[post_content_rendered.is_none()]
-                     ."-present"[post_content_rendered.is_some()]
-                    {
-                        p {
-                            @if let Some(post_content_rendered) = post_content_rendered {
-                                (post_content_rendered)
-                            } @else {
-                                "Post missing"
-                            }
-                        }
-                    }
-                }
-
-            }
-        };
-
-        let button_bar = html! {
-            @if let Some(ext_event_id) = external_event_id {
-                div ."m-postOverview__buttonBar" {
-                    div .m-postOverview__reactions {
-                        (reactions_html)
-                    }
-                    div ."m-postOverview__buttons" {
-                        @if let Some(reply_count) = reply_count {
-                            @if reply_count > 0 {
-                                button ."m-postOverview__commentsButton u-button"
-                                    hx-get={"/ui/comments/"(ext_event_id.event_id().to_short())}
-                                    hx-target="next .m-postOverview__comments"
-                                    hx-swap="outerHTML"
-                                    hx-on::after-request="this.classList.add('u-hidden')"
-                                {
-                                    span ."m-postOverview__commentsButtonIcon u-buttonIcon" width="1rem" height="1rem" {}
-                                    @if reply_count == 1 {
-                                        ("1 Reply".to_string())
-                                    } @else {
-                                        (format!("{} Replies", reply_count))
-                                    }
-                                }
-                            }
-
-                        }
-                        button ."m-postOverview__replyToButton u-button"
-                            disabled[ro.to_disabled()]
-                            hx-get={"/ui/post/reply_to?reply_to="(ext_event_id)}
-                            hx-target=".m-newPostForm__replyToLine"
-                            hx-swap="outerHTML"
-                        {
-                            span ."m-postOverview__replyToButtonIcon u-buttonIcon" width="1rem" height="1rem" {}
-                            "Reply"
-                        }
-                    }
-                }
-            }
-        };
-
-        let post_id = format!(
-            "post-{}",
-            event_id
-                .map(|e| e.to_string())
-                .unwrap_or_else(|| "preview".to_string()),
-        );
-
-        let post = html! {
-            article #(post_id)
-                ."m-postOverview"
-                ."-response"[reply_to.is_some() || is_comment]
-                ."-reply-parent"[comment.is_some()]
-             {
-                (post_main)
-
-                (button_bar)
-
-                div ."m-postOverview__comments"
-                    ."-empty"[comment.is_none()]
-                {
-                    @if let Some(comment) = comment {
-                        div ."m-postOverview__commentsItem" {
-                            (comment)
-                        }
-                    }
-                }
-            }
-        };
-
-        Ok(html! {
-            @if let Some((reply_to_author, reply_to_post)) = reply_to {
-                @if let Some(reply_to_post) = reply_to_post {
-                    @if let Some(djot_content) = reply_to_post.content.djot_content.as_ref() {
-                        (Box::pin(self.post_overview(
-                            client,
-                            reply_to_post.author
-                            )
-                            .event_id(reply_to_post.event_id)
-                            .content(djot_content)
-                            .ro(ro)
-                            .comment(post)
-                            .call()
-                        )
-                        .await?)
-                    }
-                } @else {
-                    (Box::pin(self.post_overview(
-                        client,
-                        reply_to_author,
-                        )
-                        .ro(ro).comment(post)
-                        .call()
-                    ).await?)
-                }
-            } @else {
-                (post)
-            }
-        })
-    }
-
-    fn render_user_handle(
+    pub(crate) fn render_user_handle(
         &self,
         _event_id: Option<ShortEventId>,
         id: RostraId,
@@ -737,6 +511,7 @@ pub(crate) enum TimelineMode {
     Network,
     Notifications,
     Profile(RostraId),
+    ProfileSingle(RostraId, ShortEventId),
 }
 
 impl TimelineMode {
@@ -746,6 +521,7 @@ impl TimelineMode {
             TimelineMode::Network => "/ui/network".to_string(),
             TimelineMode::Notifications => "/ui/notifications".to_string(),
             TimelineMode::Profile(rostra_id) => format!("/ui/profile/{rostra_id}"),
+            TimelineMode::ProfileSingle(rostra_id, _) => format!("/ui/profile/{rostra_id}"),
         }
     }
 
@@ -761,6 +537,33 @@ impl TimelineMode {
 
     fn is_profile(&self) -> bool {
         matches!(self, TimelineMode::Profile(_))
+    }
+    async fn get_posts(
+        self,
+        client: &ClientRef<'_>,
+        pagination: Option<EventPaginationCursor>,
+    ) -> (
+        Vec<SocialPostRecord<SocialPost>>,
+        Option<EventPaginationCursor>,
+    ) {
+        if let Self::ProfileSingle(_author, event_id) = self {
+            (
+                client
+                    .db()
+                    .get_social_post(event_id)
+                    .await
+                    .into_iter()
+                    .collect(),
+                None,
+            )
+        } else {
+            let filter_fn = self.to_filter_fn(&client).await;
+
+            client
+                .db()
+                .paginate_social_posts_rev(pagination, 20, filter_fn)
+                .await
+        }
     }
 
     #[allow(clippy::type_complexity)]
@@ -793,6 +596,10 @@ impl TimelineMode {
                     && post.reply_to.map(|ext_id| ext_id.rostra_id()) == Some(self_id)
             }),
             TimelineMode::Profile(rostra_id) => Box::new(move |post| post.author == rostra_id),
+            TimelineMode::ProfileSingle(_, _) => {
+                warn!(target: LOG_TARGET, "Should not be here");
+                Box::new(move |_post| false)
+            }
         }
     }
 }

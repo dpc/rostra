@@ -274,7 +274,7 @@ impl Database {
     pub fn get_event_content_tx(
         event: impl Into<ShortEventId>,
         events_content_table: &impl events_content::ReadableTable,
-    ) -> DbResult<Option<EventContentState>> {
+    ) -> DbResult<Option<EventContentState<'static>>> {
         Ok(events_content_table.get(&event.into())?.map(|r| r.value()))
     }
     pub fn has_event_content_tx(

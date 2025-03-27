@@ -513,9 +513,16 @@ img[loading="lazy"][src][width][height] {
   font-weight: bold;
 }
 
+.m-postOverview__userHandle {
+  display: flex;
+  gap: 2pt;
+  justify-content: space-between;
+}
+
 .m-postOverview__header {
   display: flex;
   gap: 2pt;
+  justify-content: space-between;
 }
 
 .m-postOverview__personaDisplayName {

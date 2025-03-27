@@ -3,6 +3,7 @@ mod avatar;
 mod content;
 mod cookies;
 mod new_post;
+mod post;
 mod profile;
 mod profile_self;
 mod timeline;
@@ -165,6 +166,7 @@ pub fn route_handler(state: SharedState) -> Router<Arc<UiState>> {
         )
         .route("/ui/avatar/{id}", get(avatar::get))
         .route("/ui/updates", get(timeline::get_updates))
+        .route("/ui/post/{author}/{event}", get(post::get_single_post))
         .route("/ui/post", post(new_post::post_new_post))
         .route("/ui/post/preview", post(new_post::get_post_preview))
         .route(

@@ -10,8 +10,8 @@ use tracing::{debug, warn};
 use super::Database;
 use crate::event::EventContentState;
 use crate::{
-    LOG_TARGET, events, events_content, social_posts, social_posts_by_time, social_posts_reactions,
-    social_posts_replies, tables,
+    DbResult, LOG_TARGET, events, events_content, social_posts, social_posts_by_time,
+    social_posts_reactions, social_posts_replies, tables,
 };
 
 #[derive(
@@ -307,36 +307,28 @@ impl Database {
             let mut ret = HashMap::new();
 
             for event_id in post_ids {
-                let Some(content_state) =
-                    Database::get_event_content_tx(event_id, &events_content_table)?
+                let Some((social_post, event, social_post_record)) =
+                    Self::get_social_post_record_tx(
+                        &events_table,
+                        &social_posts_table,
+                        &events_content_table,
+                        event_id,
+                    )?
                 else {
                     continue;
                 };
-                let EventContentState::Present(content) = content_state else {
-                    continue;
-                };
 
-                let Ok(social_post) = content.deserialize_cbor::<content_kind::SocialPost>() else {
-                    debug!(target: LOG_TARGET, %event_id, "Content invalid");
-                    continue;
-                };
-
-                let Some(event) = Database::get_event_tx(event_id, &events_table)? else {
-                    warn!(target: LOG_TARGET, %event_id, "Missing event for a post with social_post_record?!");
-                    continue;
-                };
-
-                let social_post_record =
-                    Database::get_social_post_tx(event_id, &social_posts_table)?.unwrap_or_default();
-
-                ret.insert(event_id, SocialPostRecord {
-                    ts: event.timestamp(),
-                    author: event.author(),
+                ret.insert(
                     event_id,
-                    reply_count: social_post_record.reply_count,
-                    reply_to: social_post.reply_to,
-                    content: social_post,
-                });
+                    SocialPostRecord {
+                        ts: event.timestamp(),
+                        author: event.author(),
+                        event_id,
+                        reply_count: social_post_record.reply_count,
+                        reply_to: social_post.reply_to,
+                        content: social_post,
+                    },
+                );
             }
 
             Ok(ret)
@@ -394,5 +386,66 @@ impl Database {
         })
         .await
         .expect("Storage error")
+    }
+
+    pub async fn get_social_post(
+        &self,
+        event_id: ShortEventId,
+    ) -> Option<SocialPostRecord<content_kind::SocialPost>> {
+        self.read_with(|tx| {
+            let events_table = tx.open_table(&events::TABLE)?;
+            let social_posts_table = tx.open_table(&social_posts::TABLE)?;
+            let events_content_table = tx.open_table(&events_content::TABLE)?;
+
+            let Some((social_post, event, social_post_record)) = Self::get_social_post_record_tx(
+                &events_table,
+                &social_posts_table,
+                &events_content_table,
+                event_id,
+            )?
+            else {
+                return Ok(None);
+            };
+
+            Ok(Some(SocialPostRecord {
+                ts: event.timestamp(),
+                author: event.author(),
+                event_id,
+                reply_count: social_post_record.reply_count,
+                reply_to: social_post.reply_to,
+                content: social_post,
+            }))
+        })
+        .await
+        .expect("Storage error")
+    }
+
+    fn get_social_post_record_tx(
+        events_table: &redb_bincode::ReadOnlyTable<ShortEventId, crate::EventRecord>,
+        social_posts_table: &redb_bincode::ReadOnlyTable<ShortEventId, crate::SocialPostRecord>,
+        events_content_table: &redb_bincode::ReadOnlyTable<
+            ShortEventId,
+            EventContentState<'static>,
+        >,
+        event_id: ShortEventId,
+    ) -> DbResult<Option<(SocialPost, crate::EventRecord, crate::SocialPostRecord)>> {
+        let Some(content_state) = Database::get_event_content_tx(event_id, events_content_table)?
+        else {
+            return Ok(None);
+        };
+        let EventContentState::Present(content) = content_state else {
+            return Ok(None);
+        };
+        let Ok(social_post) = content.deserialize_cbor::<content_kind::SocialPost>() else {
+            debug!(target: LOG_TARGET, %event_id, "Content invalid");
+            return Ok(None);
+        };
+        let Some(event) = Database::get_event_tx(event_id, events_table)? else {
+            warn!(target: LOG_TARGET, %event_id, "Missing event for a post with social_post_record?!");
+            return Ok(None);
+        };
+        let social_post_record =
+            Database::get_social_post_tx(event_id, social_posts_table)?.unwrap_or_default();
+        Ok(Some((social_post, event, social_post_record)))
     }
 }
