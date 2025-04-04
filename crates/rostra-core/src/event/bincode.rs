@@ -2,12 +2,15 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use convi::ExpectInto as _;
 
-use super::{Event, EventContent, EventContentUnsized, EventKind, SignedEvent};
+use super::{
+    Event, EventAuxKey, EventContentKind, EventContentRaw, EventContentUnsized, EventKind,
+    SignedEvent,
+};
 use crate::bincode::STD_BINCODE_CONFIG;
 use crate::id::RostraId;
 use crate::{ContentHash, EventId, MsgLen, ShortEventId};
 
-impl EventContent {
+impl EventContentRaw {
     pub fn compute_content_hash(&self) -> ContentHash {
         blake3::hash(self.as_ref()).into()
     }
@@ -15,16 +18,16 @@ impl EventContent {
 
 #[bon::bon]
 impl Event {
-    #[builder]
-    pub fn new(
+    #[builder(start_fn = builder_raw_content, finish_fn = build)]
+    pub fn new_raw_content(
         author: RostraId,
-        delete: Option<ShortEventId>,
         kind: impl Into<EventKind>,
+        delete: Option<ShortEventId>,
+        singleton_aux_key: Option<EventAuxKey>,
         parent_prev: Option<ShortEventId>,
         parent_aux: Option<ShortEventId>,
         timestamp: Option<SystemTime>,
-        content: Option<&EventContent>,
-        singleton: bool,
+        content: Option<&EventContentRaw>,
     ) -> Self {
         if delete.is_some() && parent_aux.is_some() {
             panic!("Can't set both both delete and parent_aux");
@@ -42,13 +45,14 @@ impl Event {
 
         Self {
             version: 0,
-            flags: if replace.is_some() { 1 } else { 0 } | if singleton { 2 } else { 0 },
+            flags: if replace.is_some() { 1 } else { 0 }
+                | if singleton_aux_key.is_some() { 2 } else { 0 },
             kind: kind.into(),
             content_len: content
                 .as_ref()
                 .map(|content| MsgLen(content.len().expect_into()))
                 .unwrap_or_default(),
-            padding: [0; 16],
+            key_aux: singleton_aux_key.unwrap_or_default(),
             timestamp: timestamp.into(),
             author,
             parent_prev: parent_prev.unwrap_or_default(),
@@ -60,6 +64,36 @@ impl Event {
         }
     }
 
+    #[builder(start_fn = builder)]
+    pub fn new<C>(
+        #[builder(start_fn)] content: &C,
+        author: RostraId,
+        delete: Option<ShortEventId>,
+        parent_prev: Option<ShortEventId>,
+        parent_aux: Option<ShortEventId>,
+        timestamp: Option<SystemTime>,
+    ) -> (Self, EventContentRaw)
+    where
+        C: EventContentKind,
+    {
+        let content_raw = content
+            .serialize_cbor()
+            .expect("Event can't fail to serialize");
+
+        (
+            Self::new_raw_content(
+                author,
+                C::KIND,
+                delete,
+                content.singleton_key_aux(),
+                parent_prev,
+                parent_aux,
+                timestamp,
+                Some(&content_raw),
+            ),
+            content_raw,
+        )
+    }
     pub fn compute_id(&self) -> EventId {
         let encoded =
             ::bincode::encode_to_vec(self, STD_BINCODE_CONFIG).expect("Can't fail encoding");

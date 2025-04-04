@@ -21,8 +21,8 @@ use itertools::Itertools as _;
 use process_event_content_ops::ProcessEventError;
 use redb_bincode::{ReadTransaction, ReadableTable, WriteTransaction};
 use rostra_core::event::{
-    EventContent, EventExt as _, IrohNodeId, PersonaSelector, VerifiedEvent, VerifiedEventContent,
-    content_kind,
+    EventContentRaw, EventExt as _, IrohNodeId, PersonaSelector, VerifiedEvent,
+    VerifiedEventContent, content_kind,
 };
 use rostra_core::id::{RostraId, ToShort as _};
 use rostra_core::{ShortEventId, Timestamp};
@@ -251,6 +251,9 @@ impl Database {
         self.read_with(|tx| {
             match name {
                 "events" => Self::dump_table_dbtx(tx, &tables::events::TABLE)?,
+                "events_singletons" => {
+                    Self::dump_table_dbtx(tx, &tables::events_singletons::TABLE)?
+                }
                 "events_content" => Self::dump_table_dbtx(tx, &tables::events_content::TABLE)?,
                 "events_content_missing" => {
                     Self::dump_table_dbtx(tx, &tables::events_content_missing::TABLE)?
@@ -406,7 +409,7 @@ impl Database {
     pub async fn get_event_content(
         &self,
         event_id: impl Into<ShortEventId>,
-    ) -> Option<EventContent> {
+    ) -> Option<EventContentRaw> {
         let event_id = event_id.into();
         self.read_with(|tx| {
             let events_content_table = tx.open_table(&crate::events_content::TABLE)?;
@@ -739,7 +742,7 @@ pub enum InsertEventOutcome {
         ///
         /// If Some - deletion of the `deleted_parent` is cusing revertion of
         /// this content, which should be processed.
-        reverted_parent_content: Option<EventContent>,
+        reverted_parent_content: Option<EventContentRaw>,
 
         /// Ids of parents we don't have yet, so they are now marked
         /// as "missing".

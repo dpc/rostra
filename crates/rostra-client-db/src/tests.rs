@@ -1,5 +1,5 @@
 use rostra_core::EventId;
-use rostra_core::event::{Event, EventContent, EventKind, VerifiedEvent};
+use rostra_core::event::{Event, EventContentRaw, EventKind, VerifiedEvent};
 use rostra_core::id::{RostraId, RostraIdSecretKey};
 use rostra_util_error::BoxedErrorResult;
 use snafu::ResultExt as _;
@@ -33,14 +33,13 @@ fn build_test_event(
 ) -> VerifiedEvent {
     let parent = parent.into();
 
-    let content = EventContent::new(vec![]);
+    let content = EventContentRaw::new(vec![]);
     let author = id_secret.id();
-    let event = Event::builder()
+    let event = Event::builder_raw_content()
         .author(author)
         .kind(EventKind::SOCIAL_POST)
         .maybe_parent_prev(parent.map(Into::into))
         .content(&content)
-        .singleton(false)
         .build();
 
     let signed_event = event.signed_by(id_secret);
@@ -129,15 +128,14 @@ fn build_test_event_2(
     let parent = parent.into();
     let delete = delete.into();
 
-    let content = EventContent::from(vec![]);
+    let content = EventContentRaw::from(vec![]);
     let author = id_secret.id();
-    let event = Event::builder()
+    let event = Event::builder_raw_content()
         .author(author)
         .kind(EventKind::SOCIAL_POST)
         .maybe_parent_prev(parent.map(Into::into))
         .maybe_delete(delete.map(Into::into))
         .content(&content)
-        .singleton(false)
         .build();
 
     let signed_event = event.signed_by(id_secret);

@@ -1,7 +1,6 @@
 use std::collections::{HashMap, HashSet};
 
 use axum::extract::{Path, State};
-use axum::http::HeaderMap;
 use axum::response::IntoResponse;
 use maud::{Markup, html};
 use rostra_client::ClientRef;

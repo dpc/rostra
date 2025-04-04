@@ -1,17 +1,16 @@
 use tracing::info;
 
-use crate::event::{Event, EventContent, EventKind, SignedEvent};
+use crate::event::{Event, EventContentRaw, EventKind, SignedEvent};
 use crate::id::RostraIdSecretKey;
 
 #[test_log::test]
 fn event_size() {
     let id_secret = RostraIdSecretKey::generate();
 
-    let event = Event::builder()
+    let event = Event::builder_raw_content()
         .author(id_secret.id())
         .kind(EventKind::RAW)
-        .content(&EventContent::new(b"test".to_vec()))
-        .singleton(false)
+        .content(&EventContentRaw::new(b"test".to_vec()))
         .build();
 
     let event_signed = event.signed_by(id_secret);

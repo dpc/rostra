@@ -3,7 +3,7 @@ use std::sync::Arc;
 
 use rostra_client_db::{Database, IdsFollowersRecord};
 use rostra_core::ShortEventId;
-use rostra_core::event::{EventContent, SignedEvent};
+use rostra_core::event::{EventContentRaw, SignedEvent};
 use rostra_core::id::{RostraId, ToShort as _};
 use rostra_util_error::{FmtCompact, WhateverResult};
 use snafu::ResultExt as _;
@@ -105,7 +105,7 @@ impl HeadUpdateBroadcaster {
         client: &ClientRef<'_>,
         id: RostraId,
         signed_event: &SignedEvent,
-        event_content: &EventContent,
+        event_content: &EventContentRaw,
     ) -> WhateverResult<()> {
         let conn = client
             .connect(id)

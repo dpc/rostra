@@ -6,10 +6,11 @@ use rostra_util_error::{BoxedError, FmtCompact as _};
 use snafu::{Location, OptionExt as _, ResultExt as _, Snafu};
 use tracing::debug;
 
+use crate::event::EventSingletonRecord;
 use crate::{
     Database, DbError, IdSocialProfileRecord, IrohNodeRecord, LOG_TARGET, OverflowSnafu,
-    SocialPostsReactionsRecord, SocialPostsRepliesRecord, WriteTransactionCtx, social_posts,
-    social_posts_by_time, social_posts_reactions, social_posts_replies,
+    SocialPostsReactionsRecord, SocialPostsRepliesRecord, WriteTransactionCtx, events_singletons,
+    social_posts, social_posts_by_time, social_posts_reactions, social_posts_replies,
 };
 
 #[derive(Debug, Snafu)]
@@ -250,6 +251,21 @@ impl Database {
                 _ => {}
             },
         };
+
+        if event_content.event.is_singleton() {
+            let mut events_singletons_tbl = tx
+                .open_table(&events_singletons::TABLE)
+                .map_err(DbError::from)?;
+
+            Self::insert_latest_value_tx(
+                event_content.timestamp(),
+                &(event_content.kind(), event_content.aux_key()),
+                EventSingletonRecord {
+                    event_id: event_content.event_id().to_short(),
+                },
+                &mut events_singletons_tbl,
+            )?;
+        }
 
         Ok(())
     }

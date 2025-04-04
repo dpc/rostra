@@ -54,7 +54,7 @@ array_type_define_public!(
 );
 array_type_impl_serde!(struct ShortEventId, 16);
 array_type_impl_base32_str!(ShortEventId);
-impl_zero_default!(ShortEventId);
+array_type_impl_zero_default!(ShortEventId, 16);
 
 array_type_define_public!(
     /// Blake3 hash of a payload

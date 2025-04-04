@@ -11,7 +11,7 @@ use iroh::endpoint::{RecvStream, SendStream};
 use iroh_io::{TokioStreamReader, TokioStreamWriter};
 use rostra_core::bincode::STD_BINCODE_CONFIG;
 use rostra_core::event::{
-    EventContent, EventExt as _, SignedEvent, VerifiedEvent, VerifiedEventContent,
+    EventContentRaw, EventExt as _, SignedEvent, VerifiedEvent, VerifiedEventContent,
 };
 use rostra_core::id::{RostraId, ToShort as _};
 use rostra_core::{ContentHash, MsgLen, ShortEventId};
@@ -502,7 +502,7 @@ impl Connection {
                     let resp = resp.to_owned();
                     Box::pin(async move {
                         if resp.0 {
-                            Ok(Some(EventContent::new(
+                            Ok(Some(EventContentRaw::new(
                                 Connection::read_bao_content(
                                     recv,
                                     event.content_len(),
@@ -528,7 +528,7 @@ impl Connection {
     pub async fn feed_event(
         &self,
         event: SignedEvent,
-        content: EventContent,
+        content: EventContentRaw,
     ) -> RpcResult<FeedEventResponse> {
         self.make_rpc_with_extra_data_send(&FeedEventRequest(event), move |send| {
             Box::pin({

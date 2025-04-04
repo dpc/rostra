@@ -3,7 +3,7 @@ use ed25519_dalek::SignatureError;
 use snafu::{ResultExt as _, Snafu};
 
 use super::{
-    Event, EventContent, EventExt, EventKind, EventSignature, SignedEvent, SignedEventExt,
+    Event, EventContentRaw, EventExt, EventKind, EventSignature, SignedEvent, SignedEventExt,
 };
 use crate::id::RostraId;
 use crate::{ContentHash, EventId, ShortEventId};
@@ -38,7 +38,7 @@ impl SignedEventExt for VerifiedEvent {
 #[derive(Clone, Debug)]
 pub struct VerifiedEventContent {
     pub event: VerifiedEvent,
-    pub content: Option<EventContent>,
+    pub content: Option<EventContentRaw>,
 }
 
 impl EventExt for VerifiedEventContent {
@@ -124,7 +124,7 @@ impl VerifiedEvent {
 impl VerifiedEventContent {
     pub fn verify(
         event: VerifiedEvent,
-        content: impl Into<Option<EventContent>>,
+        content: impl Into<Option<EventContentRaw>>,
     ) -> VerifiedEventResult<Self> {
         let content = content.into();
         if let Some(content) = content.as_ref() {
@@ -148,7 +148,10 @@ impl VerifiedEventContent {
 
         Ok(Self { event, content })
     }
-    pub fn assume_verified(event: VerifiedEvent, content: impl Into<Option<EventContent>>) -> Self {
+    pub fn assume_verified(
+        event: VerifiedEvent,
+        content: impl Into<Option<EventContentRaw>>,
+    ) -> Self {
         let content = content.into();
         debug_assert!(VerifiedEventContent::verify(event, content.clone()).is_ok());
         Self { event, content }

@@ -557,7 +557,7 @@ impl TimelineMode {
                 None,
             )
         } else {
-            let filter_fn = self.to_filter_fn(&client).await;
+            let filter_fn = self.to_filter_fn(client).await;
 
             client
                 .db()

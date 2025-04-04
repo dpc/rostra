@@ -54,12 +54,11 @@ impl HeadMerger {
                 continue;
             };
 
-            let signed_event = Event::builder()
+            let signed_event = Event::builder_raw_content()
                 .author(self.id)
                 .kind(EventKind::NULL)
                 .parent_prev(head1)
                 .parent_aux(head2)
-                .singleton(false)
                 .build()
                 .signed_by(self.id_secret);
 

@@ -4,7 +4,7 @@ use std::sync::Arc;
 use iroh::Endpoint;
 use iroh::endpoint::Incoming;
 use rostra_client_db::{DbError, IdsFolloweesRecord};
-use rostra_core::event::{EventContent, EventExt as _, VerifiedEvent, VerifiedEventContent};
+use rostra_core::event::{EventContentRaw, EventExt as _, VerifiedEvent, VerifiedEventContent};
 use rostra_core::id::RostraId;
 use rostra_p2p::RpcError;
 use rostra_p2p::connection::{
@@ -234,7 +234,7 @@ impl RequestHandler {
             .await
             .context(RpcSnafu)?;
 
-        let event_content = EventContent::from(
+        let event_content = EventContentRaw::from(
             Connection::read_bao_content(&mut read, event.content_len(), event.content_hash())
                 .await
                 .context(RpcSnafu)?,

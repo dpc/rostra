@@ -18,8 +18,8 @@ use iroh::discovery::pkarr::PkarrPublisher;
 use itertools::Itertools as _;
 use rostra_client_db::{Database, DbResult, IdsFolloweesRecord, IdsFollowersRecord};
 use rostra_core::event::{
-    Event, EventKind, IrohNodeId, PersonaId, PersonaSelector, SignedEvent, VerifiedEvent,
-    VerifiedEventContent, content_kind,
+    Event, EventContentRaw, IrohNodeId, PersonaId, PersonaSelector, SignedEvent, SocialPost,
+    VerifiedEvent, VerifiedEventContent, content_kind,
 };
 use rostra_core::id::{RostraId, RostraIdSecretKey, ToShort as _};
 use rostra_core::{ExternalEventId, ShortEventId};
@@ -578,18 +578,14 @@ impl Client {
             self.db.get_self_random_eventid().await
         };
 
-        let content = content.serialize_cbor()?;
-
-        let signed_event = Event::builder()
+        let (event, content) = Event::builder(&content)
             .author(self.id)
-            .kind(C::KIND)
-            .content(&content)
             .maybe_parent_prev(current_head)
             .maybe_parent_aux(aux_event)
             .maybe_delete(replace)
-            .singleton(C::SINGLETON)
-            .build()
-            .signed_by(id_secret);
+            .build();
+
+        let signed_event = event.signed_by(id_secret);
 
         let verified_event = VerifiedEvent::verify_signed(self.id, signed_event)
             .expect("Can't fail to verify self-created event");
@@ -696,7 +692,7 @@ impl Client {
         pub(crate) const ACTIVE_RESERVATION_TIMEOUT: Duration = Duration::from_secs(120);
         let mut known_head = None;
         let mut active_reservation: Option<(CompactTicket, Instant)> = None;
-        let mut signed_event: Option<SignedEvent> = None;
+        let mut event_and_content: Option<(SignedEvent, EventContentRaw)> = None;
 
         'try_connect_to_active: loop {
             let published_id_data = self.check_published_id_state().await;
@@ -728,19 +724,24 @@ impl Client {
                         continue;
                     };
 
-                    let body = body.as_bytes().to_owned().into();
-                    signed_event = Some(signed_event.unwrap_or_else(|| {
-                        Event::builder()
+                    if event_and_content.is_none() {
+                        event_and_content = Some({
+                            let (event, content) = Event::builder(&SocialPost {
+                                djot_content: Some(body.clone()),
+                                persona: PersonaId(0),
+                                reply_to: None,
+                                reaction: None,
+                            })
                             .author(self.id)
-                            .kind(EventKind::SOCIAL_POST)
-                            .content(&body)
-                            .singleton(false)
-                            .build()
-                            .signed_by(id_secret)
-                    }));
+                            .build();
 
-                    let signed_event = signed_event.expect("Must be set by now");
-                    match conn.feed_event(signed_event, body).await {
+                            (event.signed_by(id_secret), content)
+                        });
+                    }
+
+                    let (signed_event, raw_content) =
+                        event_and_content.as_ref().expect("Must be set by now");
+                    match conn.feed_event(*signed_event, raw_content.clone()).await {
                         Ok(_) => {
                             debug!(target: LOG_TARGET, "Published");
                             return Ok(());

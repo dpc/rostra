@@ -6,7 +6,7 @@ use ids::{
     IdsFolloweesRecord, IdsFolloweesRecordV0, IdsFollowersRecord, IdsPersonaRecord,
     IdsUnfollowedRecord,
 };
-use rostra_core::event::{IrohNodeId, PersonaId};
+use rostra_core::event::{EventAuxKey, EventKind, IrohNodeId, PersonaId};
 use rostra_core::id::{RestRostraId, RostraId, ShortRostraId};
 use rostra_core::{ShortEventId, Timestamp};
 use serde::Serialize;
@@ -60,6 +60,7 @@ def_table!(ids_personas: (RostraId, PersonaId) => IdsPersonaRecord);
 
 // EVENTS
 def_table!(events: ShortEventId => EventRecord);
+def_table!(events_singletons: (EventKind, EventAuxKey) => Latest<event::EventSingletonRecord>);
 def_table!(events_missing: (RostraId, ShortEventId) => EventsMissingRecord);
 def_table!(events_heads: (RostraId, ShortEventId) => EventsHeadsTableRecord);
 def_table!(events_self: ShortEventId => ());
@@ -76,7 +77,7 @@ def_table!(social_posts_replies: (ShortEventId, Timestamp, ShortEventId)=> Socia
 def_table!(social_posts_reactions: (ShortEventId, Timestamp, ShortEventId)=> SocialPostsReactionsRecord);
 def_table!(social_posts_by_time: (Timestamp, ShortEventId) => ());
 
-#[derive(Debug, Encode, Decode, Clone)]
+#[derive(Debug, Encode, Decode, Clone, Serialize)]
 pub struct Latest<T> {
     pub ts: Timestamp,
     pub inner: T,

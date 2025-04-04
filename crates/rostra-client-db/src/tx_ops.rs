@@ -6,7 +6,7 @@ use rand::{Rng as _, thread_rng};
 use redb::StorageError;
 use redb_bincode::{ReadableTable, Table};
 use rostra_core::event::{
-    EventContent, EventExt as _, VerifiedEvent, VerifiedEventContent, content_kind,
+    EventContentRaw, EventExt as _, VerifiedEvent, VerifiedEventContent, content_kind,
 };
 use rostra_core::id::{RostraId, ToShort as _};
 use rostra_core::{ShortEventId, Timestamp};
@@ -121,7 +121,7 @@ impl Database {
 
         let mut deleted_parent = None;
 
-        let mut reverted_parent_content: Option<EventContent> = None;
+        let mut reverted_parent_content: Option<EventContentRaw> = None;
         let mut missing_parents = vec![];
 
         for (parent_id, parent_is_aux) in parent_ids {

@@ -21,10 +21,10 @@ impl EventContentUnsized {
 }
 
 impl ToOwned for EventContentUnsized {
-    type Owned = EventContent;
+    type Owned = EventContentRaw;
 
     fn to_owned(&self) -> Self::Owned {
-        EventContent(self.0.into())
+        EventContentRaw(self.0.into())
     }
 }
 
@@ -42,13 +42,13 @@ impl AsRef<[u8]> for EventContentUnsized {
 /// Look for [`super::content_kind::EventContentKind`]
 #[derive(Clone, Debug)]
 #[cfg_attr(feature = "bincode", derive(::bincode::Encode, ::bincode::Decode))]
-pub struct EventContent(
+pub struct EventContentRaw(
     /// We never modify the content, while it is hard to avoid ever cloning it,
     /// so let's make cloning cheap
     Arc<[u8]>,
 );
 
-impl ops::Deref for EventContent {
+impl ops::Deref for EventContentRaw {
     type Target = EventContentUnsized;
 
     fn deref(&self) -> &Self::Target {
@@ -56,7 +56,7 @@ impl ops::Deref for EventContent {
     }
 }
 
-impl EventContent {
+impl EventContentRaw {
     pub fn new(v: Vec<u8>) -> Self {
         Self(v.into())
     }
@@ -70,25 +70,25 @@ impl EventContent {
     }
 }
 
-impl From<Arc<[u8]>> for EventContent {
+impl From<Arc<[u8]>> for EventContentRaw {
     fn from(value: Arc<[u8]>) -> Self {
-        EventContent(value)
+        EventContentRaw(value)
     }
 }
 
-impl From<Vec<u8>> for EventContent {
+impl From<Vec<u8>> for EventContentRaw {
     fn from(value: Vec<u8>) -> Self {
-        EventContent(value.into())
+        EventContentRaw(value.into())
     }
 }
 
-impl AsRef<[u8]> for EventContent {
+impl AsRef<[u8]> for EventContentRaw {
     fn as_ref(&self) -> &[u8] {
         &self.0
     }
 }
 
-impl Borrow<EventContentUnsized> for EventContent {
+impl Borrow<EventContentUnsized> for EventContentRaw {
     #[allow(clippy::needless_lifetimes)]
     fn borrow<'s>(&'s self) -> &'s EventContentUnsized {
         // Safety: [`EventContentUnsized`] is a `repr(transparent)`

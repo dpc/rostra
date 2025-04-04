@@ -4,7 +4,7 @@ use std::sync::Arc;
 use snafu::Snafu;
 
 use super::{
-    ContentValidationError, EventContent, EventContentKind, EventContentUnsized, EventKind,
+    ContentValidationError, EventContentRaw, EventContentKind, EventContentUnsized, EventKind,
     EventSignature, VerifiedEventContent,
 };
 
@@ -48,7 +48,7 @@ impl<'de> serde::de::Deserialize<'de> for EventSignature {
     }
 }
 
-impl serde::Serialize for EventContent {
+impl serde::Serialize for EventContentRaw {
     fn serialize<S>(&self, ser: S) -> Result<S::Ok, S::Error>
     where
         S: serde::Serializer,
@@ -61,7 +61,7 @@ impl serde::Serialize for EventContent {
     }
 }
 
-impl<'de> serde::de::Deserialize<'de> for EventContent {
+impl<'de> serde::de::Deserialize<'de> for EventContentRaw {
     fn deserialize<D>(de: D) -> Result<Self, D::Error>
     where
         D: serde::Deserializer<'de>,
@@ -73,10 +73,10 @@ impl<'de> serde::de::Deserialize<'de> for EventContent {
                 .map_err(serde::de::Error::custom)?
                 .into();
 
-            Ok(EventContent::from(bytes))
+            Ok(EventContentRaw::from(bytes))
         } else {
             let bytes = Vec::<u8>::deserialize(de)?;
-            Ok(EventContent::from(bytes))
+            Ok(EventContentRaw::from(bytes))
         }
     }
 }

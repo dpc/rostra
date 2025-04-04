@@ -24,7 +24,8 @@ pub use verified_event::*;
 use crate::id::RostraId;
 use crate::{
     ContentHash, MsgLen, NullableShortEventId, ShortEventId, Timestamp, TimestampFixed,
-    array_type_define,
+    array_type_define, array_type_impl_base64_str, array_type_impl_serde,
+    array_type_impl_zero_default,
 };
 
 /// Convenience extension trait to unify getting event data from all versions
@@ -35,6 +36,15 @@ pub trait EventExt {
     fn author(&self) -> RostraId {
         self.event().author
     }
+
+    fn flags(&self) -> u8 {
+        self.event().flags
+    }
+
+    fn aux_key(&self) -> EventAuxKey {
+        self.event().key_aux
+    }
+
     fn kind(&self) -> EventKind {
         self.event().kind
     }
@@ -55,6 +65,10 @@ pub trait EventExt {
     }
     fn is_delete_parent_aux_content_set(&self) -> bool {
         self.event().is_delete_parent_aux_content_set()
+    }
+
+    fn is_singleton(&self) -> bool {
+        self.event().is_singleton()
     }
 }
 
@@ -95,8 +109,9 @@ pub struct Event {
     /// protocols should accommodate such missing events as a core
     /// feature of the protocol and no longer store or return content data.
     ///
-    /// Big `1` - singleton - only the last value of this event kind really
-    /// matters, and previous ones can be considered deleted.
+    /// Big `1` - singleton - only the last value of this event for a given
+    /// `(kind, key)` really matters, and previous ones can be considered
+    /// deleted.
     ///
     /// All other bits MUST be 0 when producing headers, but might
     /// gain meaning in the future, so should still be accepted and
@@ -120,9 +135,11 @@ pub struct Event {
     /// Timestamp of the message, in a fixed-sized encoding.
     pub timestamp: TimestampFixed,
 
-    /// Unused, reserved for future use, must be set to `0`s, ignored on
-    /// receiving.
-    pub padding: [u8; 16],
+    /// Key for the `singleton` flag
+    ///
+    /// Arbitrary bytes that can be used to index the event automatically,
+    /// event without inspecting the content.
+    pub key_aux: EventAuxKey,
 
     /// Public id of the creator of the message
     pub author: RostraId,
@@ -171,9 +188,14 @@ pub struct Event {
 
 impl Event {
     pub const DELETE_PARENT_AUX_CONTENT_FLAG: u8 = 1;
+    pub const SINGLETON_FLAG: u8 = 2;
 
     pub fn is_delete_parent_aux_content_set(&self) -> bool {
         self.flags & Self::DELETE_PARENT_AUX_CONTENT_FLAG != 0
+    }
+
+    pub fn is_singleton(&self) -> bool {
+        self.flags & Self::SINGLETON_FLAG != 0
     }
 }
 
@@ -263,6 +285,16 @@ impl fmt::Display for EventSignature {
         data_encoding::BASE64URL_NOPAD.encode_write(&self.0, f)
     }
 }
+
+array_type_define!(
+    #[derive(PartialEq, Eq)]
+    struct EventAuxKey,
+    16
+);
+
+array_type_impl_serde!(struct EventAuxKey, 16);
+array_type_impl_base64_str!(EventAuxKey);
+array_type_impl_zero_default!(EventAuxKey, 16);
 
 #[cfg_attr(feature = "bincode", derive(::bincode::Encode, ::bincode::Decode))]
 #[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]

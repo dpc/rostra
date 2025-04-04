@@ -128,11 +128,37 @@ macro_rules! array_type_impl_base32_str {
 }
 
 #[macro_export]
-macro_rules! impl_zero_default {
-    ($name:tt) => {
+macro_rules! array_type_impl_base64_str {
+    (
+        $t:tt
+    ) => {
+        impl std::fmt::Display for $t {
+            fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                data_encoding::BASE64_NOPAD.encode_write(self.as_slice(), f)
+            }
+        }
+
+        impl std::str::FromStr for $t {
+            type Err = data_encoding::DecodeError;
+
+            fn from_str(s: &str) -> Result<$t, Self::Err> {
+                let v = data_encoding::BASE64_NOPAD.decode(s.as_bytes())?;
+                let a = v.try_into().map_err(|_| data_encoding::DecodeError {
+                    position: 0,
+                    kind: data_encoding::DecodeKind::Length,
+                })?;
+                Ok(Self(a))
+            }
+        }
+    };
+}
+
+#[macro_export]
+macro_rules! array_type_impl_zero_default {
+    ($name:tt, $n:expr) => {
         impl Default for $name {
             fn default() -> Self {
-                Self([0; 16])
+                Self([0; $n])
             }
         }
     };

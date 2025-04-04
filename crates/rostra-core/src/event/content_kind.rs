@@ -4,8 +4,8 @@ use std::str::FromStr as _;
 use snafu::Snafu;
 use unicode_segmentation::UnicodeSegmentation as _;
 
-use super::{EventContent, EventKind, PersonaId};
-use crate::id::RostraId;
+use super::{EventAuxKey, EventContentRaw, EventKind, PersonaId};
+use crate::id::{RostraId, ToShort as _};
 use crate::{
     ExternalEventId, ShortEventId, array_type_define, array_type_impl_base32_str,
     array_type_impl_serde,
@@ -22,8 +22,6 @@ pub trait EventContentKind: ::serde::Serialize + ::serde::de::DeserializeOwned {
     /// The [`EventKind`] corresponding to this content kind
     const KIND: EventKind;
 
-    const SINGLETON: bool = false;
-
     /// Deserialize cbor-encoded content
     ///
     /// Most content will be deserialized a cbor, as it's:
@@ -31,12 +29,16 @@ pub trait EventContentKind: ::serde::Serialize + ::serde::de::DeserializeOwned {
     /// * self-describing, so flexible to evolve while maintaining compatibility
     /// * roughly-compatible with JSON, making it easy to transform to JSON form
     ///   for external APIs and such.
-    fn serialize_cbor(&self) -> ContentValidationResult<EventContent> {
+    fn serialize_cbor(&self) -> ContentValidationResult<EventContentRaw> {
         self.validate()?;
         let mut buf = Vec::with_capacity(128);
         cbor4ii::serde::to_writer(&mut buf, self).expect("Can't fail");
         // ciborium::into_writer(self, &mut buf).expect("Can't fail");
-        Ok(EventContent::new(buf))
+        Ok(EventContentRaw::new(buf))
+    }
+
+    fn singleton_key_aux(&self) -> Option<EventAuxKey> {
+        None
     }
 
     fn validate(&self) -> ContentValidationResult<()> {
@@ -68,6 +70,10 @@ impl Follow {
 }
 impl EventContentKind for Follow {
     const KIND: EventKind = EventKind::FOLLOW;
+
+    fn singleton_key_aux(&self) -> Option<EventAuxKey> {
+        Some(EventAuxKey::from_bytes(self.followee.to_short().to_bytes()))
+    }
 }
 
 #[allow(deprecated)]
@@ -83,6 +89,10 @@ pub struct Unfollow {
 #[allow(deprecated)]
 impl EventContentKind for Unfollow {
     const KIND: EventKind = EventKind::UNFOLLOW;
+
+    fn singleton_key_aux(&self) -> Option<EventAuxKey> {
+        Some(EventAuxKey::from_bytes(self.followee.to_short().to_bytes()))
+    }
 }
 
 array_type_define!(
@@ -286,6 +296,9 @@ impl EventContentKind for SocialProfileUpdate {
             }
         }
         Ok(())
+    }
+    fn singleton_key_aux(&self) -> Option<EventAuxKey> {
+        Some(EventAuxKey::ZERO)
     }
 }
 

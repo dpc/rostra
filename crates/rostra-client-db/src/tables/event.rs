@@ -49,3 +49,8 @@ pub struct EventsMissingRecord {
 
 #[derive(Decode, Encode, Debug)]
 pub struct EventsHeadsTableRecord;
+
+#[derive(Debug, Encode, Decode, Clone, Serialize)]
+pub struct EventSingletonRecord {
+    pub event_id: ShortEventId,
+}
