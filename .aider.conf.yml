@@ -1,2 +1,6 @@
 test-cmd: cargo nextest run --cargo-quiet
 # cache-prompts: true
+
+read:
+  - ./README.md
+  - ./CONVENTIONS.md
