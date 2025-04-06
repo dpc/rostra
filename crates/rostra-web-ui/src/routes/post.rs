@@ -192,14 +192,17 @@ impl UiState {
                             }
 
                         }
-                        button ."m-postOverview__replyToButton u-button"
-                            disabled[ro.to_disabled()]
-                            hx-get={"/ui/post/reply_to?reply_to="(ext_event_id)}
-                            hx-target=".m-newPostForm__replyToLine"
-                            hx-swap="outerHTML"
-                        {
-                            span ."m-postOverview__replyToButtonIcon u-buttonIcon" width="1rem" height="1rem" {}
-                            "Reply"
+                        @if !ro.is_ro() {
+
+                            button ."m-postOverview__replyToButton u-button"
+                                disabled[ro.to_disabled()]
+                                hx-get={"/ui/post/reply_to?reply_to="(ext_event_id)}
+                                hx-target=".m-newPostForm__replyToLine"
+                                hx-swap="outerHTML"
+                            {
+                                span ."m-postOverview__replyToButtonIcon u-buttonIcon" width="1rem" height="1rem" {}
+                                "Reply"
+                            }
                         }
                     }
                 }

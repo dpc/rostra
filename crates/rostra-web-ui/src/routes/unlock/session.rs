@@ -41,7 +41,7 @@ impl UserSession {
     }
 }
 
-#[derive(Copy, Clone, Debug)]
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
 pub enum RoMode {
     Ro,
     Rw,
@@ -53,6 +53,10 @@ impl RoMode {
             RoMode::Ro => true,
             RoMode::Rw => false,
         }
+    }
+
+    pub fn is_ro(self) -> bool {
+        self == Self::Ro
     }
 }
 // impl Guest {
