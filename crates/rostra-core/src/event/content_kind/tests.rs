@@ -2,6 +2,7 @@ use std::{cmp, fmt};
 
 use super::{IrohNodeId, NodeAnnouncement};
 
+#[cfg(feature = "serde")]
 fn round_trip<T>(v: T)
 where
     T: ::serde::Serialize + for<'de> ::serde::Deserialize<'de> + fmt::Debug + cmp::Eq,

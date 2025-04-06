@@ -21,6 +21,10 @@ serde = [
 ]
 rand = ["dep:rand"]
 
+[[bench]]
+name = "event"
+harness = false
+
 [dependencies]
 bech32 = { workspace = true }
 bincode = { workspace = true, optional = true }
@@ -41,6 +45,7 @@ unicode-segmentation = { workspace = true }
 z32 = { workspace = true }
 
 [dev-dependencies]
+divan = { workspace = true }
 test-log = { workspace = true, features = ["trace"] }
 serde_json = { workspace = true }
 tracing = { workspace = true }

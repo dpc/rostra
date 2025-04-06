@@ -239,8 +239,8 @@ pub trait SignedEventExt: EventExt {
 #[cfg_attr(feature = "bincode", derive(::bincode::Encode, ::bincode::Decode))]
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 pub struct SignedEvent {
-    event: Event,
-    sig: EventSignature,
+    pub event: Event,
+    pub sig: EventSignature,
 }
 
 impl SignedEvent {
