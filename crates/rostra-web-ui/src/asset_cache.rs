@@ -87,7 +87,7 @@ impl AssetCache {
 
                     let raw_for_etag = raw.clone();
                     let path_for_etag = stored_path.clone();
-                    
+
                     Ok(Some((
                         filename.to_string(),
                         StaticAsset {

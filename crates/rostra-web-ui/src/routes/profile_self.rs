@@ -142,7 +142,7 @@ impl UiState {
                             }
                         button
                             ."m-profileSummary__logoutButton u-button"
-                            hx-get="/ui/unlock/logout"
+                            hx-post="/ui/unlock/logout"
                             {
                                 span ."m-profileSummary__logoutButtonIcon u-buttonIcon" width="1rem" height="1rem" {}
                                 "Logout"

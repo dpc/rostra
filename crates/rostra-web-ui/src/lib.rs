@@ -89,6 +89,7 @@ pub struct Opts {
     assets_dir: PathBuf,
     pub reuseport: bool,
     pub data_dir: PathBuf,
+    pub default_profile: Option<RostraId>,
 }
 
 impl Opts {
@@ -99,6 +100,7 @@ impl Opts {
         reuseport: bool,
         data_dir: PathBuf,
         secret_file: Option<PathBuf>,
+        default_profile: Option<RostraId>,
     ) -> Self {
         Self {
             listen,
@@ -107,6 +109,7 @@ impl Opts {
             reuseport,
             data_dir,
             secret_file,
+            default_profile,
         }
     }
 }
@@ -130,6 +133,7 @@ pub type UiStateClientResult<T> = result::Result<T, UiStateClientError>;
 pub struct UiState {
     clients: MultiClient,
     assets: Option<Arc<AssetCache>>,
+    default_profile: Option<RostraId>,
 }
 
 impl UiState {
@@ -219,6 +223,7 @@ impl Server {
         let state = Arc::new(UiState {
             clients,
             assets: assets.clone(),
+            default_profile: opts.default_profile,
         });
 
         info!("Listening on {}", listener.local_addr()?);

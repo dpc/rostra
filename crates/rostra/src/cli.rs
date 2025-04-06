@@ -80,6 +80,11 @@ pub struct WebUiOpts {
     #[arg(long)]
     pub secret_file: Option<PathBuf>,
 
+    /// Default profile to use for users who haven't logged in yet (read-only
+    /// mode)
+    #[arg(long)]
+    pub default_profile: Option<RostraId>,
+
     #[arg(long)]
     pub skip_xdg_open: bool,
 
@@ -108,6 +113,7 @@ pub fn make_web_opts(data_dir: &Path, opts: &WebUiOpts) -> rostra_web_ui::Opts {
         opts.reuseport,
         data_dir.to_owned(),
         opts.secret_file.clone(),
+        opts.default_profile,
     )
 }
 

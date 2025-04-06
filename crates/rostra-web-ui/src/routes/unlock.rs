@@ -34,6 +34,7 @@ pub async fn get(
         )];
         return Ok((StatusCode::OK, headers).into_response());
     }
+
     Ok(Maud(state.unlock_page(None, None, None).await?).into_response())
 }
 
@@ -111,7 +112,7 @@ pub async fn logout(session: Session) -> RequestResult<impl IntoResponse> {
 
     let headers = [(
         HeaderName::from_static("hx-redirect"),
-        HeaderValue::from_static("/ui"),
+        HeaderValue::from_static("/ui/unlock"),
     )];
     Ok((StatusCode::SEE_OTHER, headers).into_response())
 }

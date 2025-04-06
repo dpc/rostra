@@ -32,6 +32,7 @@ dev PORT="2345":
             web-ui \
             --listen [::1]:{{PORT}} \
             --skip-xdg-open \
+            --default-profile rse1okfyp4yj75i6riwbz86mpmbgna3f7qr66aj1njceqoigjabegy \
             --secret-file "$ROSTRA_DATA_DIR/secret" \
             --reuseport \
           "

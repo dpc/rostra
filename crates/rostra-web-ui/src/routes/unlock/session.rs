@@ -1,9 +1,12 @@
+use std::sync::Arc;
+
 use axum::extract::FromRequestParts;
 use axum::http::request;
 use rostra_core::id::{RostraId, RostraIdSecretKey};
 use serde::{Deserialize, Serialize};
 use tower_sessions::Session;
 
+use crate::UiState;
 use crate::error::{
     InternalServerSnafu, LoginRequiredSnafu, ReadOnlyModeSnafu, RequestError, RequestResult,
 };
@@ -82,31 +85,54 @@ impl RoMode {
 
 pub const SESSION_KEY: &str = "rostra_id";
 
-impl<S> FromRequestParts<S> for UserSession
-where
-    S: Send + Sync,
-{
+impl FromRequestParts<Arc<UiState>> for UserSession {
     type Rejection = RequestError;
 
     async fn from_request_parts(
         req: &mut request::Parts,
-        state: &S,
+        state: &Arc<UiState>,
     ) -> Result<Self, Self::Rejection> {
         let session = Session::from_request_parts(req, state)
             .await
             .map_err(|(_, msg)| InternalServerSnafu { msg }.build())?;
 
-        let user: UserSession = session
-            .get(SESSION_KEY)
-            .await
-            .map_err(|_| {
+        // Try to get the user session from the session store
+        let user_result: Result<Option<UserSession>, _> =
+            session.get(SESSION_KEY).await.map_err(|_| {
                 InternalServerSnafu {
                     msg: "session store error",
                 }
                 .build()
-            })?
-            .ok_or_else(|| LoginRequiredSnafu.build())?;
+            });
 
-        Ok(user)
+        match user_result {
+            Ok(Some(user)) => Ok(user),
+            Ok(None) => {
+                if let Some(default_id) = state.default_profile {
+                    // Load the client for the default profile in read-only mode
+                    state.unlock(default_id, None).await.map_err(|_e| {
+                        InternalServerSnafu {
+                            msg: "Failed to load default profile",
+                        }
+                        .build()
+                    })?;
+
+                    let user = UserSession::new(default_id, None);
+
+                    session.insert(SESSION_KEY, &user).await.map_err(|_| {
+                        InternalServerSnafu {
+                            msg: "failed to insert session",
+                        }
+                        .build()
+                    })?;
+
+                    Ok(user)
+                } else {
+                    // No default profile, require login
+                    Err(LoginRequiredSnafu.build())
+                }
+            }
+            Err(e) => Err(e),
+        }
     }
 }
