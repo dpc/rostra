@@ -185,7 +185,7 @@ async fn handle_cmd(opts: Opts) -> CliResult<serde_json::Value> {
             pending().await
         }
         cli::OptsCmd::WebUi(ref web_opts) => {
-            let clients = MultiClient::new(opts.global.data_dir().to_owned());
+            let clients = MultiClient::new(opts.global.data_dir().to_owned(), web_opts.max_clients);
             let server = Server::init(make_web_opts(opts.global.data_dir(), web_opts), clients)
                 .await
                 .context(WebUiServerSnafu)?;

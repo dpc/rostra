@@ -85,6 +85,10 @@ pub struct WebUiOpts {
     #[arg(long)]
     pub default_profile: Option<RostraId>,
 
+    /// Maximum number of clients to keep loaded at once
+    #[arg(long, default_value = "10")]
+    pub max_clients: usize,
+
     #[arg(long)]
     pub skip_xdg_open: bool,
 
@@ -114,6 +118,7 @@ pub fn make_web_opts(data_dir: &Path, opts: &WebUiOpts) -> rostra_web_ui::Opts {
         data_dir.to_owned(),
         opts.secret_file.clone(),
         opts.default_profile,
+        opts.max_clients,
     )
 }
 

@@ -1,9 +1,9 @@
-{ stdenv
-, lib
-, fetchFromGitHub
-, rustPlatform
-, pkg-config
-,
+{
+  stdenv,
+  lib,
+  fetchFromGitHub,
+  rustPlatform,
+  pkg-config,
 }:
 
 rustPlatform.buildRustPackage rec {
@@ -29,7 +29,7 @@ rustPlatform.buildRustPackage rec {
     description = "A very fast linker for Linux";
     homepage = "https://github.com/davidlattimore/wild";
     license = licenses.mit;
-    maintainers = with maintainers; [ dpc];
+    maintainers = with maintainers; [ dpc ];
     platforms = platforms.linux;
   };
 }

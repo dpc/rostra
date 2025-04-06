@@ -90,9 +90,11 @@ pub struct Opts {
     pub reuseport: bool,
     pub data_dir: PathBuf,
     pub default_profile: Option<RostraId>,
+    pub max_clients: usize,
 }
 
 impl Opts {
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         listen: String,
         cors_origin: Option<String>,
@@ -101,6 +103,7 @@ impl Opts {
         data_dir: PathBuf,
         secret_file: Option<PathBuf>,
         default_profile: Option<RostraId>,
+        max_clients: usize,
     ) -> Self {
         Self {
             listen,
@@ -110,6 +113,7 @@ impl Opts {
             data_dir,
             secret_file,
             default_profile,
+            max_clients,
         }
     }
 }
