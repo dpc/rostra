@@ -4,7 +4,7 @@ use std::sync::Arc;
 use snafu::Snafu;
 
 use super::{
-    ContentValidationError, EventContentRaw, EventContentKind, EventContentUnsized, EventKind,
+    ContentValidationError, EventContentKind, EventContentRaw, EventContentUnsized, EventKind,
     EventSignature, VerifiedEventContent,
 };
 

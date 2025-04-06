@@ -21,8 +21,8 @@ use itertools::Itertools as _;
 use process_event_content_ops::ProcessEventError;
 use redb_bincode::{ReadTransaction, ReadableTable, WriteTransaction};
 use rostra_core::event::{
-    EventContentRaw, EventExt as _, IrohNodeId, PersonaSelector, VerifiedEvent,
-    VerifiedEventContent, content_kind,
+    EventAuxKey, EventContentRaw, EventExt as _, EventKind, IrohNodeId, PersonaSelector,
+    VerifiedEvent, VerifiedEventContent, content_kind,
 };
 use rostra_core::id::{RostraId, ToShort as _};
 use rostra_core::{ShortEventId, Timestamp};
@@ -667,6 +667,49 @@ impl Database {
             let events_heads = tx.open_table(&social_profiles::TABLE)?;
 
             Self::get_social_profile_tx(id, &events_heads)
+        })
+        .await
+        .expect("Database panic")
+    }
+
+    pub async fn get_latest_singleton_event(
+        &self,
+        kind: EventKind,
+        aux_key: EventAuxKey,
+    ) -> Option<ShortEventId> {
+        self.read_with(|tx| {
+            let singletons_table = tx.open_table(&events_singletons::TABLE)?;
+
+            Ok(singletons_table
+                .get(&(kind, aux_key))?
+                .map(|record| record.value().inner.event_id))
+        })
+        .await
+        .expect("Database panic")
+    }
+
+    pub async fn get_all_singleton_events(
+        &self,
+        kind: EventKind,
+    ) -> HashMap<EventAuxKey, ShortEventId> {
+        self.read_with(|tx| {
+            let singletons_table = tx.open_table(&events_singletons::TABLE)?;
+
+            let mut result = HashMap::new();
+            let range_start = (kind, EventAuxKey::ZERO);
+            let range_end = (kind, EventAuxKey::MAX);
+
+            for record in singletons_table.range(range_start..range_end)? {
+                let record = record?;
+                let key = record.0.value();
+                debug_assert_eq!(key.0, kind);
+
+                let aux_key = key.1;
+                let singleton = record.1.value();
+                result.insert(aux_key, singleton.inner.event_id);
+            }
+
+            Ok(result)
         })
         .await
         .expect("Database panic")

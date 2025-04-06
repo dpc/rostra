@@ -1,5 +1,5 @@
 #[macro_export]
-macro_rules! array_type_define_minimum {
+macro_rules! array_type_define_min_max {
     (
         $(#[$outer:meta])*
         struct $t:tt, $n:literal
@@ -39,7 +39,7 @@ macro_rules! array_type_define {
         $(#[$outer:meta])*
         struct $t:tt, $n:literal
     ) => {
-        $crate::array_type_define_minimum!(
+        $crate::array_type_define_min_max!(
             #[derive(Copy, Clone, Hash)]
             #[cfg_attr(feature = "bincode", derive(::bincode::Encode, ::bincode::Decode))]
             $(#[$outer])*

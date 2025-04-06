@@ -1,6 +1,6 @@
 use std::fmt;
 
-use rostra_core::array_type_define_minimum;
+use rostra_core::array_type_define_min_max;
 
 pub trait ToShort {
     type ShortId;
@@ -15,7 +15,7 @@ impl ToShort for iroh::PublicKey {
     }
 }
 
-array_type_define_minimum!(
+array_type_define_min_max!(
     #[derive(PartialEq, Eq)]
     struct IrohEndpointShortId,
     8
