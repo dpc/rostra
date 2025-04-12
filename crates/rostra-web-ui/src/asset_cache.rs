@@ -7,7 +7,6 @@ use std::path::{self, PathBuf};
 use std::string::String;
 use std::sync::LazyLock;
 
-use axum::extract::Path;
 use bytes::Bytes;
 use futures::stream::{BoxStream, StreamExt};
 use rostra_util_error::WhateverResult;
@@ -17,39 +16,14 @@ use tracing::{debug, info};
 
 use crate::LOG_TARGET;
 
-const HASH_SPLIT_CHAR: char = '.';
-
-/// Maps static asset filenames to their compressed bytes and content type. This
+/// Pre-loaded and pre-compressed static assets. This
 /// is used to serve static assets from the build directory without reading from
 /// disk, as the cache stays in RAM for the life of the server.
-///
-/// This type should be accessed via the `cache` property in `AppState`.
 #[derive(Debug)]
-pub struct AssetCache(HashMap<String, StaticAsset>);
+pub struct StaticAssets(HashMap<String, StaticAsset>);
 
-impl AssetCache {
-    /// Attempts to return a static asset from the cache from a cache key. If
-    /// the asset is not found, `None` is returned.
-    pub fn get(&self, key: &str) -> Option<&StaticAsset> {
-        self.0.get(key)
-    }
-
-    /// Helper method to get a static asset from an extracted request path.
-    pub fn get_from_path(&self, path: &Path<String>) -> Option<&StaticAsset> {
-        let key = Self::get_cache_key(path);
-        self.get(&key)
-    }
-
-    fn get_cache_key(path: &str) -> String {
-        let mut parts = path.split(['.', HASH_SPLIT_CHAR]);
-
-        let basename = parts.next().unwrap_or_default();
-        let ext = parts.next_back().unwrap_or_default();
-
-        format!("{}.{}", basename, ext)
-    }
-
-    pub async fn load_files(root_dir: &path::Path) -> WhateverResult<Self> {
+impl StaticAssets {
+    pub async fn load(root_dir: &path::Path) -> WhateverResult<Self> {
         info!(target: LOG_TARGET, dir=%root_dir.display(), "Loading assets");
         let mut cache = HashMap::default();
 
@@ -111,7 +85,7 @@ impl AssetCache {
                         },
                     )))
                 })
-                .buffered(16)
+                .buffered(32)
                 .filter_map(
                     |res_opt: WhateverResult<std::option::Option<(String, StaticAsset)>>| {
                         ready(res_opt.transpose())
@@ -122,7 +96,7 @@ impl AssetCache {
 
         for asset_res in assets {
             let (filename, asset) = asset_res?;
-            cache.insert(Self::get_cache_key(&filename), asset);
+            cache.insert(filename, asset);
         }
 
         for (key, asset) in &cache {
@@ -131,6 +105,12 @@ impl AssetCache {
         tracing::debug!(len = cache.len(), "Loaded assets");
 
         Ok(Self(cache))
+    }
+
+    /// Attempts to return a static asset from the cache from a cache key. If
+    /// the asset is not found, `None` is returned.
+    pub fn get(&self, key: &str) -> Option<&StaticAsset> {
+        self.0.get(key)
     }
 }
 
@@ -197,8 +177,6 @@ fn calculate_etag(data: &[u8]) -> String {
     format!("\"{}\"", hasher.finish())
 }
 
-// async fn read_dir_stream(dir: impl AsRef<path::Path>) -> impl Stream<Item =
-// io::Result<PathBuf>> {
 fn read_dir_stream(dir: PathBuf) -> BoxStream<'static, io::Result<PathBuf>> {
     async_stream::try_stream! {
         let entries = ReadDirStream::new(

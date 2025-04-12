@@ -14,17 +14,16 @@ use std::sync::Arc;
 use axum::Router;
 use axum::body::Body;
 use axum::extract::{FromRequest, Path, Request, State};
-use axum::http::header::{self, ACCEPT_ENCODING, CONTENT_ENCODING, CONTENT_TYPE};
+use axum::http::header::{self, CONTENT_TYPE};
 use axum::http::{HeaderMap, HeaderValue, StatusCode};
 use axum::middleware::{self, Next};
 use axum::response::{IntoResponse, Redirect, Response};
 use axum::routing::{get, post};
 use maud::Markup;
-use tracing::warn;
 
 use super::SharedState;
 use super::error::{RequestError, UserErrorResponse};
-use crate::{LOG_TARGET, UiState};
+use crate::UiState;
 
 #[derive(Clone, Debug)]
 #[must_use]
@@ -54,59 +53,6 @@ where
     fn into_response(self) -> Response {
         axum::Json(self.0).into_response()
     }
-}
-
-#[axum::debug_handler]
-pub async fn get_static_asset(
-    state: State<SharedState>,
-    path: Path<String>,
-    req_headers: HeaderMap,
-) -> axum::http::Response<Body> {
-    let Some(assets) = state.assets.as_ref() else {
-        warn!(target: LOG_TARGET, "Shouldn't be here");
-        return StatusCode::NOT_FOUND.into_response();
-    };
-
-    let Some(asset) = assets.get_from_path(&path) else {
-        return StatusCode::NOT_FOUND.into_response();
-    };
-
-    let mut resp_headers = HeaderMap::new();
-
-    // We set the content type explicitly here as it will otherwise
-    // be inferred as an `octet-stream`
-    resp_headers.insert(
-        CONTENT_TYPE,
-        HeaderValue::from_static(asset.content_type().unwrap_or("application/octet-stream")),
-    );
-
-    // Handle ETag and conditional request
-    let etag = asset.etag.clone();
-    if let Some(response) = crate::handle_etag(&req_headers, &etag, &mut resp_headers) {
-        return response;
-    }
-
-    let accepts_brotli = req_headers
-        .get_all(ACCEPT_ENCODING)
-        .into_iter()
-        .any(|encodings| {
-            let Ok(str) = encodings.to_str() else {
-                return false;
-            };
-
-            str.split(',').any(|s| s.trim() == "br")
-        });
-
-    let content = match (accepts_brotli, asset.compressed.as_ref()) {
-        (true, Some(compressed)) => {
-            resp_headers.insert(CONTENT_ENCODING, HeaderValue::from_static("br"));
-
-            compressed.clone()
-        }
-        _ => asset.raw.clone(),
-    };
-
-    (resp_headers, content).into_response()
 }
 
 pub async fn cache_control(request: Request, next: Next) -> Response {
@@ -141,6 +87,58 @@ pub async fn cache_control(request: Request, next: Next) -> Response {
     }
 
     response
+}
+
+pub async fn get_static_asset(
+    state: State<SharedState>,
+    Path(path): Path<String>,
+    req_headers: HeaderMap,
+) -> impl IntoResponse {
+    if let Some(assets) = &state.assets {
+        if let Some(asset) = assets.get(&path) {
+            let mut resp_headers = HeaderMap::new();
+
+            // Set content type
+            if let Some(content_type) = asset.content_type() {
+                resp_headers.insert(
+                    axum::http::header::CONTENT_TYPE,
+                    axum::http::HeaderValue::from_static(content_type),
+                );
+            }
+
+            // Handle ETag and conditional request
+            if let Some(response) = crate::handle_etag(&req_headers, &asset.etag, &mut resp_headers)
+            {
+                return response;
+            }
+
+            let accepts_brotli = req_headers
+                .get_all(axum::http::header::ACCEPT_ENCODING)
+                .into_iter()
+                .any(|encodings| {
+                    let Ok(str) = encodings.to_str() else {
+                        return false;
+                    };
+
+                    str.split(',').any(|s| s.trim() == "br")
+                });
+
+            let content = match (accepts_brotli, asset.compressed.as_ref()) {
+                (true, Some(compressed)) => {
+                    resp_headers.insert(
+                        axum::http::header::CONTENT_ENCODING,
+                        axum::http::HeaderValue::from_static("br"),
+                    );
+                    compressed.clone()
+                }
+                _ => asset.raw.clone(),
+            };
+
+            return (resp_headers, content).into_response();
+        }
+    }
+
+    axum::http::StatusCode::NOT_FOUND.into_response()
 }
 
 pub async fn not_found(_state: State<SharedState>, _req: Request<Body>) -> impl IntoResponse {

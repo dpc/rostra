@@ -1,4 +1,5 @@
 pub(crate) mod asset_cache;
+mod asset_service;
 mod error;
 mod fragment;
 pub mod html_utils;
@@ -14,10 +15,9 @@ use std::sync::Arc;
 use std::time::Duration;
 use std::{io, result};
 
-use asset_cache::AssetCache;
+use asset_cache::StaticAssets;
 use axum::http::header::{ACCEPT, CONTENT_TYPE};
 use axum::http::{HeaderName, HeaderValue, Method};
-use axum::routing::get;
 use axum::{Router, middleware};
 use error::{IdMismatchSnafu, UnlockError, UnlockResult};
 use listenfd::ListenFd;
@@ -27,7 +27,7 @@ use rostra_client::{ClientHandle, ClientRefError};
 use rostra_core::id::{RostraId, RostraIdSecretKey};
 use rostra_util::is_rostra_dev_mode_set;
 use rostra_util_error::WhateverResult;
-use routes::{cache_control, get_static_asset};
+use routes::cache_control;
 use snafu::{ResultExt as _, Snafu, Whatever, ensure};
 use tokio::net::{TcpListener, TcpSocket};
 use tokio::signal;
@@ -136,7 +136,7 @@ pub type UiStateClientResult<T> = result::Result<T, UiStateClientError>;
 
 pub struct UiState {
     clients: MultiClient,
-    assets: Option<Arc<AssetCache>>,
+    assets: Option<Arc<StaticAssets>>,
     default_profile: Option<RostraId>,
 }
 
@@ -172,7 +172,7 @@ pub struct Server {
     listener: TcpListener,
 
     state: SharedState,
-    assets: Option<Arc<AssetCache>>,
+    assets: Option<Arc<StaticAssets>>,
     opts: Opts,
 }
 
@@ -219,7 +219,7 @@ impl Server {
             None
         } else {
             Some(Arc::new(
-                AssetCache::load_files(&opts.assets_dir)
+                StaticAssets::load(&opts.assets_dir)
                     .await
                     .context(AssetsLoadSnafu)?,
             ))
@@ -275,22 +275,15 @@ impl Server {
         );
         let mut router = Router::new().merge(routes::route_handler(self.state.clone()));
 
-        match self.assets {
-            Some(_assets) => {
-                router = router.nest("/assets", {
-                    let state = self.state.clone();
-                    Router::new()
-                        .route("/{*file}", get(get_static_asset))
-                        .with_state(state)
-                });
+        router = match self.assets.clone() {
+            Some(assets) => {
+                router.nest_service("/assets", asset_service::StaticAssetService::new(assets))
             }
-            _ => {
-                router = router.nest_service(
-                    "/assets",
-                    ServeDir::new(format!("{}/assets", env!("CARGO_MANIFEST_DIR"))),
-                );
-            }
-        }
+            _ => router.nest_service(
+                "/assets",
+                ServeDir::new(format!("{}/assets", env!("CARGO_MANIFEST_DIR"))),
+            ),
+        };
 
         let session_store = MemoryStore::default();
         let session_layer = SessionManagerLayer::new(session_store)
