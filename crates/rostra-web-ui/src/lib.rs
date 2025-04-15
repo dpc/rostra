@@ -1,5 +1,3 @@
-pub(crate) mod asset_cache;
-mod asset_service;
 mod error;
 mod fragment;
 pub mod html_utils;
@@ -15,10 +13,10 @@ use std::sync::Arc;
 use std::time::Duration;
 use std::{io, result};
 
-use asset_cache::StaticAssets;
 use axum::http::header::{ACCEPT, CONTENT_TYPE};
 use axum::http::{HeaderName, HeaderValue, Method};
 use axum::{Router, middleware};
+use axum_dpc_static_assets::{StaticAssetService, StaticAssets};
 use error::{IdMismatchSnafu, UnlockError, UnlockResult};
 use listenfd::ListenFd;
 use rostra_client::error::IdSecretReadError;
@@ -43,39 +41,6 @@ use tracing::info;
 pub const UI_ROOT_PATH: &str = "/ui";
 
 const LOG_TARGET: &str = "rostra::web_ui";
-
-/// Handles ETag-based conditional requests
-///
-/// Takes the request headers, the ETag value, and response headers to modify.
-/// If the client already has the current version (based on If-None-Match
-/// header), returns a 304 Not Modified response.
-///
-/// Returns:
-/// - Some(Response) if a 304 Not Modified should be returned
-/// - None if processing should continue normally
-pub fn handle_etag(
-    req_headers: &axum::http::HeaderMap,
-    etag: &str,
-    resp_headers: &mut axum::http::HeaderMap,
-) -> Option<axum::response::Response> {
-    use axum::http::StatusCode;
-    use axum::http::header::{ETAG, IF_NONE_MATCH};
-    use axum::response::IntoResponse;
-
-    // Add ETag header to response
-    if let Ok(etag_value) = axum::http::HeaderValue::from_str(etag) {
-        resp_headers.insert(ETAG, etag_value);
-    }
-
-    // Check if client already has this version
-    if let Some(if_none_match) = req_headers.get(IF_NONE_MATCH) {
-        if if_none_match.as_bytes() == etag.as_bytes() {
-            return Some((StatusCode::NOT_MODIFIED, resp_headers.clone()).into_response());
-        }
-    }
-
-    None
-}
 
 fn default_rostra_assets_dir() -> PathBuf {
     PathBuf::from(env!("ROSTRA_SHARE_DIR")).join("assets")
@@ -200,7 +165,7 @@ pub enum WebUiServerError {
     },
 
     AssetsLoad {
-        source: Whatever,
+        source: axum_dpc_static_assets::LoadError,
     },
 
     #[snafu(transparent)]
@@ -276,9 +241,7 @@ impl Server {
         let mut router = Router::new().merge(routes::route_handler(self.state.clone()));
 
         router = match self.assets.clone() {
-            Some(assets) => {
-                router.nest_service("/assets", asset_service::StaticAssetService::new(assets))
-            }
+            Some(assets) => router.nest_service("/assets", StaticAssetService::new(assets)),
             _ => router.nest_service(
                 "/assets",
                 ServeDir::new(format!("{}/assets", env!("CARGO_MANIFEST_DIR"))),

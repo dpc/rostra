@@ -19,6 +19,7 @@ use axum::http::{HeaderMap, HeaderValue, StatusCode};
 use axum::middleware::{self, Next};
 use axum::response::{IntoResponse, Redirect, Response};
 use axum::routing::{get, post};
+use axum_dpc_static_assets::handle_etag;
 use maud::Markup;
 
 use super::SharedState;
@@ -107,8 +108,7 @@ pub async fn get_static_asset(
             }
 
             // Handle ETag and conditional request
-            if let Some(response) = crate::handle_etag(&req_headers, &asset.etag, &mut resp_headers)
-            {
+            if let Some(response) = handle_etag(&req_headers, &asset.etag, &mut resp_headers) {
                 return response;
             }
 

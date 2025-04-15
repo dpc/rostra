@@ -2,6 +2,7 @@ use axum::body::Body;
 use axum::extract::{Path, State};
 use axum::http::{HeaderMap, HeaderValue, header};
 use axum::response::{IntoResponse, Redirect, Response};
+use axum_dpc_static_assets::handle_etag;
 use rostra_core::id::RostraId;
 
 use super::get_static_asset;
@@ -54,7 +55,7 @@ pub async fn get(
     let etag = profile.event_id.to_string();
 
     // Handle ETag and conditional request
-    if let Some(response) = crate::handle_etag(&req_headers, &etag, &mut resp_headers) {
+    if let Some(response) = handle_etag(&req_headers, &etag, &mut resp_headers) {
         return Ok(response.into_response());
     }
 

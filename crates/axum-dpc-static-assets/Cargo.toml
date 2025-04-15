@@ -1,0 +1,22 @@
+[package]
+name = "axum-dpc-static-assets"
+
+description = "dpc's static asset handler for axum"
+edition = "2024"
+license = "MIT OR APACHE-2.0 OR MPL-2.0"
+version = "0.1.0"
+
+[lints]
+workspace = true
+
+[dependencies]
+async-stream = { workspace = true }
+axum = { workspace = true, features = ["ws", "multipart"] }
+bytes = { workspace = true }
+brotli = { workspace = true }
+futures = { workspace = true }
+snafu = { workspace = true }
+tokio = { workspace = true }
+tokio-stream = { workspace = true, features = ["fs"] }
+tower-service = { workspace = true }
+tracing = { workspace = true }

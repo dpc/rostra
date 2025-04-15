@@ -333,6 +333,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "axum-dpc-static-assets"
+version = "0.1.0"
+dependencies = [
+ "async-stream",
+ "axum",
+ "brotli",
+ "bytes",
+ "futures",
+ "snafu",
+ "tokio",
+ "tokio-stream",
+ "tower-service",
+ "tracing",
+]
+
+[[package]]
 name = "axum-extra"
 version = "0.10.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3980,6 +3996,7 @@ version = "0.1.0"
 dependencies = [
  "async-stream",
  "axum",
+ "axum-dpc-static-assets",
  "axum-extra",
  "bon",
  "brotli",

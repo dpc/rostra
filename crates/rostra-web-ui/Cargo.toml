@@ -13,6 +13,7 @@ workspace = true
 async-stream = { workspace = true }
 axum = { workspace = true, features = ["ws", "multipart"] }
 axum-extra = { workspace = true, features = ["form"] }
+axum-dpc-static-assets = { workspace = true }
 bon = { workspace = true }
 bytes = { workspace = true }
 brotli = { workspace = true }
