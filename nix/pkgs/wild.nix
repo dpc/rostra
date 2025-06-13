@@ -23,7 +23,7 @@ rustPlatform.buildRustPackage rec {
     pkg-config
   ];
 
-  cargoHash = "sha256-YPRGf0dRLiMoRn6/t27a8iWUFh5NCe7iEitSK0FhJQg=";
+  cargoHash = "sha256-KWF5CkizI+w24bTC6pD/QetAxOPawXjbfHLf0eWzg3A=";
 
   meta = with lib; {
     description = "A very fast linker for Linux";
