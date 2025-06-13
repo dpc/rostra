@@ -2,10 +2,10 @@
   description = "Rostra";
 
   inputs = {
-    nixpkgs.url = "github:NixOS/nixpkgs/nixos-24.11";
+    nixpkgs.url = "github:NixOS/nixpkgs/nixos-25.05";
     nixpkgs-unstable.url = "github:NixOS/nixpkgs/nixos-unstable";
     flake-utils.url = "github:numtide/flake-utils";
-    flakebox.url = "github:rustshop/flakebox?rev=5e9ce550fb989f1311547ee09301315cc311ba3b";
+    flakebox.url = "github:rustshop/flakebox?rev=f96cbeafded56bc6f5c27fbd96e4fcc78b8a8861";
 
     bundlers = {
       url = "github:NixOS/bundlers";

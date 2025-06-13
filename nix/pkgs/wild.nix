@@ -1,5 +1,4 @@
 {
-  stdenv,
   lib,
   fetchFromGitHub,
   rustPlatform,
@@ -8,13 +7,13 @@
 
 rustPlatform.buildRustPackage rec {
   name = "wild-${version}";
-  version = "0.3.0-git";
+  version = "0.5.0";
 
   src = fetchFromGitHub {
     owner = "davidlattimore";
     repo = "wild";
-    rev = "d73f2be52184ab39c1db03be32e96dab77c69c0f";
-    sha256 = "sha256-A5izko2u18UgdmHDrIGQ6hOnvzKbR/9NJ7s6CpMEw+g=";
+    rev = "81d9c116f42c232769807e0e003eac7e70f95b6e";
+    sha256 = "sha256-tVGvSd4aege3xz/CrEl98AwuEJlsM3nVVG0urTSajFQ=";
   };
 
   doCheck = false;
@@ -23,7 +22,7 @@ rustPlatform.buildRustPackage rec {
     pkg-config
   ];
 
-  cargoHash = "sha256-KWF5CkizI+w24bTC6pD/QetAxOPawXjbfHLf0eWzg3A=";
+  cargoHash = "sha256-dXIYJfjz6okiLJuX4ZHu0Ft2/9XDjCrvvl/eqeuvBkU=";
 
   meta = with lib; {
     description = "A very fast linker for Linux";
