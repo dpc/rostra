@@ -78,7 +78,7 @@ impl UiState {
     }
 
     pub fn avatar_url(&self, id: RostraId) -> String {
-        format!("/ui/avatar/{}", id)
+        format!("/ui/avatar/{id}")
     }
 
     pub async fn render_self_profile_summary(

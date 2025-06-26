@@ -302,7 +302,7 @@ impl Opts {
     pub fn cors_origin_url_str(&self, listen: SocketAddr) -> String {
         self.cors_origin
             .clone()
-            .unwrap_or_else(|| format!("http://{}", listen))
+            .unwrap_or_else(|| format!("http://{listen}"))
     }
     pub fn cors_origin_domain_str(&self, listen: SocketAddr) -> String {
         self.cors_origin

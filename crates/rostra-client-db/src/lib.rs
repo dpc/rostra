@@ -177,7 +177,7 @@ impl Database {
         if legacy_path_bech32.exists() {
             return Ok(legacy_path_bech32);
         }
-        Ok(data_dir.join(format!("{}.redb", self_id)))
+        Ok(data_dir.join(format!("{self_id}.redb")))
     }
 
     pub async fn new_in_memory(self_id: RostraId) -> DbResult<Database> {

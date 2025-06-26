@@ -78,7 +78,7 @@ pub async fn cache_control(request: Request, next: Next) -> Response {
         };
 
         if let Some(dur) = cache_duration_secs {
-            let value = format!("public, max-age={}", dur);
+            let value = format!("public, max-age={dur}");
 
             response.headers_mut().insert(
                 "cache-control",

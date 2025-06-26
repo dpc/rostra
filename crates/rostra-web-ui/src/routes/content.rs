@@ -88,9 +88,9 @@ impl UiState {
                     if let Some((html, alt)) = in_img_to_raw_html.pop() {
                         let alt = alt.trim();
                         let load_msg = if alt.is_empty() {
-                            format!("Load: {}", s).into()
+                            format!("Load: {s}").into()
                         } else {
-                            format!("Load “{}”: {}", alt, s).into()
+                            format!("Load “{alt}”: {s}").into()
                         };
                         vec![
                             Event::Start(Container::Paragraph, Attributes::new()),
@@ -106,9 +106,9 @@ impl UiState {
                     } else if let Some(alt) = in_img_to_img.pop() {
                         let alt = alt.trim();
                         let load_msg = if alt.is_empty() {
-                            format!("Load: {}", s).into()
+                            format!("Load: {s}").into()
                         } else {
-                            format!("Load “{}”: {}", alt, s).into()
+                            format!("Load “{alt}”: {s}").into()
                         };
                         vec![
                             Event::Start(Container::Paragraph, Attributes::new()),
@@ -165,7 +165,8 @@ impl UiState {
 enum ExternalMedia<'s> {
     YT(Cow<'s, str>),
 }
-fn extract_media(url: &Url) -> Option<ExternalMedia> {
+
+fn extract_media(url: &Url) -> Option<ExternalMedia<'_>> {
     let host_str = url.host_str()?;
     match host_str {
         "youtube.com" | "www.youtube.com" => {
@@ -190,8 +191,7 @@ fn maybe_embed_media_html(s: &str) -> Option<String> {
     match extract_media(&url)? {
         ExternalMedia::YT(vid) => Some(format!(
             "<iframe loading=lazy width=\"100%\" style=\"aspect-ratio: 16 / 9;\"
- src=\"https://www.youtube.com/embed/{}\" frameborder=\"0\"></iframe>",
-            vid
+ src=\"https://www.youtube.com/embed/{vid}\" frameborder=\"0\"></iframe>"
         )),
     }
 }
