@@ -5,7 +5,7 @@ pub mod util;
 pub use connection::Connection;
 use rostra_core::event::VerifiedEventError;
 use rostra_util_error::BoxedError;
-use snafu::Snafu;
+use snafu::{Snafu, Whatever};
 pub const ROSTRA_P2P_V0_ALPN: &[u8] = b"rostra-p2p-v0";
 
 pub const LOG_TARGET: &str = "rostra::p2p";
@@ -14,7 +14,7 @@ pub const LOG_TARGET: &str = "rostra::p2p";
 pub enum RpcError {
     #[snafu(visibility(pub))]
     Connection {
-        source: anyhow::Error,
+        source: iroh::endpoint::ConnectError,
     },
     StreamConnection {
         source: iroh::endpoint::ConnectionError,

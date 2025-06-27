@@ -11,10 +11,10 @@ use std::sync::{Arc, Weak};
 use std::time::Duration;
 
 use backon::Retryable as _;
-use iroh::NodeAddr;
 use iroh::discovery::ConcurrentDiscovery;
 use iroh::discovery::dns::DnsDiscovery;
 use iroh::discovery::pkarr::PkarrPublisher;
+use iroh::{NodeAddr, Watcher as _};
 use itertools::Itertools as _;
 use rostra_client_db::{Database, DbResult, IdsFolloweesRecord, IdsFollowersRecord};
 use rostra_core::event::{
@@ -26,7 +26,7 @@ use rostra_core::{ExternalEventId, ShortEventId};
 use rostra_p2p::connection::{Connection, FeedEventResponse};
 use rostra_p2p::{ConnectionSnafu, RpcError};
 use rostra_p2p_api::ROSTRA_P2P_V0_ALPN;
-use rostra_util_error::FmtCompact as _;
+use rostra_util_error::{FmtCompact as _, WhateverResult};
 use rostra_util_fmt::AsFmtOption as _;
 use snafu::{Location, OptionExt as _, ResultExt as _, Snafu, ensure};
 use tokio::sync::{broadcast, watch};
@@ -38,8 +38,8 @@ use crate::LOG_TARGET;
 use crate::error::{
     ActivateResult, ConnectIrohSnafu, ConnectResult, IdResolveError, IdResolveResult,
     IdSecretReadResult, InitIrohClientSnafu, InitPkarrClientSnafu, InitResult, InvalidIdSnafu,
-    IoSnafu, IrohResult, MissingTicketSnafu, ParsingSnafu, PeerUnavailableSnafu, PkarrResolveSnafu,
-    PostResult, RRecordSnafu, ResolveSnafu, SecretMismatchSnafu,
+    IoSnafu, MissingTicketSnafu, ParsingSnafu, PeerUnavailableSnafu, PkarrResolveSnafu, PostResult,
+    RRecordSnafu, ResolveSnafu, SecretMismatchSnafu,
 };
 use crate::id::{CompactTicket, IdPublishedData, IdResolvedData};
 use crate::task::head_merger::HeadMerger;
@@ -350,8 +350,8 @@ impl Client {
             .unwrap_or_else(|| SecretKey::generate(&mut rand::thread_rng()));
 
         let discovery = ConcurrentDiscovery::from_services(vec![
-            Box::new(PkarrPublisher::n0_dns(secret_key.clone())),
-            Box::new(DnsDiscovery::n0_dns()),
+            Box::new(PkarrPublisher::n0_dns().build(secret_key.clone())),
+            Box::new(DnsDiscovery::n0_dns().build()),
         ]);
 
         // We rely entirely on tickets published by our own publisher
@@ -359,7 +359,7 @@ impl Client {
         let ep = Endpoint::builder()
             .secret_key(secret_key)
             .alpns(vec![ROSTRA_P2P_V0_ALPN.to_vec()])
-            .discovery(Box::new(discovery))
+            .discovery(discovery)
             .bind()
             .await
             .context(InitIrohClientSnafu)?;
@@ -392,7 +392,7 @@ impl Client {
         tokio::spawn(MissingEventContentFetcher::new(self).run());
     }
 
-    pub(crate) async fn iroh_address(&self) -> IrohResult<NodeAddr> {
+    pub(crate) async fn iroh_address(&self) -> WhateverResult<NodeAddr> {
         pub(crate) fn sanitize_node_addr(node_addr: NodeAddr) -> NodeAddr {
             pub(crate) fn is_ipv4_cgnat(ip: Ipv4Addr) -> bool {
                 matches!(ip.octets(), [100, b, ..] if (64..128).contains(&b))
@@ -437,7 +437,12 @@ impl Client {
             }
         }
 
-        self.endpoint.node_addr().await.map(sanitize_node_addr)
+        self.endpoint
+            .node_addr()
+            .initialized()
+            .await
+            .map(sanitize_node_addr)
+            .whatever_context("Watcher disconnected")
     }
 
     pub fn self_head_subscribe(&self) -> watch::Receiver<Option<ShortEventId>> {

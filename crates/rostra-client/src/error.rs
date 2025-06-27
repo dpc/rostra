@@ -17,7 +17,7 @@ pub enum InitError {
     #[snafu(display("Pkarr Client initialization error"))]
     InitPkarrClient { source: pkarr::errors::BuildError },
     #[snafu(display("Iroh Client initialization error"))]
-    InitIrohClient { source: IrohError },
+    InitIrohClient { source: iroh::endpoint::BindError },
     #[snafu(transparent)]
     Db { source: DbError },
 }
@@ -72,9 +72,13 @@ pub type IdPublishResult<T> = std::result::Result<T, IdPublishError>;
 #[derive(Debug, Snafu)]
 #[snafu(visibility(pub(crate)))]
 pub enum ConnectError {
-    Resolve { source: IdResolveError },
+    Resolve {
+        source: IdResolveError,
+    },
     PeerUnavailable,
-    ConnectIroh { source: IrohError },
+    ConnectIroh {
+        source: iroh::endpoint::ConnectError,
+    },
 }
 
 pub type ConnectResult<T> = std::result::Result<T, ConnectError>;
