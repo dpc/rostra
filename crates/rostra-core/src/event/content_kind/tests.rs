@@ -8,7 +8,7 @@ where
     T: ::serde::Serialize + for<'de> ::serde::Deserialize<'de> + fmt::Debug + cmp::Eq,
 {
     let json = serde_json::to_string(&v).expect("Can't fail");
-    println!("json: {}", json);
+    println!("json: {json}");
     let json_ret = serde_json::from_str(&json).expect("Can't fail");
     assert_eq!(v, json_ret);
 

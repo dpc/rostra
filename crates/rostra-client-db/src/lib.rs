@@ -110,7 +110,8 @@ pub enum DbError {
         location: Location,
     },
     Transaction {
-        source: redb::TransactionError,
+        #[snafu(source(from(redb::TransactionError, Box::new)))]
+        source: Box<redb::TransactionError>,
         #[snafu(implicit)]
         location: Location,
     },

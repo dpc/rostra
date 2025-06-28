@@ -58,6 +58,7 @@ pub struct ClientRefError {
 pub type ClientRefResult<T> = Result<T, ClientRefError>;
 
 #[derive(Debug)]
+#[allow(clippy::large_enum_variant)]
 pub enum ClientMode {
     Full(Database),
     Light,

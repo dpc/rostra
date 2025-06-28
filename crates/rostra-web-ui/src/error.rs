@@ -52,11 +52,13 @@ pub enum UnlockError {
         source: DbError,
     },
     Init {
-        source: InitError,
+        #[snafu(source(from(InitError, Box::new)))]
+        source: Box<InitError>,
     },
     #[snafu(transparent)]
     MultiClient {
-        source: MultiClientError,
+        #[snafu(source(from(MultiClientError, Box::new)))]
+        source: Box<MultiClientError>,
     },
     #[snafu(transparent)]
     MultiClientActivate {
