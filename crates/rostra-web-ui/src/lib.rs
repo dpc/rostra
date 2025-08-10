@@ -206,6 +206,7 @@ impl Server {
 
     pub async fn get_listener(opts: &Opts) -> ServerResult<TcpListener> {
         if let Some(listener) = ListenFd::from_env().take_tcp_listener(0)? {
+            listener.set_nonblocking(true)?;
             return Ok(TcpListener::from_std(listener)?);
         }
         let socket = {
