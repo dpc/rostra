@@ -438,12 +438,9 @@ impl Client {
             }
         }
 
-        self.endpoint
-            .node_addr()
-            .initialized()
-            .await
-            .map(sanitize_node_addr)
-            .whatever_context("Watcher disconnected")
+        Ok(sanitize_node_addr(
+            self.endpoint.node_addr().initialized().await,
+        ))
     }
 
     pub fn self_head_subscribe(&self) -> watch::Receiver<Option<ShortEventId>> {
