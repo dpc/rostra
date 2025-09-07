@@ -26,9 +26,7 @@ pub(crate) trait CookiesExt {
 impl CookiesExt for Cookies {
     fn get_last_seen(&self, self_id: impl Into<ShortRostraId>) -> Option<EventPaginationCursor> {
         let self_id = self_id.into();
-        if let Some(s) = self.get(&format!(
-            "{self_id}-{NOTIFICATIONS_LAST_SEEN_COOKIE_NAME}"
-        )) {
+        if let Some(s) = self.get(&format!("{self_id}-{NOTIFICATIONS_LAST_SEEN_COOKIE_NAME}")) {
             serde_json::from_str(s.value())
                 .inspect_err(|err| {
                     debug!(target: LOG_TARGET, err = %err.fmt_compact(), "Invalid cookie value");
