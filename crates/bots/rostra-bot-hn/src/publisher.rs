@@ -60,7 +60,7 @@ impl HnPublisher {
 
         self.client
             .social_post(
-                self.secret.clone(),
+                self.secret,
                 body,
                 None, // No reply to
                 self.persona_id,

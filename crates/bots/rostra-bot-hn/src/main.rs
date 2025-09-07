@@ -27,7 +27,10 @@ pub const LOG_TARGET: &str = "rostra_bot_hn::main";
 #[derive(Debug, Snafu)]
 pub enum BotError {
     #[snafu(display("Initialization error: {source}"))]
-    Init { source: InitError },
+    Init {
+        #[snafu(source(from(InitError, Box::new)))]
+        source: Box<InitError>,
+    },
     #[snafu(display("Secret read error: {source}"))]
     Secret { source: IdSecretReadError },
     #[snafu(display("Database error: {source}"))]

@@ -123,7 +123,7 @@ impl HnScraper {
                 .cloned()
                 .unwrap_or_else(|| "unknown".to_string());
 
-            let hn_url = format!("{}item?id={}", HN_BASE_URL, hn_id);
+            let hn_url = format!("{HN_BASE_URL}item?id={hn_id}");
 
             let article = HnArticle {
                 hn_id,
