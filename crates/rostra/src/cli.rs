@@ -48,8 +48,13 @@ pub enum OptsCmd {
     GenId,
     /// Start the Rostra server
     Serve {
+        /// Default profile to use for users who haven't logged in yet
+        /// (read-only mode)
+        #[arg(long, group = "id", env = "ROSTRA_ID")]
+        id: Option<RostraId>,
+
         /// Path to the secret file for authentication
-        #[arg(long)]
+        #[arg(long, group = "id")]
         secret_file: Option<PathBuf>,
     },
     WebUi(WebUiOpts),
@@ -116,7 +121,6 @@ pub fn make_web_opts(data_dir: &Path, opts: &WebUiOpts) -> rostra_web_ui::Opts {
         opts.assets_dir.clone(),
         opts.reuseport,
         data_dir.to_owned(),
-        opts.secret_file.clone(),
         opts.default_profile,
         opts.max_clients,
     )

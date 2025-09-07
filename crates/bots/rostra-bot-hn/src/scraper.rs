@@ -65,30 +65,37 @@ impl HnScraper {
         // HN uses a table structure with specific classes
         // Each story row has class "athing" with an ID that's the HN item ID
         let story_selector = Selector::parse("tr.athing").map_err(|_| ScraperError::HtmlParse)?;
-        let title_selector = Selector::parse("span.titleline > a").map_err(|_| ScraperError::HtmlParse)?;
+        let title_selector =
+            Selector::parse("span.titleline > a").map_err(|_| ScraperError::HtmlParse)?;
         let score_selector = Selector::parse("span.score").map_err(|_| ScraperError::HtmlParse)?;
         let author_selector = Selector::parse("a.hnuser").map_err(|_| ScraperError::HtmlParse)?;
 
         // Collect scores and authors separately
-        let scores: Vec<u32> = document.select(&score_selector)
+        let scores: Vec<u32> = document
+            .select(&score_selector)
             .map(|score_elem| {
                 let score_text = score_elem.inner_html();
-                score_text.split_whitespace().next()
+                score_text
+                    .split_whitespace()
+                    .next()
                     .and_then(|s| s.parse::<u32>().ok())
                     .unwrap_or(0)
             })
             .collect();
 
-        let authors: Vec<String> = document.select(&author_selector)
+        let authors: Vec<String> = document
+            .select(&author_selector)
             .map(|author_elem| author_elem.inner_html())
             .collect();
 
         for (story_index, story_element) in document.select(&story_selector).enumerate() {
             // Get HN ID from the story row ID attribute
             let hn_id_str = story_element.value().id().unwrap_or("");
-            let hn_id = hn_id_str.parse::<u32>().map_err(|_| ScraperError::HnIdParse {
-                id_str: hn_id_str.to_string(),
-            })?;
+            let hn_id = hn_id_str
+                .parse::<u32>()
+                .map_err(|_| ScraperError::HnIdParse {
+                    id_str: hn_id_str.to_string(),
+                })?;
 
             // Get title and URL from the title link
             let title_link = match story_element.select(&title_selector).next() {
@@ -103,7 +110,7 @@ impl HnScraper {
             let url = title_link.value().attr("href").map(|s| {
                 // Handle relative URLs
                 if s.starts_with("item?id=") {
-                    format!("{}{}", HN_BASE_URL, s)
+                    format!("{HN_BASE_URL}{s}")
                 } else {
                     s.to_string()
                 }
@@ -111,7 +118,10 @@ impl HnScraper {
 
             // Get score and author by index
             let score = scores.get(story_index).copied().unwrap_or(0);
-            let author = authors.get(story_index).cloned().unwrap_or_else(|| "unknown".to_string());
+            let author = authors
+                .get(story_index)
+                .cloned()
+                .unwrap_or_else(|| "unknown".to_string());
 
             let hn_url = format!("{}item?id={}", HN_BASE_URL, hn_id);
 
@@ -129,7 +139,10 @@ impl HnScraper {
             articles.push(article);
         }
 
-        info!(count = articles.len(), "Scraped articles from HackerNews frontpage");
+        info!(
+            count = articles.len(),
+            "Scraped articles from HackerNews frontpage"
+        );
         Ok(articles)
     }
 }

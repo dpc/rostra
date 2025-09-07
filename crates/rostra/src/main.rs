@@ -169,15 +169,17 @@ async fn handle_cmd(opts: Opts) -> CliResult<serde_json::Value> {
                 serde_json::to_value(serde_json::Value::Null).expect("Can't fail")
             }
         },
-        cli::OptsCmd::Serve { secret_file } => {
-            let secret_id = if let Some(secret_file) = secret_file {
-                Client::read_id_secret(&secret_file)
+        cli::OptsCmd::Serve { secret_file, id } => {
+            let (id, secret) = if let Some(secret_file) = secret_file {
+                let secret = Client::read_id_secret(&secret_file)
                     .await
-                    .context(SecretSnafu)?
+                    .context(SecretSnafu)?;
+                (secret.id(), Some(secret))
             } else {
-                unimplemented!()
+                (id.expect("Must be set, enforced via clap"), None)
             };
-            let _client = Client::builder(secret_id.id())
+            let _client = Client::builder(id)
+                .maybe_secret(secret)
                 .build()
                 .await
                 .context(InitSnafu)?;

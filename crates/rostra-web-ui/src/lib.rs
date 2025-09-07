@@ -50,7 +50,6 @@ fn default_rostra_assets_dir() -> PathBuf {
 pub struct Opts {
     pub listen: String,
     pub cors_origin: Option<String>,
-    pub secret_file: Option<PathBuf>,
     assets_dir: PathBuf,
     pub reuseport: bool,
     pub data_dir: PathBuf,
@@ -66,7 +65,6 @@ impl Opts {
         assets_dir: Option<PathBuf>,
         reuseport: bool,
         data_dir: PathBuf,
-        secret_file: Option<PathBuf>,
         default_profile: Option<RostraId>,
         max_clients: usize,
     ) -> Self {
@@ -76,7 +74,6 @@ impl Opts {
             assets_dir: assets_dir.unwrap_or_else(default_rostra_assets_dir),
             reuseport,
             data_dir,
-            secret_file,
             default_profile,
             max_clients,
         }
