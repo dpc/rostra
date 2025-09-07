@@ -27,7 +27,7 @@ dev PORT="2345":
         -i 'crates/rostra-web-ui/assets/**' \
         -i 'assets/**' \
         -s " \
-          cargo run -- \
+          cargo build --all-targets; ./target/debug/rostra \
             --data-dir "$ROSTRA_DATA_DIR" \
             web-ui \
             --listen [::1]:{{PORT}} \
