@@ -10,6 +10,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use clap::Parser;
 use rostra_client::Client;
 use rostra_client::error::{IdSecretReadError, InitError};
+use rostra_client_db::Database;
 use rostra_core::Timestamp;
 use snafu::{ResultExt, Snafu};
 use tokio::time::{Duration, interval};
@@ -64,6 +65,10 @@ pub struct Opts {
     /// Minimum score threshold for articles
     #[arg(long, default_value = "50")]
     pub min_score: u32,
+
+    /// Data dir to store the database in
+    #[arg(long)]
+    pub data_dir: Option<PathBuf>,
 }
 
 #[snafu::report]
@@ -75,7 +80,7 @@ async fn main() -> BotResult<()> {
 
     info!(target: LOG_TARGET, "Starting Rostra HN Bot");
     info!(
-        target: LOG_TARGET,
+      target: LOG_TARGET,
       scrape_interval = opts.scrape_interval_minutes,
       max_articles = opts.max_articles_per_run,
       min_score = opts.min_score,
@@ -92,8 +97,19 @@ async fn main() -> BotResult<()> {
         "Loaded secret"
     );
 
+    let db = if let Some(data_dir) = opts.data_dir.clone() {
+        Some(
+            Database::open(&data_dir.join("rostra.redb"), secret.id())
+                .await
+                .context(DatabaseSnafu)?,
+        )
+    } else {
+        None
+    };
+
     let client = Client::builder(secret.id())
         .secret(secret)
+        .maybe_db(db)
         .build()
         .await
         .context(InitSnafu)?;
