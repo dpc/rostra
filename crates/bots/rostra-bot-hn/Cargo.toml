@@ -1,0 +1,33 @@
+[package]
+name = "rostra-bot-hn"
+
+description = { workspace = true }
+edition = { workspace = true }
+license = { workspace = true }
+version = { workspace = true }
+
+[lints]
+workspace = true
+
+[[bin]]
+name = "rostra-bot-hn"
+
+[dependencies]
+anyhow = { workspace = true }
+bincode = { workspace = true }
+clap = { workspace = true }
+futures = { workspace = true }
+redb-bincode = { workspace = true }
+reqwest = { workspace = true, features = ["rustls-tls"], default-features = false }
+rostra-client = { workspace = true }
+rostra-client-db = { workspace = true }
+rostra-core = { workspace = true }
+rostra-util-error = { workspace = true }
+scraper = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+snafu = { workspace = true }
+tokio = { workspace = true, features = ["time"] }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+url = { workspace = true }

@@ -10,13 +10,13 @@ use rostra_util_error::BoxedErrorResult;
 use rostra_util_fmt::AsFmtOption as _;
 use snafu::ResultExt as _;
 use tokio::sync::watch;
-use tracing::{debug, instrument, trace, warn};
+use tracing::{debug, info, instrument, trace, warn};
 
 use crate::client::Client;
 use crate::error::{DnsSnafu, IdPublishResult, PkarrPublishSnafu, PkarrSignedPacketSnafu};
 use crate::id::{CompactTicket, IdPublishedData};
 use crate::{RRECORD_HEAD_KEY, RRECORD_P2P_KEY};
-const LOG_TARGET: &str = "rostra::publisher";
+const LOG_TARGET: &str = "rostra::id-publish";
 
 pub fn publishing_interval() -> Duration {
     Duration::from_secs(360)
@@ -84,6 +84,7 @@ impl PkarrIdPublisher {
     /// Run the thread
     #[instrument(skip(self), ret)]
     pub async fn run(mut self) {
+        info!(target: LOG_TARGET, "Starting pkarr id publisher");
         let mut interval = tokio::time::interval(publishing_interval());
         loop {
             tokio::select! {
@@ -165,18 +166,22 @@ impl PkarrIdPublisher {
     async fn wait_for_your_turn(&self) {
         let mut failures_count = 0;
 
+        debug!(
+            target: LOG_TARGET,
+            "Checking for other alive peers"
+        );
         loop {
             if 3 < failures_count {
                 break;
             }
-            let secs = rand::thread_rng().gen_range(1..30);
-            tokio::time::sleep(Duration::from_secs(secs)).await;
             if self.connect_self().await.is_err() {
                 failures_count += 1;
             } else {
                 trace!(target: LOG_TARGET, "Detect other peer alive, waiting");
                 failures_count = 0;
             }
+            let secs = rand::thread_rng().gen_range(1..10);
+            tokio::time::sleep(Duration::from_secs(secs)).await;
         }
     }
 

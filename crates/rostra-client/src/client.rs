@@ -36,10 +36,10 @@ use tracing::{debug, info, trace, warn};
 use super::{RRECORD_HEAD_KEY, RRECORD_P2P_KEY, get_rrecord_typed};
 use crate::LOG_TARGET;
 use crate::error::{
-    ActivateResult, ConnectIrohSnafu, ConnectResult, IdResolveError, IdResolveResult,
-    IdSecretReadResult, InitIrohClientSnafu, InitPkarrClientSnafu, InitResult, InvalidIdSnafu,
-    IoSnafu, MissingTicketSnafu, ParsingSnafu, PeerUnavailableSnafu, PkarrResolveSnafu, PostResult,
-    RRecordSnafu, ResolveSnafu, SecretMismatchSnafu,
+    ActivateResult, ActivateSnafu, ConnectIrohSnafu, ConnectResult, IdResolveError,
+    IdResolveResult, IdSecretReadResult, InitIrohClientSnafu, InitPkarrClientSnafu, InitResult,
+    InvalidIdSnafu, IoSnafu, MissingTicketSnafu, ParsingSnafu, PeerUnavailableSnafu,
+    PkarrResolveSnafu, PostResult, RRecordSnafu, ResolveSnafu, SecretMismatchSnafu,
 };
 use crate::id::{CompactTicket, IdPublishedData, IdResolvedData};
 use crate::task::head_merger::HeadMerger;
@@ -151,6 +151,7 @@ impl Client {
         #[builder(start_fn)] id: RostraId,
         #[builder(default = true)] start_request_handler: bool,
         db: Option<Database>,
+        secret: Option<RostraIdSecretKey>,
     ) -> InitResult<Arc<Self>> {
         debug!(target: LOG_TARGET, id = %id, "Starting Rostra client");
         let is_mode_full = db.is_some();
@@ -196,6 +197,10 @@ impl Client {
             client.start_head_update_broadcaster();
             client.start_missing_event_fetcher();
             client.start_missing_event_content_fetcher();
+        }
+
+        if let Some(secret) = secret {
+            client.unlock_active(secret).await.context(ActivateSnafu)?;
         }
 
         trace!(target: LOG_TARGET, %id, "Client complete");

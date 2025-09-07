@@ -18,6 +18,8 @@ pub enum InitError {
     InitPkarrClient { source: pkarr::errors::BuildError },
     #[snafu(display("Iroh Client initialization error"))]
     InitIrohClient { source: iroh::endpoint::BindError },
+    #[snafu(display("Failed to activate"))]
+    Activate { source: ActivateError },
     #[snafu(transparent)]
     Db { source: DbError },
 }
