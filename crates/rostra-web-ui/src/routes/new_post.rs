@@ -328,7 +328,7 @@ impl UiState {
                     ."m-newPostForm__content"
                     placeholder=(
                         if ro.to_disabled() {
-                            "Read-Only mode."
+                            "Read-only view. Logout to change."
                         } else {
                           "What's on your mind?"
                         })
