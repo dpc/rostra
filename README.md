@@ -51,7 +51,7 @@ able to post or do any other actions that require the secret key.
 You can clone the git repository locally and run:
 
 ```
-cargo run --release web-ui  
+cargo run --bin rostra --release -- web-ui
 ```
 
 to start the web ui.
