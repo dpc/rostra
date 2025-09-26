@@ -80,6 +80,23 @@ Pick the last build and at the bottom of the page look for "Artifacts".
 
 In the future, the official releases will come with prebuilt binaries as well.
 
+#### Running over Tor
+
+Rostra is a p2p software, which means it will establish direct connections
+between you and other users. If you would like to hide your IP for other
+users for privacy reasons it is possible to run Rostra over Tor using
+[`oniux`](https://blog.torproject.org/introducing-oniux-tor-isolation-using-linux-namespaces/)
+
+You can run:
+
+```
+nix run github:/dpc/rostra#rostra-web-ui-tor
+```
+
+to use a script to do so. See [`flake.nix`] to investigate how it works.
+
+Alternatively, you can host Rostra on your server, and use it remotely over web-ui,
+in the same way <https://rostra.me> is working.
 
 ## More info about Rostra:
 

@@ -26,6 +26,7 @@ rostra-client = { workspace = true }
 rostra-client-db = { workspace = true }
 rostra-p2p = { workspace = true, features = ["serde"] }
 rostra-p2p-api = { workspace = true }
+rostra-util-bind-addr = { workspace = true }
 rostra-util-error = { workspace = true }
 rostra-web-ui  = { workspace = true }
 tokio = { workspace = true }

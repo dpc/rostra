@@ -8,7 +8,6 @@ mod serde_util;
 
 use std::net::{AddrParseError, SocketAddr};
 use std::path::{Path, PathBuf};
-use std::str::FromStr as _;
 use std::sync::Arc;
 use std::time::Duration;
 use std::{io, result};
@@ -24,10 +23,11 @@ use rostra_client::multiclient::MultiClient;
 use rostra_client::{ClientHandle, ClientRefError};
 use rostra_core::id::{RostraId, RostraIdSecretKey};
 use rostra_util::is_rostra_dev_mode_set;
+use rostra_util_bind_addr::BindAddr;
 use rostra_util_error::WhateverResult;
 use routes::cache_control;
 use snafu::{ResultExt as _, Snafu, Whatever, ensure};
-use tokio::net::{TcpListener, TcpSocket};
+use tokio::net::{TcpListener, TcpSocket, UnixListener};
 use tokio::signal;
 use tower_cookies::CookieManagerLayer;
 use tower_http::CompressionLevel;
@@ -48,7 +48,7 @@ fn default_rostra_assets_dir() -> PathBuf {
 
 #[derive(Clone, Debug)]
 pub struct Opts {
-    pub listen: String,
+    pub listen: BindAddr,
     pub cors_origin: Option<String>,
     assets_dir: PathBuf,
     pub reuseport: bool,
@@ -60,7 +60,7 @@ pub struct Opts {
 impl Opts {
     #[allow(clippy::too_many_arguments)]
     pub fn new(
-        listen: String,
+        listen: BindAddr,
         cors_origin: Option<String>,
         assets_dir: Option<PathBuf>,
         reuseport: bool,
@@ -130,13 +130,6 @@ impl UiState {
 }
 
 pub type SharedState = Arc<UiState>;
-pub struct Server {
-    listener: TcpListener,
-
-    state: SharedState,
-    assets: Option<Arc<StaticAssets>>,
-    opts: Opts,
-}
 
 #[derive(Debug, Snafu)]
 pub enum WebUiServerError {
@@ -172,104 +165,136 @@ pub enum WebUiServerError {
 }
 
 pub type ServerResult<T> = std::result::Result<T, WebUiServerError>;
-impl Server {
-    pub async fn init(opts: Opts, clients: MultiClient) -> ServerResult<Server> {
-        let listener = Self::get_listener(&opts).await?;
 
-        // Todo: allow disabling with a cmdline flag too?
-        let assets = if is_rostra_dev_mode_set() {
-            None
+pub async fn get_tcp_listener(addr: SocketAddr, reuseport: bool) -> ServerResult<TcpListener> {
+    if let Some(listener) = ListenFd::from_env().take_tcp_listener(0)? {
+        listener.set_nonblocking(true)?;
+        return Ok(TcpListener::from_std(listener)?);
+    }
+    let socket = {
+        let socket = if addr.is_ipv4() {
+            TcpSocket::new_v4()?
         } else {
-            Some(Arc::new(
-                StaticAssets::load(&opts.assets_dir)
-                    .await
-                    .context(AssetsLoadSnafu)?,
-            ))
+            TcpSocket::new_v6()?
         };
-        let state = Arc::new(UiState {
-            clients,
-            assets: assets.clone(),
-            default_profile: opts.default_profile,
-        });
-
-        info!("Listening on {}", listener.local_addr()?);
-        Ok(Self {
-            listener,
-            state,
-            opts,
-            assets,
-        })
-    }
-
-    pub async fn get_listener(opts: &Opts) -> ServerResult<TcpListener> {
-        if let Some(listener) = ListenFd::from_env().take_tcp_listener(0)? {
-            listener.set_nonblocking(true)?;
-            return Ok(TcpListener::from_std(listener)?);
+        if reuseport {
+            #[cfg(unix)]
+            socket.set_reuseport(true)?;
         }
-        let socket = {
-            let addr = SocketAddr::from_str(&opts.listen).context(ListenAddrSnafu)?;
+        socket.set_nodelay(true)?;
 
-            let socket = if addr.is_ipv4() {
-                TcpSocket::new_v4()?
-            } else {
-                TcpSocket::new_v6()?
+        socket.bind(addr)?;
+
+        socket
+    };
+
+    Ok(socket.listen(1024)?)
+}
+
+pub async fn get_unix_listener(path: &Path) -> ServerResult<UnixListener> {
+    // Remove existing socket file if it exists
+    if path.exists() {
+        std::fs::remove_file(path)?;
+    }
+    
+    Ok(UnixListener::bind(path)?)
+}
+
+pub async fn run_ui(opts: Opts, clients: MultiClient) -> ServerResult<()> {
+    // Todo: allow disabling with a cmdline flag too?
+    let assets = if is_rostra_dev_mode_set() {
+        None
+    } else {
+        Some(Arc::new(
+            StaticAssets::load(&opts.assets_dir)
+                .await
+                .context(AssetsLoadSnafu)?,
+        ))
+    };
+    
+    let state = Arc::new(UiState {
+        clients,
+        assets: assets.clone(),
+        default_profile: opts.default_profile,
+    });
+
+    match &opts.listen {
+        BindAddr::Tcp(addr) => {
+            let listener = get_tcp_listener(*addr, opts.reuseport).await?;
+            let local_addr = listener.local_addr()?;
+            
+            info!(
+                target: LOG_TARGET,
+                listen = %local_addr,
+                origin = %opts.cors_origin_url_str(local_addr),
+                "Starting TCP server"
+            );
+            
+            let mut router = Router::new().merge(routes::route_handler(state.clone()));
+            router = match assets.clone() {
+                Some(assets) => router.nest_service("/assets", StaticAssetService::new(assets)),
+                _ => router.nest_service(
+                    "/assets",
+                    ServeDir::new(format!("{}/assets", env!("CARGO_MANIFEST_DIR"))),
+                ),
             };
-            if opts.reuseport {
-                #[cfg(unix)]
-                socket.set_reuseport(true)?;
-            }
-            socket.set_nodelay(true)?;
 
-            socket.bind(addr)?;
+            let session_store = MemoryStore::default();
+            let session_layer = SessionManagerLayer::new(session_store)
+                .with_expiry(Expiry::OnInactivity(time::Duration::minutes(2 * 24 * 60)));
 
-            socket
-        };
+            axum::serve(
+                listener,
+                router
+                    .with_state(state)
+                    .layer(CookieManagerLayer::new())
+                    .layer(middleware::from_fn(cache_control))
+                    .layer(session_layer)
+                    .layer(cors_layer(&opts, local_addr)?)
+                    .layer(compression_layer())
+                    .into_make_service_with_connect_info::<SocketAddr>(),
+            )
+            .with_graceful_shutdown(shutdown_signal())
+            .await?;
+        }
+        BindAddr::Unix(path) => {
+            let listener = get_unix_listener(path).await?;
+            
+            info!(
+                target: LOG_TARGET,
+                listen = %path.display(),
+                "Starting Unix socket server"
+            );
+            
+            let mut router = Router::new().merge(routes::route_handler(state.clone()));
+            router = match assets.clone() {
+                Some(assets) => router.nest_service("/assets", StaticAssetService::new(assets)),
+                _ => router.nest_service(
+                    "/assets",
+                    ServeDir::new(format!("{}/assets", env!("CARGO_MANIFEST_DIR"))),
+                ),
+            };
 
-        Ok(socket.listen(1024)?)
+            let session_store = MemoryStore::default();
+            let session_layer = SessionManagerLayer::new(session_store)
+                .with_expiry(Expiry::OnInactivity(time::Duration::minutes(2 * 24 * 60)));
+
+            axum::serve(
+                listener,
+                router
+                    .with_state(state)
+                    .layer(CookieManagerLayer::new())
+                    .layer(middleware::from_fn(cache_control))
+                    .layer(session_layer)
+                    .layer(compression_layer())
+                    .into_make_service(),
+            )
+            .with_graceful_shutdown(shutdown_signal())
+            .await?;
+        }
     }
 
-    pub async fn run(self) -> ServerResult<()> {
-        let listen = self.listener.local_addr()?;
-        info!(
-            target: LOG_TARGET,
-            addr = %listen,
-            origin = %self.opts.cors_origin_url_str(listen),
-            "Starting server"
-        );
-        let mut router = Router::new().merge(routes::route_handler(self.state.clone()));
-
-        router = match self.assets.clone() {
-            Some(assets) => router.nest_service("/assets", StaticAssetService::new(assets)),
-            _ => router.nest_service(
-                "/assets",
-                ServeDir::new(format!("{}/assets", env!("CARGO_MANIFEST_DIR"))),
-            ),
-        };
-
-        let session_store = MemoryStore::default();
-        let session_layer = SessionManagerLayer::new(session_store)
-            .with_expiry(Expiry::OnInactivity(time::Duration::minutes(2 * 24 * 60)));
-
-        axum::serve(
-            self.listener,
-            router
-                .with_state(self.state.clone())
-                .layer(CookieManagerLayer::new())
-                .layer(middleware::from_fn(cache_control))
-                .layer(session_layer)
-                .layer(cors_layer(&self.opts, listen)?)
-                .layer(compression_layer())
-                .into_make_service_with_connect_info::<SocketAddr>(),
-        )
-        .with_graceful_shutdown(shutdown_signal())
-        .await?;
-
-        Ok(())
-    }
-
-    pub fn addr(&self) -> ServerResult<SocketAddr> {
-        Ok(self.listener.local_addr()?)
-    }
+    Ok(())
 }
 
 fn compression_layer() -> CompressionLayer<SizeAbove> {

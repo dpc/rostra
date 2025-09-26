@@ -15,8 +15,9 @@ use rostra_core::event::PersonaId;
 use rostra_core::id::RostraIdSecretKey;
 use rostra_p2p::RpcError;
 use rostra_p2p::connection::Connection;
+use rostra_util_bind_addr::BindAddr;
 use rostra_util_error::{BoxedError, FmtCompact as _};
-use rostra_web_ui::{Server, WebUiServerError};
+use rostra_web_ui::{WebUiServerError, run_ui};
 use snafu::{FromString, ResultExt, Snafu, Whatever};
 use tokio::time::Instant;
 use tracing::level_filters::LevelFilter;
@@ -188,23 +189,18 @@ async fn handle_cmd(opts: Opts) -> CliResult<serde_json::Value> {
         }
         cli::OptsCmd::WebUi(ref web_opts) => {
             let clients = MultiClient::new(opts.global.data_dir().to_owned(), web_opts.max_clients);
-            let server = Server::init(make_web_opts(opts.global.data_dir(), web_opts), clients)
-                .await
-                .context(WebUiServerSnafu)?;
+            let ui_opts = make_web_opts(opts.global.data_dir(), web_opts);
 
             if !web_opts.skip_xdg_open {
-                if cmd!(
-                    "xdg-open",
-                    format!("http://{}", server.addr().context(WebUiServerSnafu)?)
-                )
-                .run()
-                .is_err()
-                {
-                    warn!(target: LOG_TARGET, "Failed to open browser");
-                };
+                // For unix sockets, we can't easily determine a URL to open, so skip xdg-open
+                if let BindAddr::Tcp(addr) = &ui_opts.listen {
+                    if cmd!("xdg-open", format!("http://{}", addr)).run().is_err() {
+                        warn!(target: LOG_TARGET, "Failed to open browser");
+                    };
+                }
             }
 
-            server.run().await.context(WebUiServerSnafu)?;
+            run_ui(ui_opts, clients).await.context(WebUiServerSnafu)?;
 
             serde_json::Value::Null
         }

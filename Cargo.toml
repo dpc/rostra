@@ -7,6 +7,7 @@ members = [
   "crates/rostra-p2p",
   "crates/rostra-p2p-api",
   "crates/rostra-util",
+  "crates/rostra-util-bind-addr",
   "crates/rostra-util-dedup-chan",
   "crates/rostra-util-error",
   "crates/rostra-util-fmt",
@@ -78,6 +79,7 @@ rostra-client-db = { path = "crates/rostra-client-db" }
 rostra-p2p = { path = "crates/rostra-p2p" }
 rostra-p2p-api = { path = "crates/rostra-p2p-api" }
 rostra-util = { path = "crates/rostra-util" }
+rostra-util-bind-addr = { path = "crates/rostra-util-bind-addr" }
 # rostra-util-dedup-chan = { path = "crates/rostra-util-dedup-chan" }
 dedup-chan = { path = "crates/rostra-util-dedup-chan", package = "rostra-util-dedup-chan" }
 rostra-util-error = { path = "crates/rostra-util-error" }

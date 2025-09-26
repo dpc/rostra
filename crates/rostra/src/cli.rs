@@ -4,6 +4,7 @@ use std::sync::LazyLock;
 use clap::{Args, Parser, Subcommand};
 use rostra_core::event::PersonaId;
 use rostra_core::id::RostraId;
+use rostra_util_bind_addr::BindAddr;
 
 /// Command line options for the Rostra CLI application
 #[derive(Debug, Parser)]
@@ -98,8 +99,10 @@ pub struct WebUiOpts {
     pub skip_xdg_open: bool,
 
     /// Listen address
+    ///
+    /// Either a socket addr (TCP) or a path (Unix socket)
     #[arg(long, short, default_value = "[::1]:3377", env = "ROSTRA_LISTEN")]
-    pub listen: String,
+    pub listen: BindAddr,
 
     /// Set SO_REUSEPORT
     #[arg(long, env = "ROSTRA_REUSEPORT", default_value = "true")]

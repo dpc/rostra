@@ -3924,6 +3924,7 @@ dependencies = [
  "rostra-core",
  "rostra-p2p",
  "rostra-p2p-api",
+ "rostra-util-bind-addr",
  "rostra-util-error",
  "rostra-web-ui",
  "serde",
@@ -4102,6 +4103,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "rostra-util-bind-addr"
+version = "0.1.0"
+dependencies = [
+ "serde",
+]
+
+[[package]]
 name = "rostra-util-dedup-chan"
 version = "0.1.0"
 dependencies = [
@@ -4143,6 +4151,7 @@ dependencies = [
  "rostra-p2p",
  "rostra-p2p-api",
  "rostra-util",
+ "rostra-util-bind-addr",
  "rostra-util-error",
  "serde",
  "serde_json",

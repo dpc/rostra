@@ -105,10 +105,70 @@
         rostra-web-ui = pkgs.writeShellScriptBin "rostra-web-ui" ''
           ${multiBuild.rostra}/bin/rostra web-ui "$@"
         '';
+
+        rostra-web-ui-tor = pkgs.writeShellScriptBin "rostra-web-ui-tor" ''
+          ${rostra-tor}/bin/rostra-tor web-ui "$@"
+        '';
+
+        rostra-tor = pkgs.writeShellScriptBin "rostra-tor" ''
+          set -e
+          
+          # Create temporary directory for Unix socket
+          rostra_tmpdir=$(mktemp --tmpdir --directory rostra-ui-XXXX)
+          export ROSTRA_LISTEN="''${rostra_tmpdir}/ui.sock"
+          
+          # Separate cleanup functions
+          cleanup_tempdir() { rm -rf "''${rostra_tmpdir}" 2>/dev/null || true; }
+          trap cleanup_tempdir EXIT
+          
+          
+          # Start rostra web-ui with oniux (Tor proxy) in background
+          ${pkgs-unstable.oniux}/bin/oniux ${multiBuild.rostra}/bin/rostra "$@" &
+          rostra_pid=$!
+          
+          cleanup_rostra() { kill -9 "$rostra_pid" 2>/dev/null || true; }
+          trap cleanup_rostra EXIT
+
+          # Wait for Unix socket to be created
+          timeout=30
+          while [ $timeout -gt 0 ] && [ ! -S "''${ROSTRA_LISTEN}" ]; do
+            sleep 0.1
+            timeout=$((timeout - 1))
+          done
+          
+          if [ ! -S "''${ROSTRA_LISTEN}" ]; then
+            echo "Error: Unix socket was not created within timeout"
+            exit 1
+          fi
+          
+          # Find an available TCP port (starting from 3378)
+          tcp_port=3378
+          while ${pkgs.netcat}/bin/nc -z localhost $tcp_port 2>/dev/null; do
+            tcp_port=$((tcp_port + 1))
+          done
+          
+          echo "Forwarding TCP port $tcp_port to Unix socket"
+          
+          # Start socat to forward TCP to Unix socket
+          ${pkgs.socat}/bin/socat TCP-LISTEN:$tcp_port,reuseaddr,fork UNIX-CONNECT:"''${ROSTRA_LISTEN}" &
+          socat_pid=$!
+          
+          cleanup_socat() { kill -9 "$socat_pid" 2>/dev/null || true; }
+          trap cleanup_socat EXIT
+
+          # Give socat a moment to start
+          sleep .1
+          
+          ${pkgs.xdg-utils}/bin/xdg-open "http://127.0.0.1:$tcp_port" || {
+            echo "Failed to open browser. Please navigate to http://127.0.0.1:$tcp_port manually"
+          }
+          
+          wait $rostra_pid
+        '';
       in
       {
         packages = {
-          inherit rostra-web-ui;
+          inherit rostra-web-ui rostra-tor rostra-web-ui-tor;
           default = rostra-web-ui;
           rostra = multiBuild.rostra;
         };
