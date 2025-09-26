@@ -265,7 +265,6 @@ impl StaticAssetService {
     fn handle_request(&self, req: Request<Body>) -> Response<Body> {
         let path = req.uri().path().trim_start_matches('/');
         let Some(asset) = self.assets.get(path) else {
-            dbg!("NOT FOUND", path);
             return (StatusCode::NOT_FOUND, Body::empty()).into_response();
         };
 

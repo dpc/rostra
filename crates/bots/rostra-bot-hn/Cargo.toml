@@ -18,7 +18,9 @@ bincode = { workspace = true }
 clap = { workspace = true }
 futures = { workspace = true }
 redb-bincode = { workspace = true }
-reqwest = { workspace = true, features = ["rustls-tls"], default-features = false }
+reqwest = { workspace = true, features = [
+  "rustls-tls",
+], default-features = false }
 rostra-client = { workspace = true }
 rostra-client-db = { workspace = true }
 rostra-core = { workspace = true }
