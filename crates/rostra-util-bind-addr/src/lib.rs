@@ -1,6 +1,7 @@
 use std::net::SocketAddr;
 use std::path::PathBuf;
 use std::str::FromStr;
+
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -26,7 +27,7 @@ impl FromStr for BindAddr {
 impl std::fmt::Display for BindAddr {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            BindAddr::Tcp(addr) => write!(f, "{}", addr),
+            BindAddr::Tcp(addr) => write!(f, "{addr}"),
             BindAddr::Unix(path) => write!(f, "{}", path.display()),
         }
     }

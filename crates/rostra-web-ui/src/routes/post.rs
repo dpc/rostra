@@ -4,17 +4,20 @@ use axum::extract::{Path, State};
 use axum::response::IntoResponse;
 use maud::{Markup, html};
 use rostra_client::ClientRef;
+use rostra_client::connection_cache::ConnectionCache;
+use rostra_client::util::rpc::get_event_content_from_followers;
 use rostra_client_db::IdSocialProfileRecord;
 use rostra_client_db::social::SocialPostRecord;
 use rostra_core::event::SocialPost;
 use rostra_core::id::{RostraId, ToShort as _};
 use rostra_core::{ExternalEventId, ShortEventId};
+use snafu::ResultExt as _;
 use tower_cookies::Cookies;
 
 use super::Maud;
 use super::timeline::TimelineMode;
 use super::unlock::session::{RoMode, UserSession};
-use crate::error::RequestResult;
+use crate::error::{OtherSnafu, RequestResult};
 use crate::{SharedState, UiState};
 
 pub async fn get_single_post(
@@ -37,6 +40,56 @@ pub async fn get_single_post(
     ))
 }
 
+pub async fn fetch_missing_post(
+    state: State<SharedState>,
+    session: UserSession,
+    Path((author_id, event_id)): Path<(RostraId, ShortEventId)>,
+) -> RequestResult<impl IntoResponse> {
+    let client_handle = state.client(session.id()).await?;
+    let client = client_handle.client_ref()?;
+
+    let mut connections_cache = ConnectionCache::new();
+    let mut followers_cache = std::collections::BTreeMap::new();
+
+    get_event_content_from_followers(
+        client.handle(),
+        client.rostra_id(),
+        author_id,
+        event_id,
+        &mut connections_cache,
+        &mut followers_cache,
+        client.db(),
+    )
+    .await
+    .context(OtherSnafu)?;
+
+    // Post was fetched successfully, render the updated content
+    let db = client.db();
+    let post_record = db.get_social_post(event_id).await;
+
+    if let Some(post_record) = post_record {
+        if let Some(djot_content) = post_record.content.djot_content.as_ref() {
+            let post_content_rendered = state.render_content(&client, djot_content).await;
+            return Ok(Maud(html! {
+                div ."m-postOverview__content -present" {
+                    p {
+                        (post_content_rendered)
+                    }
+                }
+            }));
+        }
+    }
+
+    // Fetch attempt completed but post still not available
+    Ok(Maud(html! {
+        div ."m-postOverview__content -missing" {
+            p {
+                "Post not found"
+            }
+        }
+    }))
+}
+
 #[bon::bon]
 impl UiState {
     #[allow(clippy::too_many_arguments)]
@@ -46,7 +99,11 @@ impl UiState {
         #[builder(start_fn)] client: &ClientRef<'_>,
         #[builder(start_fn)] author: RostraId,
         persona_display_name: Option<&str>,
-        reply_to: Option<(RostraId, Option<&SocialPostRecord<SocialPost>>)>,
+        reply_to: Option<(
+            RostraId,
+            ShortEventId,
+            Option<&SocialPostRecord<SocialPost>>,
+        )>,
         event_id: Option<ShortEventId>,
         content: Option<&str>,
         reply_count: Option<u64>,
@@ -122,6 +179,8 @@ impl UiState {
         } else {
             author.to_short().to_string()
         };
+        let post_content_is_missing = post_content_rendered.is_none();
+
         let post_main = html! {
             div ."m-postOverview__main"
             {
@@ -158,7 +217,9 @@ impl UiState {
                             @if let Some(post_content_rendered) = post_content_rendered {
                                 (post_content_rendered)
                             } @else {
-                                "Post missing"
+                                p {
+                                    "Post missing"
+                                }
                             }
                         }
                     }
@@ -191,6 +252,19 @@ impl UiState {
                                 }
                             }
 
+                        }
+                        @if post_content_is_missing {
+                            @if let Some(event_id) = event_id {
+                                button ."u-button u-button--small"
+                                    hx-post={"/ui/post/"(author)"/"(event_id)"/fetch"}
+                                    hx-target="previous .m-postOverview__content"
+                                    hx-swap="outerHTML"
+                                    hx-indicator="next .htmx-indicator"
+                                {
+                                    span ."m-postOverview__fetchButtonIcon u-buttonIcon" width="1rem" height="1rem" {}
+                                    "Fetch"
+                                }
+                            }
                         }
                         @if !ro.is_ro() {
 
@@ -239,30 +313,17 @@ impl UiState {
         };
 
         Ok(html! {
-            @if let Some((reply_to_author, reply_to_post)) = reply_to {
-                @if let Some(reply_to_post) = reply_to_post {
-                    @if let Some(djot_content) = reply_to_post.content.djot_content.as_ref() {
-                        (Box::pin(self.render_post_overview(
-                            client,
-                            reply_to_post.author
-                            )
-                            .event_id(reply_to_post.event_id)
-                            .content(djot_content)
-                            .ro(ro)
-                            .comment(post)
-                            .call()
-                        )
-                        .await?)
-                    }
-                } @else {
-                    (Box::pin(self.render_post_overview(
-                        client,
-                        reply_to_author,
-                        )
-                        .ro(ro).comment(post)
-                        .call()
-                    ).await?)
-                }
+            @if let Some((reply_to_author, reply_to_event_id, reply_to_post)) = reply_to {
+                (Box::pin(self.render_post_overview(
+                    client,
+                    reply_to_author,
+                    )
+                    .event_id(reply_to_event_id)
+                    .ro(ro)
+                    .maybe_content(reply_to_post.and_then(|r| r.content.djot_content.as_deref()))
+                    .comment(post)
+                    .call()
+                ).await?)
             } @else {
                 (post)
             }

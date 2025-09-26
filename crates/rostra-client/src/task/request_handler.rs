@@ -86,7 +86,7 @@ impl RequestHandler {
     }
 
     /// Run the thread
-    #[instrument(skip(self), ret)]
+    #[instrument(name = "request-handler", skip(self), ret)]
     pub async fn run(self: Arc<Self>) {
         loop {
             if self.client.app_ref_opt().is_none() {

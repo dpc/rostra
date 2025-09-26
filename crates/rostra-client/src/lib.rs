@@ -1,10 +1,13 @@
 pub mod error;
 
+pub mod connection_cache;
 pub(crate) mod task;
 
 pub mod multiclient;
 
 pub mod id;
+
+pub mod util;
 
 use std::str::FromStr;
 

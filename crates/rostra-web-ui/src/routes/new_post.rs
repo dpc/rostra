@@ -96,6 +96,7 @@ pub async fn post_new_post(
     let reply_to = if let Some(reply_to) = form.reply_to {
         Some((
             reply_to.rostra_id(),
+            reply_to.event_id(),
             state
                 .client(session.id())
                 .await?
@@ -110,7 +111,8 @@ pub async fn post_new_post(
     };
     let reply_to = reply_to
         .as_ref()
-        .map(|(rostra_id, record)| (*rostra_id, record.as_ref()));
+        .map(|(rostra_id, event_id, record)| (*rostra_id, *event_id, record.as_ref()));
+
     Ok(Maud(html! {
         // new clean form
         (clean_form)

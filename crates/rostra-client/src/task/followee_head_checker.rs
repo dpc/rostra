@@ -13,9 +13,9 @@ use snafu::ResultExt as _;
 use tokio::sync::watch;
 use tracing::{debug, info, instrument, trace};
 
-use super::connection_cache::ConnectionCache;
 use crate::ClientRef;
 use crate::client::Client;
+use crate::connection_cache::ConnectionCache;
 const LOG_TARGET: &str = "rostra::head_checker";
 
 pub struct FolloweeHeadChecker {

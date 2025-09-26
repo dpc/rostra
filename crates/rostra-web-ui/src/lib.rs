@@ -196,7 +196,7 @@ pub async fn get_unix_listener(path: &Path) -> ServerResult<UnixListener> {
     if path.exists() {
         std::fs::remove_file(path)?;
     }
-    
+
     Ok(UnixListener::bind(path)?)
 }
 
@@ -211,7 +211,7 @@ pub async fn run_ui(opts: Opts, clients: MultiClient) -> ServerResult<()> {
                 .context(AssetsLoadSnafu)?,
         ))
     };
-    
+
     let state = Arc::new(UiState {
         clients,
         assets: assets.clone(),
@@ -222,14 +222,14 @@ pub async fn run_ui(opts: Opts, clients: MultiClient) -> ServerResult<()> {
         BindAddr::Tcp(addr) => {
             let listener = get_tcp_listener(*addr, opts.reuseport).await?;
             let local_addr = listener.local_addr()?;
-            
+
             info!(
                 target: LOG_TARGET,
                 listen = %local_addr,
                 origin = %opts.cors_origin_url_str(local_addr),
                 "Starting TCP server"
             );
-            
+
             let mut router = Router::new().merge(routes::route_handler(state.clone()));
             router = match assets.clone() {
                 Some(assets) => router.nest_service("/assets", StaticAssetService::new(assets)),
@@ -259,13 +259,13 @@ pub async fn run_ui(opts: Opts, clients: MultiClient) -> ServerResult<()> {
         }
         BindAddr::Unix(path) => {
             let listener = get_unix_listener(path).await?;
-            
+
             info!(
                 target: LOG_TARGET,
                 listen = %path.display(),
                 "Starting Unix socket server"
             );
-            
+
             let mut router = Router::new().merge(routes::route_handler(state.clone()));
             router = match assets.clone() {
                 Some(assets) => router.nest_service("/assets", StaticAssetService::new(assets)),

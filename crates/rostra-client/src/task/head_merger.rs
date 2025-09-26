@@ -29,7 +29,7 @@ impl HeadMerger {
     }
 
     /// Run the thread
-    #[instrument(skip(self), ret)]
+    #[instrument(name = "head-merger", skip(self), ret)]
     pub async fn run(self) {
         let mut head_rx = self.self_head_rx.clone();
         while let Ok(_head) = head_rx.changed().await {

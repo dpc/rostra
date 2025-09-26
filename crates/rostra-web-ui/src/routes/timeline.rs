@@ -441,7 +441,7 @@ impl UiState {
                                     )
                                     .maybe_reply_to(
                                     post.reply_to
-                                        .map(|reply_to| (reply_to.rostra_id(), parents.get(&reply_to.event_id().to_short())))
+                                        .map(|reply_to| (reply_to.rostra_id(), reply_to.event_id(), parents.get(&reply_to.event_id().to_short())))
                                     )
                                     .event_id(post.event_id)
                                     .content(djot_content)

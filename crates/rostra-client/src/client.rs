@@ -264,7 +264,12 @@ impl Client {
 
         // Try all known endpoints in parallel
         let mut connection_futures = Vec::new();
-        for ((_ts, node_id), _stats) in endpoints {
+
+        let node_ids: Vec<_> = endpoints
+            .into_keys()
+            .map(|(_ts, node_id)| node_id)
+            .collect();
+        for node_id in node_ids {
             let Ok(node_id) = iroh::NodeId::from_bytes(&node_id.to_bytes()) else {
                 debug!(target: LOG_TARGET, %id, "Invalid iroh id for rostra id found");
                 continue;
@@ -329,7 +334,7 @@ impl Client {
             // with some other node.
             return Err(PeerUnavailableSnafu.build());
         }
-        debug!(target: LOG_TARGET, iroh_id = %node_addr.node_id, id = %id.to_short(), "Connecting");
+        debug!(target: LOG_TARGET, iroh_id = %node_addr.node_id, id = %id.to_short(), "Connecting after pkarr resolution");
         Ok(self
             .endpoint
             .connect(node_addr, ROSTRA_P2P_V0_ALPN)

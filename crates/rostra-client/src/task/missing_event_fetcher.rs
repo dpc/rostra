@@ -6,9 +6,9 @@ use rostra_util_error::{BoxedErrorResult, FmtCompact, WhateverResult};
 use snafu::ResultExt as _;
 use tracing::{debug, instrument, trace, warn};
 
-use super::connection_cache::ConnectionCache;
 use crate::LOG_TARGET;
 use crate::client::Client;
+use crate::connection_cache::ConnectionCache;
 
 #[derive(Clone)]
 pub struct MissingEventFetcher {
@@ -80,7 +80,19 @@ impl MissingEventFetcher {
                 let Ok(client) = self.client.client_ref().boxed() else {
                     break;
                 };
+                debug!(
+                    target:  LOG_TARGET,
+                    author_id = %author_id,
+                    follower_id = %follower_id,
+                    "Looking for a missing events from"
+                );
                 let Some(conn) = connections.get_or_connect(&client, *follower_id).await else {
+                    debug!(
+                        target:  LOG_TARGET,
+                        author_id = %author_id,
+                        follower_id = %follower_id,
+                        "Could not connect"
+                    );
                     continue;
                 };
 
@@ -89,7 +101,7 @@ impl MissingEventFetcher {
                         continue;
                     }
                     match self
-                        .get_event_from(author_id, *missing_event, *follower_id, conn, &db)
+                        .get_event_from_conn(author_id, *missing_event, *follower_id, conn, &db)
                         .await
                     {
                         Ok(_) => {}
@@ -109,7 +121,7 @@ impl MissingEventFetcher {
         }
     }
 
-    async fn get_event_from(
+    async fn get_event_from_conn(
         &self,
         author_id: RostraId,
         event_id: ShortEventId,
