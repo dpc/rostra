@@ -18,8 +18,9 @@ use tracing::debug;
 use super::id_self::IdSelfAccountRecord;
 use super::{
     Database, DbError, DbResult, EventsHeadsTableRecord, InsertEventOutcome, events,
-    events_by_time, events_content, events_heads, events_missing, events_self, get_first_in_range,
-    get_last_in_range, ids, ids_followees, ids_followers, ids_self, tables,
+    events_by_time, events_content, events_content_rc_count, events_heads, events_missing,
+    events_self, get_first_in_range, get_last_in_range, ids, ids_followees, ids_followers,
+    ids_self, tables,
 };
 use crate::{
     IdSocialProfileRecord, LOG_TARGET, Latest, SocialPostRecord, events_content_missing, ids_full,
@@ -75,6 +76,7 @@ impl Database {
         events_heads_table: &mut events_heads::Table,
         events_by_time_table: &mut events_by_time::Table,
         events_content_table: &mut events_content::Table,
+        events_content_rc_count_table: &mut events_content_rc_count::Table,
         events_content_missing_table: &mut events_content_missing::Table,
     ) -> DbResult<InsertEventOutcome> {
         let author = event.author();
@@ -173,6 +175,9 @@ impl Database {
             },
         )?;
         events_by_time_table.insert(&(event.timestamp(), event_id), &())?;
+
+        // Increment reference count for this event's content
+        Database::increment_event_content_rc_tx(event_id, events_content_rc_count_table)?;
 
         Ok(InsertEventOutcome::Inserted {
             was_missing,
@@ -462,5 +467,83 @@ impl Database {
         let self_id = Self::read_self_id_tx(ids_self_t)?
             .expect("Must have iroh secret generated after opening");
         Ok(iroh::SecretKey::from_bytes(&self_id.iroh_secret))
+    }
+
+    /// Increment reference count for event content when an event is inserted
+    pub fn increment_event_content_rc_tx(
+        event_id: ShortEventId,
+        events_content_rc_count_table: &mut events_content_rc_count::Table,
+    ) -> DbResult<u64> {
+        let current_count = events_content_rc_count_table
+            .get(&event_id)?
+            .map(|g| g.value())
+            .unwrap_or(0); // Default to 0 if missing (first reference)
+
+        let new_count = current_count + 1;
+        events_content_rc_count_table.insert(&event_id, &new_count)?;
+        Ok(new_count)
+    }
+
+    /// Decrement reference count for event content when an event is removed
+    /// Returns true if content should be deleted (count reached 0)
+    pub fn decrement_event_content_rc_tx(
+        event_id: ShortEventId,
+        events_content_table: &mut events_content::Table,
+        events_content_rc_count_table: &mut events_content_rc_count::Table,
+        events_content_missing_table: &mut events_content_missing::Table,
+    ) -> DbResult<bool> {
+        let current_count = events_content_rc_count_table
+            .get(&event_id)?
+            .map(|g| g.value())
+            .unwrap_or(1); // Default to 1 if missing (assume single reference)
+
+        if current_count <= 1 {
+            // Count will reach 0, remove everything
+            events_content_table.remove(&event_id)?;
+            events_content_rc_count_table.remove(&event_id)?;
+            events_content_missing_table.remove(&event_id)?;
+            Ok(true)
+        } else {
+            // Decrement count
+            let new_count = current_count
+                .checked_sub(1)
+                .expect("Reference count should never underflow");
+            events_content_rc_count_table.insert(&event_id, &new_count)?;
+            Ok(false)
+        }
+    }
+
+    /// Get the reference count for an event content entry
+    pub fn get_event_content_rc_tx(
+        event_id: ShortEventId,
+        events_content_rc_count_table: &impl events_content_rc_count::ReadableTable,
+    ) -> DbResult<u64> {
+        Ok(events_content_rc_count_table
+            .get(&event_id)?
+            .map(|g| g.value())
+            .unwrap_or(0)) // Default to 0 if missing
+    }
+
+    /// Remove an event and handle reference counting for its content
+    pub fn remove_event_tx(
+        event_id: ShortEventId,
+        events_table: &mut events::Table,
+        events_content_table: &mut events_content::Table,
+        events_content_rc_count_table: &mut events_content_rc_count::Table,
+        events_content_missing_table: &mut events_content_missing::Table,
+    ) -> DbResult<bool> {
+        let event_existed = events_table.remove(&event_id)?.is_some();
+
+        if event_existed {
+            // Decrement reference count and potentially clean up content
+            Database::decrement_event_content_rc_tx(
+                event_id,
+                events_content_table,
+                events_content_rc_count_table,
+                events_content_missing_table,
+            )?;
+        }
+
+        Ok(event_existed)
     }
 }

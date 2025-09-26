@@ -8,8 +8,8 @@ use tracing::info;
 
 use crate::event::EventContentState;
 use crate::{
-    Database, events, events_by_time, events_content, events_content_missing, events_heads,
-    events_missing, ids_full,
+    Database, events, events_by_time, events_content, events_content_missing,
+    events_content_rc_count, events_heads, events_missing, ids_full,
 };
 
 pub(crate) async fn temp_db_rng() -> BoxedErrorResult<(TempDir, super::Database)> {
@@ -68,6 +68,8 @@ async fn test_store_event() -> BoxedErrorResult<()> {
         let mut events_missing_table = tx.open_table(&events_missing::TABLE).boxed()?;
         let mut events_by_time_table = tx.open_table(&events_by_time::TABLE)?;
         let mut events_content_table = tx.open_table(&events_content::TABLE).boxed()?;
+        let mut events_content_rc_count_table =
+            tx.open_table(&events_content_rc_count::TABLE).boxed()?;
         let mut events_content_missing_table =
             tx.open_table(&events_content_missing::TABLE).boxed()?;
         let mut events_heads_table = tx.open_table(&events_heads::TABLE).boxed()?;
@@ -96,6 +98,7 @@ async fn test_store_event() -> BoxedErrorResult<()> {
                     &mut events_heads_table,
                     &mut events_by_time_table,
                     &mut events_content_table,
+                    &mut events_content_rc_count_table,
                     &mut events_content_missing_table,
                 )?;
 
@@ -162,6 +165,8 @@ async fn test_store_deleted_event() -> BoxedErrorResult<()> {
         let mut events_table = tx.open_table(&events::TABLE).boxed()?;
         let mut events_by_time_table = tx.open_table(&events_by_time::TABLE)?;
         let mut events_content_table = tx.open_table(&events_content::TABLE).boxed()?;
+        let mut events_content_rc_count_table =
+            tx.open_table(&events_content_rc_count::TABLE).boxed()?;
         let mut events_content_missing_table =
             tx.open_table(&events_content_missing::TABLE).boxed()?;
         let mut events_missing_table = tx.open_table(&events_missing::TABLE).boxed()?;
@@ -199,6 +204,7 @@ async fn test_store_deleted_event() -> BoxedErrorResult<()> {
                     &mut events_heads_table,
                     &mut events_by_time_table,
                     &mut events_content_table,
+                    &mut events_content_rc_count_table,
                     &mut events_content_missing_table,
                 )?;
 
@@ -224,6 +230,117 @@ async fn test_store_deleted_event() -> BoxedErrorResult<()> {
                 }
             }
         }
+        Ok(())
+    })
+    .await?;
+
+    Ok(())
+}
+
+#[test_log::test(tokio::test(flavor = "multi_thread"))]
+async fn test_event_reference_counting() -> BoxedErrorResult<()> {
+    use std::borrow::Cow;
+
+    use rostra_core::event::EventContentRaw;
+    use rostra_core::id::ToShort;
+
+    let id_secret = RostraIdSecretKey::generate();
+    let (_dir, db) = temp_db(id_secret.id()).await?;
+
+    let event_a = build_test_event(id_secret, None);
+    let event_a_id = event_a.event_id.to_short();
+
+    db.write_with(|tx| {
+        let mut events_content_table = tx.open_table(&events_content::TABLE)?;
+        let mut events_content_rc_count_table = tx.open_table(&events_content_rc_count::TABLE)?;
+        let mut events_content_missing_table = tx.open_table(&events_content_missing::TABLE)?;
+
+        // Test initial state - no reference count should exist
+        let initial_count =
+            Database::get_event_content_rc_tx(event_a_id, &events_content_rc_count_table)?;
+        assert_eq!(initial_count, 0, "Initial count should be 0");
+
+        // Insert first event reference
+        Database::increment_event_content_rc_tx(event_a_id, &mut events_content_rc_count_table)?;
+        let count_after_first =
+            Database::get_event_content_rc_tx(event_a_id, &events_content_rc_count_table)?;
+        assert_eq!(
+            count_after_first, 1,
+            "Count should be 1 after first increment"
+        );
+
+        // Insert second event reference
+        Database::increment_event_content_rc_tx(event_a_id, &mut events_content_rc_count_table)?;
+        let count_after_second =
+            Database::get_event_content_rc_tx(event_a_id, &events_content_rc_count_table)?;
+        assert_eq!(
+            count_after_second, 2,
+            "Count should be 2 after second increment"
+        );
+
+        // Add some content to test cleanup
+        let test_content = EventContentRaw::new(vec![1, 2, 3]);
+        events_content_table.insert(
+            &event_a_id,
+            &EventContentState::Present(Cow::Owned(test_content)),
+        )?;
+        events_content_missing_table.insert(&event_a_id, &())?;
+
+        // Remove first reference - should decrement but not delete content
+        let was_deleted = Database::decrement_event_content_rc_tx(
+            event_a_id,
+            &mut events_content_table,
+            &mut events_content_rc_count_table,
+            &mut events_content_missing_table,
+        )?;
+        assert!(
+            !was_deleted,
+            "Content should not be deleted after first decrement"
+        );
+
+        let count_after_first_decrement =
+            Database::get_event_content_rc_tx(event_a_id, &events_content_rc_count_table)?;
+        assert_eq!(
+            count_after_first_decrement, 1,
+            "Count should be 1 after first decrement"
+        );
+
+        // Content should still exist
+        let content_exists = events_content_table.get(&event_a_id)?.is_some();
+        assert!(
+            content_exists,
+            "Content should still exist after first decrement"
+        );
+
+        // Remove second reference - should delete everything
+        let was_deleted = Database::decrement_event_content_rc_tx(
+            event_a_id,
+            &mut events_content_table,
+            &mut events_content_rc_count_table,
+            &mut events_content_missing_table,
+        )?;
+        assert!(
+            was_deleted,
+            "Content should be deleted after final decrement"
+        );
+
+        // Everything should be cleaned up
+        let final_count =
+            Database::get_event_content_rc_tx(event_a_id, &events_content_rc_count_table)?;
+        assert_eq!(final_count, 0, "Count should be 0 after cleanup");
+
+        let content_exists = events_content_table.get(&event_a_id)?.is_some();
+        assert!(
+            !content_exists,
+            "Content should be deleted after final decrement"
+        );
+
+        let missing_exists = events_content_missing_table.get(&event_a_id)?.is_some();
+        assert!(
+            !missing_exists,
+            "Content missing entry should be deleted after final decrement"
+        );
+
         Ok(())
     })
     .await?;

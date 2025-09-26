@@ -4,7 +4,7 @@ use rostra_client_db::{Database as ClientDatabase, DbResult};
 use rostra_core::Timestamp;
 use tracing::{debug, info};
 
-use crate::tables::{hn_articles_published, hn_articles_unpublished, HnArticle};
+use crate::tables::{HnArticle, hn_articles_published, hn_articles_unpublished};
 
 pub struct HnBotDatabase {
     client_db: Arc<ClientDatabase>,
@@ -69,7 +69,11 @@ impl HnBotDatabase {
     }
 
     /// Mark an article as published and remove from unpublished queue
-    pub async fn mark_article_published(&self, hn_id: u32, published_at: Timestamp) -> DbResult<()> {
+    pub async fn mark_article_published(
+        &self,
+        hn_id: u32,
+        published_at: Timestamp,
+    ) -> DbResult<()> {
         self.client_db
             .write_with(|tx| {
                 let mut unpublished_table = tx.open_table(&hn_articles_unpublished::TABLE)?;
@@ -86,7 +90,6 @@ impl HnBotDatabase {
             })
             .await
     }
-
 
     /// Get count of unpublished articles
     pub async fn get_unpublished_count(&self) -> DbResult<usize> {

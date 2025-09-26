@@ -1,9 +1,8 @@
 use bincode::{Decode, Encode};
-use rostra_core::Timestamp;
-use serde::{Deserialize, Serialize};
-
 // Re-export the def_table macro from rostra-client-db
 pub use rostra_client_db::def_table;
+use rostra_core::Timestamp;
+use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Encode, Decode, Clone, Serialize, Deserialize)]
 pub struct HnArticle {
