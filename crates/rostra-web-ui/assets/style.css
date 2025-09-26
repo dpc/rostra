@@ -239,7 +239,7 @@ img {
   max-width: 100%;
 }
 
-img[loading="lazy"] {
+img.u-userImage[loading="lazy"] {
   display: block;
   /* Start invisible */
   opacity: 0;
@@ -248,9 +248,9 @@ img[loading="lazy"] {
 }
 
 /* Cached images (or loaded ones) fade in instantly */
-img[src]:not([loading="lazy"]),
+img.u-userImage[src]:not([loading="lazy"]),
 /* Non-lazy images */
-img[loading="lazy"][src][width][height] {
+img.u-userImage[loading="lazy"][src][width][height] {
   /* Lazy images with dimensions */
   opacity: 1;
 }
