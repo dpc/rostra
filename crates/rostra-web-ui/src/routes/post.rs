@@ -40,6 +40,46 @@ pub async fn get_single_post(
     ))
 }
 
+pub async fn delete_post(
+    state: State<SharedState>,
+    session: UserSession,
+    Path((author_id, event_id)): Path<(RostraId, ShortEventId)>,
+) -> RequestResult<impl IntoResponse> {
+    let client_handle = state.client(session.id()).await?;
+    let client = client_handle.client_ref()?;
+
+    // Verify the post is authored by the current user
+    if author_id != client.rostra_id() {
+        return Ok(Maud(html! {
+            div ."error" {
+                "You can only delete your own posts"
+            }
+        }));
+    }
+
+    // Create and publish a delete event with DELETE_PARENT_AUX_CONTENT_FLAG set
+    // and parent_aux pointing to the post we want to delete
+    client
+        .publish_event(session.id_secret()?, rostra_core::event::SocialPost {
+            djot_content: None,
+            persona: rostra_core::event::PersonaId(0),
+            reply_to: None,
+            reaction: None,
+        })
+        .replace(event_id)
+        .call()
+        .await?;
+
+    // Return empty content to replace the post
+    Ok(Maud(html! {
+        div ."m-postOverview -deleted" {
+            div ."m-postOverview__deletedMessage" {
+                "This post has been deleted"
+            }
+        }
+    }))
+}
+
 pub async fn fetch_missing_post(
     state: State<SharedState>,
     session: UserSession,
@@ -267,6 +307,17 @@ impl UiState {
                             }
                         }
                         @if !ro.is_ro() {
+                            @if author == client.rostra_id() {
+                                button ."m-postOverview__deleteButton u-button u-button--danger"
+                                    hx-post={"/ui/post/"(author)"/"(event_id.unwrap())"/delete"}
+                                    hx-confirm="Are you sure you want to delete this post?"
+                                    hx-target="closest .m-postOverview"
+                                    hx-swap="outerHTML"
+                                {
+                                    span ."m-postOverview__deleteButtonIcon u-buttonIcon" width="1rem" height="1rem" {}
+                                    "Delete"
+                                }
+                            }
 
                             button ."m-postOverview__replyToButton u-button"
                                 disabled[ro.to_disabled()]
