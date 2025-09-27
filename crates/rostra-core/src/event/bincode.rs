@@ -94,6 +94,7 @@ impl Event {
             content_raw,
         )
     }
+
     pub fn compute_id(&self) -> EventId {
         let encoded =
             ::bincode::encode_to_vec(self, STD_BINCODE_CONFIG).expect("Can't fail encoding");

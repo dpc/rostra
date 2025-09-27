@@ -4,13 +4,19 @@ use std::str::FromStr as _;
 use jotdown::{Attributes, Container, Event};
 use maud::{Markup, PreEscaped};
 use rostra_client::ClientRef;
+use rostra_core::ShortEventId;
 use rostra_core::id::RostraId;
 use url::Url;
 
 use crate::UiState;
 
 impl UiState {
-    pub(crate) async fn render_content(&self, _client: &ClientRef<'_>, content: &str) -> Markup {
+    pub(crate) async fn render_content(
+        &self,
+        _client: &ClientRef<'_>,
+        author_id: RostraId,
+        content: &str,
+    ) -> Markup {
         let sanitized = jotdown::Parser::new(content).map(|e| match e {
             Event::Start(Container::RawBlock { format }, _attrs) if format == "html" => {
                 Event::Start(Container::CodeBlock { language: format }, Attributes::new())
@@ -29,6 +35,7 @@ impl UiState {
         });
 
         let mut in_profile_link = vec![];
+        let mut in_media_link = vec![];
         let mut in_img_to_raw_html = vec![];
         let mut in_img_to_img = vec![];
         let out = jotdown::html::render_to_string(sanitized.flat_map(|event| {
@@ -68,67 +75,98 @@ impl UiState {
                         vec![Event::End(Container::Link(s, jotdown::LinkType::AutoLink))]
                     }
                 }
-                Event::Start(Container::Image(s, _link_type), _attr) => {
-                    if let Some(html) = maybe_embed_media_html(&s) {
-                        in_img_to_raw_html.push((html, String::new()));
+                Event::Start(Container::Image(s, _link_type), attr) => {
+                    if let Some(event_id) = Self::extra_rostra_media_link(&s) {
+                        // TODO: blocked on https://github.com/hellux/jotdown/issues/86
+                        // let x = client
+                        //     .db()
+                        //     .get_social_profile(rostra_id)
+                        //     .await
+                        //     .map(|record| record.display_name)
+                        //     .unwrap_or_else(|| rostra_id.to_string());
+                        in_media_link.push(event_id);
+                        vec![Event::Start(
+                            Container::Image(
+                                format!("/ui/media/{author_id}/{event_id}").into(),
+                                jotdown::SpanLinkType::Inline,
+                            ),
+                            attr,
+                        )]
                     } else {
-                        in_img_to_img.push(String::new());
-                    };
-                    vec![Event::Start(
-                        Container::Div {
-                            class: "lazyload-wrapper",
-                        },
-                        jotdown::Attributes::try_from(
-                            "{ onclick=\"this.classList.add('-expanded')\" }",
-                        )
-                        .expect("Can't fail"),
-                    )]
+                        if let Some(html) = maybe_embed_media_html(&s) {
+                            in_img_to_raw_html.push((html, String::new()));
+                        } else {
+                            in_img_to_img.push(String::new());
+                        }
+
+                        vec![Event::Start(
+                            Container::Div {
+                                class: "lazyload-wrapper",
+                            },
+                            jotdown::Attributes::try_from(
+                                "{ onclick=\"this.classList.add('-expanded')\" }",
+                            )
+                            .expect("Can't fail"),
+                        )]
+                    }
                 }
-                Event::End(Container::Image(s, link_type)) => [
-                    if let Some((html, alt)) = in_img_to_raw_html.pop() {
-                        let alt = alt.trim();
-                        let load_msg = if alt.is_empty() {
-                            format!("Load: {s}").into()
-                        } else {
-                            format!("Load “{alt}”: {s}").into()
-                        };
-                        vec![
-                            Event::Start(Container::Paragraph, Attributes::new()),
-                            Event::Str(load_msg),
-                            Event::End(Container::Paragraph),
-                            Event::Start(
-                                Container::RawInline { format: "html" },
-                                Attributes::try_from("{ loading=lazy }").expect("Can't fail"),
-                            ),
-                            Event::Str(html.into()),
-                            Event::End(Container::RawInline { format: "html" }),
-                        ]
-                    } else if let Some(alt) = in_img_to_img.pop() {
-                        let alt = alt.trim();
-                        let load_msg = if alt.is_empty() {
-                            format!("Load: {s}").into()
-                        } else {
-                            format!("Load “{alt}”: {s}").into()
-                        };
-                        vec![
-                            Event::Start(Container::Paragraph, Attributes::new()),
-                            Event::Str(load_msg),
-                            Event::End(Container::Paragraph),
-                            Event::Start(
-                                Container::Image(s.clone(), link_type),
-                                Attributes::try_from("{ loading=lazy }").expect("Can't fail"),
-                            ),
-                            Event::Str(alt.to_string().into()),
-                            Event::End(Container::Image(s, link_type)),
-                        ]
+                Event::End(Container::Image(s, link_type)) => {
+                    if let Some(event_id) = Self::extra_rostra_media_link(&s) {
+                        in_media_link.pop();
+                        vec![Event::End(Container::Image(
+                            format!("/ui/media/{author_id}/{event_id}").into(),
+                            jotdown::SpanLinkType::Inline,
+                        ))]
                     } else {
-                        panic!("Can't be here")
-                    },
-                    vec![Event::End(Container::Div {
-                        class: "img-wrapper",
-                    })],
-                ]
-                .concat(),
+                        [
+                            if let Some((html, alt)) = in_img_to_raw_html.pop() {
+                                let alt = alt.trim();
+                                let load_msg = if alt.is_empty() {
+                                    format!("Load: {s}").into()
+                                } else {
+                                    format!("Load “{alt}”: {s}").into()
+                                };
+                                vec![
+                                    Event::Start(Container::Paragraph, Attributes::new()),
+                                    Event::Str(load_msg),
+                                    Event::End(Container::Paragraph),
+                                    Event::Start(
+                                        Container::RawInline { format: "html" },
+                                        Attributes::try_from("{ loading=lazy }")
+                                            .expect("Can't fail"),
+                                    ),
+                                    Event::Str(html.into()),
+                                    Event::End(Container::RawInline { format: "html" }),
+                                ]
+                            } else if let Some(alt) = in_img_to_img.pop() {
+                                let alt = alt.trim();
+                                let load_msg = if alt.is_empty() {
+                                    format!("Load: {s}").into()
+                                } else {
+                                    format!("Load “{alt}”: {s}").into()
+                                };
+                                vec![
+                                    Event::Start(Container::Paragraph, Attributes::new()),
+                                    Event::Str(load_msg),
+                                    Event::End(Container::Paragraph),
+                                    Event::Start(
+                                        Container::Image(s.clone(), link_type),
+                                        Attributes::try_from("{ loading=lazy }")
+                                            .expect("Can't fail"),
+                                    ),
+                                    Event::Str(alt.to_string().into()),
+                                    Event::End(Container::Image(s, link_type)),
+                                ]
+                            } else {
+                                panic!("Can't be here")
+                            },
+                            vec![Event::End(Container::Div {
+                                class: "img-wrapper",
+                            })],
+                        ]
+                        .concat()
+                    }
+                }
                 Event::Str(s) => {
                     if !in_profile_link.is_empty() {
                         let profile = in_profile_link.last().expect("Not empty just checked");
@@ -160,6 +198,15 @@ impl UiState {
             None
         }
     }
+
+    /// Extra rostra id from a link `s`
+    pub(crate) fn extra_rostra_media_link(s: &str) -> Option<ShortEventId> {
+        if let Some(s) = s.strip_prefix("rostra-media:") {
+            ShortEventId::from_str(s).ok()
+        } else {
+            None
+        }
+    }
 }
 
 enum ExternalMedia<'s> {
@@ -181,6 +228,18 @@ fn extract_media(url: &Url) -> Option<ExternalMedia<'_>> {
         }
         _ => None,
     }
+}
+
+fn is_rostra_media_url(s: &str) -> bool {
+    let Ok(url) = Url::parse(s) else {
+        return false;
+    };
+
+    if url.scheme() == "rostra-media" {
+        return true;
+    }
+
+    false
 }
 
 fn maybe_embed_media_html(s: &str) -> Option<String> {

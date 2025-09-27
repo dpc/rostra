@@ -1,4 +1,3 @@
-use std::collections::BTreeSet;
 use std::str::FromStr as _;
 
 use snafu::Snafu;
@@ -7,8 +6,7 @@ use unicode_segmentation::UnicodeSegmentation as _;
 use super::{EventAuxKey, EventContentRaw, EventKind, PersonaId};
 use crate::id::{RostraId, ToShort as _};
 use crate::{
-    ExternalEventId, ShortEventId, array_type_define, array_type_impl_base32_str,
-    array_type_impl_serde,
+    ExternalEventId, array_type_define, array_type_impl_base32_str, array_type_impl_serde,
 };
 
 #[derive(Debug, Snafu)]
@@ -228,36 +226,54 @@ impl SocialPost {
         Self::is_reaction(&self.reply_to, reaction)
     }
 }
+
 impl EventContentKind for SocialPost {
     const KIND: EventKind = EventKind::SOCIAL_POST;
 }
 
+/// A piece of media (like an image, or a video)
 #[cfg_attr(feature = "serde", derive(::serde::Serialize, ::serde::Deserialize))]
 #[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
-pub struct SocialUpvote {
-    /// List of sub-personas this post belongs to
-    #[serde(rename = "p")]
-    pub personas: BTreeSet<String>,
-    #[serde(rename = "t")]
-    pub timestamp: u32,
-    #[serde(rename = "i")]
-    pub author: RostraId,
-    #[serde(rename = "e")]
-    pub event_id: ShortEventId,
+pub struct SocialMedia {
+    /// Mime type for the `data`
+    #[serde(rename = "m")]
+    pub mime: String,
+    /// Binary content of the media file
+    #[serde(rename = "d")]
+    pub data: Vec<u8>,
 }
 
-#[cfg_attr(feature = "serde", derive(::serde::Serialize, ::serde::Deserialize))]
-#[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
-pub struct SocialRepost {
-    /// List of sub-personas this post belongs to
-    #[serde(rename = "p")]
-    pub personas: BTreeSet<String>,
-    #[serde(rename = "t")]
-    pub timestamp: u32,
-    #[serde(rename = "i")]
-    pub author: RostraId,
-    #[serde(rename = "e")]
-    pub event_id: ShortEventId,
+impl EventContentKind for SocialMedia {
+    const KIND: EventKind = EventKind::SOCIAL_MEDIA;
+
+    fn singleton_key_aux(&self) -> Option<EventAuxKey> {
+        // Use blake3 hash of the content data as the key
+        let hash = blake3::hash(&self.data);
+        let hash_bytes = hash.as_bytes();
+        let mut key_bytes = [0u8; 16];
+        key_bytes.copy_from_slice(&hash_bytes[..16]);
+        Some(EventAuxKey::from_bytes(key_bytes))
+    }
+
+    fn validate(&self) -> ContentValidationResult<()> {
+        // Limit media file size to 9MB to prevent issues, until
+        // we have a better data management and reclamation system.
+        if self.data.len() > 9 * 1024 * 1024 {
+            return Err(ContentValidationError);
+        }
+
+        // Validate MIME type length
+        if self.mime.len() > 100 {
+            return Err(ContentValidationError);
+        }
+
+        // Don't allow empty data
+        if self.data.is_empty() {
+            return Err(ContentValidationError);
+        }
+
+        Ok(())
+    }
 }
 
 #[cfg_attr(feature = "serde", derive(::serde::Serialize, ::serde::Deserialize))]

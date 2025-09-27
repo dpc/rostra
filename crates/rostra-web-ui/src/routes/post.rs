@@ -60,12 +60,15 @@ pub async fn delete_post(
     // Create and publish a delete event with DELETE_PARENT_AUX_CONTENT_FLAG set
     // and parent_aux pointing to the post we want to delete
     client
-        .publish_event(session.id_secret()?, rostra_core::event::SocialPost {
-            djot_content: None,
-            persona: rostra_core::event::PersonaId(0),
-            reply_to: None,
-            reaction: None,
-        })
+        .publish_event(
+            session.id_secret()?,
+            rostra_core::event::SocialPost {
+                djot_content: None,
+                persona: rostra_core::event::PersonaId(0),
+                reply_to: None,
+                reaction: None,
+            },
+        )
         .replace(event_id)
         .call()
         .await?;
@@ -109,7 +112,9 @@ pub async fn fetch_missing_post(
 
     if let Some(post_record) = post_record {
         if let Some(djot_content) = post_record.content.djot_content.as_ref() {
-            let post_content_rendered = state.render_content(&client, djot_content).await;
+            let post_content_rendered = state
+                .render_content(&client, post_record.author, djot_content)
+                .await;
             return Ok(Maud(html! {
                 div ."m-postOverview__content -present" {
                     p {
@@ -209,7 +214,7 @@ impl UiState {
         };
 
         let post_content_rendered = if let Some(content) = content.as_ref() {
-            Some(self.render_content(client, content).await)
+            Some(self.render_content(client, author, content).await)
         } else {
             None
         };

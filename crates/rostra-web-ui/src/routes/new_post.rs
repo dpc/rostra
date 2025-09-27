@@ -4,7 +4,7 @@ use axum::response::IntoResponse;
 use maud::{Markup, PreEscaped, html};
 use rostra_core::ExternalEventId;
 use rostra_core::event::PersonaId;
-use rostra_core::id::ToShort as _;
+use rostra_core::id::{RostraId, ToShort as _};
 use serde::Deserialize;
 use tower_cookies::Cookies;
 
@@ -92,6 +92,7 @@ pub async fn post_new_post(
             }
         },
         session.ro_mode(),
+        Some(client_ref.rostra_id()),
     );
     let reply_to = if let Some(reply_to) = form.reply_to {
         Some((
@@ -318,7 +319,12 @@ impl UiState {
         }
     }
 
-    pub fn new_post_form(&self, notification: impl Into<Option<Markup>>, ro: RoMode) -> Markup {
+    pub fn new_post_form(
+        &self,
+        notification: impl Into<Option<Markup>>,
+        ro: RoMode,
+        user_id: Option<RostraId>,
+    ) -> Markup {
         let notification = notification.into();
         html! {
             form ."m-newPostForm"
@@ -347,20 +353,65 @@ impl UiState {
                     disabled[ro.to_disabled()]
                     {}
                 div ."m-newPostForm__footer" {
-                    @if let Some(n) = notification {
-                        (n)
+                    div ."m-newPostForm__footerRow m-newPostForm__footerRow--main" {
+                        a href="https://htmlpreview.github.io/?https://github.com/jgm/djot/blob/master/doc/syntax.html" target="_blank" { "Formatting" }
+                        a
+                            ."m-newPostForm__emojiButton"
+                            href="#"
+                        { "😀" }
+                        button ."m-newPostForm__previewButton u-button"
+                            disabled[ro.to_disabled()]
+                            type="submit"
+                        {
+                            span ."m-newPostForm__previewButtonIcon u-buttonIcon" width="1rem" height="1rem" {}
+                            "Preview"
+                        }
                     }
-                    a href="https://htmlpreview.github.io/?https://github.com/jgm/djot/blob/master/doc/syntax.html" target="_blank" { "Formatting" }
-                    a
-                        ."m-newPostForm__emojiButton"
-                        href="#"
-                    { "😀" }
-                    button ."m-newPostForm__previewButton u-button"
-                        disabled[ro.to_disabled()]
-                        type="submit"
-                    {
-                        span ."m-newPostForm__previewButtonIcon u-buttonIcon" width="1rem" height="1rem" {}
-                        "Preview"
+                    div ."m-newPostForm__footerRow m-newPostForm__footerRow--media" {
+                        div ."m-newPostForm__notification" {
+                            @if let Some(n) = notification {
+                                (n)
+                            }
+                        }
+                        @if let Some(uid) = user_id {
+                            button ."m-newPostForm__attachButton u-button"
+                                disabled[ro.to_disabled()]
+                                type="button"
+                                hx-get=(format!("/ui/media/{}/list", uid))
+                                hx-target=".o-mediaList"
+                                hx-swap="outerHTML"
+                            {
+                                span ."m-newPostForm__attachButtonIcon u-buttonIcon" width="1rem" height="1rem" {}
+                                "Attach"
+                            }
+                        } @else {
+                            button ."m-newPostForm__attachButton u-button"
+                                disabled
+                                type="button"
+                            {
+                                span ."m-newPostForm__attachButtonIcon u-buttonIcon" width="1rem" height="1rem" {}
+                                "Attach"
+                            }
+                        }
+                        button ."m-newPostForm__uploadButton u-button"
+                            disabled[ro.to_disabled()]
+                            type="button"
+                            onclick="document.getElementById('media-file-input').click()"
+                        {
+                            span ."m-newPostForm__uploadButtonIcon u-buttonIcon" width="1rem" height="1rem" {}
+                            "Upload"
+                        }
+                        input id="media-file-input"
+                            name="media_file"
+                            type="file"
+                            accept="image/*,video/*,audio/*"
+                            style="display: none;"
+                            hx-post="/ui/media/publish"
+                            hx-encoding="multipart/form-data"
+                            hx-target=".m-newPostForm__notification"
+                            hx-swap="innerHTML"
+                            hx-trigger="change"
+                            {}
                     }
                 }
                 div
@@ -398,6 +449,37 @@ impl UiState {
 
             }
             (submit_on_ctrl_enter(".m-newPostForm", ".m-newPostForm__content"))
+
+            // JavaScript for inserting media syntax
+            script {
+                (PreEscaped(r#"
+                    function insertMediaSyntax(eventId) {
+                        const textarea = document.querySelector('.m-newPostForm__content');
+                        const syntax = '![](rostra-media:' + eventId + ')';
+                        
+                        if (textarea) {
+                            const start = textarea.selectionStart;
+                            const end = textarea.selectionEnd;
+                            const text = textarea.value;
+                            
+                            // Insert at cursor position
+                            const newText = text.substring(0, start) + syntax + text.substring(end);
+                            textarea.value = newText;
+                            
+                            // Move cursor to end of inserted text
+                            const newPos = start + syntax.length;
+                            textarea.setSelectionRange(newPos, newPos);
+                            textarea.focus();
+                            
+                            // Trigger input event for htmx preview update
+                            textarea.dispatchEvent(new Event('input', { bubbles: true }));
+                        }
+                        
+                        // Hide the media list
+                        document.querySelector('.o-mediaList').style.display = 'none';
+                    }
+                "#))
+            }
         }
     }
 }

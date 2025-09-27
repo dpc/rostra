@@ -2,6 +2,7 @@ mod add_followee;
 mod avatar;
 mod content;
 mod cookies;
+mod media;
 mod new_post;
 mod post;
 mod profile;
@@ -163,16 +164,15 @@ pub fn route_handler(state: SharedState) -> Router<Arc<UiState>> {
             get(profile::get_follow_dialog).post(profile::post_follow),
         )
         .route("/ui/avatar/{id}", get(avatar::get))
+        .route("/ui/media/{author}/{event_id}", get(media::get))
+        .route("/ui/media/{author}/list", get(media::list))
         .route("/ui/updates", get(timeline::get_updates))
         .route("/ui/post/{author}/{event}", get(post::get_single_post))
         .route(
             "/ui/post/{author}/{event}/fetch",
             post(post::fetch_missing_post),
         )
-        .route(
-            "/ui/post/{author}/{event}/delete",
-            post(post::delete_post),
-        )
+        .route("/ui/post/{author}/{event}/delete", post(post::delete_post))
         .route("/ui/post", post(new_post::post_new_post))
         .route("/ui/post/preview", post(new_post::get_post_preview))
         .route(
@@ -180,6 +180,7 @@ pub fn route_handler(state: SharedState) -> Router<Arc<UiState>> {
             post(new_post::get_post_preview_dialog),
         )
         .route("/ui/post/reply_to", get(new_post::get_reply_to))
+        .route("/ui/media/publish", post(media::publish))
         .route("/ui/followee", post(add_followee::add_followee))
         .route("/ui/unlock", get(unlock::get).post(unlock::post_unlock))
         .route("/ui/unlock/logout", get(unlock::get).post(unlock::logout))

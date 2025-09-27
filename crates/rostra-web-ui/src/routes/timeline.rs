@@ -131,6 +131,10 @@ impl UiState {
         &self,
         session: &UserSession,
     ) -> RequestResult<Markup> {
+        let client = self.client(session.id()).await?;
+        let client_ref = client.client_ref()?;
+        let user_id = client_ref.rostra_id();
+
         Ok(html! {
             nav ."o-navBar"
                 hx-ext="ws"
@@ -151,7 +155,7 @@ impl UiState {
 
                 (self.render_add_followee_form(None))
 
-                (self.new_post_form(None, session.ro_mode()))
+                (self.new_post_form(None, session.ro_mode(), Some(user_id)))
             }
         })
     }
@@ -223,6 +227,7 @@ impl UiState {
 
             }
             div .o-previewDialog {}
+            div .o-mediaList {}
             div .o-followDialog {}
             (re_typeset_mathjax())
 

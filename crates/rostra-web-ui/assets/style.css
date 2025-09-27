@@ -710,6 +710,12 @@ emoji-picker {
 
 .m-newPostForm__footer {
   display: flex;
+  flex-direction: column;
+  gap: 5pt;
+}
+
+.m-newPostForm__footerRow {
+  display: flex;
   justify-content: flex-end;
   gap: 5pt;
 }
@@ -1170,4 +1176,94 @@ input:checked+.slider:before {
 
 .slider.round:before {
   border-radius: 50%;
+}
+
+/* Media List Styles */
+.o-mediaList {
+  display: none;
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  background-color: rgba(0, 0, 0, 0.5);
+  z-index: 1000;
+  justify-content: center;
+  align-items: center;
+}
+
+.o-mediaList.-active {
+  display: flex;
+}
+
+.o-mediaList__content {
+  background-color: var(--color-bg-default);
+  border-radius: 8px;
+  padding: 20px;
+  width: 90%;
+  max-width: 600px;
+  max-height: 80vh;
+  overflow-y: auto;
+  box-shadow: 0 4px 8px rgba(0, 0, 0, 0.2);
+  display: flex;
+  flex-direction: column;
+}
+
+.o-mediaList__items {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+  gap: 10px;
+  margin-bottom: 20px;
+  overflow-y: auto;
+  flex-grow: 1;
+  max-height: calc(80vh - 120px); /* Leave space for header and close button */
+  padding: 10px;
+  border: 1px solid var(--color-timeline-item-border);
+  border-radius: var(--border-radius-std);
+}
+
+.o-mediaList__item {
+  cursor: pointer;
+  border: 1px solid var(--color-button-border);
+  border-radius: var(--border-radius-std);
+  padding: 8px;
+  text-align: center;
+  transition: background-color 0.2s;
+}
+
+.o-mediaList__item:hover {
+  background-color: var(--color-button-bg-hover);
+}
+
+.o-mediaList__thumbnail {
+  width: 100%;
+  max-width: 120px;
+  height: 80px;
+  object-fit: cover;
+  border-radius: var(--border-radius-std);
+  margin-bottom: 5px;
+}
+
+.o-mediaList__info {
+  font-size: 0.8rem;
+  color: var(--color-text-default);
+  opacity: 0.7;
+}
+
+.o-mediaList__empty {
+  text-align: center;
+  color: var(--color-text-default);
+  opacity: 0.7;
+  padding: 20px;
+}
+
+.o-mediaList__actionButtons {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  margin-top: 20px;
+}
+
+.o-mediaList__closeButton {
+  background-color: var(--color-button-bg);
 }

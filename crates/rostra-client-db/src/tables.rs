@@ -60,7 +60,10 @@ def_table!(ids_personas: (RostraId, PersonaId) => IdsPersonaRecord);
 
 // EVENTS
 def_table!(events: ShortEventId => EventRecord);
+// TODO: this version is stupid, make a migration that deletes it and renames
+// `events_singletons_new` to old name
 def_table!(events_singletons: (EventKind, EventAuxKey) => Latest<event::EventSingletonRecord>);
+def_table!(events_singletons_new: (RostraId, EventKind, EventAuxKey) => Latest<event::EventSingletonRecord>);
 def_table!(events_missing: (RostraId, ShortEventId) => EventsMissingRecord);
 def_table!(events_heads: (RostraId, ShortEventId) => EventsHeadsTableRecord);
 def_table!(events_self: ShortEventId => ());

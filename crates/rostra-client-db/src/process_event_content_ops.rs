@@ -10,7 +10,8 @@ use crate::event::EventSingletonRecord;
 use crate::{
     Database, DbError, IdSocialProfileRecord, IrohNodeRecord, LOG_TARGET, OverflowSnafu,
     SocialPostsReactionsRecord, SocialPostsRepliesRecord, WriteTransactionCtx, events_singletons,
-    social_posts, social_posts_by_time, social_posts_reactions, social_posts_replies,
+    events_singletons_new, social_posts, social_posts_by_time, social_posts_reactions,
+    social_posts_replies,
 };
 
 #[derive(Debug, Snafu)]
@@ -264,6 +265,24 @@ impl Database {
                     event_id: event_content.event_id().to_short(),
                 },
                 &mut events_singletons_tbl,
+            )?;
+
+            // Also write to events_singleton2 table with RostraId in the key
+            let mut events_singletons_new_tbl = tx
+                .open_table(&events_singletons_new::TABLE)
+                .map_err(DbError::from)?;
+
+            Self::insert_latest_value_tx(
+                event_content.timestamp(),
+                &(
+                    event_content.author(),
+                    event_content.kind(),
+                    event_content.aux_key(),
+                ),
+                EventSingletonRecord {
+                    event_id: event_content.event_id().to_short(),
+                },
+                &mut events_singletons_new_tbl,
             )?;
         }
 

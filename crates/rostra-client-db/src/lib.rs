@@ -162,7 +162,7 @@ pub struct Database {
 }
 
 impl Database {
-    const MAX_CONTENT_LEN: u32 = 1_000_000u32;
+    const MAX_CONTENT_LEN: u32 = 10_000_000u32;
     pub async fn mk_db_path(
         data_dir: &Path,
         self_id: RostraId,
@@ -470,6 +470,7 @@ impl Database {
         .await
         .expect("Storage error")
     }
+
     /// Process event content
     ///
     /// Note: Must only be called for an event that was already processed
@@ -689,6 +690,23 @@ impl Database {
         .expect("Database panic")
     }
 
+    pub async fn get_latest_singleton_event2(
+        &self,
+        rostra_id: RostraId,
+        kind: EventKind,
+        aux_key: EventAuxKey,
+    ) -> Option<ShortEventId> {
+        self.read_with(|tx| {
+            let singletons_table = tx.open_table(&events_singletons_new::TABLE)?;
+
+            Ok(singletons_table
+                .get(&(rostra_id, kind, aux_key))?
+                .map(|record| record.value().inner.event_id))
+        })
+        .await
+        .expect("Database panic")
+    }
+
     pub async fn get_all_singleton_events(
         &self,
         kind: EventKind,
@@ -760,6 +778,7 @@ where
         .map(|(k, _)| k.value()))
 }
 
+#[derive(Debug, Clone)]
 pub enum InsertEventOutcome {
     /// An event already existed, so it changed nothing
     AlreadyPresent,
@@ -810,7 +829,7 @@ impl InsertEventOutcome {
     }
 }
 
-#[derive(Clone, Copy, PartialEq, Eq)]
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum ProcessEventState {
     New,
     Existing,

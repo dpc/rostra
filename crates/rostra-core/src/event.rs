@@ -317,12 +317,15 @@ impl EventKind {
 
     /// Social Post, backbone of the social network
     pub const SOCIAL_POST: Self = EventKind::from_u16(0x20);
-    pub const SOCIAL_LIKE: Self = EventKind::from_u16(0x21);
-    pub const SOCIAL_REPOST: Self = EventKind::from_u16(0x22);
     pub const SOCIAL_PROFILE_UPDATE: Self = EventKind::from_u16(0x24);
+    pub const SOCIAL_MEDIA: Self = EventKind::from_u16(0x25);
 
     pub const fn from_u16(value: u16) -> Self {
         Self(value.to_be_bytes())
+    }
+
+    pub const fn as_u16(self) -> u16 {
+        u16::from_be_bytes(self.0)
     }
 }
 
@@ -336,11 +339,10 @@ impl fmt::Display for EventKind {
             Self::PERSONA_UPDATE => "persona-update",
             Self::NODE_ANNOUNCEMENT => "node-announcement",
             Self::SOCIAL_POST => "social-post",
-            Self::SOCIAL_LIKE => "social-like",
-            Self::SOCIAL_REPOST => "social-repost",
             Self::SOCIAL_PROFILE_UPDATE => "social-profile-update",
+            Self::SOCIAL_MEDIA => "social-media",
             v => {
-                f.write_fmt(format_args!("{v}"))?;
+                f.write_fmt(format_args!("{}", v.as_u16()))?;
                 return Ok(());
             }
         };

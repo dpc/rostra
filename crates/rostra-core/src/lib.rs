@@ -191,9 +191,10 @@ impl From<NullableShortEventId> for Option<ShortEventId> {
 impl fmt::Display for NullableShortEventId {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         if let Some(id) = self.0 {
-            id.fmt(f)
+            id.fmt(f)?;
         } else {
-            f.write_str("none")
+            f.write_str("none")?;
         }
+        Ok(())
     }
 }

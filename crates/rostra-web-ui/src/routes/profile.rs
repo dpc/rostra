@@ -198,7 +198,7 @@ impl UiState {
                         (self.render_profile_summary(profile_id, session, session.ro_mode()).await?)
                     }
 
-                    (self.new_post_form(None, session.ro_mode()))
+                    (self.new_post_form(None, session.ro_mode(), None))
                 }
         })
     }

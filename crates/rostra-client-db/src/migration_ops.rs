@@ -9,9 +9,10 @@ use crate::{
     Database, DbResult, DbVersionTooHighSnafu, IdSocialProfileRecord, IdsFolloweesRecord,
     LOG_TARGET, Latest, SocialPostRecord, WriteTransactionCtx, db_version, events, events_by_time,
     events_content, events_content_missing, events_heads, events_missing, events_self,
-    events_singletons, ids_followees, ids_followees_v0, ids_followers, ids_full, ids_personas,
-    ids_self, ids_unfollowed, social_posts, social_posts_by_time, social_posts_reactions,
-    social_posts_replies, social_posts_v0, social_profiles, social_profiles_v0,
+    events_singletons, events_singletons_new, ids_followees, ids_followees_v0, ids_followers,
+    ids_full, ids_personas, ids_self, ids_unfollowed, social_posts, social_posts_by_time,
+    social_posts_reactions, social_posts_replies, social_posts_v0, social_profiles,
+    social_profiles_v0,
 };
 
 impl Database {
@@ -27,6 +28,7 @@ impl Database {
 
         tx.open_table(&events::TABLE)?;
         tx.open_table(&events_singletons::TABLE)?;
+        tx.open_table(&events_singletons_new::TABLE)?;
         tx.open_table(&events_missing::TABLE)?;
         tx.open_table(&events_by_time::TABLE)?;
         tx.open_table(&events_content::TABLE)?;
