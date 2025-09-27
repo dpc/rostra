@@ -169,6 +169,10 @@ pub fn route_handler(state: SharedState) -> Router<Arc<UiState>> {
             "/ui/post/{author}/{event}/fetch",
             post(post::fetch_missing_post),
         )
+        .route(
+            "/ui/post/{author}/{event}/delete",
+            post(post::delete_post),
+        )
         .route("/ui/post", post(new_post::post_new_post))
         .route("/ui/post/preview", post(new_post::get_post_preview))
         .route(
