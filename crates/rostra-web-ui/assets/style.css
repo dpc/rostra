@@ -8,9 +8,9 @@
 
 @media (prefers-color-scheme: dark) {
   :root {
-    --color-bg: 10%;
-    --color-bg-inc: 2%;
-    --color-fg: 90%;
+    --color-bg: 15%;
+    --color-bg-inc: 2.5%;
+    --color-fg: 85%;
     --color-fg-inc: -1%;
 
     --invert: 100%;
@@ -18,13 +18,17 @@
     /* --color-timeline-bg: #414141; */
 
     /* --color-timeline-item-border: #91919c; */
-    --color-post-bg: #303030;
+    --color-post-bg: #404040;
 
-    --color-blockquote-bg: #f9fafb;
+    --color-blockquote-bg: rgba(255, 255, 255, 0.08);
 
-    --color-border: rgb(217, 217, 232);
+    --color-border: rgba(255, 255, 255, 0.2);
     --color-text-input: var(--color-text-default);
-    --quote-background-color: #0f0f0f;
+    --quote-background-color: rgba(0, 0, 0, 0.3);
+
+    /* Bright shadows for dark mode */
+    --shadow-color: rgba(255, 255, 255, 0.1);
+    --shadow-color-strong: rgba(255, 255, 255, 0.15);
   }
 }
 
@@ -47,6 +51,10 @@
     --color-border: rgb(217, 217, 232);
     --color-text-input: var(--color-text-default);
     --quote-background-color: #f9fafb;
+
+    /* Dark shadows for light mode */
+    --shadow-color: rgba(0, 0, 0, 0.1);
+    --shadow-color-strong: rgba(0, 0, 0, 0.15);
   }
 }
 
@@ -771,18 +779,21 @@ emoji-picker {
   align-items: center;
   height: 100dvh;
   padding: 1rem;
-  /* min-height: 100vh; */
-  /* min-width: 100vw; */
 }
 
 .o-unlockScreen__form {
   padding: clamp(0px, 2.5vw, 2rem) clamp(0px, 5vw, 4rem);
-  border: solid 1px;
+  border: solid 1px var(--color-timeline-item-border);
   border-radius: var(--border-radius-std);
 
   display: flex;
   flex-direction: column;
   gap: .5rem;
+
+  background: linear-gradient(135deg,
+      var(--color-bg-default) 0%,
+      oklch(calc(var(--color-bg) + 3 * var(--color-bg-inc)) 0 0) 100%);
+  box-shadow: 0 8px 25px var(--shadow-color-strong), 0 2px 10px var(--shadow-color);
 }
 
 .o-unlockScreen__header>* {
@@ -1216,7 +1227,8 @@ input:checked+.slider:before {
   margin-bottom: 20px;
   overflow-y: auto;
   flex-grow: 1;
-  max-height: calc(80vh - 120px); /* Leave space for header and close button */
+  max-height: calc(80vh - 120px);
+  /* Leave space for header and close button */
   padding: 10px;
   border: 1px solid var(--color-timeline-item-border);
   border-radius: var(--border-radius-std);
