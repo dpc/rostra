@@ -33,6 +33,12 @@
     /* Less saturated links for dark mode */
     --color-link: oklch(55% 0.25 30);
     --color-link-hover: oklch(85% 0.35 30);
+
+    /* Subtle button colors for dark mode */
+    --color-button-bg: oklch(20% 0 0);
+    --color-button-bg-hover: oklch(25% 0 0);
+    --color-button-border: oklch(50% 0 0);
+    --color-button-border-hover: oklch(60% 0 0);
   }
 }
 
@@ -63,6 +69,12 @@
     /* Link colors for light mode */
     --color-link: oklch(40% 0.20 30);
     --color-link-hover: oklch(30% 0.50 30);
+
+    /* Button colors for light mode */
+    --color-button-bg: oklch(93% 0 0);
+    --color-button-bg-hover: oklch(90% 0 0);
+    --color-button-border: oklch(67% 0 0);
+    --color-button-border-hover: oklch(72% 0 0);
   }
 }
 
@@ -71,10 +83,6 @@
   --color-bg-default: oklch(var(--color-bg) 0 0);
   --color-pre-bg: oklch(calc(var(--color-bg) + 10 * var(--color-bg-inc)) 0 0);
   --color-text-input-bg: oklch(calc(var(--color-bg) + 3 * var(--color-bg-inc)) 0 0);
-  --color-button-bg: oklch(calc(var(--color-bg) + 10 * var(--color-bg-inc)) 0 0);
-  --color-button-bg-hover: oklch(calc(var(--color-bg) + 5 * var(--color-bg-inc)) 0 0);
-  --color-button-border: oklch(calc(var(--color-bg) + 30 * var(--color-bg-inc)) 0 0);
-  --color-button-border-hover: oklch(calc(var(--color-bg) + 25 * var(--color-bg-inc)) 0 0);
   --color-timeline-item-border: oklch(calc(var(--color-bg) + 10 * var(--color-bg-inc)) 0 0);
   --color-timeline-bg: oklch(calc(var(--color-bg) + 5 * var(--color-bg-inc)) 0 0);
   --color-post-highlight-bg: oklch(calc(var(--color-bg) + 8 * var(--color-bg-inc)) 0 0);
@@ -739,7 +747,7 @@ emoji-picker {
 .m-newPostForm__content {
   padding: 5pt;
   height: 10rem;
-  border: 1px solid var(--color-timeline-item-border);
+  border: 1px solid var(--color-button-border);
   border-radius: var(--border-radius-std);
 }
 
@@ -774,7 +782,7 @@ emoji-picker {
 }
 
 .m-addFolloweeForm__content {
-  border: 1px solid var(--color-timeline-item-border);
+  border: 1px solid var(--color-button-border);
   border-radius: var(--border-radius-std);
   flex-grow: 1;
   /* width: 100%; */
