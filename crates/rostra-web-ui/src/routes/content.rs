@@ -230,18 +230,6 @@ fn extract_media(url: &Url) -> Option<ExternalMedia<'_>> {
     }
 }
 
-fn is_rostra_media_url(s: &str) -> bool {
-    let Ok(url) = Url::parse(s) else {
-        return false;
-    };
-
-    if url.scheme() == "rostra-media" {
-        return true;
-    }
-
-    false
-}
-
 fn maybe_embed_media_html(s: &str) -> Option<String> {
     let Ok(url) = Url::parse(s) else {
         return None;
