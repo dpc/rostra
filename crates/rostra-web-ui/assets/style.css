@@ -29,6 +29,10 @@
     /* Bright shadows for dark mode */
     --shadow-color: rgba(255, 255, 255, 0.1);
     --shadow-color-strong: rgba(255, 255, 255, 0.15);
+
+    /* Less saturated links for dark mode */
+    --color-link: oklch(55% 0.25 30);
+    --color-link-hover: oklch(85% 0.35 30);
   }
 }
 
@@ -55,6 +59,10 @@
     /* Dark shadows for light mode */
     --shadow-color: rgba(0, 0, 0, 0.1);
     --shadow-color-strong: rgba(0, 0, 0, 0.15);
+
+    /* Link colors for light mode */
+    --color-link: oklch(40% 0.20 30);
+    --color-link-hover: oklch(30% 0.50 30);
   }
 }
 
@@ -70,8 +78,6 @@
   --color-timeline-item-border: oklch(calc(var(--color-bg) + 10 * var(--color-bg-inc)) 0 0);
   --color-timeline-bg: oklch(calc(var(--color-bg) + 5 * var(--color-bg-inc)) 0 0);
   --color-post-highlight-bg: oklch(calc(var(--color-bg) + 8 * var(--color-bg-inc)) 0 0);
-  --color-link: oklch(calc(var(--color-fg) + 15 * var(--color-fg-inc)) 0.4 30);
-  --color-link-hover: oklch(calc(var(--color-fg) + 55 * var(--color-fg-inc)) 0.4 110);
 }
 
 /* RESET */
