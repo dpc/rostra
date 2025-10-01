@@ -772,6 +772,14 @@ emoji-picker {
   background: url('/assets/icons/arrow-right.svg') center/contain no-repeat;
 }
 
+.m-newPostForm__attachButtonIcon {
+  background: url('/assets/icons/paperclip.svg') center/contain no-repeat;
+}
+
+.m-newPostForm__uploadButtonIcon {
+  background: url('/assets/icons/cloud-arrow-up.svg') center/contain no-repeat;
+}
+
 .m-addFolloweeForm {
   display: flex;
   flex-direction: row;
