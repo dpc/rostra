@@ -331,6 +331,7 @@ img.u-userImage[loading="lazy"][src][width][height] {
   color: var(--color-link);
 }
 
+
 .u-userImage {
   width: 32pt;
   height: 32pt;
@@ -653,6 +654,10 @@ emoji-picker {
 
 .m-postOverview__replyToButtonIcon {
   background: url('/assets/icons/reply.svg') center/contain no-repeat;
+}
+
+.m-postOverview__deleteButtonIcon {
+  background: url('/assets/icons/xmark.svg') center/contain no-repeat;
 }
 
 .m-profileSummary {
