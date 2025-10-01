@@ -6,13 +6,13 @@ use rostra_client::ClientRefError;
 use rostra_client::error::{ActivateError, InitError, PostError};
 use rostra_client::multiclient::MultiClientError;
 use rostra_client_db::DbError;
-use rostra_util_error::BoxedError;
+use rostra_util_error::{BoxedError, FmtCompact as _};
 use serde::Serialize;
 use snafu::Snafu;
 use tracing::info;
 
 use super::routes::AppJson;
-use crate::UiStateClientError;
+use crate::{LOG_TARGET, UiStateClientError};
 
 /// Error by the user
 #[derive(Debug, Snafu)]
@@ -92,7 +92,12 @@ pub type RequestResult<T> = std::result::Result<T, RequestError>;
 
 impl IntoResponse for RequestError {
     fn into_response(self) -> Response {
-        info!(err=%self, "Request Error");
+        info!(
+            target: LOG_TARGET,
+
+            err=%self.fmt_compact(),
+            "Request Error"
+        );
 
         let (status_code, message) = match root_cause(&self).downcast_ref::<UserRequestError>() {
             Some(user_err) => {

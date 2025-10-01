@@ -14,7 +14,7 @@ use std::sync::Arc;
 
 use axum::Router;
 use axum::body::Body;
-use axum::extract::{FromRequest, Path, Request, State};
+use axum::extract::{DefaultBodyLimit, FromRequest, Path, Request, State};
 use axum::http::header::{self, CONTENT_TYPE};
 use axum::http::{HeaderMap, HeaderValue, StatusCode};
 use axum::middleware::{self, Next};
@@ -180,7 +180,10 @@ pub fn route_handler(state: SharedState) -> Router<Arc<UiState>> {
             post(new_post::get_post_preview_dialog),
         )
         .route("/ui/post/reply_to", get(new_post::get_reply_to))
-        .route("/ui/media/publish", post(media::publish))
+        .route(
+            "/ui/media/publish",
+            post(media::publish).layer(DefaultBodyLimit::max(9_000_000)),
+        )
         .route("/ui/followee", post(add_followee::add_followee))
         .route("/ui/unlock", get(unlock::get).post(unlock::post_unlock))
         .route("/ui/unlock/logout", get(unlock::get).post(unlock::logout))
