@@ -685,16 +685,25 @@ emoji-picker {
   flex-direction: row;
   flex-wrap: wrap;
   gap: 0.5rem;
+  width: 100%;
+  max-width: 400px;
 }
 
 .m-profileSummary__copyButton {
   display: flex;
   align-items: center;
-  gap: 0.5rem;
+  justify-content: center;
+  flex: 1;
+  position: relative;
+  padding-left: 2rem;
 }
 
 .m-profileSummary__copyButtonIcon {
   background: url('/assets/icons/id-card.svg') center/contain no-repeat;
+  position: absolute;
+  left: 0.5rem;
+  top: 50%;
+  transform: translateY(-50%);
 }
 
 .m-profileSummary__copyButton:hover .m-profileSummary__copyButtonIcon {
@@ -708,11 +717,18 @@ emoji-picker {
 .m-profileSummary__editButton {
   display: flex;
   align-items: center;
-  gap: 0.5rem;
+  justify-content: center;
+  flex: 1;
+  position: relative;
+  padding-left: 2rem;
 }
 
 .m-profileSummary__editButtonIcon {
   background: url('/assets/icons/pen-to-square.svg') center/contain no-repeat;
+  position: absolute;
+  left: 0.5rem;
+  top: 50%;
+  transform: translateY(-50%);
 }
 
 .m-profileSummary__saveButton {
@@ -728,11 +744,18 @@ emoji-picker {
 .m-profileSummary__logoutButton {
   display: flex;
   align-items: center;
-  gap: 0.5rem;
+  justify-content: center;
+  flex: 1;
+  position: relative;
+  padding-left: 2rem;
 }
 
 .m-profileSummary__logoutButtonIcon {
   background: url('/assets/icons/arrow-right-from-bracket.svg') center/contain no-repeat;
+  position: absolute;
+  left: 0.5rem;
+  top: 50%;
+  transform: translateY(-50%);
 }
 
 .m-newPostForm {
@@ -760,6 +783,10 @@ emoji-picker {
   display: flex;
   justify-content: flex-end;
   gap: 5pt;
+}
+
+.m-newPostForm__footerRow--media {
+  justify-content: flex-start;
 }
 
 .m-newPostForm__previewButton {
