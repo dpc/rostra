@@ -15,7 +15,7 @@
 
     --invert: 100%;
 
-    /* --color-timeline-bg: #414141; */
+    --color-timeline-bg: oklch(calc(15% + 2 * 2.5%) 0 0);
 
     /* --color-timeline-item-border: #91919c; */
     --color-post-bg: #404040;
@@ -51,7 +51,7 @@
 
     --invert: 0%;
 
-    /* --color-timeline-bg: oklch(95.12% 0 117.53); */
+    --color-timeline-bg: oklch(calc(97% + 5 * -1%) 0 0);
 
     /* --color-timeline-item-border: rgb(217, 217, 232); */
     --color-post-bg: #f7f7f7;
@@ -84,7 +84,6 @@
   --color-pre-bg: oklch(calc(var(--color-bg) + 10 * var(--color-bg-inc)) 0 0);
   --color-text-input-bg: oklch(calc(var(--color-bg) + 3 * var(--color-bg-inc)) 0 0);
   --color-timeline-item-border: oklch(calc(var(--color-bg) + 10 * var(--color-bg-inc)) 0 0);
-  --color-timeline-bg: oklch(calc(var(--color-bg) + 5 * var(--color-bg-inc)) 0 0);
   --color-post-highlight-bg: oklch(calc(var(--color-bg) + 8 * var(--color-bg-inc)) 0 0);
 }
 
@@ -399,7 +398,7 @@ img.u-userImage[loading="lazy"][src][width][height] {
   top: 20px;
   right: 20px;
   z-index: 150;
-  background: white;
+  background: var(--color-bg-default);
   padding: 4pt;
   border: 1px solid var(--color-timeline-item-border);
 }
