@@ -671,6 +671,10 @@ emoji-picker {
   background: url('/assets/icons/xmark.svg') center/contain no-repeat;
 }
 
+.m-postOverview__fetchButtonIcon {
+  background: url('/assets/icons/download.svg') center/contain no-repeat;
+}
+
 .m-profileSummary {
   display: flex;
   justify-content: flex-start;
