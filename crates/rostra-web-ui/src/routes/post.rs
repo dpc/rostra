@@ -136,7 +136,6 @@ pub async fn fetch_missing_post(
     }))
 }
 
-
 #[bon::bon]
 impl UiState {
     #[allow(clippy::too_many_arguments)]

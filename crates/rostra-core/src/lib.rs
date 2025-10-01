@@ -134,7 +134,7 @@ pub struct Timestamp(pub u64);
 impl Timestamp {
     pub const ZERO: Self = Self(0);
     pub const MAX: Self = Self(u64::MAX);
-    
+
     pub fn now() -> Self {
         Self(time::OffsetDateTime::now_utc().unix_timestamp() as u64)
     }
