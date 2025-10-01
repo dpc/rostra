@@ -134,6 +134,15 @@ pub struct Timestamp(pub u64);
 impl Timestamp {
     pub const ZERO: Self = Self(0);
     pub const MAX: Self = Self(u64::MAX);
+    
+    pub fn now() -> Self {
+        Self(
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_secs()
+        )
+    }
 }
 
 impl From<u64> for Timestamp {

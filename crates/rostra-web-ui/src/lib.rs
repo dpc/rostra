@@ -5,6 +5,7 @@ pub mod is_htmx;
 mod routes;
 // TODO: move to own crate
 mod serde_util;
+pub mod util;
 
 use std::net::{AddrParseError, SocketAddr};
 use std::path::{Path, PathBuf};

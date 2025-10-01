@@ -316,6 +316,7 @@ impl UiState {
                                 ).event_id(comment.event_id)
                                 .content(djot_content)
                                 .reply_count(comment.reply_count)
+                                .timestamp(comment.ts)
                                 .ro(session.ro_mode())
                                 .is_comment(true)
                                 .call().await?)
@@ -451,6 +452,7 @@ impl UiState {
                                     .event_id(post.event_id)
                                     .content(djot_content)
                                     .reply_count(post.reply_count)
+                                    .timestamp(post.ts)
                                     .ro(session.ro_mode())
                                     .call().await?)
                         }

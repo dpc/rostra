@@ -571,12 +571,23 @@ img.u-userImage[loading="lazy"][src][width][height] {
   display: flex;
   gap: 2pt;
   justify-content: space-between;
+  align-items: center;
 }
 
 .m-postOverview__header {
   display: flex;
   gap: 2pt;
   justify-content: space-between;
+}
+
+.m-postOverview__timestamp {
+  font-size: 0.8rem;
+  color: oklch(60% 0 0);
+  opacity: 0.7;
+  margin-left: 0.5rem;
+  line-height: 1;
+  display: inline-flex;
+  align-items: center;
 }
 
 .m-postOverview__personaDisplayName {

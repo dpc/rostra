@@ -138,6 +138,7 @@ pub async fn post_new_post(
                     .maybe_reply_to(reply_to)
                     .event_id(event.event_id.to_short())
                     .content(&form.content)
+                    .timestamp(event.event.timestamp.into())
                     .ro( session.ro_mode())
                     .call()
                 .await?)
@@ -176,6 +177,7 @@ pub async fn get_post_preview_dialog(
                         self_id
                         )
                         .content(&form.content)
+                        .timestamp(rostra_core::Timestamp::now())
                         .ro(session.ro_mode())
                         .call().await?
                     )
@@ -251,6 +253,7 @@ pub async fn get_post_preview(
                     self_id
                     )
                     .content(&form.content)
+                    .timestamp(rostra_core::Timestamp::now())
                     .ro(session.ro_mode())
                     .call().await?
                 )

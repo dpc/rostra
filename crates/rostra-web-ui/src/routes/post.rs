@@ -10,7 +10,7 @@ use rostra_client_db::IdSocialProfileRecord;
 use rostra_client_db::social::SocialPostRecord;
 use rostra_core::event::SocialPost;
 use rostra_core::id::{RostraId, ToShort as _};
-use rostra_core::{ExternalEventId, ShortEventId};
+use rostra_core::{ExternalEventId, ShortEventId, Timestamp};
 use snafu::ResultExt as _;
 use tower_cookies::Cookies;
 
@@ -18,6 +18,7 @@ use super::Maud;
 use super::timeline::TimelineMode;
 use super::unlock::session::{RoMode, UserSession};
 use crate::error::{OtherSnafu, RequestResult};
+use crate::util::time::format_timestamp;
 use crate::{SharedState, UiState};
 
 pub async fn get_single_post(
@@ -135,6 +136,7 @@ pub async fn fetch_missing_post(
     }))
 }
 
+
 #[bon::bon]
 impl UiState {
     #[allow(clippy::too_many_arguments)]
@@ -152,6 +154,7 @@ impl UiState {
         event_id: Option<ShortEventId>,
         content: Option<&str>,
         reply_count: Option<u64>,
+        timestamp: Option<Timestamp>,
         ro: RoMode,
         // Render the post including a comment, right away
         comment: Option<Markup>,
@@ -246,6 +249,11 @@ impl UiState {
                             @if let Some(persona_display_name) = persona_display_name {
                                 span ."m-postOverview__personaDisplayName" {
                                     (format!("({})", persona_display_name))
+                                }
+                            }
+                            @if let Some(ts) = timestamp {
+                                span ."m-postOverview__timestamp" {
+                                    (format_timestamp(ts))
                                 }
                             }
                         }
@@ -377,6 +385,7 @@ impl UiState {
                     .event_id(reply_to_event_id)
                     .ro(ro)
                     .maybe_content(reply_to_post.and_then(|r| r.content.djot_content.as_deref()))
+                    .maybe_timestamp(reply_to_post.map(|r| r.ts))
                     .comment(post)
                     .call()
                 ).await?)
