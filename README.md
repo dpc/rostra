@@ -37,14 +37,18 @@ The discoverability story is bleak ATM, so you
 probably want to follow me: `rse1okfyp4yj75i6riwbz86mpmbgna3f7qr66aj1njceqoigjabegy`
 if you don't want to stare at an empty timeline.
 
-#### Demo public instance
+### Public demo
 
 A public instance is available at https://rostra.me/ , but
 it's advised to run Rostra directly on your system.
 
-**You can log-in in a read-only mode** (eg. as me `rse1okfyp4yj75i6riwbz86mpmbgna3f7qr66aj1njceqoigjabegy`)
-by not providing any secret, and view Rostra UI from the perspective of that user. You will not be
-able to post or do any other actions that require the secret key.
+Public instance will default to showing the interface from the perspective of my own
+identity, in a read-only mode. Click "Logout" and then "Random" to generate your
+own identity to play with.
+
+Add `rse1okfyp4yj75i6riwbz86mpmbgna3f7qr66aj1njceqoigjabegy` and click "Follow"
+and give it a bit of time to sync with the network, if you want to see more
+than your own posts.
 
 #### Using Cargo
 
