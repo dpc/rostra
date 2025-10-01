@@ -136,12 +136,7 @@ impl Timestamp {
     pub const MAX: Self = Self(u64::MAX);
     
     pub fn now() -> Self {
-        Self(
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap_or_default()
-                .as_secs()
-        )
+        Self(time::OffsetDateTime::now_utc().unix_timestamp() as u64)
     }
 }
 

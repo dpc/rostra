@@ -1,4 +1,3 @@
-use std::time::{SystemTime, UNIX_EPOCH};
 
 use convi::ExpectInto as _;
 
@@ -26,7 +25,7 @@ impl Event {
         singleton_aux_key: Option<EventAuxKey>,
         parent_prev: Option<ShortEventId>,
         parent_aux: Option<ShortEventId>,
-        timestamp: Option<SystemTime>,
+        timestamp: Option<time::OffsetDateTime>,
         content: Option<&EventContentRaw>,
     ) -> Self {
         if delete.is_some() && parent_aux.is_some() {
@@ -38,10 +37,8 @@ impl Event {
         let parent_aux = parent_aux.map(Into::into);
 
         let timestamp = timestamp
-            .unwrap_or_else(SystemTime::now)
-            .duration_since(UNIX_EPOCH)
-            .expect("Dates before Unix epoch are unsupported")
-            .as_secs();
+            .unwrap_or_else(time::OffsetDateTime::now_utc)
+            .unix_timestamp() as u64;
 
         Self {
             version: 0,
@@ -71,7 +68,7 @@ impl Event {
         delete: Option<ShortEventId>,
         parent_prev: Option<ShortEventId>,
         parent_aux: Option<ShortEventId>,
-        timestamp: Option<SystemTime>,
+        timestamp: Option<time::OffsetDateTime>,
     ) -> (Self, EventContentRaw)
     where
         C: EventContentKind,

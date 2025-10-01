@@ -4055,6 +4055,7 @@ dependencies = [
  "serde_json",
  "snafu",
  "test-log",
+ "time",
  "tracing",
  "unicode-segmentation",
  "z32",
