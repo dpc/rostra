@@ -388,7 +388,7 @@ img.u-userImage[loading="lazy"][src][width][height] {
 .o-mainBar {
   flex-grow: 1;
   max-width: 50rem;
-  padding: 4pt;
+  padding: 4pt clamp(0px, 4vw - 30px, 4pt);
   padding-top: 0;
   width: 100%;
 }
