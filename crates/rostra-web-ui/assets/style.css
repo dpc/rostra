@@ -311,6 +311,7 @@ img.u-userImage[loading="lazy"][src][width][height] {
   display: flex;
   gap: 0.5rem;
   min-width: 5rem;
+  max-width: 140px;
   padding: 0.0rem .5rem;
 }
 
