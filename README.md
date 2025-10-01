@@ -29,7 +29,7 @@ social-graph-based data model.
 
 ## Screenshot
 
-![rostra web UI](https://i.imgur.com/mpWzFmT.png)
+![Screenshot of Rostra's p2p social network web UI](https://i.imgur.com/qYaL8QA.png)
 
 ## Using
 
