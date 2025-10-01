@@ -474,7 +474,7 @@ img.u-userImage[loading="lazy"][src][width][height] {
 /* Align post (non-replies) to where a root reply would be,
   to make visually parsing even easier. */
 .o-mainBarTimeline__item.-post>.m-postOverview {
-  padding-left: 2rem;
+  padding-left: 1rem;
   padding-top: 1rem;
 }
 
@@ -588,7 +588,7 @@ img.u-userImage[loading="lazy"][src][width][height] {
 }
 
 .m-postOverview__comments {
-  padding-left: 2rem;
+  padding-left: 1rem;
 }
 
 
