@@ -17,6 +17,8 @@
 
     --color-timeline-bg: #282828;
     --color-bg-default: #1c1c1c;
+    --color-post-highlight-bg: #333333;
+    --color-tab-inactive-bg: #333333;
 
     /* --color-timeline-item-border: #91919c; */
     --color-post-bg: #404040;
@@ -32,12 +34,12 @@
     --shadow-color-strong: rgba(255, 255, 255, 0.15);
 
     /* Less saturated links for dark mode */
-    --color-link: oklch(55% 0.25 30);
-    --color-link-hover: oklch(85% 0.35 30);
+    --color-link: oklch(68% 0.12 30);
+    --color-link-hover: oklch(82% 0.16 30);
 
     /* Subtle button colors for dark mode */
-    --color-button-bg: oklch(20% 0 0);
-    --color-button-bg-hover: oklch(25% 0 0);
+    --color-button-bg: oklch(25% 0 0);
+    --color-button-bg-hover: oklch(30% 0 0);
     --color-button-border: oklch(50% 0 0);
     --color-button-border-hover: oklch(60% 0 0);
   }
@@ -54,6 +56,8 @@
 
     --color-timeline-bg: oklch(calc(97% + 5 * -1%) 0 0);
     --color-bg-default: oklch(97% 0 0);
+    --color-post-highlight-bg: oklch(calc(97% + 8 * -1%) 0 0);
+    --color-tab-inactive-bg: oklch(calc(97% + 10 * -1%) 0 0);
 
     /* --color-timeline-item-border: rgb(217, 217, 232); */
     --color-post-bg: #f7f7f7;
@@ -85,7 +89,6 @@
   --color-pre-bg: oklch(calc(var(--color-bg) + 10 * var(--color-bg-inc)) 0 0);
   --color-text-input-bg: oklch(calc(var(--color-bg) + 3 * var(--color-bg-inc)) 0 0);
   --color-timeline-item-border: oklch(calc(var(--color-bg) + 10 * var(--color-bg-inc)) 0 0);
-  --color-post-highlight-bg: oklch(calc(var(--color-bg) + 8 * var(--color-bg-inc)) 0 0);
 }
 
 /* RESET */
@@ -316,6 +319,15 @@ img.u-userImage[loading="lazy"][src][width][height] {
   height: 1rem;
   display: inline-block;
   filter: invert(var(--invert));
+}
+
+.u-displayName {
+  font-weight: bold;
+  color: var(--color-text-default);
+}
+
+.u-displayName:hover {
+  color: var(--color-link);
 }
 
 .u-userImage {
@@ -552,9 +564,6 @@ img.u-userImage[loading="lazy"][src][width][height] {
   word-break: break-all;
 }
 
-.a-userNameHandle__displayName {
-  font-weight: bold;
-}
 
 .m-postOverview__userHandle {
   display: flex;
@@ -668,7 +677,6 @@ emoji-picker {
 }
 
 .m-profileSummary__displayName {
-  font-weight: 700;
   height: 1.1rem;
   line-height: 1.1rem;
   vertical-align: middle;
@@ -929,7 +937,7 @@ emoji-picker {
   top: 0;
 
   z-index: 100;
-  background-color: var(--color-timeline-bg);
+  background-color: var(--color-tab-inactive-bg);
   border-top: 1px solid var(--color-timeline-item-border);
 }
 
@@ -940,8 +948,8 @@ emoji-picker {
   text-align: center;
 }
 
-.o-mainBarTimeline__tabs>*:not(.-active) {
-  background-color: var(--color-post-highlight-bg);
+.o-mainBarTimeline__tabs>*.-active {
+  background-color: var(--color-timeline-bg);
 }
 
 .o-previewDialog {

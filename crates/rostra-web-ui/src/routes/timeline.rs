@@ -500,7 +500,7 @@ impl UiState {
                 ."a-userNameHandle"
             {
                 a
-                    ."a-userNameHandle__displayName"
+                    ."a-userNameHandle__displayName u-displayName"
                     href={"/ui/profile/"(id)}
                 {
                     (display_name)

@@ -258,7 +258,7 @@ impl UiState {
                     { }
 
                 div ."m-profileSummary__content" {
-                    a ."m-profileSummary__displayName"
+                    a ."m-profileSummary__displayName u-displayName"
                         href=(format!("/ui/profile/{}", profile_id))
                     {
                         (profile.display_name)
