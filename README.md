@@ -42,13 +42,11 @@ if you don't want to stare at an empty timeline.
 A public instance is available at https://rostra.me/ , but
 it's advised to run Rostra directly on your system.
 
-Public instance will default to showing the interface from the perspective of my own
-identity, in a read-only mode. Click "Logout" and then "Random" to generate your
-own identity to play with.
+Click "Logout" and then "Random" to generate your
+own identity to play with if you want.
 
-Add `rse1okfyp4yj75i6riwbz86mpmbgna3f7qr66aj1njceqoigjabegy` and click "Follow"
-and give it a bit of time to sync with the network, if you want to see more
-than your own posts.
+You can follow the Rostra developer: `rse1okfyp4yj75i6riwbz86mpmbgna3f7qr66aj1njceqoigjabegy`,
+if you want to see more than your own posts. Give it a bit of time to sync with the network
 
 #### Using Cargo
 
