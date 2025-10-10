@@ -133,7 +133,7 @@ pub async fn fetch_missing_post(
     let client_handle = state.client(session.id()).await?;
     let client = client_handle.client_ref()?;
 
-    let mut connections_cache = ConnectionCache::new();
+    let connections_cache = ConnectionCache::new();
     let mut followers_cache = std::collections::BTreeMap::new();
 
     get_event_content_from_followers(
@@ -141,7 +141,7 @@ pub async fn fetch_missing_post(
         client.rostra_id(),
         author_id,
         event_id,
-        &mut connections_cache,
+        &connections_cache,
         &mut followers_cache,
         client.db(),
     )

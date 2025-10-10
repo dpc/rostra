@@ -193,7 +193,7 @@ impl FolloweeHeadChecker {
             );
 
             match self
-                .download_new_data_from(&client, rostra_id, conn, head)
+                .download_new_data_from(&client, rostra_id, &conn, head)
                 .await
             {
                 Ok(true) => {
@@ -217,7 +217,7 @@ impl FolloweeHeadChecker {
         &self,
         client: &ClientRef<'_>,
         rostra_id: RostraId,
-        conn: &mut Connection,
+        conn: &Connection,
         head: ShortEventId,
     ) -> WhateverResult<bool> {
         let mut events = BinaryHeap::from([(0, head)]);

@@ -74,7 +74,7 @@ impl MissingEventFetcher {
                 continue;
             }
 
-            let mut connections = ConnectionCache::new();
+            let connections = ConnectionCache::new();
 
             for follower_id in followers.iter().chain([self.self_id].iter()) {
                 let Ok(client) = self.client.client_ref().boxed() else {
@@ -101,7 +101,7 @@ impl MissingEventFetcher {
                         continue;
                     }
                     match self
-                        .get_event_from_conn(author_id, *missing_event, *follower_id, conn, &db)
+                        .get_event_from_conn(author_id, *missing_event, *follower_id, &conn, &db)
                         .await
                     {
                         Ok(_) => {}
@@ -126,7 +126,7 @@ impl MissingEventFetcher {
         author_id: RostraId,
         event_id: ShortEventId,
         follower_id: RostraId,
-        conn: &mut Connection,
+        conn: &Connection,
         db: &rostra_client_db::Database,
     ) -> BoxedErrorResult<()> {
         debug!(target:  LOG_TARGET,
@@ -155,7 +155,7 @@ impl MissingEventFetcher {
         &self,
         author_id: RostraId,
         event_id: ShortEventId,
-        conn: &mut rostra_p2p::Connection,
+        conn: &rostra_p2p::Connection,
         storage: &rostra_client_db::Database,
     ) -> WhateverResult<bool> {
         let event = conn

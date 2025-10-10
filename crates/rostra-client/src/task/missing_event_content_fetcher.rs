@@ -48,7 +48,7 @@ impl MissingEventContentFetcher {
 
             let mut cursor: Option<ShortEventId> = None;
 
-            let mut connections = ConnectionCache::new();
+            let connections = ConnectionCache::new();
             let mut followers_by_followee = BTreeMap::new();
 
             loop {
@@ -60,7 +60,7 @@ impl MissingEventContentFetcher {
                         self.self_id,
                         author_id,
                         event_id,
-                        &mut connections,
+                        &connections,
                         &mut followers_by_followee,
                         &db,
                     )

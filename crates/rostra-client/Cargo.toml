@@ -18,6 +18,7 @@ bon = { workspace = true }
 data-encoding = { workspace = true }
 ed25519-dalek = { workspace = true }
 futures = { workspace = true }
+futures-lite = { workspace = true }
 iroh-base = { workspace = true, features = ["ticket"] }
 iroh = { workspace = true }
 iroh-io = { workspace = true }

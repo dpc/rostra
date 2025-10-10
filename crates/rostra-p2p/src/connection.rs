@@ -25,12 +25,16 @@ use crate::{
     WriteSnafu,
 };
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Connection(iroh::endpoint::Connection);
 
 impl Connection {
     pub fn remote_node_id(&self) -> Option<iroh::PublicKey> {
         self.0.remote_node_id().ok()
+    }
+
+    pub fn is_closed(&self) -> bool {
+        self.0.close_reason().is_some()
     }
 }
 /// Max request message size
