@@ -488,12 +488,12 @@ img.u-userImage[loading="lazy"][src][width][height] {
 
 /* Align post (non-replies) to where a root reply would be,
   to make visually parsing even easier. */
-.o-mainBarTimeline__item.-post>.m-postOverview {
+.o-mainBarTimeline__item.-post>.m-postView {
   padding-left: 1rem;
   padding-top: 1rem;
 }
 
-.o-mainBarTimeline__item.-preview .m-postOverview {
+.o-mainBarTimeline__item.-preview .m-postView {
   opacity: 0.6;
 }
 
@@ -511,35 +511,38 @@ img.u-userImage[loading="lazy"][src][width][height] {
   padding: 10pt;
 }
 
-.m-postOverview {
+.m-postView {
   max-width: 55rem;
 }
 
+.m-postContext__postView {
+  margin-left: 1em;
+}
 
-.m-postOverview__main {
+.m-postView__main {
   display: flex;
   /* min-width: 20rem; */
   max-width: 50rem;
 }
 
 
-.m-postOverview__userImage {
+.m-postView__userImage {
   margin: 2pt;
 }
 
-.m-postOverview__contentSide {
+.m-postView__contentSide {
   padding-inline: 10pt;
   width: 100%;
   min-width: 0;
   overflow: hidden;
 }
 
-.m-postOverview__content {
+.m-postView__content {
   position: relative;
 }
 
 /* Unexpanded (folded) reply-parent's should be truncated, so the response itself is uncluttered */
-.m-postOverview.-reply-parent>div>.m-postOverview__contentSide:not(.-expanded)>.m-postOverview__content.-present {
+.m-postContext__postParent:not(.-expanded) {
   max-height: 10rem;
   overflow: hidden;
   display: -webkit-box;
@@ -549,55 +552,55 @@ img.u-userImage[loading="lazy"][src][width][height] {
 }
 
 /* Cover reply-parent's folded content with gradient if not expanded */
-.m-postOverview.-reply-parent>div>.m-postOverview__contentSide:not(.-expanded)>.m-postOverview__content.-present::after {
+.m-postContext__postParent:not(.-expanded) .m-postView__content::before {
   content: '';
   position: absolute;
-  bottom: 0;
+  top: 0;
   left: 0;
   right: 0;
-  /* height: 10rem; */
-  top: 40%;
+  height: 10rem;
+  /* top: 40%; */
   background: linear-gradient(to bottom,
       rgba(59, 59, 59, 0) 0%,
-      var(--color-timeline-bg) 85%);
+      var(--color-timeline-bg) 60%);
   z-index: 1;
 }
 
 /* By default, hide buttons on reply parents */
-.m-postOverview.-reply-parent>.m-postOverview__buttonBar {
+.m-postView.-reply-parent>.m-postView__buttonBar {
   display: none;
 }
 
 /* When expanded, show the buttons - this class will be added via JS */
-.m-postOverview.-reply-parent.-show-buttons>.m-postOverview__buttonBar {
+.m-postView.-reply-parent.-show-buttons>.m-postView__buttonBar {
   display: flex;
 }
 
 /* But if it's expanded, show the buttons */
-.m-postOverview.-reply-parent:has(>div>.m-postOverview__contentSide.-expanded)>.m-postOverview__buttonBar {
+.m-postView.-reply-parent:has(>div>.m-postView__contentSide.-expanded)>.m-postView__buttonBar {
   display: flex;
 }
 
-.m-postOverview__contentSide>* {
+.m-postView__contentSide>* {
   word-wrap: break-word;
   word-break: break-all;
 }
 
 
-.m-postOverview__userHandle {
+.m-postView__userHandle {
   display: flex;
   gap: 2pt;
   justify-content: space-between;
   align-items: center;
 }
 
-.m-postOverview__header {
+.m-postView__header {
   display: flex;
   gap: 2pt;
   justify-content: space-between;
 }
 
-.m-postOverview__timestamp {
+.m-postView__timestamp {
   font-size: 0.8rem;
   color: oklch(60% 0 0);
   opacity: 0.7;
@@ -607,15 +610,15 @@ img.u-userImage[loading="lazy"][src][width][height] {
   align-items: center;
 }
 
-.m-postOverview__personaDisplayName {
+.m-postView__personaDisplayName {
   display: none;
 }
 
-.m-postOverview__header:hover .m-postOverview__personaDisplayName {
+.m-postView__header:hover .m-postView__personaDisplayName {
   display: inline-block;
 }
 
-.m-postOverview__comments {
+.m-postView__comments {
   padding-left: 1rem;
 }
 
@@ -637,58 +640,58 @@ emoji-picker {
   width: 100%;
 }
 
-.m-postOverview__content {
+.m-postView__content {
   word-break: break-word;
 }
 
-.m-postOverview__content .lazyload-wrapper:not(.-expanded) img,
-.m-postOverview__content .lazyload-wrapper:not(.-expanded) iframe {
+.m-postView__content .lazyload-wrapper:not(.-expanded) img,
+.m-postView__content .lazyload-wrapper:not(.-expanded) iframe {
   display: none;
 }
 
-.m-postOverview__content .lazyload-wrapper.-expanded p {
+.m-postView__content .lazyload-wrapper.-expanded p {
   display: none;
 }
 
-.m-postOverview__content .lazyload-wrapper p {
+.m-postView__content .lazyload-wrapper p {
   font-style: italic;
 }
 
-.m-postOverview__content.-missing {
+.m-postView__content.-missing {
   color: red;
   font-style: italic;
 }
 
-.m-postOverview__buttonBar {
+.m-postView__buttonBar {
   display: flex;
   justify-content: space-between;
   gap: 5pt;
 }
 
 
-.m-postOverview__reactions {
+.m-postView__reactions {
   display: flex;
   gap: .5rem;
 }
 
-.m-postOverview__buttons {
+.m-postView__buttons {
   display: flex;
   gap: .5rem;
 }
 
-.m-postOverview__commentsButtonIcon {
+.m-postView__commentsButtonIcon {
   background: url('/assets/icons/comment.svg') center/contain no-repeat;
 }
 
-.m-postOverview__replyToButtonIcon {
+.m-postView__replyToButtonIcon {
   background: url('/assets/icons/reply.svg') center/contain no-repeat;
 }
 
-.m-postOverview__deleteButtonIcon {
+.m-postView__deleteButtonIcon {
   background: url('/assets/icons/xmark.svg') center/contain no-repeat;
 }
 
-.m-postOverview__fetchButtonIcon {
+.m-postView__fetchButtonIcon {
   background: url('/assets/icons/download.svg') center/contain no-repeat;
 }
 

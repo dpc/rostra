@@ -49,7 +49,7 @@ pub async fn get_single_post(
         if let Some(post_record) = post_record {
             return Ok(Maud(
                 state
-                    .render_post_overview(&client_ref, author)
+                    .render_post_context(&client_ref, author)
                     .event_id(event_id)
                     .maybe_content(post_record.content.djot_content.as_deref())
                     .timestamp(post_record.ts)
@@ -117,8 +117,8 @@ pub async fn delete_post(
 
     // Return empty content to replace the post
     Ok(Maud(html! {
-        div ."m-postOverview -deleted" {
-            div ."m-postOverview__deletedMessage" {
+        div ."m-postView -deleted" {
+            div ."m-postView__deletedMessage" {
                 "This post has been deleted"
             }
         }
@@ -158,7 +158,7 @@ pub async fn fetch_missing_post(
                 .render_content(&client, post_record.author, djot_content)
                 .await;
             return Ok(Maud(html! {
-                div ."m-postOverview__content -present" {
+                div ."m-postView__content -present" {
                     p {
                         (post_content_rendered)
                     }
@@ -169,7 +169,7 @@ pub async fn fetch_missing_post(
 
     // Fetch attempt completed but post still not available
     Ok(Maud(html! {
-        div ."m-postOverview__content -missing" {
+        div ."m-postView__content -missing" {
             p {
                 "Post not found"
             }
@@ -179,9 +179,11 @@ pub async fn fetch_missing_post(
 
 #[bon::bon]
 impl UiState {
+    /// Render a whole post with all its context (parent, children buttons,
+    /// etc.)
     #[allow(clippy::too_many_arguments)]
     #[builder]
-    pub async fn render_post_overview(
+    pub async fn render_post_context(
         &self,
         #[builder(start_fn)] client: &ClientRef<'_>,
         #[builder(start_fn)] author: RostraId,
@@ -196,11 +198,103 @@ impl UiState {
         reply_count: Option<u64>,
         timestamp: Option<Timestamp>,
         ro: RoMode,
-        // Render the post including a comment, right away
-        comment: Option<Markup>,
+    ) -> RequestResult<Markup> {
+        // Note: we are actually not doing pagiantion, and just ignore
+        // everything after first page
+        let (reactions, _) = if let Some(event_id) = event_id {
+            client
+                .db()
+                .paginate_social_post_reactions_rev(event_id, None, 1000)
+                .await
+        } else {
+            (vec![], None)
+        };
+
+        let mut reaction_social_profiles: HashMap<RostraId, IdSocialProfileRecord> = HashMap::new();
+
+        for reaction_author in reactions
+            .iter()
+            .map(|reaction| reaction.author)
+            // collect to deduplicate
+            .collect::<HashSet<_>>()
+        {
+            // TODO: make a batched request for all profiles in one go
+            if let Some(reaction_user_profile) =
+                self.get_social_profile_opt(reaction_author, client).await
+            {
+                // HashSet above must have deduped it
+                assert!(
+                    reaction_social_profiles
+                        .insert(reaction_author, reaction_user_profile)
+                        .is_none()
+                );
+            }
+        }
+
+        let post_id = format!(
+            "post-{}",
+            event_id
+                .map(|e| e.to_string())
+                .unwrap_or_else(|| "preview".to_string()),
+        );
+        let post_view = self
+            .render_post_view(client, author)
+            .maybe_persona_display_name(persona_display_name)
+            .maybe_event_id(event_id)
+            .maybe_content(content)
+            .maybe_reply_count(reply_count)
+            .maybe_timestamp(timestamp)
+            .ro(ro)
+            .call()
+            .await?;
+
+        Ok(html! {
+
+            article #(post_id)
+                ."m-postContext"
+             {
+                @if let Some((reply_to_author, reply_to_event_id, reply_to_post)) = reply_to {
+
+
+                    div ."m-postContext__postParent"
+                        onclick="this.classList.add('-expanded')"
+                    {
+                        (Box::pin(self.render_post_view(
+                            client,
+                            reply_to_author,
+                            )
+                            .event_id(reply_to_event_id)
+                            .ro(ro)
+                            .maybe_content(reply_to_post.and_then(|r| r.content.djot_content.as_deref()))
+                            .maybe_timestamp(reply_to_post.map(|r| r.ts))
+                            .call()
+                        ).await?)
+                    }
+                }
+
+                div ."m-postContext__postView" {
+                    (post_view)
+                }
+            }
+        })
+    }
+
+    /// Render post without its parents and comments, but with the buttons
+    /// etc.)
+    #[allow(clippy::too_many_arguments)]
+    #[builder]
+    pub async fn render_post_view(
+        &self,
+        #[builder(start_fn)] client: &ClientRef<'_>,
+        #[builder(start_fn)] author: RostraId,
+        persona_display_name: Option<&str>,
+        event_id: Option<ShortEventId>,
+        content: Option<&str>,
+        reply_count: Option<u64>,
+        timestamp: Option<Timestamp>,
+        ro: RoMode,
         // Is the post loaded as a comment to an existing post (already being
         // displayed)
-        #[builder(default = false)] is_comment: bool,
     ) -> RequestResult<Markup> {
         let external_event_id = event_id.map(|e| ExternalEventId::new(author, e));
         let user_profile = self.get_social_profile_opt(author, client).await;
@@ -241,7 +335,7 @@ impl UiState {
             @for reaction in reactions {
                 @if let Some(reaction_text) = reaction.content.get_reaction() {
 
-                    span .m-postOverview__reaction
+                    span .m-postView__reaction
                         title=(
                             format!("by {}",
                                 reaction_social_profiles.get(&reaction.author)
@@ -270,9 +364,9 @@ impl UiState {
         let post_content_is_missing = post_content_rendered.is_none();
 
         let post_main = html! {
-            div ."m-postOverview__main"
+            div ."m-postView__main"
             {
-                img ."m-postOverview__userImage u-userImage"
+                img ."m-postView__userImage u-userImage"
                     src=(self.avatar_url(author))
                     alt=(format!("{display_name}'s avatar"))
                     width="32pt"
@@ -280,31 +374,30 @@ impl UiState {
                     loading="lazy"
                 { }
 
-                div ."m-postOverview__contentSide"
-                    onclick=[comment.as_ref().map(|_|"this.classList.add('-expanded')" )]
-                {
-                    header ."m-postOverview__header" {
-                        span ."m-postOverview__userHandle" {
+                div ."m-postView__contentSide" {
+
+                    header ."m-postView__header" {
+                        span ."m-postView__userHandle" {
                             (self.render_user_handle(event_id, author, user_profile.as_ref()))
                             @if let Some(persona_display_name) = persona_display_name {
-                                span ."m-postOverview__personaDisplayName" {
+                                span ."m-postView__personaDisplayName" {
                                     (format!("({})", persona_display_name))
                                 }
                             }
                             @if let Some(ts) = timestamp {
-                                span ."m-postOverview__timestamp" {
+                                span ."m-postView__timestamp" {
                                     (format_timestamp(ts))
                                 }
                             }
                         }
                         @if let Some(event_id) = event_id {
-                            a ."m-postOverview__postAnchor" href=(format!("/ui/post/{}/{}", author, event_id)) { "#" }
+                            a ."m-postView__postAnchor" href=(format!("/ui/post/{}/{}", author, event_id)) { "#" }
                         }
                     }
 
-                    div ."m-postOverview__content"
-                     ."-missing"[post_content_rendered.is_none()]
-                     ."-present"[post_content_rendered.is_some()]
+                    div."m-postView__content"
+                        ."-missing"[post_content_rendered.is_none()]
+                        ."-present"[post_content_rendered.is_some()]
                     {
                         p {
                             @if let Some(post_content_rendered) = post_content_rendered {
@@ -317,26 +410,26 @@ impl UiState {
                         }
                     }
                 }
-
             }
+
         };
 
         let button_bar = html! {
             @if let Some(ext_event_id) = external_event_id {
-                div ."m-postOverview__buttonBar" {
-                    div .m-postOverview__reactions {
+                div ."m-postView__buttonBar" {
+                    div .m-postView__reactions {
                         (reactions_html)
                     }
-                    div ."m-postOverview__buttons" {
+                    div ."m-postView__buttons" {
                         @if let Some(reply_count) = reply_count {
                             @if reply_count > 0 {
-                                button ."m-postOverview__commentsButton u-button"
+                                button ."m-postView__commentsButton u-button"
                                     hx-get={"/ui/comments/"(ext_event_id.event_id().to_short())}
-                                    hx-target="next .m-postOverview__comments"
+                                    hx-target="next .m-postView__comments"
                                     hx-swap="outerHTML"
                                     hx-on::after-request="this.classList.add('u-hidden')"
                                 {
-                                    span ."m-postOverview__commentsButtonIcon u-buttonIcon" width="1rem" height="1rem" {}
+                                    span ."m-postView__commentsButtonIcon u-buttonIcon" width="1rem" height="1rem" {}
                                     @if reply_count == 1 {
                                         ("1 Reply".to_string())
                                     } @else {
@@ -350,35 +443,35 @@ impl UiState {
                             @if let Some(event_id) = event_id {
                                 button ."u-button u-button--small"
                                     hx-post={"/ui/post/"(author)"/"(event_id)"/fetch"}
-                                    hx-target="previous .m-postOverview__content"
+                                    hx-target="previous .m-postView__content"
                                     hx-swap="outerHTML"
                                     hx-indicator="next .htmx-indicator"
                                 {
-                                    span ."m-postOverview__fetchButtonIcon u-buttonIcon" width="1rem" height="1rem" {}
+                                    span ."m-postView__fetchButtonIcon u-buttonIcon" width="1rem" height="1rem" {}
                                     "Fetch"
                                 }
                             }
                         }
                         @if author == client.rostra_id() {
-                            button ."m-postOverview__deleteButton u-button u-button--danger"
+                            button ."m-postView__deleteButton u-button u-button--danger"
                                 disabled[ro.to_disabled()]
                                 hx-post={"/ui/post/"(author)"/"(event_id.unwrap())"/delete"}
                                 hx-confirm="Are you sure you want to delete this post?"
-                                hx-target="closest .m-postOverview"
+                                hx-target="closest .m-postView"
                                 hx-swap="outerHTML"
                             {
-                                span ."m-postOverview__deleteButtonIcon u-buttonIcon" width="1rem" height="1rem" {}
+                                span ."m-postView__deleteButtonIcon u-buttonIcon" width="1rem" height="1rem" {}
                                 "Delete"
                             }
                         }
 
-                        button ."m-postOverview__replyToButton u-button"
+                        button ."m-postView__replyToButton u-button"
                             disabled[ro.to_disabled()]
                             hx-get={"/ui/post/reply_to?reply_to="(ext_event_id)}
                             hx-target=".m-newPostForm__replyToLine"
                             hx-swap="outerHTML"
                         {
-                            span ."m-postOverview__replyToButtonIcon u-buttonIcon" width="1rem" height="1rem" {}
+                            span ."m-postView__replyToButtonIcon u-buttonIcon" width="1rem" height="1rem" {}
                             "Reply"
                         }
                     }
@@ -386,50 +479,18 @@ impl UiState {
             }
         };
 
-        let post_id = format!(
-            "post-{}",
-            event_id
-                .map(|e| e.to_string())
-                .unwrap_or_else(|| "preview".to_string()),
-        );
+        Ok(html! {
 
-        let post = html! {
-            article #(post_id)
-                ."m-postOverview"
-                ."-response"[reply_to.is_some() || is_comment]
-                ."-reply-parent"[comment.is_some()]
+            div
+                ."m-postView"
              {
+
                 (post_main)
 
                 (button_bar)
 
-                div ."m-postOverview__comments"
-                    ."-empty"[comment.is_none()]
-                {
-                    @if let Some(comment) = comment {
-                        div ."m-postOverview__commentsItem" {
-                            (comment)
-                        }
-                    }
-                }
-            }
-        };
+                div ."m-postView__comments" {}
 
-        Ok(html! {
-            @if let Some((reply_to_author, reply_to_event_id, reply_to_post)) = reply_to {
-                (Box::pin(self.render_post_overview(
-                    client,
-                    reply_to_author,
-                    )
-                    .event_id(reply_to_event_id)
-                    .ro(ro)
-                    .maybe_content(reply_to_post.and_then(|r| r.content.djot_content.as_deref()))
-                    .maybe_timestamp(reply_to_post.map(|r| r.ts))
-                    .comment(post)
-                    .call()
-                ).await?)
-            } @else {
-                (post)
             }
         })
     }

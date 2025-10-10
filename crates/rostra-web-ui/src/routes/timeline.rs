@@ -306,11 +306,11 @@ impl UiState {
             .await;
 
         Ok(html! {
-            div ."m-postOverview__comments" {
+            div ."m-postView__comments" {
                 @for comment in comments {
                     @if let Some(djot_content) = comment.content.djot_content.as_ref() {
                         div ."o-postOverview__commentsItem" {
-                            (self.render_post_overview(
+                            (self.render_post_context(
                                 &client_ref,
                                 comment.author
                                 ).event_id(comment.event_id)
@@ -318,7 +318,6 @@ impl UiState {
                                 .reply_count(comment.reply_count)
                                 .timestamp(comment.ts)
                                 .ro(session.ro_mode())
-                                .is_comment(true)
                                 .call().await?)
                         }
                     }
@@ -438,7 +437,7 @@ impl UiState {
                         ."-reply"[post.reply_to.is_some()]
                         ."-post"[post.reply_to.is_none()]
                         {
-                            (self.render_post_overview(
+                            (self.render_post_context(
                                 &client_ref,
                                 post.author,
                                 ).maybe_persona_display_name(
