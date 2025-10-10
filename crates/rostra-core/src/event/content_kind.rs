@@ -65,28 +65,13 @@ impl Follow {
         }
         None
     }
+
+    pub fn is_unfollow(&self) -> bool {
+        self.selector.is_none() && self.selector.is_none()
+    }
 }
 impl EventContentKind for Follow {
     const KIND: EventKind = EventKind::FOLLOW;
-
-    fn singleton_key_aux(&self) -> Option<EventAuxKey> {
-        Some(EventAuxKey::from_bytes(self.followee.to_short().to_bytes()))
-    }
-}
-
-#[allow(deprecated)]
-#[cfg_attr(feature = "serde", derive(::serde::Serialize, ::serde::Deserialize))]
-#[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
-#[deprecated(note = "Use Follow with selector: None")]
-pub struct Unfollow {
-    #[serde(rename = "i")]
-    #[allow(deprecated)]
-    pub followee: RostraId,
-}
-
-#[allow(deprecated)]
-impl EventContentKind for Unfollow {
-    const KIND: EventKind = EventKind::UNFOLLOW;
 
     fn singleton_key_aux(&self) -> Option<EventAuxKey> {
         Some(EventAuxKey::from_bytes(self.followee.to_short().to_bytes()))

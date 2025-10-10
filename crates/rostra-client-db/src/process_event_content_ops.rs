@@ -56,33 +56,25 @@ impl Database {
                             .context(InvalidSnafu)?;
                         (
                             content.followee,
-                            Database::insert_follow_tx(
-                                author,
-                                event_content.event.event.timestamp.into(),
-                                content,
-                                &mut ids_followees_t,
-                                &mut ids_followers_t,
-                                &mut id_unfollowed_t,
-                            )?,
-                        )
-                    }
-                    EventKind::UNFOLLOW => {
-                        #[allow(deprecated)]
-                        let content = event_content
-                            .deserialize_cbor::<content_kind::Unfollow>()
-                            .boxed()
-                            .context(InvalidSnafu)?;
-                        (
-                            #[allow(deprecated)]
-                            content.followee,
-                            Database::insert_unfollow_tx(
-                                author,
-                                event_content.event.event.timestamp.into(),
-                                content,
-                                &mut ids_followees_t,
-                                &mut ids_followers_t,
-                                &mut id_unfollowed_t,
-                            )?,
+                            if content.is_unfollow() {
+                                Database::insert_unfollow_tx(
+                                    author,
+                                    event_content.event.event.timestamp.into(),
+                                    content.followee,
+                                    &mut ids_followees_t,
+                                    &mut ids_followers_t,
+                                    &mut id_unfollowed_t,
+                                )?
+                            } else {
+                                Database::insert_follow_tx(
+                                    author,
+                                    event_content.event.event.timestamp.into(),
+                                    content,
+                                    &mut ids_followees_t,
+                                    &mut ids_followers_t,
+                                    &mut id_unfollowed_t,
+                                )?
+                            },
                         )
                     }
                     _ => unreachable!(),

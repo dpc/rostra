@@ -332,7 +332,7 @@ impl Database {
     pub(crate) fn insert_unfollow_tx(
         author: RostraId,
         timestamp: Timestamp,
-        content_kind::Unfollow { followee }: content_kind::Unfollow,
+        followee: RostraId,
         followees_table: &mut Table<(RostraId, RostraId), IdsFolloweesRecord>,
         followers_table: &mut Table<(RostraId, RostraId), IdsFollowersRecord>,
         unfollowed_table: &mut Table<(RostraId, RostraId), IdsUnfollowedRecord>,
