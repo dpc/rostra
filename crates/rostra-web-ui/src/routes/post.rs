@@ -399,14 +399,10 @@ impl UiState {
                         ."-missing"[post_content_rendered.is_none()]
                         ."-present"[post_content_rendered.is_some()]
                     {
-                        p {
-                            @if let Some(post_content_rendered) = post_content_rendered {
-                                (post_content_rendered)
-                            } @else {
-                                p {
-                                    "Post missing"
-                                }
-                            }
+                        @if let Some(post_content_rendered) = post_content_rendered {
+                            (post_content_rendered)
+                        } @else {
+                            p { "Post missing" }
                         }
                     }
                 }

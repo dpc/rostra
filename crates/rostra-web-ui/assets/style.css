@@ -486,11 +486,12 @@ img.u-userImage[loading="lazy"][src][width][height] {
   }
 }
 
-/* Align post (non-replies) to where a root reply would be,
-  to make visually parsing even easier. */
-.o-mainBarTimeline__item.-post>.m-postView {
-  padding-left: 1rem;
-  padding-top: 1rem;
+.o-mainBarTimeline__item {
+  margin-top: 0.5em;
+}
+
+.o-mainBarTimeline__item.-preview .m-postView {
+  opacity: 0.6;
 }
 
 .o-mainBarTimeline__item.-preview .m-postView {
@@ -513,11 +514,9 @@ img.u-userImage[loading="lazy"][src][width][height] {
 
 .m-postView {
   max-width: 55rem;
+  margin: 0.5em;
 }
 
-.m-postContext__postView {
-  margin-left: 1em;
-}
 
 .m-postView__main {
   display: flex;
@@ -561,25 +560,16 @@ img.u-userImage[loading="lazy"][src][width][height] {
   height: 10rem;
   /* top: 40%; */
   background: linear-gradient(to bottom,
-      rgba(59, 59, 59, 0) 0%,
-      var(--color-timeline-bg) 60%);
+      rgba(59, 59, 59, 0%) 20%,
+      var(--color-timeline-bg) 70%);
   z-index: 1;
 }
 
 /* By default, hide buttons on reply parents */
-.m-postView.-reply-parent>.m-postView__buttonBar {
+.m-postContext__postParent:not(.-expanded) .m-postView__buttonBar {
   display: none;
 }
 
-/* When expanded, show the buttons - this class will be added via JS */
-.m-postView.-reply-parent.-show-buttons>.m-postView__buttonBar {
-  display: flex;
-}
-
-/* But if it's expanded, show the buttons */
-.m-postView.-reply-parent:has(>div>.m-postView__contentSide.-expanded)>.m-postView__buttonBar {
-  display: flex;
-}
 
 .m-postView__contentSide>* {
   word-wrap: break-word;
