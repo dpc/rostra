@@ -318,28 +318,27 @@ impl UiState {
                                 }
                             }
                         }
-                        @if !ro.is_ro() {
-                            @if author == client.rostra_id() {
-                                button ."m-postOverview__deleteButton u-button u-button--danger"
-                                    hx-post={"/ui/post/"(author)"/"(event_id.unwrap())"/delete"}
-                                    hx-confirm="Are you sure you want to delete this post?"
-                                    hx-target="closest .m-postOverview"
-                                    hx-swap="outerHTML"
-                                {
-                                    span ."m-postOverview__deleteButtonIcon u-buttonIcon" width="1rem" height="1rem" {}
-                                    "Delete"
-                                }
-                            }
-
-                            button ."m-postOverview__replyToButton u-button"
+                        @if author == client.rostra_id() {
+                            button ."m-postOverview__deleteButton u-button u-button--danger"
                                 disabled[ro.to_disabled()]
-                                hx-get={"/ui/post/reply_to?reply_to="(ext_event_id)}
-                                hx-target=".m-newPostForm__replyToLine"
+                                hx-post={"/ui/post/"(author)"/"(event_id.unwrap())"/delete"}
+                                hx-confirm="Are you sure you want to delete this post?"
+                                hx-target="closest .m-postOverview"
                                 hx-swap="outerHTML"
                             {
-                                span ."m-postOverview__replyToButtonIcon u-buttonIcon" width="1rem" height="1rem" {}
-                                "Reply"
+                                span ."m-postOverview__deleteButtonIcon u-buttonIcon" width="1rem" height="1rem" {}
+                                "Delete"
                             }
+                        }
+
+                        button ."m-postOverview__replyToButton u-button"
+                            disabled[ro.to_disabled()]
+                            hx-get={"/ui/post/reply_to?reply_to="(ext_event_id)}
+                            hx-target=".m-newPostForm__replyToLine"
+                            hx-swap="outerHTML"
+                        {
+                            span ."m-postOverview__replyToButtonIcon u-buttonIcon" width="1rem" height="1rem" {}
+                            "Reply"
                         }
                     }
                 }
