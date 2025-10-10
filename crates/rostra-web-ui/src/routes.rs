@@ -166,6 +166,10 @@ pub fn route_handler(state: SharedState) -> Router<Arc<UiState>> {
         .route("/ui/avatar/{id}", get(avatar::get))
         .route("/ui/media/{author}/{event_id}", get(media::get))
         .route("/ui/media/{author}/list", get(media::list))
+        .route(
+            "/ui/media/publish",
+            post(media::publish).layer(DefaultBodyLimit::max(9_000_000)),
+        )
         .route("/ui/updates", get(timeline::get_updates))
         .route("/ui/post/{author}/{event}", get(post::get_single_post))
         .route(
@@ -180,10 +184,6 @@ pub fn route_handler(state: SharedState) -> Router<Arc<UiState>> {
             post(new_post::get_post_preview_dialog),
         )
         .route("/ui/post/reply_to", get(new_post::get_reply_to))
-        .route(
-            "/ui/media/publish",
-            post(media::publish).layer(DefaultBodyLimit::max(9_000_000)),
-        )
         .route("/ui/followee", post(add_followee::add_followee))
         .route("/ui/unlock", get(unlock::get).post(unlock::post_unlock))
         .route("/ui/unlock/logout", get(unlock::get).post(unlock::logout))
