@@ -1,6 +1,6 @@
 use std::collections::{HashMap, HashSet};
 
-use axum::extract::{Path, State};
+use axum::extract::{Path, Query, State};
 use axum::response::IntoResponse;
 use maud::{Markup, html};
 use rostra_client::ClientRef;
@@ -11,6 +11,7 @@ use rostra_client_db::social::SocialPostRecord;
 use rostra_core::event::SocialPost;
 use rostra_core::id::{RostraId, ToShort as _};
 use rostra_core::{ExternalEventId, ShortEventId, Timestamp};
+use serde::Deserialize;
 use snafu::ResultExt as _;
 use tower_cookies::Cookies;
 
@@ -18,15 +19,55 @@ use super::Maud;
 use super::timeline::TimelineMode;
 use super::unlock::session::{RoMode, UserSession};
 use crate::error::{OtherSnafu, RequestResult};
+use crate::util::extractors::HxRequest;
 use crate::util::time::format_timestamp;
 use crate::{SharedState, UiState};
+
+#[derive(Deserialize)]
+pub struct SinglePostQuery {
+    #[serde(default)]
+    raw: bool,
+}
 
 pub async fn get_single_post(
     state: State<SharedState>,
     session: UserSession,
     mut cookies: Cookies,
+    hx_request: HxRequest,
+    Query(query): Query<SinglePostQuery>,
     Path((author, event_id)): Path<(RostraId, ShortEventId)>,
 ) -> RequestResult<impl IntoResponse> {
+    // Render raw post if it's an HTMX request or raw=true query parameter
+    if hx_request.is_htmx_request() || dbg!(query.raw) {
+        let client_handle = state.client(session.id()).await?;
+        let client_ref = client_handle.client_ref()?;
+        let db = client_ref.db();
+
+        // Get the post record
+        let post_record = db.get_social_post(event_id).await;
+
+        if let Some(post_record) = post_record {
+            return Ok(Maud(
+                state
+                    .render_post_overview(&client_ref, author)
+                    .event_id(event_id)
+                    .maybe_content(post_record.content.djot_content.as_deref())
+                    .timestamp(post_record.ts)
+                    .ro(session.ro_mode())
+                    .call()
+                    .await?,
+            ));
+        } else {
+            // Post not found, return error message
+            return Ok(Maud(html! {
+                div ."error" {
+                    "Post not found"
+                }
+            }));
+        }
+    }
+
+    // Default behavior: render full timeline page
     let navbar = state.timeline_common_navbar(&session).await?;
     Ok(Maud(
         state

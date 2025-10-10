@@ -1,3 +1,5 @@
+use std::ops;
+
 use axum::extract::FromRequestParts;
 use axum::http::request::Parts;
 
@@ -37,7 +39,7 @@ impl From<HxRequest> for bool {
     }
 }
 
-impl std::ops::Deref for HxRequest {
+impl ops::Deref for HxRequest {
     type Target = bool;
 
     fn deref(&self) -> &Self::Target {
