@@ -173,6 +173,12 @@ code {
   font-family: monospace;
 }
 
+pre {
+  overflow-x: auto;
+  white-space: pre;
+  max-width: 100%;
+}
+
 button {
   font: inherit;
   cursor: pointer;
@@ -524,6 +530,8 @@ img.u-userImage[loading="lazy"][src][width][height] {
 .m-postOverview__contentSide {
   padding-inline: 10pt;
   width: 100%;
+  min-width: 0;
+  overflow: hidden;
 }
 
 .m-postOverview__content {
