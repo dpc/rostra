@@ -348,6 +348,15 @@ img.u-userImage[loading="lazy"][src][width][height] {
   display: none;
 }
 
+.u-button:disabled,
+.u-button[disabled] {
+  color: var(--color-button-border);
+  background-color: var(--color-button-bg);
+  border-color: var(--color-button-border);
+  cursor: not-allowed;
+  pointer-events: none;
+}
+
 [disabled]>.u-buttonIcon {
   opacity: 0.6;
 }
