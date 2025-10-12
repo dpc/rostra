@@ -538,6 +538,10 @@ img.u-userImage[loading="lazy"][src][width][height] {
 
 .m-postView__content {
   position: relative;
+
+  & img {
+    width: 100%;
+  }
 }
 
 /* Unexpanded (folded) reply-parent's should be truncated, so the response itself is uncluttered */
