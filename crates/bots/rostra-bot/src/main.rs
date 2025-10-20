@@ -18,12 +18,12 @@ use tracing::level_filters::LevelFilter;
 use tracing::{error, info, warn};
 use tracing_subscriber::EnvFilter;
 
-use crate::database::HnBotDatabase;
-use crate::publisher::{HnPublisher, PublisherError};
-use crate::scraper::{HnScraper, ScraperError};
+use crate::database::BotDatabase;
+use crate::publisher::{Publisher, PublisherError};
+use crate::scraper::{Scraper, ScraperError, create_scraper};
 
-pub const PROJECT_NAME: &str = "rostra-bot-hn";
-pub const LOG_TARGET: &str = "rostra_bot_hn::main";
+pub const PROJECT_NAME: &str = "rostra-bot";
+pub const LOG_TARGET: &str = "rostra_bot::main";
 
 #[derive(Debug, Snafu)]
 pub enum BotError {
@@ -46,7 +46,24 @@ pub enum BotError {
 
 pub type BotResult<T> = std::result::Result<T, BotError>;
 
-/// Rostra Hacker News Bot
+#[derive(Debug, Clone, clap::ValueEnum)]
+pub enum Source {
+    #[value(name = "hn")]
+    HackerNews,
+    #[value(name = "lobsters")]
+    Lobsters,
+}
+
+impl std::fmt::Display for Source {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Source::HackerNews => write!(f, "HackerNews"),
+            Source::Lobsters => write!(f, "Lobsters"),
+        }
+    }
+}
+
+/// Rostra Bot - scrapes news sites and publishes to Rostra
 #[derive(Debug, Parser)]
 #[command(version, about, long_about = None)]
 pub struct Opts {
@@ -69,6 +86,10 @@ pub struct Opts {
     /// Data dir to store the database in
     #[arg(long)]
     pub data_dir: Option<PathBuf>,
+
+    /// Source to scrape from
+    #[arg(long, value_enum, default_value = "hn")]
+    pub source: Source,
 }
 
 #[snafu::report]
@@ -78,9 +99,10 @@ async fn main() -> BotResult<()> {
 
     let opts = Opts::parse();
 
-    info!(target: LOG_TARGET, "Starting Rostra HN Bot");
+    info!(target: LOG_TARGET, "Starting Rostra Bot for {}", opts.source);
     info!(
       target: LOG_TARGET,
+      source = %opts.source,
       scrape_interval = opts.scrape_interval_minutes,
       max_articles = opts.max_articles_per_run,
       min_score = opts.min_score,
@@ -116,47 +138,47 @@ async fn main() -> BotResult<()> {
 
     info!(target: LOG_TARGET, "Client initialized successfully");
 
-    // Initialize HN bot database using client's database
-    let hn_db = HnBotDatabase::new(client.db().clone());
-    hn_db.init_hn_tables().await.context(DatabaseSnafu)?;
+    // Initialize bot database using client's database
+    let db = BotDatabase::new(client.db().clone());
+    db.init_tables().await.context(DatabaseSnafu)?;
 
-    info!(target: LOG_TARGET, "HN bot database initialized");
+    info!(target: LOG_TARGET, "Bot database initialized");
 
     // Initialize scraper and publisher
-    let scraper = HnScraper::new();
-    let publisher = HnPublisher::new(client.clone(), secret);
+    let scraper = create_scraper(&opts.source);
+    let publisher = Publisher::new(client.clone(), secret);
 
     info!(target: LOG_TARGET, "Bot is running. Press Ctrl+C to stop.");
 
     // Main bot loop
-    run_bot_loop(&opts, &hn_db, &scraper, &publisher).await
+    run_bot_loop(&opts, &db, scraper.as_ref(), &publisher).await
 }
 
 async fn run_bot_loop(
     opts: &Opts,
-    hn_db: &HnBotDatabase,
-    scraper: &HnScraper,
-    publisher: &HnPublisher,
+    db: &BotDatabase,
+    scraper: &dyn Scraper,
+    publisher: &Publisher,
 ) -> BotResult<()> {
     let mut interval = interval(Duration::from_secs(opts.scrape_interval_minutes * 60));
 
     loop {
         info!(target: LOG_TARGET, "Starting scraping and publishing cycle");
 
-        // Scrape HN articles
+        // Scrape articles
         match scraper.scrape_frontpage().await {
             Ok(articles) => {
-                info!(target: LOG_TARGET, count = articles.len(), "Scraped articles from HN");
+                info!(target: LOG_TARGET, count = articles.len(), source = %opts.source, "Scraped articles");
 
                 // Filter articles by score and add to database
                 let mut added_count = 0;
                 for article in articles {
                     if article.score >= opts.min_score {
-                        match hn_db.add_unpublished_article(&article).await {
+                        match db.add_unpublished_article(&article).await {
                             Ok(true) => added_count += 1,
                             Ok(false) => {} // Already exists
                             Err(e) => {
-                                warn!(target: LOG_TARGET, error = %e, hn_id = article.hn_id, "Failed to add article to database")
+                                warn!(target: LOG_TARGET, error = %e, article_id = %article.id, "Failed to add article to database")
                             }
                         }
                     }
@@ -164,12 +186,12 @@ async fn run_bot_loop(
                 info!(target: LOG_TARGET, added = added_count, "Added new articles to unpublished queue");
             }
             Err(e) => {
-                error!(target: LOG_TARGET, error = %e, "Failed to scrape HN frontpage");
+                error!(target: LOG_TARGET, error = %e, source = %opts.source, "Failed to scrape frontpage");
             }
         }
 
         // Publish unpublished articles
-        match hn_db.get_unpublished_articles().await {
+        match db.get_unpublished_articles().await {
             Ok(articles) => {
                 let articles_to_publish: Vec<_> = articles
                     .into_iter()
@@ -188,17 +210,17 @@ async fn run_bot_loop(
                             .expect("Time went backwards")
                             .as_secs(),
                     );
-                    for (hn_id, result) in results {
+                    for (article_id, result) in results {
                         match result {
                             Ok(()) => {
                                 if let Err(e) =
-                                    hn_db.mark_article_published(hn_id, published_at).await
+                                    db.mark_article_published(&article_id, published_at).await
                                 {
-                                    error!(target: LOG_TARGET, error = %e, hn_id = hn_id, "Failed to mark article as published in database");
+                                    error!(target: LOG_TARGET, error = %e, article_id = %article_id, "Failed to mark article as published in database");
                                 }
                             }
                             Err(e) => {
-                                error!(target: LOG_TARGET, error = %e, hn_id = hn_id, "Failed to publish article");
+                                error!(target: LOG_TARGET, error = %e, article_id = %article_id, "Failed to publish article");
                             }
                         }
                     }
@@ -212,7 +234,7 @@ async fn run_bot_loop(
         }
 
         // Show current queue status
-        if let Ok(unpublished_count) = hn_db.get_unpublished_count().await {
+        if let Ok(unpublished_count) = db.get_unpublished_count().await {
             info!(target: LOG_TARGET, queue_size = unpublished_count, "Articles in unpublished queue");
         }
 

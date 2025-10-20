@@ -13,7 +13,7 @@ members = [
   "crates/rostra-util-fmt",
   "crates/rostra-web-ui",
   "crates/axum-dpc-static-assets",
-  "crates/bots/rostra-bot-hn",
+  "crates/bots/rostra-bot",
 ]
 resolver = "2"
 

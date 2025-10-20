@@ -1,5 +1,5 @@
 [package]
-name = "rostra-bot-hn"
+name = "rostra-bot"
 
 description = { workspace = true }
 edition = { workspace = true }
@@ -10,10 +10,11 @@ version = { workspace = true }
 workspace = true
 
 [[bin]]
-name = "rostra-bot-hn"
+name = "rostra-bot"
 
 [dependencies]
 anyhow = { workspace = true }
+async-trait = "0.1"
 bincode = { workspace = true }
 clap = { workspace = true }
 futures = { workspace = true }
