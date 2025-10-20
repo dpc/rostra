@@ -37,7 +37,7 @@ impl HeadMerger {
             // To avoid two active nodes merging heads together at the same time, producing
             // more heads, that require more merging, etc., we just sleep a random period of
             // time here, which should be enough to propagate and eventually desynchronize.
-            let rand_secs = rand::thread_rng().gen_range(0..60);
+            let rand_secs = rand::rng().random_range(0..60);
             tokio::time::sleep(Duration::from_secs(rand_secs)).await;
 
             let Ok(client) = self.client.client_ref() else {

@@ -1,12 +1,10 @@
 use ed25519_dalek::{SigningKey, VerifyingKey};
-use rand::rngs::OsRng;
 
 use super::{RostraId, RostraIdSecretKey};
 
 impl RostraIdSecretKey {
     pub fn generate() -> Self {
-        let mut csprng = OsRng;
-        SigningKey::generate(&mut csprng).into()
+        SigningKey::generate(&mut rand::rng()).into()
     }
 
     pub fn id(self) -> RostraId {

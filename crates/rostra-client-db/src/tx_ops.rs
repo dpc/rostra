@@ -2,7 +2,7 @@ use std::collections::{HashMap, HashSet};
 
 use ids::{IdsFollowersRecord, IdsUnfollowedRecord};
 use itertools::Itertools as _;
-use rand::{Rng as _, thread_rng};
+use rand::Rng as _;
 use redb::StorageError;
 use redb_bincode::{ReadableTable, Table};
 use rostra_core::event::{
@@ -94,7 +94,7 @@ impl Database {
             .map(|g| g.value())
         {
             Some(prev_missing) => {
-                // if the missing was marked as deleted, we'll record it
+                // If the missing was marked as deleted, we'll record it.
                 (
                     true,
                     if let Some(deleted_by) = prev_missing.deleted_by {
@@ -107,7 +107,7 @@ impl Database {
                 )
             }
             _ => {
-                // since nothing was expecting this event yet, it must be a "head"
+                // Since nothing was expecting this event yet, it must be a "head".
                 events_heads_table.insert(&(author, event_id), &EventsHeadsTableRecord)?;
                 (false, false)
             }
@@ -153,18 +153,18 @@ impl Database {
                         });
                 }
             } else {
-                // we do not have this parent yet, so we mark it as missing
+                // We do not have this parent yet, so we mark it as missing
                 events_missing_table.insert(
                     &(author, parent_id),
                     &EventsMissingRecord {
-                        // potentially mark that the missing event was already deleted
+                        // Potentially mark that the missing event was already deleted.
                         deleted_by: (event.is_delete_parent_aux_content_set() && parent_is_aux)
                             .then_some(event_id),
                     },
                 )?;
                 missing_parents.push(parent_id);
             }
-            // if the event was considered a "head", it shouldn't as it has a child
+            // If the event was considered a "head", it shouldn't as it has a child.
             events_heads_table.remove(&(author, parent_id))?;
         }
 
@@ -225,7 +225,7 @@ impl Database {
                     return Ok(true);
                 }
                 EventContentState::Invalid(_) | EventContentState::Present(_) => {
-                    // go ahead and mark as pruned
+                    // Go ahead and mark as pruned
                 }
             }
         }
@@ -396,7 +396,7 @@ impl Database {
     ) -> DbResult<IdSelfAccountRecord> {
         let id_self_record = IdSelfAccountRecord {
             rostra_id: self_id,
-            iroh_secret: thread_rng().r#gen(),
+            iroh_secret: rand::rng().random(),
         };
         let _ = id_self_table.insert(&(), &id_self_record)?;
         Ok(id_self_record)
@@ -438,7 +438,7 @@ impl Database {
         let before_pivot = (ShortEventId::ZERO)..(pivot);
         let after_pivot = (pivot)..=(ShortEventId::MAX);
 
-        Ok(Some(if thread_rng().r#gen() {
+        Ok(Some(if rand::rng().random() {
             match get_first_in_range(events_self_table, after_pivot)? {
                 Some(k) => k,
                 _ => match get_last_in_range(events_self_table, before_pivot)? {

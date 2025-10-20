@@ -181,7 +181,7 @@ impl PkarrIdPublisher {
                 trace!(target: LOG_TARGET, "Detect other peer alive, waiting");
                 failures_count = 0;
             }
-            let secs = rand::thread_rng().gen_range(1..10);
+            let secs = rand::rng().random_range(1..10);
             tokio::time::sleep(Duration::from_secs(secs)).await;
         }
     }

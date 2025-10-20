@@ -38,7 +38,7 @@ pub async fn get_single_post(
     Path((author, event_id)): Path<(RostraId, ShortEventId)>,
 ) -> RequestResult<impl IntoResponse> {
     // Render raw post if it's an HTMX request or raw=true query parameter
-    if hx_request.is_htmx_request() || dbg!(query.raw) {
+    if hx_request.is_htmx_request() || query.raw {
         let client_handle = state.client(session.id()).await?;
         let client_ref = client_handle.client_ref()?;
         let db = client_ref.db();
@@ -199,7 +199,7 @@ impl UiState {
         timestamp: Option<Timestamp>,
         ro: RoMode,
     ) -> RequestResult<Markup> {
-        // Note: we are actually not doing pagiantion, and just ignore
+        // Note: we are actually not doing pagination, and just ignore
         // everything after first page
         let (reactions, _) = if let Some(event_id) = event_id {
             client
@@ -299,7 +299,7 @@ impl UiState {
         let external_event_id = event_id.map(|e| ExternalEventId::new(author, e));
         let user_profile = self.get_social_profile_opt(author, client).await;
 
-        // Note: we are actually not doing pagiantion, and just ignore
+        // Note: we are actually not doing pagination, and just ignore
         // everything after first page
         let (reactions, _) = if let Some(event_id) = event_id {
             client

@@ -1,5 +1,4 @@
-use ed25519_dalek::ed25519::signature::SignerMut as _;
-use ed25519_dalek::{SignatureError, VerifyingKey};
+use ed25519_dalek::{SignatureError, Signer, VerifyingKey};
 
 use super::{Event, EventSignature, SignedEvent};
 use crate::bincode::STD_BINCODE_CONFIG;

@@ -11,10 +11,10 @@ use std::sync::{Arc, Weak};
 use std::time::Duration;
 
 use backon::Retryable as _;
+use iroh::NodeAddr;
 use iroh::discovery::ConcurrentDiscovery;
 use iroh::discovery::dns::DnsDiscovery;
 use iroh::discovery::pkarr::PkarrPublisher;
-use iroh::{NodeAddr, Watcher as _};
 use itertools::Itertools as _;
 use rostra_client_db::{Database, DbResult, IdsFolloweesRecord, IdsFollowersRecord};
 use rostra_core::event::{
@@ -358,7 +358,7 @@ impl Client {
         use iroh::{Endpoint, SecretKey};
         let secret_key = iroh_secret
             .into()
-            .unwrap_or_else(|| SecretKey::generate(&mut rand::thread_rng()));
+            .unwrap_or_else(|| SecretKey::generate(&mut rand::rng()));
 
         let discovery = ConcurrentDiscovery::from_services(vec![
             Box::new(PkarrPublisher::n0_dns().build(secret_key.clone())),
@@ -448,9 +448,7 @@ impl Client {
             }
         }
 
-        Ok(sanitize_node_addr(
-            self.endpoint.node_addr().initialized().await,
-        ))
+        Ok(sanitize_node_addr(self.endpoint.node_addr()))
     }
 
     pub fn self_head_subscribe(&self) -> watch::Receiver<Option<ShortEventId>> {
