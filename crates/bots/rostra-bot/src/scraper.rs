@@ -236,15 +236,14 @@ impl LobstersScraper {
             let title = title_link.inner_html();
             let url = title_link.value().attr("href").map(|s| s.to_string());
 
-            // Extract score from vote div
-            let score_selector =
-                Selector::parse("div.score").map_err(|_| ScraperError::HtmlParse)?;
+            // Extract score from voting element - correct selector for Lobsters
+            let vote_selector = Selector::parse("div.voters > a.upvoter").map_err(|_| ScraperError::HtmlParse)?;
             let score = story_element
-                .select(&score_selector)
+                .select(&vote_selector)
                 .next()
-                .and_then(|score_elem| {
-                    let score_text = score_elem.inner_html();
-                    score_text.trim().parse::<u32>().ok()
+                .and_then(|vote_elem| {
+                    let vote_text = vote_elem.inner_html();
+                    vote_text.trim().parse::<u32>().ok()
                 })
                 .unwrap_or(0);
 

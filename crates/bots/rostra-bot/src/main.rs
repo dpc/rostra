@@ -42,6 +42,8 @@ pub enum BotError {
     Publisher { source: PublisherError },
     #[snafu(display("Logging initialization failed"))]
     Logging,
+    #[snafu(display("Secret file is required for bot operation"))]
+    MissingSecretFile,
 }
 
 pub type BotResult<T> = std::result::Result<T, BotError>;
@@ -67,9 +69,12 @@ impl std::fmt::Display for Source {
 #[derive(Debug, Parser)]
 #[command(version, about, long_about = None)]
 pub struct Opts {
+    #[command(subcommand)]
+    pub command: Option<Command>,
+
     /// Path to the secret file for authentication
-    #[arg(long, required = true)]
-    pub secret_file: PathBuf,
+    #[arg(long)]
+    pub secret_file: Option<PathBuf>,
 
     /// Interval between scraping runs in minutes
     #[arg(long, default_value = "30")]
@@ -92,6 +97,25 @@ pub struct Opts {
     pub source: Source,
 }
 
+#[derive(Debug, Parser)]
+pub enum Command {
+    /// Development commands
+    Dev {
+        #[command(subcommand)]
+        dev_command: DevCommand,
+    },
+}
+
+#[derive(Debug, Parser)]
+pub enum DevCommand {
+    /// Test scraping functionality
+    Test {
+        /// Source to scrape from
+        #[arg(long, value_enum, default_value = "hn")]
+        source: Source,
+    },
+}
+
 #[snafu::report]
 #[tokio::main]
 async fn main() -> BotResult<()> {
@@ -99,6 +123,19 @@ async fn main() -> BotResult<()> {
 
     let opts = Opts::parse();
 
+    match opts.command {
+        Some(Command::Dev { dev_command }) => {
+            handle_dev_command(dev_command).await
+        }
+        None => {
+            // Default behavior - run the bot
+            let secret_file = opts.secret_file.clone().ok_or_else(|| BotError::MissingSecretFile)?;
+            run_bot(opts, secret_file).await
+        }
+    }
+}
+
+async fn run_bot(opts: Opts, secret_file: PathBuf) -> BotResult<()> {
     info!(target: LOG_TARGET, "Starting Rostra Bot for {}", opts.source);
     info!(
       target: LOG_TARGET,
@@ -109,7 +146,7 @@ async fn main() -> BotResult<()> {
       "Bot configuration"
     );
 
-    let secret = Client::read_id_secret(&opts.secret_file)
+    let secret = Client::read_id_secret(&secret_file)
         .await
         .context(SecretSnafu)?;
 
@@ -152,6 +189,42 @@ async fn main() -> BotResult<()> {
 
     // Main bot loop
     run_bot_loop(&opts, &db, scraper.as_ref(), &publisher).await
+}
+
+async fn handle_dev_command(dev_command: DevCommand) -> BotResult<()> {
+    match dev_command {
+        DevCommand::Test { source } => {
+            info!(target: LOG_TARGET, "Testing scraper for {}", source);
+
+            let scraper = create_scraper(&source);
+
+            match scraper.scrape_frontpage().await {
+                Ok(articles) => {
+                    println!("Successfully scraped {} articles from {}:", articles.len(), source);
+                    println!();
+
+                    for (i, article) in articles.iter().enumerate() {
+                        println!("Article {}: ", i + 1);
+                        println!("  ID: {}", article.id);
+                        println!("  Title: {}", article.title);
+                        println!("  Score: {}", article.score);
+                        println!("  Author: {}", article.author);
+                        println!("  Source: {}", article.source);
+                        println!("  URL: {}", article.url.as_deref().unwrap_or("None"));
+                        println!("  Source URL: {}", article.source_url);
+                        println!("  Scraped at: {:?}", article.scraped_at);
+                        println!();
+                    }
+
+                    Ok(())
+                }
+                Err(e) => {
+                    eprintln!("Failed to scrape {}: {}", source, e);
+                    Err(BotError::Scraper { source: e })
+                }
+            }
+        }
+    }
 }
 
 async fn run_bot_loop(
