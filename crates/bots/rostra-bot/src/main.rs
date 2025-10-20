@@ -85,7 +85,7 @@ pub struct Opts {
     pub max_articles_per_run: usize,
 
     /// Minimum score threshold for articles
-    #[arg(long, default_value = "50")]
+    #[arg(long, default_value = "0")]
     pub min_score: u32,
 
     /// Data dir to store the database in
@@ -124,12 +124,13 @@ async fn main() -> BotResult<()> {
     let opts = Opts::parse();
 
     match opts.command {
-        Some(Command::Dev { dev_command }) => {
-            handle_dev_command(dev_command).await
-        }
+        Some(Command::Dev { dev_command }) => handle_dev_command(dev_command).await,
         None => {
             // Default behavior - run the bot
-            let secret_file = opts.secret_file.clone().ok_or_else(|| BotError::MissingSecretFile)?;
+            let secret_file = opts
+                .secret_file
+                .clone()
+                .ok_or_else(|| BotError::MissingSecretFile)?;
             run_bot(opts, secret_file).await
         }
     }
@@ -200,7 +201,11 @@ async fn handle_dev_command(dev_command: DevCommand) -> BotResult<()> {
 
             match scraper.scrape_frontpage().await {
                 Ok(articles) => {
-                    println!("Successfully scraped {} articles from {}:", articles.len(), source);
+                    println!(
+                        "Successfully scraped {} articles from {}:",
+                        articles.len(),
+                        source
+                    );
                     println!();
 
                     for (i, article) in articles.iter().enumerate() {

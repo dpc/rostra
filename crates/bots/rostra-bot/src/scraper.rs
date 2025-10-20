@@ -237,7 +237,8 @@ impl LobstersScraper {
             let url = title_link.value().attr("href").map(|s| s.to_string());
 
             // Extract score from voting element - correct selector for Lobsters
-            let vote_selector = Selector::parse("div.voters > a.upvoter").map_err(|_| ScraperError::HtmlParse)?;
+            let vote_selector =
+                Selector::parse("div.voters > a.upvoter").map_err(|_| ScraperError::HtmlParse)?;
             let score = story_element
                 .select(&vote_selector)
                 .next()
