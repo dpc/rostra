@@ -15,7 +15,6 @@ use rostra_p2p::connection::{
 };
 use rostra_p2p::util::ToShort as _;
 use rostra_util_error::{BoxedError, FmtCompact as _};
-use rostra_util_fmt::AsFmtOption as _;
 use snafu::{Location, OptionExt as _, ResultExt as _, Snafu};
 use tokio::sync::watch;
 use tracing::{debug, info, instrument, trace};
@@ -28,6 +27,12 @@ const LOG_TARGET: &str = "rostra::req_handler";
 #[derive(Debug, Snafu)]
 pub enum IncomingConnectionError {
     Connection {
+        source: iroh::endpoint::ConnectingError,
+        #[snafu(implicit)]
+        location: Location,
+    },
+    #[snafu(display("Connection stream error: {source}"))]
+    ConnectionStream {
         source: iroh::endpoint::ConnectionError,
         #[snafu(implicit)]
         location: Location,
@@ -75,7 +80,7 @@ pub struct RequestHandler {
 
 impl RequestHandler {
     pub fn new(client: &Client, endpoint: Endpoint) -> Arc<Self> {
-        info!(id = %client.rostra_id(), iroh_endpoint = %endpoint.node_id(), "Starting request handler task");
+        info!(id = %client.rostra_id(), iroh_endpoint = %endpoint.id(), "Starting request handler task");
         Self {
             client: client.handle(),
             endpoint,
@@ -119,12 +124,12 @@ impl RequestHandler {
     pub async fn handle_incoming_try(&self, incoming: Incoming) -> IncomingConnectionResult<()> {
         let conn = incoming
             .accept()
-            .context(ConnectionSnafu)?
+            .context(ConnectionStreamSnafu)?
             .await
             .context(ConnectionSnafu)?;
 
         loop {
-            let (send, mut recv) = conn.accept_bi().await.context(ConnectionSnafu)?;
+            let (send, mut recv) = conn.accept_bi().await.context(ConnectionStreamSnafu)?;
             let (rpc_id, req_msg) = Connection::read_request_raw(&mut recv)
                 .await
                 .context(RpcSnafu)?;
@@ -132,7 +137,7 @@ impl RequestHandler {
             debug!(
                 target: LOG_TARGET,
                 rpc_id = %rpc_id,
-                from = %conn.remote_node_id().ok().map(|id| id.to_short()).fmt_option(),
+                from = %conn.remote_id().to_short(),
                 "Rpc request"
             );
 

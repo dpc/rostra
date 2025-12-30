@@ -61,8 +61,8 @@ futures-lite = "2.6.1"
 bytes = "*"
 listenfd = "1.0.2"
 futures-util = "*"
-iroh = { version = "0.93.2", default-features = false }
-iroh-base = { version = "0.93.2", default-features = false }
+iroh = { version = "0.95.1", default-features = false }
+iroh-base = { version = "0.95.1", default-features = false }
 iroh-io = "0.6.0"
 itertools = "0.13.0"
 jotdown = "0.7.0"

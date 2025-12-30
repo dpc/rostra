@@ -1,17 +1,16 @@
 use core::{fmt, str};
 
-use iroh::NodeAddr;
-use iroh_base::ticket::{NodeTicket, Ticket as _};
+use iroh_base::{EndpointAddr, EndpointId};
 use rostra_core::ShortEventId;
 use rostra_util_error::BoxedError;
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub struct CompactTicket(pub NodeTicket);
+pub struct CompactTicket(pub EndpointId);
 
 impl fmt::Display for CompactTicket {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        data_encoding::BASE64URL_NOPAD.encode_write(&self.0.to_bytes(), f)
+        data_encoding::BASE64URL_NOPAD.encode_write(self.0.as_bytes(), f)
     }
 }
 
@@ -20,19 +19,26 @@ impl str::FromStr for CompactTicket {
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         let bytes = data_encoding::BASE64URL_NOPAD.decode(s.as_bytes())?;
-        Ok(Self(NodeTicket::from_bytes(&bytes)?))
+        let id = EndpointId::try_from(&bytes[..])?;
+        Ok(Self(id))
     }
 }
 
-impl From<NodeAddr> for CompactTicket {
-    fn from(addr: NodeAddr) -> Self {
-        Self(NodeTicket::from(addr))
+impl From<EndpointId> for CompactTicket {
+    fn from(id: EndpointId) -> Self {
+        Self(id)
     }
 }
 
-impl From<CompactTicket> for NodeAddr {
+impl From<EndpointAddr> for CompactTicket {
+    fn from(addr: EndpointAddr) -> Self {
+        Self(addr.id)
+    }
+}
+
+impl From<CompactTicket> for EndpointAddr {
     fn from(val: CompactTicket) -> Self {
-        val.0.into()
+        EndpointAddr::new(val.0)
     }
 }
 

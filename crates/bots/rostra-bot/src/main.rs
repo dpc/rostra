@@ -224,7 +224,7 @@ async fn handle_dev_command(dev_command: DevCommand) -> BotResult<()> {
                     Ok(())
                 }
                 Err(e) => {
-                    eprintln!("Failed to scrape {}: {}", source, e);
+                    eprintln!("Failed to scrape {source}: {e}");
                     Err(BotError::Scraper { source: e })
                 }
             }

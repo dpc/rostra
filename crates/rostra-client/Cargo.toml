@@ -19,7 +19,7 @@ data-encoding = { workspace = true }
 ed25519-dalek = { workspace = true }
 futures = { workspace = true }
 futures-lite = { workspace = true }
-iroh-base = { workspace = true, features = ["ticket"] }
+iroh-base = { workspace = true }
 iroh = { workspace = true }
 iroh-io = { workspace = true }
 itertools = { workspace = true }

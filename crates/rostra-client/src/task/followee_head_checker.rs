@@ -8,7 +8,6 @@ use rostra_core::id::{RostraId, ToShort as _};
 use rostra_p2p::Connection;
 use rostra_util::is_rostra_dev_mode_set;
 use rostra_util_error::{BoxedErrorResult, FmtCompact, WhateverResult};
-use rostra_util_fmt::AsFmtOption as _;
 use snafu::ResultExt as _;
 use tokio::sync::watch;
 use tracing::{debug, info, instrument, trace};
@@ -225,13 +224,13 @@ impl FolloweeHeadChecker {
 
         let storage = client.db();
 
-        let peer_id = conn.remote_node_id();
+        let peer_id = conn.remote_id();
 
         while let Some((depth, event_id)) = events.pop() {
             debug!(
                target: LOG_TARGET,
                 %depth,
-                node_id = %peer_id.fmt_option(),
+                node_id = %peer_id,
                 %rostra_id,
                 %event_id,
                 "Querrying for event"
@@ -244,7 +243,7 @@ impl FolloweeHeadChecker {
                 debug!(
                     target: LOG_TARGET,
                     %depth,
-                    node_id = %peer_id.fmt_option(),
+                    node_id = %peer_id,
                     %rostra_id,
                     %event_id,
                     "Event not found"
@@ -275,7 +274,7 @@ impl FolloweeHeadChecker {
                     debug!(
                         target: LOG_TARGET,
                         %depth,
-                        node_id = %peer_id.fmt_option(),
+                        node_id = %peer_id,
                         %rostra_id,
                         %event_id,
                         "Event content not found"

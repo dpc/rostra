@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 use std::marker::PhantomData;
-use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
+use std::net::Ipv4Addr;
 use std::ops;
 use std::option::Option;
 use std::path::Path;
@@ -11,11 +11,10 @@ use std::sync::{Arc, Weak};
 use std::time::Duration;
 
 use backon::Retryable as _;
-use iroh::NodeAddr;
+use iroh_base::EndpointAddr;
 use iroh::discovery::ConcurrentDiscovery;
 use iroh::discovery::dns::DnsDiscovery;
 use iroh::discovery::pkarr::PkarrPublisher;
-use itertools::Itertools as _;
 use rostra_client_db::{Database, DbResult, IdsFolloweesRecord, IdsFollowersRecord};
 use rostra_core::event::{
     Event, EventContentRaw, IrohNodeId, PersonaId, PersonaSelector, SignedEvent, SocialPost,
@@ -224,7 +223,7 @@ impl Client {
 
         let db = &self.db;
 
-        let our_endpoint = IrohNodeId::from_bytes(*self.endpoint.node_id().as_bytes());
+        let our_endpoint = IrohNodeId::from_bytes(*self.endpoint.id().as_bytes());
         let endpoints = db.get_id_endpoints(self.rostra_id()).await;
 
         if let Some((_existing_id, _existing_record)) = endpoints
@@ -250,7 +249,7 @@ impl Client {
         self.publish_event(
             id_secret,
             content_kind::NodeAnnouncement::Iroh {
-                addr: IrohNodeId::from_bytes(*self.endpoint.node_id().as_bytes()),
+                addr: IrohNodeId::from_bytes(*self.endpoint.id().as_bytes()),
             },
         )
         .call()
@@ -270,12 +269,12 @@ impl Client {
             .map(|(_ts, node_id)| node_id)
             .collect();
         for node_id in node_ids {
-            let Ok(node_id) = iroh::NodeId::from_bytes(&node_id.to_bytes()) else {
+            let Ok(pub_key) = iroh::PublicKey::from_bytes(&node_id.to_bytes()) else {
                 debug!(target: LOG_TARGET, %id, "Invalid iroh id for rostra id found");
                 continue;
             };
 
-            if node_id == self.endpoint.node_id() {
+            if pub_key == self.endpoint.id() {
                 // Skip connecting to our own Id
                 continue;
             }
@@ -283,7 +282,7 @@ impl Client {
             let endpoint = self.endpoint.clone();
             connection_futures.push(Box::pin(async move {
                 let conn = endpoint
-                    .connect(node_id, ROSTRA_P2P_V0_ALPN)
+                    .connect(pub_key, ROSTRA_P2P_V0_ALPN)
                     .await
                     .context(ConnectionSnafu)?;
                 let conn = Connection::from(conn);
@@ -328,16 +327,16 @@ impl Client {
     pub async fn connect_by_pkarr_resolution(&self, id: RostraId) -> ConnectResult<Connection> {
         let ticket = self.resolve_id_ticket(id).await.context(ResolveSnafu)?;
 
-        let node_addr = NodeAddr::from(ticket);
-        if node_addr.node_id == self.endpoint.node_id() {
+        let endpoint_addr = EndpointAddr::from(ticket);
+        if endpoint_addr.id == self.endpoint.id() {
             // If we are trying to connect to our own Id, we want to connect (if possible)
             // with some other node.
             return Err(PeerUnavailableSnafu.build());
         }
-        debug!(target: LOG_TARGET, iroh_id = %node_addr.node_id, id = %id.to_short(), "Connecting after pkarr resolution");
+        debug!(target: LOG_TARGET, iroh_id = %endpoint_addr.id, id = %id.to_short(), "Connecting after pkarr resolution");
         Ok(self
             .endpoint
-            .connect(node_addr, ROSTRA_P2P_V0_ALPN)
+            .connect(endpoint_addr, ROSTRA_P2P_V0_ALPN)
             .await
             .context(ConnectIrohSnafu)?
             .into())
@@ -374,7 +373,7 @@ impl Client {
             .bind()
             .await
             .context(InitIrohClientSnafu)?;
-        debug!(target: LOG_TARGET, iroh_id = %ep.node_id(), "Created Iroh endpoint");
+        debug!(target: LOG_TARGET, iroh_id = %ep.id(), "Created Iroh endpoint");
         Ok(ep)
     }
 
@@ -403,52 +402,48 @@ impl Client {
         tokio::spawn(MissingEventContentFetcher::new(self).run());
     }
 
-    pub(crate) async fn iroh_address(&self) -> WhateverResult<NodeAddr> {
-        pub(crate) fn sanitize_node_addr(node_addr: NodeAddr) -> NodeAddr {
+    pub(crate) async fn iroh_address(&self) -> WhateverResult<EndpointAddr> {
+        pub(crate) fn sanitize_endpoint_addr(endpoint_addr: EndpointAddr) -> EndpointAddr {
+            use iroh_base::TransportAddr;
             pub(crate) fn is_ipv4_cgnat(ip: Ipv4Addr) -> bool {
                 matches!(ip.octets(), [100, b, ..] if (64..128).contains(&b))
             }
-            let direct_addresses = node_addr
-                .direct_addresses
+            let filtered_addrs = endpoint_addr
+                .addrs
                 .into_iter()
                 .filter(|addr| match addr {
-                    std::net::SocketAddr::V4(ipv4) => {
-                        let ip = ipv4.ip();
-                        !ip.is_private()
-                            && !ip.is_link_local()
-                            && !is_ipv4_cgnat(*ip)
-                            && !ip.is_loopback()
-                            && !ip.is_multicast()
-                            && !ip.is_broadcast()
-                            && !ip.is_documentation()
-                    }
-                    std::net::SocketAddr::V6(ipv6) => {
-                        let ip = ipv6.ip();
-                        !ip.is_multicast()
-                            && !ip.is_loopback()
-                            // Unique Local Addresses (ULA)
-                            && (ip.to_bits() & !0x7f) != 0xfc00_0000_0000_0000_0000_0000_0000_0000
-                            // Link-Local Addresses
-                            && (ip.to_bits() & !0x3ff) != 0xfe80_0000_0000_0000_0000_0000_0000_0000
-                    }
+                    TransportAddr::Ip(socket_addr) => match socket_addr {
+                        std::net::SocketAddr::V4(ipv4) => {
+                            let ip = ipv4.ip();
+                            !ip.is_private()
+                                && !ip.is_link_local()
+                                && !is_ipv4_cgnat(*ip)
+                                && !ip.is_loopback()
+                                && !ip.is_multicast()
+                                && !ip.is_broadcast()
+                                && !ip.is_documentation()
+                        }
+                        std::net::SocketAddr::V6(ipv6) => {
+                            let ip = ipv6.ip();
+                            !ip.is_multicast()
+                                && !ip.is_loopback()
+                                // Unique Local Addresses (ULA)
+                                && (ip.to_bits() & !0x7f) != 0xfc00_0000_0000_0000_0000_0000_0000_0000
+                                // Link-Local Addresses
+                                && (ip.to_bits() & !0x3ff) != 0xfe80_0000_0000_0000_0000_0000_0000_0000
+                        }
+                    },
+                    TransportAddr::Relay(_) => true, // Keep relay addresses
+                    _ => true, // Keep any future address types
                 })
-                .unique_by(|addr| match addr.ip() {
-                    IpAddr::V4(ipv4) => IpAddr::V4(ipv4),
-                    IpAddr::V6(ipv6) => IpAddr::V6(Ipv6Addr::from_bits(
-                        ipv6.to_bits() & !0xffff_ffff_ffff_ffffu128,
-                    )),
-                })
-                .sorted_unstable_by(|a, b| a.is_ipv6().cmp(&b.is_ipv6()).then(a.cmp(b)))
-                // Limit to 4
-                .take(4)
                 .collect();
-            NodeAddr {
-                direct_addresses,
-                ..node_addr
+            EndpointAddr {
+                id: endpoint_addr.id,
+                addrs: filtered_addrs,
             }
         }
 
-        Ok(sanitize_node_addr(self.endpoint.node_addr()))
+        Ok(sanitize_endpoint_addr(self.endpoint.addr()))
     }
 
     pub fn self_head_subscribe(&self) -> watch::Receiver<Option<ShortEventId>> {

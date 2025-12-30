@@ -29,8 +29,8 @@ use crate::{
 pub struct Connection(iroh::endpoint::Connection);
 
 impl Connection {
-    pub fn remote_node_id(&self) -> Option<iroh::PublicKey> {
-        self.0.remote_node_id().ok()
+    pub fn remote_id(&self) -> iroh::PublicKey {
+        self.0.remote_id()
     }
 
     pub fn is_closed(&self) -> bool {
