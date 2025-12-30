@@ -11,10 +11,10 @@ use std::sync::{Arc, Weak};
 use std::time::Duration;
 
 use backon::Retryable as _;
-use iroh_base::EndpointAddr;
 use iroh::discovery::ConcurrentDiscovery;
 use iroh::discovery::dns::DnsDiscovery;
 use iroh::discovery::pkarr::PkarrPublisher;
+use iroh_base::EndpointAddr;
 use rostra_client_db::{Database, DbResult, IdsFolloweesRecord, IdsFollowersRecord};
 use rostra_core::event::{
     Event, EventContentRaw, IrohNodeId, PersonaId, PersonaSelector, SignedEvent, SocialPost,
