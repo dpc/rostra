@@ -65,7 +65,7 @@ iroh = { version = "0.95.1", default-features = false }
 iroh-base = { version = "0.95.1", default-features = false }
 iroh-io = "0.6.0"
 itertools = "0.13.0"
-jotdown = "0.7.0"
+jotdown = "0.9.0"
 pkarr = "3.10.0"
 proptest = "1.6.0"
 maud = "*"
@@ -150,3 +150,4 @@ debug = false
 
 [patch.crates-io]
 redb-bincode = { git = "https://github.com/rustshop/redb-bincode", rev = "b33cedb787d452dc3735a153aca55086fea7c306" }
+jotdown = { git = "https://github.com/dpc/jotdown", rev = "e32eefe0b7ee3d954bc5a4d3178a177a858bc2d7" }
