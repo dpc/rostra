@@ -40,10 +40,6 @@ where
 {
     type Error = R::Error;
 
-    fn begin(&mut self) -> Result<(), Self::Error> {
-        self.inner.begin()
-    }
-
     fn emit(&mut self, event: Event<'s>) -> Result<(), Self::Error> {
         match event {
             Event::Start(Container::Link(s, jotdown::LinkType::AutoLink), attr) => {
@@ -104,10 +100,6 @@ where
             event => self.inner.emit(event),
         }
     }
-
-    fn finish(&mut self) -> Result<(), Self::Error> {
-        self.inner.finish()
-    }
 }
 
 impl<'s, R> RenderOutput<'s> for RostraProfileLinks<R>
@@ -158,10 +150,6 @@ where
     R: Render<'s>,
 {
     type Error = R::Error;
-
-    fn begin(&mut self) -> Result<(), Self::Error> {
-        self.inner.begin()
-    }
 
     fn emit(&mut self, event: Event<'s>) -> Result<(), Self::Error> {
         match event {
@@ -289,10 +277,6 @@ where
             }
             event => self.inner.emit(event),
         }
-    }
-
-    fn finish(&mut self) -> Result<(), Self::Error> {
-        self.inner.finish()
     }
 }
 

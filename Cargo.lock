@@ -2409,7 +2409,7 @@ checksum = "8eaf4bc02d17cbdd7ff4c7438cafcdf7fb9a4613313ad11b4f8fefe7d3fa0130"
 [[package]]
 name = "jotdown"
 version = "0.9.0"
-source = "git+https://github.com/dpc/jotdown?rev=e32eefe0b7ee3d954bc5a4d3178a177a858bc2d7#e32eefe0b7ee3d954bc5a4d3178a177a858bc2d7"
+source = "git+https://github.com/dpc/jotdown?rev=83f40fca9b8e61efbb46b139f32778681d72cc75#83f40fca9b8e61efbb46b139f32778681d72cc75"
 
 [[package]]
 name = "js-sys"

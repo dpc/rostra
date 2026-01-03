@@ -150,4 +150,4 @@ debug = false
 
 [patch.crates-io]
 redb-bincode = { git = "https://github.com/rustshop/redb-bincode", rev = "b33cedb787d452dc3735a153aca55086fea7c306" }
-jotdown = { git = "https://github.com/dpc/jotdown", rev = "e32eefe0b7ee3d954bc5a4d3178a177a858bc2d7" }
+jotdown = { git = "https://github.com/dpc/jotdown", rev = "83f40fca9b8e61efbb46b139f32778681d72cc75" }
