@@ -1,8 +1,9 @@
 use std::borrow::Cow;
 use std::str::FromStr as _;
 
-use jotdown::html::filters::SanitizeExt;
-use jotdown::{Attributes, Container, Event, Render, RenderOutput, RenderOutputExt};
+use jotdown::r#async::{AsyncRender, AsyncRenderOutput, AsyncRenderOutputExt};
+use jotdown::html::filters::AsyncSanitizeExt;
+use jotdown::{Attributes, Container, Event};
 use maud::{Markup, PreEscaped};
 use rostra_client::ClientRef;
 use rostra_core::ShortEventId;
@@ -14,97 +15,112 @@ use crate::UiState;
 /// Tracks what type of container we're in for proper Event::End handling
 #[derive(Clone)]
 enum ContainerKind {
-    ProfileLink(RostraId),
+    ProfileLink(RostraId, Option<String>),
     Other,
 }
 
 /// Filter that transforms rostra: profile links to UI profile links
 /// and replaces link text with @username format
-pub(crate) struct RostraProfileLinks<R> {
+pub(crate) struct RostraProfileLinks<'c, R> {
+    client: ClientRef<'c>,
     inner: R,
     container_stack: Vec<ContainerKind>,
 }
 
-impl<R> RostraProfileLinks<R> {
-    fn new(inner: R) -> Self {
+impl<'c, R> RostraProfileLinks<'c, R> {
+    fn new(inner: R, client: ClientRef<'c>) -> Self {
         Self {
+            client,
             inner,
             container_stack: vec![],
         }
     }
 }
 
-impl<'s, R> Render<'s> for RostraProfileLinks<R>
+#[async_trait::async_trait]
+impl<'s, 'c, R> AsyncRender<'s> for RostraProfileLinks<'c, R>
 where
-    R: Render<'s>,
+    'c: 's,
+    R: AsyncRender<'s> + Send,
 {
     type Error = R::Error;
 
-    fn emit(&mut self, event: Event<'s>) -> Result<(), Self::Error> {
+    async fn emit(&mut self, event: Event<'s>) -> Result<(), Self::Error> {
         match event {
             Event::Start(Container::Link(s, jotdown::LinkType::AutoLink), attr) => {
                 if let Some(rostra_id) = UiState::extra_rostra_id_link(&s) {
-                    // TODO: blocked on https://github.com/hellux/jotdown/issues/86
-                    // let x = client
-                    //     .db()
-                    //     .get_social_profile(rostra_id)
-                    //     .await
-                    //     .map(|record| record.display_name)
-                    //     .unwrap_or_else(|| rostra_id.to_string());
+                    let display_name = self
+                        .client
+                        .db()
+                        .get_social_profile(rostra_id)
+                        .await
+                        .map(|record| record.display_name);
                     self.container_stack
-                        .push(ContainerKind::ProfileLink(rostra_id));
-                    self.inner.emit(Event::Start(
-                        Container::Link(
-                            format!("/ui/profile/{rostra_id}").into(),
-                            jotdown::LinkType::Span(jotdown::SpanLinkType::Inline),
-                        ),
-                        attr,
-                    ))
+                        .push(ContainerKind::ProfileLink(rostra_id, display_name));
+                    self.inner
+                        .emit(Event::Start(
+                            Container::Link(
+                                format!("/ui/profile/{rostra_id}").into(),
+                                jotdown::LinkType::Span(jotdown::SpanLinkType::Inline),
+                            ),
+                            attr,
+                        ))
+                        .await
                 } else {
                     self.container_stack.push(ContainerKind::Other);
-                    self.inner.emit(Event::Start(
-                        Container::Link(s, jotdown::LinkType::AutoLink),
-                        attr,
-                    ))
+                    self.inner
+                        .emit(Event::Start(
+                            Container::Link(s, jotdown::LinkType::AutoLink),
+                            attr,
+                        ))
+                        .await
                 }
             }
             Event::Start(container, attr) => {
                 self.container_stack.push(ContainerKind::Other);
-                self.inner.emit(Event::Start(container, attr))
+                self.inner.emit(Event::Start(container, attr)).await
             }
             Event::Str(s) => {
                 // Check if we're inside a profile link
                 let in_profile_link = self
                     .container_stack
                     .iter()
-                    .any(|c| matches!(c, ContainerKind::ProfileLink(_)));
+                    .any(|c| matches!(c, ContainerKind::ProfileLink(_, _)));
                 if in_profile_link {
                     // Find the profile ID from the stack
-                    if let Some(ContainerKind::ProfileLink(profile)) = self
+                    if let Some(ContainerKind::ProfileLink(rostra_id, display_name)) = self
                         .container_stack
                         .iter()
-                        .find(|c| matches!(c, ContainerKind::ProfileLink(_)))
+                        .find(|c| matches!(c, ContainerKind::ProfileLink(_, _)))
                     {
-                        self.inner.emit(Event::Str(format!("@{profile}").into()))
+                        self.inner
+                            .emit(Event::Str(Cow::Owned(
+                                display_name
+                                    .clone()
+                                    .unwrap_or_else(|| format!("@{rostra_id}")),
+                            )))
+                            .await
                     } else {
-                        self.inner.emit(Event::Str(s))
+                        self.inner.emit(Event::Str(s)).await
                     }
                 } else {
-                    self.inner.emit(Event::Str(s))
+                    self.inner.emit(Event::Str(s)).await
                 }
             }
             Event::End => {
                 self.container_stack.pop();
-                self.inner.emit(Event::End)
+                self.inner.emit(Event::End).await
             }
-            event => self.inner.emit(event),
+            event => self.inner.emit(event).await,
         }
     }
 }
 
-impl<'s, R> RenderOutput<'s> for RostraProfileLinks<R>
+#[async_trait::async_trait]
+impl<'s, 'c, R> AsyncRenderOutput<'s> for RostraProfileLinks<'c, R>
 where
-    R: RenderOutput<'s>,
+    'c: 's,
+    R: AsyncRenderOutput<'s> + Send,
 {
     type Output = R::Output;
 
@@ -145,25 +161,28 @@ impl<'s, R> RostraImages<'s, R> {
     }
 }
 
-impl<'s, R> Render<'s> for RostraImages<'s, R>
+#[async_trait::async_trait]
+impl<'s, R> AsyncRender<'s> for RostraImages<'s, R>
 where
-    R: Render<'s>,
+    R: AsyncRender<'s> + Send,
 {
     type Error = R::Error;
 
-    fn emit(&mut self, event: Event<'s>) -> Result<(), Self::Error> {
+    async fn emit(&mut self, event: Event<'s>) -> Result<(), Self::Error> {
         match event {
             Event::Start(Container::Image(s, link_type), attr) => {
                 if let Some(event_id) = UiState::extra_rostra_media_link(&s) {
                     // Transform rostra-media: links to /ui/media/ URLs
                     self.container_stack.push(Some(ImageTransform::RostraMedia));
-                    self.inner.emit(Event::Start(
-                        Container::Image(
-                            format!("/ui/media/{}/{}", self.author_id, event_id).into(),
-                            jotdown::SpanLinkType::Inline,
-                        ),
-                        attr,
-                    ))
+                    self.inner
+                        .emit(Event::Start(
+                            Container::Image(
+                                format!("/ui/media/{}/{}", self.author_id, event_id).into(),
+                                jotdown::SpanLinkType::Inline,
+                            ),
+                            attr,
+                        ))
+                        .await
                 } else {
                     // External image - check if it's embeddable media
                     if let Some(html) = maybe_embed_media_html(&s) {
@@ -178,20 +197,22 @@ where
                             )));
                     }
                     // Start the lazy-load wrapper div
-                    self.inner.emit(Event::Start(
-                        Container::Div {
-                            class: "lazyload-wrapper".into(),
-                        },
-                        jotdown::Attributes::try_from(
-                            "{ onclick=\"this.classList.add('-expanded')\" }",
-                        )
-                        .expect("Can't fail"),
-                    ))
+                    self.inner
+                        .emit(Event::Start(
+                            Container::Div {
+                                class: "lazyload-wrapper".into(),
+                            },
+                            jotdown::Attributes::try_from(
+                                "{ onclick=\"this.classList.add('-expanded')\" }",
+                            )
+                            .expect("Can't fail"),
+                        ))
+                        .await
                 }
             }
             Event::Start(container, attr) => {
                 self.container_stack.push(None);
-                self.inner.emit(Event::Start(container, attr))
+                self.inner.emit(Event::Start(container, attr)).await
             }
             Event::Str(s) => {
                 // If we're inside an image transformation, capture the alt text
@@ -199,7 +220,7 @@ where
                     match transform {
                         ImageTransform::RostraMedia => {
                             // For rostra media, pass through the str
-                            self.inner.emit(Event::Str(s))
+                            self.inner.emit(Event::Str(s)).await
                         }
                         ImageTransform::EmbeddableMedia(_, alt) => {
                             // Capture alt text, skip emitting the str for now
@@ -213,7 +234,7 @@ where
                         }
                     }
                 } else {
-                    self.inner.emit(Event::Str(s))
+                    self.inner.emit(Event::Str(s)).await
                 }
             }
             Event::End => {
@@ -221,7 +242,7 @@ where
                     match transform {
                         ImageTransform::RostraMedia => {
                             // Just emit End for rostra media
-                            self.inner.emit(Event::End)
+                            self.inner.emit(Event::End).await
                         }
                         ImageTransform::EmbeddableMedia(html, alt) => {
                             // Emit the load message and embedded HTML
@@ -233,19 +254,22 @@ where
                             };
 
                             self.inner
-                                .emit(Event::Start(Container::Paragraph, Attributes::new()))?;
-                            self.inner.emit(Event::Str(load_msg.into()))?;
-                            self.inner.emit(Event::End)?;
-                            self.inner.emit(Event::Start(
-                                Container::RawInline {
-                                    format: "html".into(),
-                                },
-                                Attributes::try_from("{ loading=lazy }").expect("Can't fail"),
-                            ))?;
-                            self.inner.emit(Event::Str(html.into()))?;
-                            self.inner.emit(Event::End)?;
+                                .emit(Event::Start(Container::Paragraph, Attributes::new()))
+                                .await?;
+                            self.inner.emit(Event::Str(load_msg.into())).await?;
+                            self.inner.emit(Event::End).await?;
+                            self.inner
+                                .emit(Event::Start(
+                                    Container::RawInline {
+                                        format: "html".into(),
+                                    },
+                                    Attributes::try_from("{ loading=lazy }").expect("Can't fail"),
+                                ))
+                                .await?;
+                            self.inner.emit(Event::Str(html.into())).await?;
+                            self.inner.emit(Event::End).await?;
                             // Close the div
-                            self.inner.emit(Event::End)
+                            self.inner.emit(Event::End).await
                         }
                         ImageTransform::ExternalImage(s, link_type, alt) => {
                             // Emit load message and the actual image
@@ -257,32 +281,36 @@ where
                             };
 
                             self.inner
-                                .emit(Event::Start(Container::Paragraph, Attributes::new()))?;
-                            self.inner.emit(Event::Str(load_msg.into()))?;
-                            self.inner.emit(Event::End)?;
-                            self.inner.emit(Event::Start(
-                                Container::Image(s.clone(), link_type),
-                                Attributes::try_from("{ loading=lazy }").expect("Can't fail"),
-                            ))?;
-                            self.inner.emit(Event::Str(alt.to_string().into()))?;
-                            self.inner.emit(Event::End)?;
+                                .emit(Event::Start(Container::Paragraph, Attributes::new()))
+                                .await?;
+                            self.inner.emit(Event::Str(load_msg.into())).await?;
+                            self.inner.emit(Event::End).await?;
+                            self.inner
+                                .emit(Event::Start(
+                                    Container::Image(s.clone(), link_type),
+                                    Attributes::try_from("{ loading=lazy }").expect("Can't fail"),
+                                ))
+                                .await?;
+                            self.inner.emit(Event::Str(alt.to_string().into())).await?;
+                            self.inner.emit(Event::End).await?;
                             // Close the div
-                            self.inner.emit(Event::End)
+                            self.inner.emit(Event::End).await
                         }
                     }
                 } else {
                     self.container_stack.pop();
-                    self.inner.emit(Event::End)
+                    self.inner.emit(Event::End).await
                 }
             }
-            event => self.inner.emit(event),
+            event => self.inner.emit(event).await,
         }
     }
 }
 
-impl<'s, R> RenderOutput<'s> for RostraImages<'s, R>
+#[async_trait::async_trait]
+impl<'s, R> AsyncRenderOutput<'s> for RostraImages<'s, R>
 where
-    R: RenderOutput<'s>,
+    R: AsyncRenderOutput<'s> + Send,
 {
     type Output = R::Output;
 
@@ -295,44 +323,45 @@ where
 pub trait RostraRenderExt {
     /// Transform rostra: profile links to UI profile links with @username
     /// format
-    fn rostra_profile_links(self) -> RostraProfileLinks<Self>
+    fn rostra_profile_links<'c>(self, client: ClientRef<'c>) -> RostraProfileLinks<'c, Self>
     where
         Self: Sized,
     {
-        RostraProfileLinks::new(self)
+        RostraProfileLinks::new(self, client)
     }
 
     /// Transform images (rostra-media: links and external media with lazy
     /// loading)
     fn rostra_images<'s>(self, author_id: RostraId) -> RostraImages<'s, Self>
     where
-        Self: Sized + Render<'s>,
+        Self: Sized + AsyncRender<'s>,
     {
         RostraImages::new(self, author_id)
     }
 }
 
-impl<'s, R> RostraRenderExt for R where R: Sized + Render<'s> {}
+impl<'s, R> RostraRenderExt for R where R: Sized + AsyncRender<'s> {}
 
 impl UiState {
     pub(crate) async fn render_content(
         &self,
-        _client: &ClientRef<'_>,
+        client: &ClientRef<'_>,
         author_id: RostraId,
         content: &str,
     ) -> Markup {
         // Compose the filters using extension traits: Renderer -> ProfileLinks ->
         // Images -> Sanitize
-        let renderer = jotdown::html::Renderer::default()
-            .rostra_profile_links()
+        let renderer = jotdown::html::tokio::Renderer::default()
+            .rostra_profile_links(client.clone())
             .rostra_images(author_id)
             .sanitize();
 
         let out = renderer
             .render_into_document(content)
+            .await
             .expect("Rendering failed");
 
-        PreEscaped(out)
+        PreEscaped(String::from_utf8(out.into_inner()).expect("djot output is always valid utf8"))
     }
 
     /// Extra rostra id from a link `s`

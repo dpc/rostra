@@ -11,6 +11,7 @@ workspace = true
 
 [dependencies]
 async-stream = { workspace = true }
+async-trait = { workspace = true }
 axum = { workspace = true, features = ["ws", "multipart"] }
 axum-extra = { workspace = true, features = ["form"] }
 axum-dpc-static-assets = { workspace = true }

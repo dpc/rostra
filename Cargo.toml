@@ -35,6 +35,7 @@ license = "MIT"
 
 [workspace.dependencies]
 async-stream = "0.3.6"
+async-trait = "0.1"
 anyhow = "1.0.95"
 axum = { version = "0.8.1", features = ["macros"] }
 axum-dpc-static-assets = { path = "crates/axum-dpc-static-assets" }
@@ -65,7 +66,7 @@ iroh = { version = "0.95.1", default-features = false }
 iroh-base = { version = "0.95.1", default-features = false }
 iroh-io = "0.6.0"
 itertools = "0.13.0"
-jotdown = "0.9.0"
+jotdown = { version = "0.9.0", features = ["async"] }
 pkarr = "3.10.0"
 proptest = "1.6.0"
 maud = "*"
@@ -150,4 +151,6 @@ debug = false
 
 [patch.crates-io]
 redb-bincode = { git = "https://github.com/rustshop/redb-bincode", rev = "b33cedb787d452dc3735a153aca55086fea7c306" }
-jotdown = { git = "https://github.com/dpc/jotdown", rev = "83f40fca9b8e61efbb46b139f32778681d72cc75" }
+jotdown = { git = "https://github.com/dpc/jotdown", rev = "6a4528812cd9a4621b56dab02b724f5d5a5371a1", features = [
+  "async",
+] }
