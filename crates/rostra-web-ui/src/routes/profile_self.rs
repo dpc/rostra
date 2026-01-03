@@ -92,7 +92,7 @@ impl UiState {
             .get_social_profile(self_id, &client.client_ref()?)
             .await;
         Ok(html! {
-            div ."m-profileSummary" {
+            div id="self-profile-summary" ."m-profileSummary" {
                 script {
                     (PreEscaped(
                     r#"
@@ -130,23 +130,34 @@ impl UiState {
                                 span ."m-profileSummary__copyButtonIcon u-buttonIcon" width="1rem" height="1rem" {}
                                 "RostraId"
                             }
-                        button
-                            ."m-profileSummary__editButton u-button"
-                            hx-get="/ui/self/edit"
-                            hx-target="closest .m-profileSummary"
-                            hx-swap="outerHTML"
-                            disabled[ro.to_disabled()]
+                        form
+                            action="/ui/self/edit"
+                            method="get"
+                            x-target="self-profile-summary"
+                            x-swap="outerHTML"
+                        {
+                            button
+                                ."m-profileSummary__editButton u-button"
+                                ."-disabled"[ro.to_disabled()]
+                                type="submit"
                             {
                                 span ."m-profileSummary__editButtonIcon u-buttonIcon" width="1rem" height="1rem" {}
                                 "Edit"
                             }
-                        button
-                            ."m-profileSummary__logoutButton u-button"
-                            hx-post="/ui/unlock/logout"
+                        }
+                        form
+                            action="/ui/unlock/logout"
+                            method="post"
+                            style="display: inline;"
                             {
-                                span ."m-profileSummary__logoutButtonIcon u-buttonIcon" width="1rem" height="1rem" {}
-                                "Logout"
-                            }
+                            button
+                                ."m-profileSummary__logoutButton u-button"
+                                type="submit"
+                                {
+                                    span ."m-profileSummary__logoutButtonIcon u-buttonIcon" width="1rem" height="1rem" {}
+                                    "Logout"
+                                }
+                        }
                     }
                 }
             }
@@ -160,10 +171,12 @@ impl UiState {
             .get_social_profile(client_ref.rostra_id(), &client_ref)
             .await;
         Ok(html! {
-            form ."m-profileSummary -edit"
-                hx-post="/ui/self/edit"
-                hx-swap="outerHTML"
-                hx-encoding="multipart/form-data"
+            form id="self-profile-summary" ."m-profileSummary -edit"
+                action="/ui/self/edit"
+                method="post"
+                x-target="self-profile-summary"
+                x-swap="outerHTML"
+                enctype="multipart/form-data"
             {
                 script {
                     (PreEscaped(r#"

@@ -41,8 +41,10 @@ impl UiState {
         let notification = notification.into();
         html! {
             form ."m-addFolloweeForm"
-                hx-post="/ui/followee"
-                hx-swap="outerHTML"
+                action="/ui/followee"
+                method="post"
+                x-target="this"
+                x-swap="outerHTML"
             {
                 input ."m-addFolloweeForm__content"
                     placeholder="RostraId"

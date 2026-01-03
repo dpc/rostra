@@ -11,6 +11,7 @@ use tower_cookies::Cookies;
 use super::Maud;
 use super::timeline::{TimelineMode, TimelinePaginationInput};
 use super::unlock::session::{RoMode, UserSession};
+use crate::util::extractors::AjaxRequest;
 use crate::error::RequestResult;
 use crate::{SharedState, UiState};
 
@@ -18,6 +19,7 @@ pub async fn get_profile(
     state: State<SharedState>,
     session: UserSession,
     mut cookies: Cookies,
+    AjaxRequest(is_ajax): AjaxRequest,
     Path(profile_id): Path<RostraId>,
     Form(form): Form<TimelinePaginationInput>,
 ) -> RequestResult<impl IntoResponse> {
@@ -34,6 +36,7 @@ pub async fn get_profile(
                 &session,
                 &mut cookies,
                 TimelineMode::Profile(profile_id),
+                is_ajax,
             )
             .await?,
     ))
@@ -56,9 +59,10 @@ pub async fn get_follow_dialog(
     Ok(Maud(html! {
         div ."o-followDialog__content" {
             form ."o-followDialog__form"
-                hx-post=(format!("/ui/profile/{}/follow", profile_id))
-                hx-target=".m-profileSummary"
-                hx-swap="outerHTML"
+                action=(format!("/ui/profile/{}/follow", profile_id))
+                method="post"
+                x-target="profile-summary"
+                x-swap="outerHTML"
             {
                 div ."o-followDialog__optionsContainer" {
                     div ."o-followDialog__selectContainer" {
@@ -174,7 +178,7 @@ pub async fn post_follow(
 
         // Close the follow dialog
         div ."o-followDialog -empty"
-            hx-swap-oob="outerHTML:.o-followDialog"
+            x-swap-oob="outerHTML:.o-followDialog"
         {}
     }))
 }
@@ -220,7 +224,7 @@ impl UiState {
             .iter()
             .any(|(id, _)| id == &profile_id);
         Ok(html! {
-            div ."m-profileSummary" {
+            div id="profile-summary" ."m-profileSummary" {
                 script {
                     (PreEscaped(
                     r#"
@@ -272,20 +276,25 @@ impl UiState {
                             "RostraId"
                         }
                         @if session.id() != profile_id {
-                            button
-                                ."m-profileSummary__unfollowButton u-button"
-                                hx-get=(format!("/ui/profile/{profile_id}/follow?following={following}"))
-                                hx-target=".o-followDialog"
-                                hx-swap="innerHTML"
-                                hx-on::after-request="document.querySelector('.o-followDialog').classList.add('-active')"
-                                disabled[ro.to_disabled()]
+                            form
+                                action=(format!("/ui/profile/{}/follow?following={}", profile_id, following))
+                                method="get"
+                                x-target="follow-dialog-content"
+                                x-swap="innerHTML"
+                                "@ajax:after"="document.querySelector('.o-followDialog').classList.add('-active')"
                             {
-                                span ."m-profileSummary__followButtonIcon u-buttonIcon" width="1rem" height="1rem"
-                                {}
-                                @if following {
-                                    "Following..."
-                                } @else {
-                                    "Follow..."
+                                button
+                                    ."m-profileSummary__unfollowButton u-button"
+                                    ."-disabled"[ro.to_disabled()]
+                                    type="submit"
+                                {
+                                    span ."m-profileSummary__followButtonIcon u-buttonIcon" width="1rem" height="1rem"
+                                    {}
+                                    @if following {
+                                        "Following..."
+                                    } @else {
+                                        "Follow..."
+                                    }
                                 }
                             }
                         }

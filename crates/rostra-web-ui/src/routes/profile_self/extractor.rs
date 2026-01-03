@@ -26,7 +26,12 @@ where
             return Err((StatusCode::BAD_REQUEST, "Missing content type"));
         };
 
-        if content_type == "multipart/form-data" {
+        // Check if content type starts with "multipart/form-data" (it may include boundary parameter)
+        if !content_type
+            .to_str()
+            .map(|s| s.starts_with("multipart/form-data"))
+            .unwrap_or(false)
+        {
             return Err((StatusCode::BAD_REQUEST, "Invalid content type"));
         }
 

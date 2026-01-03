@@ -21,6 +21,7 @@ use super::super::error::RequestResult;
 use super::Maud;
 use super::cookies::CookiesExt as _;
 use super::unlock::session::UserSession;
+use crate::util::extractors::AjaxRequest;
 use crate::html_utils::re_typeset_mathjax;
 use crate::{LOG_TARGET, SharedState, UiState};
 
@@ -34,6 +35,7 @@ pub async fn get_followees(
     state: State<SharedState>,
     session: UserSession,
     mut cookies: Cookies,
+    AjaxRequest(is_ajax): AjaxRequest,
     Form(form): Form<TimelinePaginationInput>,
 ) -> RequestResult<impl IntoResponse> {
     let pagination = form.ts.and_then(|ts| {
@@ -49,6 +51,7 @@ pub async fn get_followees(
                 &session,
                 &mut cookies,
                 TimelineMode::Followees,
+                is_ajax,
             )
             .await?,
     ))
@@ -58,6 +61,7 @@ pub async fn get_network(
     state: State<SharedState>,
     session: UserSession,
     mut cookies: Cookies,
+    AjaxRequest(is_ajax): AjaxRequest,
     Form(form): Form<TimelinePaginationInput>,
 ) -> RequestResult<impl IntoResponse> {
     let pagination = form.ts.and_then(|ts| {
@@ -73,6 +77,7 @@ pub async fn get_network(
                 &session,
                 &mut cookies,
                 TimelineMode::Network,
+                is_ajax,
             )
             .await?,
     ))
@@ -82,6 +87,7 @@ pub async fn get_notifications(
     state: State<SharedState>,
     session: UserSession,
     mut cookies: Cookies,
+    AjaxRequest(is_ajax): AjaxRequest,
     Form(form): Form<TimelinePaginationInput>,
 ) -> RequestResult<impl IntoResponse> {
     let pagination = form.ts.and_then(|ts| {
@@ -97,6 +103,7 @@ pub async fn get_notifications(
                 &session,
                 &mut cookies,
                 TimelineMode::Notifications,
+                is_ajax,
             )
             .await?,
     ))
@@ -137,10 +144,7 @@ impl UiState {
 
         Ok(html! {
             nav ."o-navBar"
-                hx-ext="ws"
-                ws-connect="/ui/updates"
-                // doesn't work, gets lowercased, wait for https://github.com/lambda-fairy/maud/pull/445
-                // hx-on:htmx:wsError="console.log(JSON.stringify(event))"
+                x-data="websocket('/ui/updates')"
             {
                 div ."o-navBar__list" {
                     span ."o-navBar__header" { "Rostra:" }
@@ -205,6 +209,7 @@ impl UiState {
         session: &UserSession,
         cookies: &mut Cookies,
         mode: TimelineMode,
+        is_ajax: bool,
     ) -> RequestResult<Markup> {
         let client = self.client(session.id()).await?;
         let client_ref = client.client_ref()?;
@@ -212,6 +217,16 @@ impl UiState {
             .handle_notification_cookies(&client_ref, pagination, cookies, mode)
             .await?;
 
+        // For AJAX pagination requests, return only the timeline items fragment
+        if is_ajax && pagination.is_some() {
+            return Ok(self.render_main_bar_timeline(session, mode)
+                .maybe_pagination(pagination)
+                .maybe_pending_notifications(pending_notifications)
+                .call()
+                .await?);
+        }
+
+        // Otherwise return the full page
         let content = html! {
 
             (navbar)
@@ -226,9 +241,15 @@ impl UiState {
 
 
             }
-            div .o-previewDialog {}
-            div .o-mediaList {}
-            div .o-followDialog {}
+
+            // Dialog containers for timeline interactions
+            div id="preview-dialog" ."o-previewDialog" x-sync {}
+            div id="media-list" ."o-mediaList" x-sync {}
+            div id="ajax-scripts" style="display: none;" {}
+            div ."o-followDialog" {
+                div id="follow-dialog-content" {}
+            }
+
             (re_typeset_mathjax())
 
         };
@@ -306,7 +327,9 @@ impl UiState {
             .await;
 
         Ok(html! {
-            div ."m-postView__comments" {
+            div ."m-postView__comments"
+                id=(format!("post-comments-{}", post_id))
+            {
                 @for comment in comments {
                     @if let Some(djot_content) = comment.content.djot_content.as_ref() {
                         div ."o-postOverview__commentsItem" {
@@ -332,7 +355,7 @@ impl UiState {
         html! {
             a ."o-mainBar__newPostsAlert"
                 ."-hidden"[!visible]
-                hx-swap-oob=[visible.then_some("outerHTML: .o-mainBar__newPostsAlert")]
+                x-swap-oob=[visible.then_some("outerHTML:.o-mainBar__newPostsAlert")]
                  href="/ui"
             {
                 (if count == 0 {
@@ -384,7 +407,7 @@ impl UiState {
         let author_personas = client.db()?.get_personas(author_personas.into_iter()).await;
 
         Ok(html! {
-            div ."o-mainBarTimeline" {
+            div ."o-mainBarTimeline" "x-data"="{}" {
                 div ."o-mainBarTimeline__tabs" {
                     a ."o-mainBarTimeline__back" onclick="history.back()" { "<" }
 
@@ -430,7 +453,7 @@ impl UiState {
                         span class="slider round" { }
                     }
                 }
-                div ."o-mainBarTimeline__item -preview -empty" { }
+                div id="post-preview" ."o-mainBarTimeline__item -preview -empty" x-sync { }
                 @for post in &filtered_posts {
                     @if let Some(djot_content) = post.content.djot_content.as_ref() {
                         div ."o-mainBarTimeline__item"
@@ -458,16 +481,11 @@ impl UiState {
                     }
                 }
                 @if let Some(cursor) = cursor {
-                    div ."o-mainBarTimeline__rest -empty"
-                        hx-get=(
-                            format!("{}?ts={}&event_id={}",
-                                mode.to_path(),
-                                cursor.ts,
-                                cursor.event_id)
-                        )
-                        hx-select=".o-mainBarTimeline__item, .o-mainBarTimeline__rest, script.mathjax"
-                        hx-trigger="intersect once, threshold:0.5"
-                        hx-swap="outerHTML"
+                    a ."o-mainBarTimeline__rest -empty"
+                        href=(format!("{}?ts={}&event_id={}", mode.to_path(), cursor.ts, cursor.event_id))
+                        x-target="this"
+                        x-swap="outerHTML"
+                        "x-intersect.once"="$el.click()"
                     { }
                 }
             }

@@ -150,7 +150,7 @@ pub async fn list(
         .unwrap_or_default();
 
     Ok(Maud(html! {
-        div ."o-mediaList -active" hx-swap-oob="outerHTML:.o-mediaList" {
+        div ."o-mediaList -active" x-swap-oob="outerHTML:.o-mediaList" {
             div ."o-mediaList__content" {
                 h3 { "Select media to attach:" }
                 div ."o-mediaList__items" {

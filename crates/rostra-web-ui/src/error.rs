@@ -1,6 +1,6 @@
 use std::io;
 
-use axum::http::{HeaderName, HeaderValue, StatusCode};
+use axum::http::StatusCode;
 use axum::response::{IntoResponse, Redirect, Response};
 use rostra_client::ClientRefError;
 use rostra_client::error::{ActivateError, InitError, PostError};
@@ -109,17 +109,8 @@ impl IntoResponse for RequestError {
                         return Redirect::temporary("/ui/unlock").into_response();
                     }
                     RequestError::LoginRequired => {
-                        let headers = [
-                            (
-                                HeaderName::from_static("hx-redirect"),
-                                HeaderValue::from_static("/ui/unlock"),
-                            ),
-                            (
-                                HeaderName::from_static("location"),
-                                HeaderValue::from_static("/ui/unlock"),
-                            ),
-                        ];
-                        return (StatusCode::SEE_OTHER, headers).into_response();
+                        // Use standard HTTP redirect for Alpine-ajax
+                        return Redirect::to("/ui/unlock").into_response();
 
                         // return Redirect::temporary("/ui/unlock").
                         // into_response();

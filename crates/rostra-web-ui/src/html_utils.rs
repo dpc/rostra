@@ -27,7 +27,7 @@ pub(crate) fn submit_on_ctrl_enter(form_selector: &str, input_selector: &str) ->
 
                     input.addEventListener('keydown', (e) => {{
                         if (e.ctrlKey && e.key === 'Enter') {{
-                            htmx.trigger(form, 'submit');
+                            form.requestSubmit();
                         }}
                     }});
                 }}())

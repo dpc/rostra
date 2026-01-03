@@ -75,7 +75,7 @@ pub async fn post_new_post(
         cookies.save_persona(client_ref.rostra_id(), persona_id);
     }
 
-    let event = client_ref
+    let _event = client_ref
         .social_post(
             session.id_secret()?,
             form.content.clone(),
@@ -110,40 +110,20 @@ pub async fn post_new_post(
     } else {
         None
     };
-    let reply_to = reply_to
+    let _reply_to = reply_to
         .as_ref()
         .map(|(rostra_id, event_id, record)| (*rostra_id, *event_id, record.as_ref()));
 
     Ok(Maud(html! {
-        // new clean form
+        // new clean form (this is the main target)
         (clean_form)
 
-        // Close the preview dialog
-        div ."o-previewDialog -empty" hx-swap-oob="outerHTML:.o-previewDialog" {}
+        // Close the preview dialog (x-sync will update this)
+        div id="preview-dialog" ."o-previewDialog" {}
 
-        // clean up the preview
-        div ."o-mainBarTimeline__item -preview -empty"
-            hx-swap-oob="outerHTML: .o-mainBarTimeline__item.-preview"
-        { }
+        // Clear the inline preview (x-sync will update this)
+        div id="post-preview" ."o-mainBarTimeline__item -preview -empty" { }
 
-        // Insert new post at the top of the timeline, where the preview we just cleared was.
-        div hx-swap-oob="afterend: .o-mainBarTimeline__item.-preview" {
-            div ."o-mainBarTimeline__item"
-                ."-reply"[reply_to.is_some()]
-                ."-post"[reply_to.is_none()]
-             {
-                (state.render_post_context(
-                    &client_ref,
-                    client_ref.rostra_id())
-                    .maybe_reply_to(reply_to)
-                    .event_id(event.event_id.to_short())
-                    .content(&form.content)
-                    .timestamp(event.event.timestamp.into())
-                    .ro( session.ro_mode())
-                    .call()
-                .await?)
-            }
-        }
         (re_typeset_mathjax())
     }))
 }
@@ -160,7 +140,7 @@ pub async fn get_post_preview_dialog(
 
     if form.content.is_empty() {
         return Ok(Maud(html! {
-            div ."o-previewDialog -empty" {}
+            div id="preview-dialog" ."o-previewDialog" {}
         }));
     }
     let personas = client_ref.db().get_personas_for_id(self_id).await;
@@ -169,7 +149,7 @@ pub async fn get_post_preview_dialog(
     let saved_persona = cookies.get_persona(self_id);
 
     Ok(Maud(html! {
-        div ."o-previewDialog -active" hx-swap-oob="outerHTML:.o-previewDialog" {
+        div id="preview-dialog" ."o-previewDialog -active" {
             div ."o-previewDialog__content" {
                 div ."o-previewDialog__post" {
                     (state.render_post_context(
@@ -185,9 +165,10 @@ pub async fn get_post_preview_dialog(
 
                 div ."o-previewDialog__actions" {
                     form ."o-previewDialog__form"
-                        hx-post="/ui/post"
-                        hx-swap="outerHTML"
-                        hx-target=".m-newPostForm"
+                        action="/ui/post"
+                        method="post"
+                        x-target="new-post-form preview-dialog post-preview ajax-scripts"
+                        x-swap="outerHTML"
                     {
                         input type="hidden" name="content" value=(form.content) {}
                         @if let Some(reply_to) = form.reply_to {
@@ -244,7 +225,7 @@ pub async fn get_post_preview(
     let self_id = client.client_ref()?.rostra_id();
     Ok(Maud(html! {
         @if !form.content.is_empty() {
-            div ."o-mainBarTimeline__item -preview"
+            div id="post-preview" ."o-mainBarTimeline__item -preview"
                 ."-reply"[form.reply_to.is_some()]
                 ."-post"[form.reply_to.is_none()]
             {
@@ -262,7 +243,7 @@ pub async fn get_post_preview(
                 (re_typeset_mathjax())
             }
         } @else {
-            div ."o-mainBarTimeline__item -preview -empty" { }
+            div id="post-preview" ."o-mainBarTimeline__item -preview -empty" { }
         }
     }))
 }
@@ -300,7 +281,7 @@ impl UiState {
         reply_to_display_name: Option<String>,
     ) -> Markup {
         html! {
-            div ."m-newPostForm__replyToLine" {
+            div id="reply-to-line" ."m-newPostForm__replyToLine" {
                 @if let Some(reply_to) = reply_to {
                     p ."m-newPostForm__replyToLabel" {
                         span ."m-newPostForm__replyToText" { "Reply to: " }
@@ -330,9 +311,23 @@ impl UiState {
     ) -> Markup {
         let notification = notification.into();
         html! {
-            form ."m-newPostForm"
-                hx-post="/ui/post/preview_dialog"
-                hx-swap="none"
+            // Hidden form for inline preview updates (must be outside main form)
+            form id="inline-preview-form"
+                action="/ui/post/preview"
+                method="post"
+                style="display: none;"
+                x-target="post-preview"
+                x-swap="outerHTML"
+                x-autofocus
+            {
+                input type="hidden" name="content" value="" {}
+            }
+
+            form id="new-post-form" ."m-newPostForm"
+                action="/ui/post/preview_dialog"
+                method="post"
+                x-target="preview-dialog"
+                x-swap="outerHTML"
             {
                 (self.render_reply_to_line(None, None))
                 textarea
@@ -345,16 +340,17 @@ impl UiState {
                         })
                     dir="auto"
                     name="content"
-                    hx-post="/ui/post/preview"
-                    hx-include="closest form"
-                    hx-trigger="input changed delay:.2s"
-                    hx-target=".o-mainBarTimeline__item.-preview"
-                    hx-swap="outerHTML"
-                    hx-preserve="false"
+                    "@input.debounce.200ms"=r#"
+                        const previewForm = document.getElementById('inline-preview-form');
+                        const contentInput = previewForm.querySelector('input[name=content]');
+                        contentInput.value = $el.value;
+                        previewForm.requestSubmit();
+                    "#
                     autocomplete="off"
                     autofocus
                     disabled[ro.to_disabled()]
                     {}
+
                 div ."m-newPostForm__footer" {
                     div ."m-newPostForm__footerRow m-newPostForm__footerRow--main" {
                         a href="https://htmlpreview.github.io/?https://github.com/jgm/djot/blob/master/doc/syntax.html" target="_blank" { "Formatting" }
@@ -371,21 +367,24 @@ impl UiState {
                         }
                     }
                     div ."m-newPostForm__footerRow m-newPostForm__footerRow--media" {
-                        div ."m-newPostForm__notification" {
+                        div id="new-post-notification" ."m-newPostForm__notification" {
                             @if let Some(n) = notification {
                                 (n)
                             }
                         }
                         @if let Some(uid) = user_id {
-                            button ."m-newPostForm__attachButton u-button"
-                                disabled[ro.to_disabled()]
-                                type="button"
-                                hx-get=(format!("/ui/media/{}/list", uid))
-                                hx-target=".o-mediaList"
-                                hx-swap="outerHTML"
+                            form
+                                action=(format!("/ui/media/{}/list", uid))
+                                method="get"
+                                x-target="media-list"
                             {
-                                span ."m-newPostForm__attachButtonIcon u-buttonIcon" width="1rem" height="1rem" {}
-                                "Attach"
+                                button ."m-newPostForm__attachButton u-button"
+                                    ."-disabled"[ro.to_disabled()]
+                                    type="submit"
+                                {
+                                    span ."m-newPostForm__attachButtonIcon u-buttonIcon" width="1rem" height="1rem" {}
+                                    "Attach"
+                                }
                             }
                         } @else {
                             button ."m-newPostForm__attachButton u-button"
@@ -404,17 +403,21 @@ impl UiState {
                             span ."m-newPostForm__uploadButtonIcon u-buttonIcon" width="1rem" height="1rem" {}
                             "Upload"
                         }
-                        input id="media-file-input"
-                            name="media_file"
-                            type="file"
-                            accept="image/*,video/*,audio/*"
-                            style="display: none;"
-                            hx-post="/ui/media/publish"
-                            hx-encoding="multipart/form-data"
-                            hx-target=".m-newPostForm__notification"
-                            hx-swap="innerHTML"
-                            hx-trigger="change"
-                            {}
+                        form id="media-upload-form"
+                            action="/ui/media/publish"
+                            method="post"
+                            enctype="multipart/form-data"
+                            x-target="new-post-notification"
+                            x-swap="innerHTML"
+                        {
+                            input id="media-file-input"
+                                name="media_file"
+                                type="file"
+                                accept="image/*,video/*,audio/*"
+                                style="display: none;"
+                                "@change"="$el.closest('form').submit()"
+                                {}
+                        }
                     }
                 }
                 div
@@ -474,7 +477,7 @@ impl UiState {
                             textarea.setSelectionRange(newPos, newPos);
                             textarea.focus();
                             
-                            // Trigger input event for htmx preview update
+                            // Trigger input event for preview update
                             textarea.dispatchEvent(new Event('input', { bubbles: true }));
                         }
                         

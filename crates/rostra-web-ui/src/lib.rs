@@ -1,7 +1,6 @@
 mod error;
 mod fragment;
 pub mod html_utils;
-pub mod is_htmx;
 mod routes;
 // TODO: move to own crate
 mod serde_util;

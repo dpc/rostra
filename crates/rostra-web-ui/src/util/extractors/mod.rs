@@ -1,3 +1,3 @@
-pub mod hx_request;
+pub mod ajax_request;
 
-pub use hx_request::HxRequest;
+pub use ajax_request::AjaxRequest;

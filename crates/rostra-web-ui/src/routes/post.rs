@@ -19,7 +19,7 @@ use super::Maud;
 use super::timeline::TimelineMode;
 use super::unlock::session::{RoMode, UserSession};
 use crate::error::{OtherSnafu, RequestResult};
-use crate::util::extractors::HxRequest;
+use crate::util::extractors::AjaxRequest;
 use crate::util::time::format_timestamp;
 use crate::{SharedState, UiState};
 
@@ -33,12 +33,12 @@ pub async fn get_single_post(
     state: State<SharedState>,
     session: UserSession,
     mut cookies: Cookies,
-    hx_request: HxRequest,
+    AjaxRequest(is_ajax): AjaxRequest,
     Query(query): Query<SinglePostQuery>,
     Path((author, event_id)): Path<(RostraId, ShortEventId)>,
 ) -> RequestResult<impl IntoResponse> {
-    // Render raw post if it's an HTMX request or raw=true query parameter
-    if hx_request.is_htmx_request() || query.raw {
+    // Render raw post if it's an AJAX request or raw=true query parameter
+    if is_ajax || query.raw {
         let client_handle = state.client(session.id()).await?;
         let client_ref = client_handle.client_ref()?;
         let db = client_ref.db();
@@ -77,6 +77,7 @@ pub async fn get_single_post(
                 &session,
                 &mut cookies,
                 TimelineMode::ProfileSingle(author, event_id),
+                false,
             )
             .await?,
     ))
@@ -117,7 +118,9 @@ pub async fn delete_post(
 
     // Return empty content to replace the post
     Ok(Maud(html! {
-        div ."m-postView -deleted" {
+        div ."m-postView -deleted"
+            id=(format!("post-{}-{}", author_id, event_id))
+        {
             div ."m-postView__deletedMessage" {
                 "This post has been deleted"
             }
@@ -398,6 +401,7 @@ impl UiState {
                     div."m-postView__content"
                         ."-missing"[post_content_rendered.is_none()]
                         ."-present"[post_content_rendered.is_some()]
+                        id=[event_id.map(|id| format!("post-content-{}-{}", author, id))]
                     {
                         @if let Some(post_content_rendered) = post_content_rendered {
                             (post_content_rendered)
@@ -419,17 +423,22 @@ impl UiState {
                     div ."m-postView__buttons" {
                         @if let Some(reply_count) = reply_count {
                             @if reply_count > 0 {
-                                button ."m-postView__commentsButton u-button"
-                                    hx-get={"/ui/comments/"(ext_event_id.event_id().to_short())}
-                                    hx-target="next .m-postView__comments"
-                                    hx-swap="outerHTML"
-                                    hx-on::after-request="this.classList.add('u-hidden')"
+                                form
+                                    action={"/ui/comments/"(ext_event_id.event_id().to_short())}
+                                    method="get"
+                                    x-target=(format!("post-comments-{}", ext_event_id.event_id().to_short()))
+                                    x-swap="outerHTML"
+                                    "@ajax:after"="$el.querySelector('button').classList.add('u-hidden')"
                                 {
-                                    span ."m-postView__commentsButtonIcon u-buttonIcon" width="1rem" height="1rem" {}
-                                    @if reply_count == 1 {
-                                        ("1 Reply".to_string())
-                                    } @else {
-                                        (format!("{} Replies", reply_count))
+                                    button ."m-postView__commentsButton u-button"
+                                        type="submit"
+                                    {
+                                        span ."m-postView__commentsButtonIcon u-buttonIcon" width="1rem" height="1rem" {}
+                                        @if reply_count == 1 {
+                                            ("1 Reply".to_string())
+                                        } @else {
+                                            (format!("{} Replies", reply_count))
+                                        }
                                     }
                                 }
                             }
@@ -437,38 +446,52 @@ impl UiState {
                         }
                         @if post_content_is_missing {
                             @if let Some(event_id) = event_id {
-                                button ."u-button u-button--small"
-                                    hx-post={"/ui/post/"(author)"/"(event_id)"/fetch"}
-                                    hx-target="previous .m-postView__content"
-                                    hx-swap="outerHTML"
-                                    hx-indicator="next .htmx-indicator"
+                                form ."u-button u-button--small"
+                                    action={"/ui/post/"(author)"/"(event_id)"/fetch"}
+                                    method="post"
+                                    x-target=(format!("post-content-{}-{}", author, event_id))
+                                    x-swap="outerHTML"
                                 {
-                                    span ."m-postView__fetchButtonIcon u-buttonIcon" width="1rem" height="1rem" {}
-                                    "Fetch"
+                                    button type="submit" style="all: unset; cursor: pointer;" {
+                                        span ."m-postView__fetchButtonIcon u-buttonIcon" width="1rem" height="1rem" {}
+                                        "Fetch"
+                                    }
                                 }
                             }
                         }
                         @if author == client.rostra_id() {
-                            button ."m-postView__deleteButton u-button u-button--danger"
-                                disabled[ro.to_disabled()]
-                                hx-post={"/ui/post/"(author)"/"(event_id.unwrap())"/delete"}
-                                hx-confirm="Are you sure you want to delete this post?"
-                                hx-target="closest .m-postView"
-                                hx-swap="outerHTML"
+                            form
+                                action={"/ui/post/"(author)"/"(event_id.unwrap())"/delete"}
+                                method="post"
+                                x-target=(format!("post-{}-{}", author, event_id.unwrap()))
+                                x-swap="outerHTML"
+                                "@ajax:before"="confirm('Are you sure you want to delete this post?') || $event.preventDefault()"
                             {
-                                span ."m-postView__deleteButtonIcon u-buttonIcon" width="1rem" height="1rem" {}
-                                "Delete"
+                                button ."m-postView__deleteButton u-button u-button--danger"
+                                    type="submit"
+                                    disabled[ro.to_disabled()]
+                                {
+                                    span ."m-postView__deleteButtonIcon u-buttonIcon" width="1rem" height="1rem" {}
+                                    "Delete"
+                                }
                             }
                         }
 
-                        button ."m-postView__replyToButton u-button"
-                            disabled[ro.to_disabled()]
-                            hx-get={"/ui/post/reply_to?reply_to="(ext_event_id)}
-                            hx-target=".m-newPostForm__replyToLine"
-                            hx-swap="outerHTML"
+                        form
+                            action="/ui/post/reply_to"
+                            method="get"
+                            x-target="reply-to-line"
+                            x-swap="outerHTML"
+                            x-autofocus
                         {
-                            span ."m-postView__replyToButtonIcon u-buttonIcon" width="1rem" height="1rem" {}
-                            "Reply"
+                            input type="hidden" name="reply_to" value=(ext_event_id) {}
+                            button ."m-postView__replyToButton u-button"
+                                type="submit"
+                                disabled[ro.to_disabled()]
+                            {
+                                span ."m-postView__replyToButtonIcon u-buttonIcon" width="1rem" height="1rem" {}
+                                "Reply"
+                            }
                         }
                     }
                 }
@@ -479,13 +502,16 @@ impl UiState {
 
             div
                 ."m-postView"
+                id=[event_id.map(|id| format!("post-{}-{}", author, id))]
              {
 
                 (post_main)
 
                 (button_bar)
 
-                div ."m-postView__comments" {}
+                div ."m-postView__comments"
+                    id=[event_id.map(|id| format!("post-comments-{}", id))]
+                {}
 
             }
         })

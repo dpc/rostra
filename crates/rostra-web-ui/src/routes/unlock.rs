@@ -2,8 +2,7 @@ pub mod session;
 
 use axum::Form;
 use axum::extract::State;
-use axum::http::{HeaderName, HeaderValue, StatusCode};
-use axum::response::{IntoResponse, Response};
+use axum::response::{IntoResponse, Redirect, Response};
 use maud::{Markup, html};
 use rostra_core::id::{RostraId, RostraIdSecretKey};
 use serde::Deserialize;
@@ -15,24 +14,20 @@ use super::Maud;
 use crate::error::{
     LoginRequiredSnafu, OtherSnafu, PublicKeyMissingSnafu, RequestResult, UnlockResult, UnlockSnafu,
 };
-use crate::is_htmx::IsHtmx;
+use crate::util::extractors::AjaxRequest;
 use crate::serde_util::empty_string_as_none;
 use crate::{SharedState, UiState};
 
 pub async fn get(
     state: State<SharedState>,
-    IsHtmx(is_htmx): IsHtmx,
+    AjaxRequest(is_ajax): AjaxRequest,
 ) -> RequestResult<impl IntoResponse> {
-    // If we're called due to htmx request, that probably means something failed or
-    // required a auth, and was redirected here with HTTP header. We don't want
-    // to respond with a page, that htmx will interpret as a partial. We want it
-    // to reload the page altogether.
-    if is_htmx {
-        let headers = [(
-            HeaderName::from_static("hx-redirect"),
-            HeaderValue::from_static("/ui/unlock"),
-        )];
-        return Ok((StatusCode::OK, headers).into_response());
+    // If we're called due to an AJAX request, that probably means something failed or
+    // required auth, and was redirected here. We don't want to respond with a page
+    // that Alpine-ajax will interpret as a partial. We want it to reload the page altogether.
+    // Use a standard HTTP redirect which Alpine-ajax will follow with a full page reload.
+    if is_ajax {
+        return Ok(Redirect::to("/ui/unlock").into_response());
     }
 
     Ok(Maud(state.unlock_page(None, None, None).await?).into_response())
@@ -85,11 +80,8 @@ pub async fn post_unlock(
                     .await
                     .boxed()
                     .context(OtherSnafu)?;
-                let headers = [(
-                    HeaderName::from_static("hx-redirect"),
-                    HeaderValue::from_static("/ui"),
-                )];
-                (StatusCode::SEE_OTHER, headers).into_response()
+                // Use standard HTTP redirect for Alpine-ajax
+                Redirect::to("/ui").into_response()
             }
             Err(e) => Maud(
                 state
@@ -110,11 +102,8 @@ pub async fn post_unlock(
 pub async fn logout(session: Session) -> RequestResult<impl IntoResponse> {
     session.delete().await.boxed().context(OtherSnafu)?;
 
-    let headers = [(
-        HeaderName::from_static("hx-redirect"),
-        HeaderValue::from_static("/ui/unlock"),
-    )];
-    Ok((StatusCode::SEE_OTHER, headers).into_response())
+    // Use standard HTTP redirect for Alpine-ajax
+    Ok(Redirect::to("/ui/unlock").into_response())
 }
 
 impl UiState {
@@ -129,9 +118,10 @@ impl UiState {
         let random_rostra_id = random_rostra_id_secret.id().to_string();
         let notification = notification.into();
         let content = html! {
-            div ."o-unlockScreen" {
+            div id="unlock-screen" ."o-unlockScreen" {
 
                 form ."o-unlockScreen__form"
+                    action="/ui/unlock"
                     method="post"
                     autocomplete="on"
                 {
@@ -155,8 +145,7 @@ impl UiState {
                             {}
                         button ."o-unlockScreen__unlockButton u-button"
                             type="submit"
-                            hx-target="closest .o-unlockScreen"
-                            hx-post="/ui/unlock" {
+                        {
                                 span ."o-unlockScreen__unlockButtonIcon u-buttonIcon" width="1rem" height="1rem" {}
                                 "Unlock"
                             }
