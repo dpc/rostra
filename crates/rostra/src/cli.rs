@@ -58,6 +58,7 @@ pub enum OptsCmd {
         #[arg(long, group = "id")]
         secret_file: Option<PathBuf>,
     },
+    /// Start web-ui
     WebUi(WebUiOpts),
 
     /// Development and debugging commands
@@ -79,7 +80,6 @@ pub enum OptsCmd {
     },
 }
 
-/// Global options that apply across all commands
 #[derive(Debug, Args)]
 pub struct WebUiOpts {
     /// Path to the secret file for authentication
