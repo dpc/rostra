@@ -168,7 +168,6 @@ pre,
 code {
   background-color: var(--color-pre-bg);
   border-radius: var(--border-radius-std);
-  padding: 4px 6px;
   font-size: 1rem;
   font-family: monospace;
 }
@@ -1404,6 +1403,7 @@ input:checked+.slider:before {
 .o-mediaList__closeButton {
   background-color: var(--color-button-bg);
 }
+
 /* Mention Autocomplete Dropdown */
 .m-mentionAutocomplete {
   position: absolute;
@@ -1413,7 +1413,7 @@ input:checked+.slider:before {
   background: var(--color-post-bg);
   border: 1px solid var(--color-border);
   border-radius: var(--border-radius-std);
-  box-shadow: 0 2px 8px rgba(0,0,0,0.2);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
   max-height: 200px;
   overflow-y: auto;
   z-index: 1000;
@@ -1486,6 +1486,7 @@ input:checked+.slider:before {
     transform: translateX(100%);
     opacity: 0;
   }
+
   to {
     transform: translateX(0);
     opacity: 1;

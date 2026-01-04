@@ -14,6 +14,10 @@ impl UiState {
                 meta name="viewport" content="width=device-width, initial-scale=1.0";
                 meta name="color-scheme" content="light dark";
                 link rel="stylesheet" type="text/css" href="/assets/style.css";
+                // Prism.js themes - conditionally loaded based on color scheme
+                link rel="stylesheet" type="text/css" href="/assets/libs/prismjs/prism.min.css" media="(prefers-color-scheme: light)";
+                link rel="stylesheet" type="text/css" href="/assets/libs/prismjs/prism-tomorrow.min.css" media="(prefers-color-scheme: dark)";
+                link rel="stylesheet" type="text/css" href="/assets/libs/prismjs/prism-toolbar.min.css";
                 link rel="icon" type="image/png" href="/assets/favicon.png";
                 title { (page_title) }
                 // Hide elements with x-cloak until Alpine initializes
@@ -23,6 +27,28 @@ impl UiState {
                 script defer src="/assets/libs/alpinejs-intersect@3.14.3.js" {}
                 script defer src="/assets/libs/alpine-ajax@0.12.6.js" {}
                 script defer src="/assets/libs/alpinejs@3.14.3.js" {}
+                // Disable Prism.js automatic highlighting - we'll do it manually
+                script {
+                    "window.Prism = window.Prism || {}; Prism.manual = true;"
+                }
+                // Load Prism.js for code highlighting
+                // Note: C must load before C++ since C++ extends C
+                script defer src="/assets/libs/prismjs/prism-core.min.js" {}
+                script defer src="/assets/libs/prismjs/prism-c.min.js" {}
+                script defer src="/assets/libs/prismjs/prism-cpp.min.js" {}
+                script defer src="/assets/libs/prismjs/prism-javascript.min.js" {}
+                script defer src="/assets/libs/prismjs/prism-python.min.js" {}
+                script defer src="/assets/libs/prismjs/prism-rust.min.js" {}
+                script defer src="/assets/libs/prismjs/prism-java.min.js" {}
+                script defer src="/assets/libs/prismjs/prism-bash.min.js" {}
+                script defer src="/assets/libs/prismjs/prism-json.min.js" {}
+                script defer src="/assets/libs/prismjs/prism-yaml.min.js" {}
+                script defer src="/assets/libs/prismjs/prism-markdown.min.js" {}
+                script defer src="/assets/libs/prismjs/prism-sql.min.js" {}
+                script defer src="/assets/libs/prismjs/prism-autoloader.min.js" {}
+                // Prism.js plugins - toolbar must load before copy-to-clipboard
+                script defer src="/assets/libs/prismjs/prism-toolbar.min.js" {}
+                script defer src="/assets/libs/prismjs/prism-copy-to-clipboard.min.js" {}
             }
         }
     }
@@ -131,6 +157,24 @@ pub(crate) fn render_html_footer() -> Markup {
                     }));
                     event.preventDefault();
                   }
+                });
+            "#))
+        }
+
+        // Configure Prism.js autoloader and trigger highlighting
+        script {
+            (PreEscaped(r#"
+                // Configure autoloader BEFORE it loads
+                window.Prism = window.Prism || {};
+                window.Prism.plugins = window.Prism.plugins || {};
+                window.Prism.plugins.autoloader = window.Prism.plugins.autoloader || {};
+                window.Prism.plugins.autoloader.languages_path = 'https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/';
+
+                document.addEventListener('DOMContentLoaded', () => {
+                    // Manually trigger highlighting after everything is loaded
+                    if (window.Prism) {
+                        Prism.highlightAll();
+                    }
                 });
             "#))
         }

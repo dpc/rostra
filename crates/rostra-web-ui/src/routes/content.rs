@@ -3,7 +3,7 @@ use std::str::FromStr as _;
 
 use jotdown::r#async::{AsyncRender, AsyncRenderOutput, AsyncRenderOutputExt};
 use jotdown::html::filters::AsyncSanitizeExt;
-use jotdown::{Attributes, Container, Event};
+use jotdown::{AttributeKind, AttributeValue, Attributes, Container, Event};
 use maud::{Markup, PreEscaped};
 use rostra_client::ClientRef;
 use rostra_core::ShortEventId;
@@ -320,6 +320,63 @@ where
     }
 }
 
+/// Filter that adds Prism.js classes to code blocks for syntax highlighting
+pub(crate) struct PrismCodeBlocks<R> {
+    inner: R,
+}
+
+impl<R> PrismCodeBlocks<R> {
+    fn new(inner: R) -> Self {
+        Self { inner }
+    }
+}
+
+#[async_trait::async_trait]
+impl<'s, R> AsyncRender<'s> for PrismCodeBlocks<R>
+where
+    R: AsyncRender<'s> + Send,
+{
+    type Error = R::Error;
+
+    async fn emit(&mut self, event: Event<'s>) -> Result<(), Self::Error> {
+        match event {
+            Event::Start(Container::CodeBlock { language }, attr) => {
+                // Add language-xxx class for Prism.js
+                let new_attr = if !language.is_empty() {
+                    let class_value = format!("language-{}", language.trim());
+                    // Create attributes with owned strings
+                    let mut attrs = attr;
+                    attrs.push((
+                        AttributeKind::Pair {
+                            key: Cow::Borrowed("class"),
+                        },
+                        AttributeValue::from(Cow::Owned(class_value)),
+                    ));
+                    attrs
+                } else {
+                    attr
+                };
+                self.inner
+                    .emit(Event::Start(Container::CodeBlock { language }, new_attr))
+                    .await
+            }
+            event => self.inner.emit(event).await,
+        }
+    }
+}
+
+#[async_trait::async_trait]
+impl<'s, R> AsyncRenderOutput<'s> for PrismCodeBlocks<R>
+where
+    R: AsyncRenderOutput<'s> + Send,
+{
+    type Output = R::Output;
+
+    fn into_output(self) -> Self::Output {
+        self.inner.into_output()
+    }
+}
+
 /// Extension trait for adding rostra-specific rendering transformations
 pub trait RostraRenderExt {
     /// Transform rostra: profile links to UI profile links with @username
@@ -339,6 +396,14 @@ pub trait RostraRenderExt {
     {
         RostraImages::new(self, author_id)
     }
+
+    /// Add Prism.js classes to code blocks for syntax highlighting
+    fn prism_code_blocks(self) -> PrismCodeBlocks<Self>
+    where
+        Self: Sized,
+    {
+        PrismCodeBlocks::new(self)
+    }
 }
 
 impl<'s, R> RostraRenderExt for R where R: Sized + AsyncRender<'s> {}
@@ -351,10 +416,11 @@ impl UiState {
         content: &str,
     ) -> Markup {
         // Compose the filters using extension traits: Renderer -> ProfileLinks ->
-        // Images -> Sanitize
+        // Images -> PrismCodeBlocks -> Sanitize
         let renderer = jotdown::html::tokio::Renderer::default()
             .rostra_profile_links(client.clone())
             .rostra_images(author_id)
+            .prism_code_blocks()
             .sanitize();
 
         let out = renderer
