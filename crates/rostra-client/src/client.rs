@@ -589,7 +589,7 @@ impl Client {
             .maybe_parent_prev(current_head)
             .maybe_parent_aux(aux_event)
             .maybe_delete(replace)
-            .build();
+            .build()?;
 
         let signed_event = event.signed_by(id_secret);
 
@@ -739,7 +739,7 @@ impl Client {
                                 reaction: None,
                             })
                             .author(self.id)
-                            .build();
+                            .build()?;
 
                             (event.signed_by(id_secret), content)
                         });

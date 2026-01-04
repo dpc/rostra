@@ -1,8 +1,8 @@
 use convi::ExpectInto as _;
 
 use super::{
-    Event, EventAuxKey, EventContentKind, EventContentRaw, EventContentUnsized, EventKind,
-    SignedEvent,
+    ContentValidationError, Event, EventAuxKey, EventContentKind, EventContentRaw,
+    EventContentUnsized, EventKind, SignedEvent,
 };
 use crate::bincode::STD_BINCODE_CONFIG;
 use crate::id::RostraId;
@@ -68,15 +68,13 @@ impl Event {
         parent_prev: Option<ShortEventId>,
         parent_aux: Option<ShortEventId>,
         timestamp: Option<time::OffsetDateTime>,
-    ) -> (Self, EventContentRaw)
+    ) -> Result<(Self, EventContentRaw), ContentValidationError>
     where
         C: EventContentKind,
     {
-        let content_raw = content
-            .serialize_cbor()
-            .expect("Event can't fail to serialize");
+        let content_raw = content.serialize_cbor()?;
 
-        (
+        Ok((
             Self::new_raw_content(
                 author,
                 C::KIND,
@@ -88,7 +86,7 @@ impl Event {
                 Some(&content_raw),
             ),
             content_raw,
-        )
+        ))
     }
 
     pub fn compute_id(&self) -> EventId {

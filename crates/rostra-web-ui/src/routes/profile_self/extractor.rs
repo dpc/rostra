@@ -76,15 +76,22 @@ where
                     }
                 }
                 Some("avatar") => {
-                    let Some(mime) = field.content_type().map(ToOwned::to_owned) else {
-                        return Err((StatusCode::BAD_REQUEST, "Missing avatar mime type"));
-                    };
+                    // Get mime type before consuming the field
+                    let mime = field.content_type().map(ToOwned::to_owned);
+
                     let v = field.bytes().await.map_err(|_| {
                         (StatusCode::BAD_REQUEST, "Failed to parse multipart field")
                     })?;
 
-                    if parts.avatar.replace((mime, v.to_vec())).is_some() {
-                        return Err((StatusCode::BAD_REQUEST, "Failed to parse multipart field"));
+                    // Skip empty avatar files (no file selected)
+                    if !v.is_empty() {
+                        let Some(mime) = mime else {
+                            return Err((StatusCode::BAD_REQUEST, "Missing avatar mime type"));
+                        };
+
+                        if parts.avatar.replace((mime, v.to_vec())).is_some() {
+                            return Err((StatusCode::BAD_REQUEST, "Failed to parse multipart field"));
+                        }
                     }
                 }
                 _ => {

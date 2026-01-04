@@ -280,7 +280,7 @@ impl EventContentKind for SocialProfileUpdate {
             return Err(ContentValidationError);
         }
 
-        if 1000 < self.display_name.len() {
+        if 1000 < self.bio.len() {
             return Err(ContentValidationError);
         }
 
