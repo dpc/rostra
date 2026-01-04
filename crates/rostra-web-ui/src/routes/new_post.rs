@@ -330,26 +330,54 @@ impl UiState {
                 x-swap="outerHTML"
             {
                 (self.render_reply_to_line(None, None))
-                textarea
-                    ."m-newPostForm__content"
-                    placeholder=(
-                        if ro.to_disabled() {
-                            "Read-only view. Logout to change."
-                        } else {
-                          "What's on your mind?"
-                        })
-                    dir="auto"
-                    name="content"
-                    "@input.debounce.200ms"=r#"
-                        const previewForm = document.getElementById('inline-preview-form');
-                        const contentInput = previewForm.querySelector('input[name=content]');
-                        contentInput.value = $el.value;
-                        previewForm.requestSubmit();
-                    "#
-                    autocomplete="off"
-                    autofocus
-                    disabled[ro.to_disabled()]
-                    {}
+                div ."m-newPostForm__textareaWrapper"
+                    x-data="mentionAutocomplete"
+                    style="position: relative;"
+                {
+                    textarea
+                        ."m-newPostForm__content"
+                        placeholder=(
+                            if ro.to_disabled() {
+                                "Read-only view. Logout to change."
+                            } else {
+                              "What's on your mind?"
+                            })
+                        dir="auto"
+                        name="content"
+                        "@input"=r#"
+                            handleMentionInput($event);
+                            // Also handle preview update
+                            const previewForm = document.getElementById('inline-preview-form');
+                            const contentInput = previewForm.querySelector('input[name=content]');
+                            contentInput.value = $el.value;
+                            previewForm.requestSubmit();
+                        "#
+                        "@keydown"="handleKeydown($event)"
+                        autocomplete="off"
+                        autofocus
+                        disabled[ro.to_disabled()]
+                        {}
+
+                    // Autocomplete dropdown
+                    div ."m-mentionAutocomplete"
+                        x-show="showDropdown"
+                        x-cloak
+                        "@click.outside"="showDropdown = false"
+                    {
+                        template x-for="(result, index) in results" ":key"="result.rostra_id" {
+                            div ."m-mentionAutocomplete__item"
+                                ":class"="{ '-selected': index === selectedIndex }"
+                                "@click"="selectProfile(result)"
+                            {
+                                span ."m-mentionAutocomplete__displayName" x-text="result.display_name" {}
+                                span ."m-mentionAutocomplete__id" x-text="'@' + result.rostra_id.substring(0, 8)" {}
+                            }
+                        }
+                        div x-show="results.length === 0 && query.length > 0" ."m-mentionAutocomplete__empty" {
+                            "No matches found"
+                        }
+                    }
+                }
 
                 div ."m-newPostForm__footer" {
                     div ."m-newPostForm__footerRow m-newPostForm__footerRow--main" {
@@ -454,6 +482,115 @@ impl UiState {
                 }
 
             }
+
+            // Alpine.js mention autocomplete component
+            script {
+                (PreEscaped(r#"
+                    // Guard against re-registration
+                    if (!window._mentionAutocompleteRegistered) {
+                        window._mentionAutocompleteRegistered = true;
+
+                        document.addEventListener('alpine:init', () => {
+                            Alpine.data('mentionAutocomplete', () => ({
+                            query: '',
+                            results: [],
+                            selectedIndex: 0,
+                            showDropdown: false,
+                            debounceTimer: null,
+
+                            handleMentionInput(event) {
+                                const textarea = event.target;
+                                const cursorPos = textarea.selectionStart;
+                                const textBeforeCursor = textarea.value.substring(0, cursorPos);
+
+                                // Check if we're in a mention (find last @ before cursor)
+                                const atMatch = textBeforeCursor.match(/@(\w*)$/);
+
+                                if (atMatch) {
+                                    this.query = atMatch[1];
+                                    this.showDropdown = true;
+                                    this.searchProfiles();
+                                } else {
+                                    this.showDropdown = false;
+                                }
+                            },
+
+                            searchProfiles() {
+                                clearTimeout(this.debounceTimer);
+                                this.debounceTimer = setTimeout(async () => {
+                                    try {
+                                        const response = await fetch(`/ui/search/profiles?q=${encodeURIComponent(this.query)}`);
+                                        this.results = await response.json();
+                                        this.selectedIndex = 0;
+                                    } catch (error) {
+                                        console.error('Failed to search profiles:', error);
+                                        this.results = [];
+                                    }
+                                }, 300);
+                            },
+
+                            selectProfile(profile) {
+                                const textarea = this.$root.querySelector('textarea');
+                                if (!textarea) {
+                                    console.error('Textarea not found');
+                                    return;
+                                }
+
+                                const cursorPos = textarea.selectionStart;
+                                const textBeforeCursor = textarea.value.substring(0, cursorPos);
+                                const textAfterCursor = textarea.value.substring(cursorPos);
+
+                                // Find the @ position
+                                const atPos = textBeforeCursor.lastIndexOf('@');
+
+                                // Replace @query with <rostra:id>
+                                const newText =
+                                    textBeforeCursor.substring(0, atPos) +
+                                    `<rostra:${profile.rostra_id}>` +
+                                    textAfterCursor;
+
+                                textarea.value = newText;
+
+                                // Set cursor position after the inserted link
+                                const newCursorPos = atPos + `<rostra:${profile.rostra_id}>`.length;
+                                textarea.setSelectionRange(newCursorPos, newCursorPos);
+
+                                // Trigger input event for preview update
+                                textarea.dispatchEvent(new Event('input', { bubbles: true }));
+
+                                this.showDropdown = false;
+                            },
+
+                            handleKeydown(event) {
+                                if (!this.showDropdown) return;
+
+                                if (event.key === 'ArrowDown' || (event.key === 'Tab' && !event.shiftKey)) {
+                                    event.preventDefault();
+                                    if (this.results.length > 0) {
+                                        this.selectedIndex = Math.min(this.selectedIndex + 1, this.results.length - 1);
+                                        console.log('Down/Tab: selectedIndex =', this.selectedIndex);
+                                    }
+                                } else if (event.key === 'ArrowUp' || (event.key === 'Tab' && event.shiftKey)) {
+                                    event.preventDefault();
+                                    if (this.results.length > 0) {
+                                        this.selectedIndex = Math.max(this.selectedIndex - 1, 0);
+                                        console.log('Up/Shift+Tab: selectedIndex =', this.selectedIndex);
+                                    }
+                                } else if (event.key === 'Enter' && this.results.length > 0) {
+                                    event.preventDefault();
+                                    console.log('Enter: selecting profile at index', this.selectedIndex);
+                                    this.selectProfile(this.results[this.selectedIndex]);
+                                } else if (event.key === 'Escape') {
+                                    event.preventDefault();
+                                    this.showDropdown = false;
+                                }
+                            }
+                        }));
+                        });
+                    }
+                "#))
+            }
+
             (submit_on_ctrl_enter(".m-newPostForm", ".m-newPostForm__content"))
 
             // JavaScript for inserting media syntax
