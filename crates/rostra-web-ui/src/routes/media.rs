@@ -3,7 +3,7 @@ use axum::extract::{Multipart, Path, State};
 use axum::http::{HeaderMap, HeaderValue, StatusCode, header};
 use axum::response::{IntoResponse, Response};
 use axum_dpc_static_assets::handle_etag;
-use maud::html;
+use maud::{PreEscaped, html};
 use rostra_client_db::events_singletons_new;
 use rostra_core::ShortEventId;
 use rostra_core::event::content_kind;
@@ -75,8 +75,14 @@ pub async fn publish(
                 // Limit file size to 10MB
                 if data.len() > 10 * 1024 * 1024 {
                     return Ok(Maud(html! {
-                        div ."error" {
-                            "File too large. Maximum size is 10MB."
+                        div id="ajax-scripts" {
+                            script {
+                                (PreEscaped(r#"
+                                    window.dispatchEvent(new CustomEvent('notify', {
+                                        detail: { type: 'error', message: 'File too large. Maximum size is 10MB.' }
+                                    }));
+                                "#))
+                            }
                         }
                     }));
                 }
@@ -93,8 +99,14 @@ pub async fn publish(
                     .await?;
 
                 return Ok(Maud(html! {
-                    div ."success" {
-                        "Media uploaded"
+                    div id="ajax-scripts" {
+                        script {
+                            (PreEscaped(r#"
+                                window.dispatchEvent(new CustomEvent('notify', {
+                                    detail: { type: 'success', message: 'Media uploaded successfully' }
+                                }));
+                            "#))
+                        }
                     }
                 }));
             }
@@ -102,8 +114,14 @@ pub async fn publish(
     }
 
     Ok(Maud(html! {
-        div ."error" {
-            "No file selected"
+        div id="ajax-scripts" {
+            script {
+                (PreEscaped(r#"
+                    window.dispatchEvent(new CustomEvent('notify', {
+                        detail: { type: 'error', message: 'No file selected' }
+                    }));
+                "#))
+            }
         }
     }))
 }
@@ -150,7 +168,7 @@ pub async fn list(
         .unwrap_or_default();
 
     Ok(Maud(html! {
-        div ."o-mediaList -active" x-swap-oob="outerHTML:.o-mediaList" {
+        div id="media-list" ."o-mediaList -active" {
             div ."o-mediaList__content" {
                 h3 { "Select media to attach:" }
                 div ."o-mediaList__items" {
@@ -161,7 +179,7 @@ pub async fn list(
                     } @else {
                         @for (_ts, event_id, _event_record) in media_events {
                             div ."o-mediaList__item"
-                                onclick=(format!("insertMediaSyntax('{}')", event_id.to_short()))
+                                onclick=(format!("insertMediaSyntax('{}'); document.getElementById('media-list').classList.remove('-active')", event_id.to_short()))
                             {
                                 img
                                     src=(format!("/ui/media/{}/{}", author, event_id.to_short()))
@@ -175,7 +193,7 @@ pub async fn list(
                 div ."o-mediaList__actionButtons" {
                     button ."o-mediaList__closeButton u-button"
                         type="button"
-                        onclick="document.querySelector('.o-mediaList').style.display = 'none'"
+                        onclick="document.getElementById('media-list').classList.remove('-active')"
                     {
                         "Close"
                     }

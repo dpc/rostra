@@ -250,6 +250,149 @@ impl UiState {
                 div id="follow-dialog-content" {}
             }
 
+            // Initialize emoji picker once (outside form to avoid re-execution)
+            script type="module" {
+                (PreEscaped(r#"
+                    import { Picker } from '/assets/libs/emoji-picker-element/index.js';
+                    import textFieldEdit from '/assets/libs/text-field-edit/index.js';
+
+                    const emojiPicker = document.querySelector('emoji-picker');
+                    if (emojiPicker) {
+                        emojiPicker.addEventListener('emoji-click', e => {
+                            const textarea = document.querySelector('.m-newPostForm__content');
+                            if (textarea) {
+                                textFieldEdit.insert(textarea, e.detail.unicode);
+                            }
+                        });
+                    }
+                "#))
+            }
+
+            // Initialize mention autocomplete once (outside form to avoid re-execution)
+            script {
+                (PreEscaped(r#"
+                    document.addEventListener('alpine:init', () => {
+                        Alpine.data('mentionAutocomplete', () => ({
+                            query: '',
+                            results: [],
+                            selectedIndex: 0,
+                            showDropdown: false,
+                            debounceTimer: null,
+
+                            handleMentionInput(event) {
+                                const textarea = event.target;
+                                const cursorPos = textarea.selectionStart;
+                                const textBeforeCursor = textarea.value.substring(0, cursorPos);
+
+                                const atMatch = textBeforeCursor.match(/@(\w*)$/);
+
+                                if (atMatch) {
+                                    this.query = atMatch[1];
+                                    this.showDropdown = true;
+                                    this.searchProfiles();
+                                } else {
+                                    this.showDropdown = false;
+                                }
+                            },
+
+                            searchProfiles() {
+                                clearTimeout(this.debounceTimer);
+                                this.debounceTimer = setTimeout(async () => {
+                                    try {
+                                        const response = await fetch(`/ui/search/profiles?q=${encodeURIComponent(this.query)}`);
+                                        this.results = await response.json();
+                                        this.selectedIndex = 0;
+                                    } catch (error) {
+                                        console.error('Failed to search profiles:', error);
+                                        this.results = [];
+                                    }
+                                }, 300);
+                            },
+
+                            selectProfile(profile) {
+                                const textarea = this.$root.querySelector('textarea');
+                                if (!textarea) {
+                                    console.error('Textarea not found');
+                                    return;
+                                }
+
+                                const cursorPos = textarea.selectionStart;
+                                const textBeforeCursor = textarea.value.substring(0, cursorPos);
+                                const textAfterCursor = textarea.value.substring(cursorPos);
+
+                                const atPos = textBeforeCursor.lastIndexOf('@');
+
+                                const newText =
+                                    textBeforeCursor.substring(0, atPos) +
+                                    `<rostra:${profile.rostra_id}>` +
+                                    textAfterCursor;
+
+                                textarea.value = newText;
+
+                                const newCursorPos = atPos + `<rostra:${profile.rostra_id}>`.length;
+                                textarea.setSelectionRange(newCursorPos, newCursorPos);
+
+                                textarea.dispatchEvent(new Event('input', { bubbles: true }));
+
+                                this.showDropdown = false;
+                            },
+
+                            handleKeydown(event) {
+                                if (!this.showDropdown) return;
+
+                                if (event.key === 'ArrowDown' || (event.key === 'Tab' && !event.shiftKey)) {
+                                    event.preventDefault();
+                                    if (this.results.length > 0) {
+                                        this.selectedIndex = Math.min(this.selectedIndex + 1, this.results.length - 1);
+                                    }
+                                } else if (event.key === 'ArrowUp' || (event.key === 'Tab' && event.shiftKey)) {
+                                    event.preventDefault();
+                                    if (this.results.length > 0) {
+                                        this.selectedIndex = Math.max(this.selectedIndex - 1, 0);
+                                    }
+                                } else if (event.key === 'Enter' && this.results.length > 0) {
+                                    event.preventDefault();
+                                    this.selectProfile(this.results[this.selectedIndex]);
+                                } else if (event.key === 'Escape') {
+                                    event.preventDefault();
+                                    this.showDropdown = false;
+                                }
+                            }
+                        }));
+                    });
+                "#))
+            }
+
+            // Initialize insertMediaSyntax function once
+            script {
+                (PreEscaped(r#"
+                    window.insertMediaSyntax = function(eventId) {
+                        const textarea = document.querySelector('.m-newPostForm__content');
+                        const syntax = '![](rostra-media:' + eventId + ')';
+
+                        if (textarea) {
+                            const start = textarea.selectionStart;
+                            const end = textarea.selectionEnd;
+                            const text = textarea.value;
+
+                            const newText = text.substring(0, start) + syntax + text.substring(end);
+                            textarea.value = newText;
+
+                            const newPos = start + syntax.length;
+                            textarea.setSelectionRange(newPos, newPos);
+                            textarea.focus();
+
+                            textarea.dispatchEvent(new Event('input', { bubbles: true }));
+                        }
+
+                        const mediaList = document.querySelector('.o-mediaList');
+                        if (mediaList) {
+                            mediaList.style.display = 'none';
+                        }
+                    };
+                "#))
+            }
+
             (re_typeset_mathjax())
 
         };

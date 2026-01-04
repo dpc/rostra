@@ -86,11 +86,7 @@ pub async fn post_new_post(
 
     // Clear the form content after posting
     let clean_form = state.new_post_form(
-        html! {
-            div {
-                span { "Posted!" }
-            }
-        },
+        None,
         session.ro_mode(),
         Some(client_ref.rostra_id()),
     );
@@ -123,6 +119,17 @@ pub async fn post_new_post(
 
         // Clear the inline preview (x-sync will update this)
         div id="post-preview" ."o-mainBarTimeline__item -preview -empty" { }
+
+        // Show success notification
+        div id="ajax-scripts" {
+            script {
+                (PreEscaped(r#"
+                    window.dispatchEvent(new CustomEvent('notify', {
+                        detail: { type: 'success', message: 'Post published successfully' }
+                    }));
+                "#))
+            }
+        }
 
         (re_typeset_mathjax())
     }))
@@ -305,11 +312,10 @@ impl UiState {
 
     pub fn new_post_form(
         &self,
-        notification: impl Into<Option<Markup>>,
+        _notification: impl Into<Option<Markup>>,
         ro: RoMode,
         user_id: Option<RostraId>,
     ) -> Markup {
-        let notification = notification.into();
         html! {
             // Hidden form for inline preview updates (must be outside main form)
             form id="inline-preview-form"
@@ -385,6 +391,20 @@ impl UiState {
                         a
                             ."m-newPostForm__emojiButton"
                             href="#"
+                            onclick=r#"
+                                event.preventDefault();
+                                const tooltip = document.querySelector('.m-newPostForm__emojiBar');
+                                if (tooltip) {
+                                    tooltip.classList.toggle('-hidden');
+                                    if (!tooltip.classList.contains('-hidden')) {
+                                        const emojiPicker = document.querySelector('emoji-picker');
+                                        if (emojiPicker && emojiPicker.shadowRoot) {
+                                            const searchInput = emojiPicker.shadowRoot.querySelector('#search');
+                                            if (searchInput) searchInput.focus();
+                                        }
+                                    }
+                                }
+                            "#
                         { "😀" }
                         button ."m-newPostForm__previewButton u-button"
                             disabled[ro.to_disabled()]
@@ -395,24 +415,14 @@ impl UiState {
                         }
                     }
                     div ."m-newPostForm__footerRow m-newPostForm__footerRow--media" {
-                        div id="new-post-notification" ."m-newPostForm__notification" {
-                            @if let Some(n) = notification {
-                                (n)
-                            }
-                        }
-                        @if let Some(uid) = user_id {
-                            form
-                                action=(format!("/ui/media/{}/list", uid))
-                                method="get"
-                                x-target="media-list"
+                        @if user_id.is_some() {
+                            button ."m-newPostForm__attachButton u-button"
+                                ."-disabled"[ro.to_disabled()]
+                                type="submit"
+                                form="media-attach-form"
                             {
-                                button ."m-newPostForm__attachButton u-button"
-                                    ."-disabled"[ro.to_disabled()]
-                                    type="submit"
-                                {
-                                    span ."m-newPostForm__attachButtonIcon u-buttonIcon" width="1rem" height="1rem" {}
-                                    "Attach"
-                                }
+                                span ."m-newPostForm__attachButtonIcon u-buttonIcon" width="1rem" height="1rem" {}
+                                "Attach"
                             }
                         } @else {
                             button ."m-newPostForm__attachButton u-button"
@@ -423,206 +433,63 @@ impl UiState {
                                 "Attach"
                             }
                         }
-                        button ."m-newPostForm__uploadButton u-button"
-                            disabled[ro.to_disabled()]
-                            type="button"
-                            onclick="document.getElementById('media-file-input').click()"
-                        {
-                            span ."m-newPostForm__uploadButtonIcon u-buttonIcon" width="1rem" height="1rem" {}
-                            "Upload"
-                        }
-                        form id="media-upload-form"
-                            action="/ui/media/publish"
-                            method="post"
-                            enctype="multipart/form-data"
-                            x-target="new-post-notification"
-                            x-swap="innerHTML"
-                        {
-                            input id="media-file-input"
-                                name="media_file"
-                                type="file"
-                                accept="image/*,video/*,audio/*"
-                                style="display: none;"
-                                "@change"="$el.closest('form').submit()"
-                                {}
+                        @if user_id.is_some() {
+                            button ."m-newPostForm__uploadButton u-button"
+                                disabled[ro.to_disabled()]
+                                type="button"
+                                onclick="document.getElementById('media-file-input').click()"
+                            {
+                                span ."m-newPostForm__uploadButtonIcon u-buttonIcon" width="1rem" height="1rem" {}
+                                "Upload"
+                            }
+                        } @else {
+                            button ."m-newPostForm__uploadButton u-button"
+                                disabled
+                                type="button"
+                            {
+                                span ."m-newPostForm__uploadButtonIcon u-buttonIcon" width="1rem" height="1rem" {}
+                                "Upload"
+                            }
                         }
                     }
                 }
-                div
-                    ."m-newPostForm__emojiBar -hidden"
-                    role="tooltip" {
-                    emoji-picker
-                        data-source="/assets/libs/emoji-picker-element/data.json"
-                    {}
-                }
-
-                script type="module" {
-                    (PreEscaped(r#"
-                        import { Picker } from '/assets/libs/emoji-picker-element/index.js';
-                        import textFieldEdit from '/assets/libs/text-field-edit/index.js';
-
-                        const button = document.querySelector('.m-newPostForm__emojiButton')
-                        const tooltip = document.querySelector('.m-newPostForm__emojiBar')
-
-                        button.onclick = () => {
-                            tooltip.classList.toggle('-hidden');
-                            const isHidden = tooltip.classList.contains('-hidden');
-
-                            if (!isHidden) {
-                                const emojiPicker = document.querySelector('emoji-picker');
-                                const searchInput = emojiPicker.shadowRoot.querySelector('#search');
-                                searchInput.focus();
-                            }
-                        }
-
-                        document.querySelector('emoji-picker').addEventListener('emoji-click', e => {
-                          textFieldEdit.insert(document.querySelector('.m-newPostForm__content'), e.detail.unicode);
-                        })
-                    "#));
-                }
-
             }
 
-            // Alpine.js mention autocomplete component
-            script {
-                (PreEscaped(r#"
-                    // Guard against re-registration
-                    if (!window._mentionAutocompleteRegistered) {
-                        window._mentionAutocompleteRegistered = true;
+            // Separate forms for media operations (outside main form to avoid nesting)
+            @if let Some(uid) = user_id {
+                form id="media-attach-form"
+                    action=(format!("/ui/media/{}/list", uid))
+                    method="get"
+                    x-target="media-list"
+                    x-swap="outerHTML"
+                    style="display: none;"
+                {}
 
-                        document.addEventListener('alpine:init', () => {
-                            Alpine.data('mentionAutocomplete', () => ({
-                            query: '',
-                            results: [],
-                            selectedIndex: 0,
-                            showDropdown: false,
-                            debounceTimer: null,
+                form id="media-upload-form"
+                    action="/ui/media/publish"
+                    method="post"
+                    enctype="multipart/form-data"
+                    x-target="ajax-scripts"
+                    style="display: none;"
+                {
+                    input id="media-file-input"
+                        name="media_file"
+                        type="file"
+                        accept="image/*,video/*,audio/*"
+                        "@change"="$el.form.requestSubmit(); $el.value = '';"
+                        {}
+                }
+            }
 
-                            handleMentionInput(event) {
-                                const textarea = event.target;
-                                const cursorPos = textarea.selectionStart;
-                                const textBeforeCursor = textarea.value.substring(0, cursorPos);
-
-                                // Check if we're in a mention (find last @ before cursor)
-                                const atMatch = textBeforeCursor.match(/@(\w*)$/);
-
-                                if (atMatch) {
-                                    this.query = atMatch[1];
-                                    this.showDropdown = true;
-                                    this.searchProfiles();
-                                } else {
-                                    this.showDropdown = false;
-                                }
-                            },
-
-                            searchProfiles() {
-                                clearTimeout(this.debounceTimer);
-                                this.debounceTimer = setTimeout(async () => {
-                                    try {
-                                        const response = await fetch(`/ui/search/profiles?q=${encodeURIComponent(this.query)}`);
-                                        this.results = await response.json();
-                                        this.selectedIndex = 0;
-                                    } catch (error) {
-                                        console.error('Failed to search profiles:', error);
-                                        this.results = [];
-                                    }
-                                }, 300);
-                            },
-
-                            selectProfile(profile) {
-                                const textarea = this.$root.querySelector('textarea');
-                                if (!textarea) {
-                                    console.error('Textarea not found');
-                                    return;
-                                }
-
-                                const cursorPos = textarea.selectionStart;
-                                const textBeforeCursor = textarea.value.substring(0, cursorPos);
-                                const textAfterCursor = textarea.value.substring(cursorPos);
-
-                                // Find the @ position
-                                const atPos = textBeforeCursor.lastIndexOf('@');
-
-                                // Replace @query with <rostra:id>
-                                const newText =
-                                    textBeforeCursor.substring(0, atPos) +
-                                    `<rostra:${profile.rostra_id}>` +
-                                    textAfterCursor;
-
-                                textarea.value = newText;
-
-                                // Set cursor position after the inserted link
-                                const newCursorPos = atPos + `<rostra:${profile.rostra_id}>`.length;
-                                textarea.setSelectionRange(newCursorPos, newCursorPos);
-
-                                // Trigger input event for preview update
-                                textarea.dispatchEvent(new Event('input', { bubbles: true }));
-
-                                this.showDropdown = false;
-                            },
-
-                            handleKeydown(event) {
-                                if (!this.showDropdown) return;
-
-                                if (event.key === 'ArrowDown' || (event.key === 'Tab' && !event.shiftKey)) {
-                                    event.preventDefault();
-                                    if (this.results.length > 0) {
-                                        this.selectedIndex = Math.min(this.selectedIndex + 1, this.results.length - 1);
-                                        console.log('Down/Tab: selectedIndex =', this.selectedIndex);
-                                    }
-                                } else if (event.key === 'ArrowUp' || (event.key === 'Tab' && event.shiftKey)) {
-                                    event.preventDefault();
-                                    if (this.results.length > 0) {
-                                        this.selectedIndex = Math.max(this.selectedIndex - 1, 0);
-                                        console.log('Up/Shift+Tab: selectedIndex =', this.selectedIndex);
-                                    }
-                                } else if (event.key === 'Enter' && this.results.length > 0) {
-                                    event.preventDefault();
-                                    console.log('Enter: selecting profile at index', this.selectedIndex);
-                                    this.selectProfile(this.results[this.selectedIndex]);
-                                } else if (event.key === 'Escape') {
-                                    event.preventDefault();
-                                    this.showDropdown = false;
-                                }
-                            }
-                        }));
-                        });
-                    }
-                "#))
+            // Emoji picker (outside form to avoid re-creation on swap)
+            div id="emoji-picker-container" ."m-newPostForm__emojiBar -hidden"
+                role="tooltip" {
+                emoji-picker
+                    data-source="/assets/libs/emoji-picker-element/data.json"
+                {}
             }
 
             (submit_on_ctrl_enter(".m-newPostForm", ".m-newPostForm__content"))
-
-            // JavaScript for inserting media syntax
-            script {
-                (PreEscaped(r#"
-                    function insertMediaSyntax(eventId) {
-                        const textarea = document.querySelector('.m-newPostForm__content');
-                        const syntax = '![](rostra-media:' + eventId + ')';
-                        
-                        if (textarea) {
-                            const start = textarea.selectionStart;
-                            const end = textarea.selectionEnd;
-                            const text = textarea.value;
-                            
-                            // Insert at cursor position
-                            const newText = text.substring(0, start) + syntax + text.substring(end);
-                            textarea.value = newText;
-                            
-                            // Move cursor to end of inserted text
-                            const newPos = start + syntax.length;
-                            textarea.setSelectionRange(newPos, newPos);
-                            textarea.focus();
-                            
-                            // Trigger input event for preview update
-                            textarea.dispatchEvent(new Event('input', { bubbles: true }));
-                        }
-                        
-                        // Hide the media list
-                        document.querySelector('.o-mediaList').style.display = 'none';
-                    }
-                "#))
-            }
         }
     }
 }

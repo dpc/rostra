@@ -626,6 +626,14 @@ img.u-userImage[loading="lazy"][src][width][height] {
   padding-right: 1rem;
 }
 
+.m-newPostForm__emojiBar {
+  background: var(--color-post-bg);
+  border: 1px solid var(--color-button-border);
+  border-radius: var(--border-radius-std);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+  margin-top: 0.5rem;
+}
+
 .m-newPostForm__emojiBar.-hidden {
   display: none;
 }
@@ -831,6 +839,10 @@ emoji-picker {
 }
 
 .m-newPostForm__footerRow--media {
+  justify-content: flex-start;
+}
+
+.m-newPostForm__footerRow--notification {
   justify-content: flex-start;
 }
 
