@@ -94,11 +94,12 @@ where
                         .find(|c| matches!(c, ContainerKind::ProfileLink(_, _)))
                     {
                         self.inner
-                            .emit(Event::Str(Cow::Owned(
+                            .emit(Event::Str(Cow::Owned(format!(
+                                "@{}",
                                 display_name
                                     .clone()
-                                    .unwrap_or_else(|| format!("@{rostra_id}")),
-                            )))
+                                    .unwrap_or_else(|| rostra_id.to_string())
+                            ))))
                             .await
                     } else {
                         self.inner.emit(Event::Str(s)).await
