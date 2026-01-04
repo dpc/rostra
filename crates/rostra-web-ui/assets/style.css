@@ -709,6 +709,7 @@ emoji-picker {
 
 .m-profileSummary {
   display: flex;
+  flex-wrap: wrap;
   justify-content: flex-start;
   gap: 0.5rem;
 }
@@ -726,7 +727,7 @@ emoji-picker {
   flex-direction: column;
   align-items: flex-start;
   gap: 0.5rem;
-  width: 100%;
+  flex: 1;
 }
 
 .m-profileSummary__displayName {
@@ -737,8 +738,7 @@ emoji-picker {
 }
 
 .m-profileSummary__bio {
-  /* min-height: 200px; */
-  /* min-width: 100%; */
+  flex-basis: 100%;
   width: 100%;
 }
 

@@ -299,8 +299,9 @@ impl UiState {
                             }
                         }
                     }
-                    p ."m-profileSummary__bio" { (profile.bio) }
                 }
+
+                p ."m-profileSummary__bio" { (profile.bio) }
             }
 
         })
