@@ -35,15 +35,22 @@ impl UiState {
                     notifications: [],
                     nextId: 1,
                     addNotification(type, message, duration = null) {
+                        // Check if this exact message already exists
+                        const exists = this.notifications.some(n => n.message === message && n.type === type);
+                        if (exists) {
+                            return; // Don't add duplicate
+                        }
+
                         const id = this.nextId++;
                         this.notifications.push({ id, type, message });
 
-                        // Auto-dismiss success and info notifications
-                        if (duration !== null || (type === 'success' || type === 'info')) {
-                            setTimeout(() => {
-                                this.removeNotification(id);
-                            }, duration || 4000);
-                        }
+                        // Auto-dismiss all notification types
+                        const dismissTime = duration !== null ? duration :
+                                          type === 'error' ? 8000 :
+                                          4000;
+                        setTimeout(() => {
+                            this.removeNotification(id);
+                        }, dismissTime);
                     },
                     removeNotification(id) {
                         this.notifications = this.notifications.filter(n => n.id !== id);
@@ -53,9 +60,11 @@ impl UiState {
                     }
                 }"#
                 "@ajax:error.window"=r#"
-                    const status = $event.detail.xhr?.status;
+                    console.log('AJAX error event:', $event.detail);
+                    const xhr = $event.detail.xhr || $event.detail;
+                    const status = xhr?.status;
                     let message;
-                    if (status === 0) {
+                    if (status === 0 || status === undefined) {
                         message = '⚠ Network Error - Unable to complete request';
                     } else if (status >= 500) {
                         message = '⚠ Server Error (' + status + ')';
@@ -109,7 +118,19 @@ pub(crate) fn render_html_footer() -> Markup {
                       img.removeAttribute("loading");
                     }
                   });
+                });
 
+                // Catch unhandled promise rejections (network errors)
+                window.addEventListener('unhandledrejection', (event) => {
+                  console.log('Unhandled rejection:', event);
+                  if (event.reason instanceof TypeError &&
+                      (event.reason.message.includes('NetworkError') ||
+                       event.reason.message.includes('fetch'))) {
+                    window.dispatchEvent(new CustomEvent('notify', {
+                      detail: { type: 'error', message: '⚠ Network Error - Unable to complete request' }
+                    }));
+                    event.preventDefault();
+                  }
                 });
             "#))
         }
@@ -162,12 +183,12 @@ pub(crate) fn render_html_footer() -> Markup {
                       };
 
                       this.ws.onerror = (error) => {
-                        console.error("WebSocket error:", error);
+                        // Suppress error logging - it's expected if WebSocket isn't available
                       };
 
                       this.ws.onclose = () => {
-                        console.log("WebSocket closed, reconnecting...");
-                        setTimeout(() => this.connect(url), 1000);
+                        // Don't reconnect - WebSocket is optional
+                        // If we want reconnection, it should be with exponential backoff
                       };
                     },
                     destroy() {

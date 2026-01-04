@@ -624,9 +624,9 @@ impl UiState {
                     }
                 }
                 @if let Some(cursor) = cursor {
-                    a ."o-mainBarTimeline__rest -empty"
+                    a id="load-more-posts" ."o-mainBarTimeline__rest -empty"
                         href=(format!("{}?ts={}&event_id={}", mode.to_path(), cursor.ts, cursor.event_id))
-                        x-target="this"
+                        x-target="load-more-posts"
                         x-swap="outerHTML"
                         "x-intersect.once"="$el.click()"
                     { }

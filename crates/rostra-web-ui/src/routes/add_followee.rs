@@ -40,10 +40,10 @@ impl UiState {
     pub fn render_add_followee_form(&self, notification: impl Into<Option<Markup>>) -> Markup {
         let notification = notification.into();
         html! {
-            form ."m-addFolloweeForm"
+            form id="add-followee-form" ."m-addFolloweeForm"
                 action="/ui/followee"
                 method="post"
-                x-target="this"
+                x-target="add-followee-form"
                 x-swap="outerHTML"
             {
                 input ."m-addFolloweeForm__content"
