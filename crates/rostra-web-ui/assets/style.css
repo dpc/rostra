@@ -837,6 +837,10 @@ emoji-picker {
   gap: 5pt;
 }
 
+.m-newPostForm__footerRow--main {
+  justify-content: flex-start;
+}
+
 .m-newPostForm__footerRow--media {
   justify-content: flex-start;
 }
@@ -849,6 +853,7 @@ emoji-picker {
   display: flex;
   align-items: center;
   gap: 0.5rem;
+  margin-left: auto;
 }
 
 .m-newPostForm__previewButtonIcon {
