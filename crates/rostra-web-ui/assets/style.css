@@ -164,18 +164,29 @@ blockquote {
   color: #4b5563;
 }
 
-pre,
 code {
   background-color: var(--color-pre-bg);
   border-radius: var(--border-radius-std);
   font-size: 1rem;
   font-family: monospace;
+  padding: 0.1em 0.3em;
 }
 
 pre {
+  background-color: var(--color-pre-bg);
+  border-radius: var(--border-radius-std);
+  font-size: 1rem;
+  font-family: monospace;
   overflow-x: auto;
   white-space: pre;
   max-width: 100%;
+  padding: 1em;
+}
+
+pre code {
+  background-color: transparent;
+  padding: 0;
+  border-radius: 0;
 }
 
 button {
