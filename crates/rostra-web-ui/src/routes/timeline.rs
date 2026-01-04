@@ -219,11 +219,11 @@ impl UiState {
 
         // For AJAX pagination requests, return only the timeline items fragment
         if is_ajax && pagination.is_some() {
-            return Ok(self.render_main_bar_timeline(session, mode)
+            return self.render_main_bar_timeline(session, mode)
                 .maybe_pagination(pagination)
                 .maybe_pending_notifications(pending_notifications)
                 .call()
-                .await?);
+                .await;
         }
 
         // Otherwise return the full page

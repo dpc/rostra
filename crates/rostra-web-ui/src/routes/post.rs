@@ -401,7 +401,7 @@ impl UiState {
                     div."m-postView__content"
                         ."-missing"[post_content_rendered.is_none()]
                         ."-present"[post_content_rendered.is_some()]
-                        id=[event_id.map(|id| format!("post-content-{}-{}", author, id))]
+                        id=[event_id.map(|id| format!("post-content-{author}-{id}"))]
                     {
                         @if let Some(post_content_rendered) = post_content_rendered {
                             (post_content_rendered)
@@ -502,7 +502,7 @@ impl UiState {
 
             div
                 ."m-postView"
-                id=[event_id.map(|id| format!("post-{}-{}", author, id))]
+                id=[event_id.map(|id| format!("post-{author}-{id}"))]
              {
 
                 (post_main)
@@ -510,7 +510,7 @@ impl UiState {
                 (button_bar)
 
                 div ."m-postView__comments"
-                    id=[event_id.map(|id| format!("post-comments-{}", id))]
+                    id=[event_id.map(|id| format!("post-comments-{id}"))]
                 {}
 
             }

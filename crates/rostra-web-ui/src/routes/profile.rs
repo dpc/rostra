@@ -214,8 +214,9 @@ impl UiState {
         ro: RoMode,
     ) -> RequestResult<Markup> {
         let client = self.client(session.id()).await?;
+        let client_ref = client.client_ref()?;
         let profile = self
-            .get_social_profile(profile_id, &client.client_ref()?)
+            .get_social_profile(profile_id, &client_ref)
             .await;
         let following = client
             .db()?
@@ -223,6 +224,7 @@ impl UiState {
             .await
             .iter()
             .any(|(id, _)| id == &profile_id);
+        let rendered_bio = self.render_bio(client_ref, &profile.bio).await;
         Ok(html! {
             div id="profile-summary" ."m-profileSummary" {
                 script {
@@ -301,7 +303,7 @@ impl UiState {
                     }
                 }
 
-                p ."m-profileSummary__bio" { (profile.bio) }
+                div ."m-profileSummary__bio" { (rendered_bio) }
             }
 
         })
