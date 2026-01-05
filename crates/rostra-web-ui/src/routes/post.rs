@@ -77,7 +77,7 @@ pub async fn get_single_post(
                 &session,
                 &mut cookies,
                 TimelineMode::ProfileSingle(author, event_id),
-                false,
+                is_ajax,
             )
             .await?,
     ))

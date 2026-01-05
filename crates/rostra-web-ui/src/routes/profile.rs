@@ -11,8 +11,8 @@ use tower_cookies::Cookies;
 use super::Maud;
 use super::timeline::{TimelineMode, TimelinePaginationInput};
 use super::unlock::session::{RoMode, UserSession};
-use crate::util::extractors::AjaxRequest;
 use crate::error::RequestResult;
+use crate::util::extractors::AjaxRequest;
 use crate::{SharedState, UiState};
 
 pub async fn get_profile(
@@ -214,9 +214,7 @@ impl UiState {
     ) -> RequestResult<Markup> {
         let client = self.client(session.id()).await?;
         let client_ref = client.client_ref()?;
-        let profile = self
-            .get_social_profile(profile_id, &client_ref)
-            .await;
+        let profile = self.get_social_profile(profile_id, &client_ref).await;
         let following = client
             .db()?
             .get_followees(session.id())
@@ -239,18 +237,18 @@ impl UiState {
                             target.classList.remove('-active');
                         }, 1000);
                     }
-                    
+
                     function togglePersonaList() {
                         const selectedOption = document.querySelector('#follow-type-select').value;
                         const personaList = document.querySelector('.o-followDialog__personaList');
-                        
+
                         if (selectedOption === 'follow_all' || selectedOption === 'follow_only') {
                             personaList.classList.add('-visible');
                         } else {
                             personaList.classList.remove('-visible');
                         }
                     }
-                    
+
                     "#
                     ))
                 }

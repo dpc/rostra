@@ -21,8 +21,8 @@ use super::super::error::RequestResult;
 use super::Maud;
 use super::cookies::CookiesExt as _;
 use super::unlock::session::UserSession;
-use crate::util::extractors::AjaxRequest;
 use crate::html_utils::re_typeset_mathjax;
+use crate::util::extractors::AjaxRequest;
 use crate::{LOG_TARGET, SharedState, UiState};
 
 #[derive(Deserialize)]
@@ -209,7 +209,7 @@ impl UiState {
         session: &UserSession,
         cookies: &mut Cookies,
         mode: TimelineMode,
-        is_ajax: bool,
+        is_ajax_request: bool,
     ) -> RequestResult<Markup> {
         let client = self.client(session.id()).await?;
         let client_ref = client.client_ref()?;
@@ -217,16 +217,16 @@ impl UiState {
             .handle_notification_cookies(&client_ref, pagination, cookies, mode)
             .await?;
 
-        // For AJAX pagination requests, return the full timeline
-        // Alpine-ajax will extract only the elements matching x-target
-        if is_ajax && pagination.is_some() {
-            return Ok(self.render_main_bar_timeline(session, mode)
-                .maybe_pagination(pagination)
-                .maybe_pending_notifications(pending_notifications)
-                .call()
-                .await?);
-        }
+        let timeline = self
+            .render_main_bar_timeline(session, mode)
+            .maybe_pagination(pagination)
+            .maybe_pending_notifications(pending_notifications)
+            .call()
+            .await?;
 
+        if is_ajax_request {
+            return Ok(timeline);
+        }
         // Otherwise return the full page
         let content = html! {
 
@@ -234,13 +234,7 @@ impl UiState {
 
             main ."o-mainBar" {
                 (self.render_new_posts_alert(false, 0))
-                (self.render_main_bar_timeline(session, mode)
-                    .maybe_pagination(pagination)
-                    .maybe_pending_notifications(pending_notifications)
-                    .call()
-                    .await?)
-
-
+                (timeline)
             }
 
             // Dialog containers for timeline interactions
@@ -628,22 +622,25 @@ impl UiState {
                     }
                 }
                 @if let Some(cursor) = cursor {
-                    a id="load-more-posts" ."o-mainBarTimeline__rest -empty"
-                        href=(format!("{}?ts={}&event_id={}", mode.to_path(), cursor.ts, cursor.event_id))
-                        x-target="timeline-posts load-more-posts"
-                        "x-intersect.once"="$el.click()"
+                    @let href = format!("{}?ts={}&event_id={}", mode.to_path(), cursor.ts, cursor.event_id);
+                    div id="load-more-posts" ."o-mainBarTimeline__rest -empty"
+                        "data-url"=(href)
+                        "x-intersect.once"="$ajax($el.dataset.url, { targets: ['timeline-posts', 'load-more-posts'] })"
                     { }
+                } @else {
+                    div id="load-more-posts" ."o-mainBarTimeline__rest -empty" {}
                 }
             }
-            script {
-                (PreEscaped(r#"
-                    document.querySelector('.o-mainBarTimeline')
-                        .classList.toggle(
-                            '-hideReplies',
-                            !document.querySelector('.o-mainBarTimeline__showReplies').checked
-                        );
-                "#))
-            }
+            // TODO: we probably need it, but I don't know why :D
+            // script {
+            //     (PreEscaped(r#"
+            //         document.querySelector('.o-mainBarTimeline')
+            //             .classList.toggle(
+            //                 '-hideReplies',
+            //                 !document.querySelector('.o-mainBarTimeline__showReplies').checked
+            //             );
+            //     "#))
+            // }
         })
     }
 
