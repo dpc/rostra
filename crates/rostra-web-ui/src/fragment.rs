@@ -45,7 +45,8 @@ impl UiState {
                 script defer src="/assets/libs/prismjs/prism-yaml.min.js" {}
                 script defer src="/assets/libs/prismjs/prism-markdown.min.js" {}
                 script defer src="/assets/libs/prismjs/prism-sql.min.js" {}
-                script defer src="/assets/libs/prismjs/prism-autoloader.min.js" {}
+                script defer src="/assets/libs/prismjs/prism-autoloader.min.js"
+                    data-autoloader-path="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/" {}
                 // Prism.js plugins - toolbar must load before copy-to-clipboard
                 script defer src="/assets/libs/prismjs/prism-toolbar.min.js" {}
                 script defer src="/assets/libs/prismjs/prism-copy-to-clipboard.min.js" {}
@@ -161,15 +162,9 @@ pub(crate) fn render_html_footer() -> Markup {
             "#))
         }
 
-        // Configure Prism.js autoloader and trigger highlighting
+        // Trigger Prism.js highlighting after DOM loads
         script {
             (PreEscaped(r#"
-                // Configure autoloader BEFORE it loads
-                window.Prism = window.Prism || {};
-                window.Prism.plugins = window.Prism.plugins || {};
-                window.Prism.plugins.autoloader = window.Prism.plugins.autoloader || {};
-                window.Prism.plugins.autoloader.languages_path = 'https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/';
-
                 document.addEventListener('DOMContentLoaded', () => {
                     // Manually trigger highlighting after everything is loaded
                     if (window.Prism) {
