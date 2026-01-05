@@ -217,13 +217,14 @@ impl UiState {
             .handle_notification_cookies(&client_ref, pagination, cookies, mode)
             .await?;
 
-        // For AJAX pagination requests, return only the timeline items fragment
+        // For AJAX pagination requests, return the full timeline
+        // Alpine-ajax will extract only the elements matching x-target
         if is_ajax && pagination.is_some() {
-            return self.render_main_bar_timeline(session, mode)
+            return Ok(self.render_main_bar_timeline(session, mode)
                 .maybe_pagination(pagination)
                 .maybe_pending_notifications(pending_notifications)
                 .call()
-                .await;
+                .await?);
         }
 
         // Otherwise return the full page
@@ -597,37 +598,38 @@ impl UiState {
                     }
                 }
                 div id="post-preview" ."o-mainBarTimeline__item -preview -empty" x-sync { }
-                @for post in &filtered_posts {
-                    @if let Some(djot_content) = post.content.djot_content.as_ref() {
-                        div ."o-mainBarTimeline__item"
-                        ."-reply"[post.reply_to.is_some()]
-                        ."-post"[post.reply_to.is_none()]
-                        {
-                            (self.render_post_context(
-                                &client_ref,
-                                post.author,
-                                ).maybe_persona_display_name(
-                                author_personas.get(&(post.author, post.content.persona)).map(AsRef::as_ref)
+                div id="timeline-posts" x-merge="append" {
+                    @for post in &filtered_posts {
+                        @if let Some(djot_content) = post.content.djot_content.as_ref() {
+                            div ."o-mainBarTimeline__item"
+                            ."-reply"[post.reply_to.is_some()]
+                            ."-post"[post.reply_to.is_none()]
+                            {
+                                (self.render_post_context(
+                                    &client_ref,
+                                    post.author,
+                                    ).maybe_persona_display_name(
+                                    author_personas.get(&(post.author, post.content.persona)).map(AsRef::as_ref)
 
-                                    )
-                                    .maybe_reply_to(
-                                    post.reply_to
-                                        .map(|reply_to| (reply_to.rostra_id(), reply_to.event_id(), parents.get(&reply_to.event_id().to_short())))
-                                    )
-                                    .event_id(post.event_id)
-                                    .content(djot_content)
-                                    .reply_count(post.reply_count)
-                                    .timestamp(post.ts)
-                                    .ro(session.ro_mode())
-                                    .call().await?)
+                                        )
+                                        .maybe_reply_to(
+                                        post.reply_to
+                                            .map(|reply_to| (reply_to.rostra_id(), reply_to.event_id(), parents.get(&reply_to.event_id().to_short())))
+                                        )
+                                        .event_id(post.event_id)
+                                        .content(djot_content)
+                                        .reply_count(post.reply_count)
+                                        .timestamp(post.ts)
+                                        .ro(session.ro_mode())
+                                        .call().await?)
+                            }
                         }
                     }
                 }
                 @if let Some(cursor) = cursor {
                     a id="load-more-posts" ."o-mainBarTimeline__rest -empty"
                         href=(format!("{}?ts={}&event_id={}", mode.to_path(), cursor.ts, cursor.event_id))
-                        x-target="load-more-posts"
-                        x-swap="outerHTML"
+                        x-target="timeline-posts load-more-posts"
                         "x-intersect.once"="$el.click()"
                     { }
                 }
