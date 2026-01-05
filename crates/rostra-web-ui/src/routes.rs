@@ -8,6 +8,7 @@ mod post;
 mod profile;
 mod profile_self;
 mod search;
+mod settings;
 mod timeline;
 mod unlock;
 
@@ -195,6 +196,12 @@ pub fn route_handler(state: SharedState) -> Router<Arc<UiState>> {
             get(profile_self::get_self_account_edit).post(profile_self::post_self_account_edit),
         )
         .route("/ui/search/profiles", get(search::search_profiles))
+        .route("/ui/settings", get(settings::get_settings))
+        .route(
+            "/ui/settings/followers",
+            get(settings::get_settings_followers),
+        )
+        .route("/ui/settings/unfollow", post(settings::post_unfollow))
         // .route("/a/", put(account_new))
         // .route("/t/", put(token_new))
         // .route("/m/", put(metric_new).get(metric_find))

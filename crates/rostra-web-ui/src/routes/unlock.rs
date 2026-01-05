@@ -14,18 +14,19 @@ use super::Maud;
 use crate::error::{
     LoginRequiredSnafu, OtherSnafu, PublicKeyMissingSnafu, RequestResult, UnlockResult, UnlockSnafu,
 };
-use crate::util::extractors::AjaxRequest;
 use crate::serde_util::empty_string_as_none;
+use crate::util::extractors::AjaxRequest;
 use crate::{SharedState, UiState};
 
 pub async fn get(
     state: State<SharedState>,
     AjaxRequest(is_ajax): AjaxRequest,
 ) -> RequestResult<impl IntoResponse> {
-    // If we're called due to an AJAX request, that probably means something failed or
-    // required auth, and was redirected here. We don't want to respond with a page
-    // that Alpine-ajax will interpret as a partial. We want it to reload the page altogether.
-    // Use a standard HTTP redirect which Alpine-ajax will follow with a full page reload.
+    // If we're called due to an AJAX request, that probably means something failed
+    // or required auth, and was redirected here. We don't want to respond with
+    // a page that Alpine-ajax will interpret as a partial. We want it to reload
+    // the page altogether. Use a standard HTTP redirect which Alpine-ajax will
+    // follow with a full page reload.
     if is_ajax {
         return Ok(Redirect::to("/ui/unlock").into_response());
     }

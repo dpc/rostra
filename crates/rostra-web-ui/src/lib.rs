@@ -1,5 +1,5 @@
 mod error;
-mod fragment;
+mod layout;
 pub mod html_utils;
 mod routes;
 // TODO: move to own crate

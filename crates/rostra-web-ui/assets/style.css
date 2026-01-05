@@ -412,17 +412,39 @@ img.u-userImage[loading="lazy"][src][width][height] {
 }
 
 
-.o-navBar__list {
+.o-topNav {
   display: flex;
-  gap: 4pt;
+  flex-wrap: wrap;
+  gap: 0.5rem 1rem;
 }
 
-.o-navBar__item {
-  display: block;
+.o-topNav__item {
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
 }
 
-.o-navBar__header {
-  font-weight: bold;
+.o-topNav__icon {
+  display: inline-block;
+  width: 1rem;
+  height: 1rem;
+  filter: invert(var(--invert));
+}
+
+.o-topNav__icon.-back {
+  background: url('/assets/icons/arrow-left.svg') center/contain no-repeat;
+}
+
+.o-topNav__icon.-home {
+  background: url('/assets/icons/house.svg') center/contain no-repeat;
+}
+
+.o-topNav__icon.-support {
+  background: url('/assets/icons/comment.svg') center/contain no-repeat;
+}
+
+.o-topNav__icon.-settings {
+  background: url('/assets/icons/gear.svg') center/contain no-repeat;
 }
 
 .o-mainBar {
@@ -738,6 +760,11 @@ emoji-picker {
 }
 
 .m-profileSummary__bio {
+  flex-basis: 100%;
+  width: 100%;
+}
+
+.m-profileSummary__bioEdit {
   flex-basis: 100%;
   width: 100%;
   height: 10rem;
@@ -1538,4 +1565,114 @@ input:checked+.slider:before {
 
 .o-notification:hover {
   opacity: 0.9;
+}
+
+/* Settings Page */
+.o-settingsNav {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  margin-top: 1rem;
+  padding: 0.5rem;
+  background: var(--color-timeline-bg);
+  border: 1px solid var(--color-timeline-item-border);
+  border-radius: var(--border-radius-std);
+  min-width: 200px;
+}
+
+.o-settingsNav__item {
+  display: block;
+  padding: 0.5rem 0.75rem;
+  border-radius: var(--border-radius-std);
+  text-decoration: none;
+  color: var(--color-text-default);
+}
+
+.o-settingsNav__item:hover {
+  background: var(--color-button-bg-hover);
+}
+
+.o-settingsNav__item.-active {
+  background: var(--color-button-bg);
+  font-weight: bold;
+}
+
+.o-settingsContent {
+  padding: 1rem;
+  background: var(--color-timeline-bg);
+  border: 1px solid var(--color-timeline-item-border);
+  border-radius: var(--border-radius-std);
+}
+
+.o-settingsContent__header {
+  margin: 0 0 1rem 0;
+  font-size: 1.5rem;
+}
+
+.o-settingsContent__section {
+  margin-bottom: 1.5rem;
+}
+
+.o-settingsContent__section:last-child {
+  margin-bottom: 0;
+}
+
+.o-settingsContent__sectionHeader {
+  margin: 0 0 0.75rem 0;
+  font-size: 1.1rem;
+  color: var(--color-text-muted);
+}
+
+.o-settingsContent__empty {
+  color: var(--color-text-muted);
+  font-style: italic;
+}
+
+.m-followeeList {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.m-followeeList__item {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.5rem;
+  background: var(--color-post-bg);
+  border: 1px solid var(--color-button-border);
+  border-radius: var(--border-radius-std);
+}
+
+.m-followeeList__avatar {
+  flex-shrink: 0;
+  border-radius: var(--border-radius-std);
+}
+
+.m-followeeList__name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  text-decoration: none;
+  color: var(--color-text-default);
+}
+
+.m-followeeList__name:hover {
+  text-decoration: underline;
+}
+
+.m-followeeList__actions {
+  flex-shrink: 0;
+  margin-left: 0.5rem;
+}
+
+.m-followeeList__unfollowButton {
+  font-size: 0.875rem;
+  padding: 0.25rem 0.5rem;
+}
+
+.m-followeeList__unfollowButtonIcon {
+  background: url('/assets/icons/xmark.svg') center/contain no-repeat;
 }

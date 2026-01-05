@@ -190,12 +190,7 @@ impl UiState {
     ) -> RequestResult<Markup> {
         Ok(html! {
                 nav ."o-navBar" {
-                    div ."o-navBar__list" {
-                        span ."o-navBar__header" { "Rostra:" }
-                        a ."o-navBar__item" href="https://github.com/dpc/rostra/discussions" { "Support" }
-                        a ."o-navBar__item" href="https://github.com/dpc/rostra/wiki" { "Wiki" }
-                        a ."o-navBar__item" href="https://github.com/dpc/rostra" { "Github" }
-                    }
+                    (self.render_top_nav())
 
                     div ."o-navBar__userAccount" {
                         (self.render_profile_summary(profile_id, session, session.ro_mode()).await?)

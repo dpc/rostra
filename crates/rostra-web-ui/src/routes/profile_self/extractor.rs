@@ -26,7 +26,8 @@ where
             return Err((StatusCode::BAD_REQUEST, "Missing content type"));
         };
 
-        // Check if content type starts with "multipart/form-data" (it may include boundary parameter)
+        // Check if content type starts with "multipart/form-data" (it may include
+        // boundary parameter)
         if !content_type
             .to_str()
             .map(|s| s.starts_with("multipart/form-data"))
@@ -90,7 +91,10 @@ where
                         };
 
                         if parts.avatar.replace((mime, v.to_vec())).is_some() {
-                            return Err((StatusCode::BAD_REQUEST, "Failed to parse multipart field"));
+                            return Err((
+                                StatusCode::BAD_REQUEST,
+                                "Failed to parse multipart field",
+                            ));
                         }
                     }
                 }

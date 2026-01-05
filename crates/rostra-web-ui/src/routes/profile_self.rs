@@ -214,7 +214,7 @@ impl UiState {
                     }
                 }
 
-                textarea."m-profileSummary__bio"
+                textarea."m-profileSummary__bioEdit"
                     placeholder="Bio..."
                     rows="8"
                     dir="auto"

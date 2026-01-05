@@ -126,6 +126,36 @@ impl UiState {
             }
         })
     }
+
+    /// Renders a standard two-column page layout with navbar and main content
+    pub fn render_page_layout(&self, navbar: Markup, main_content: Markup) -> Markup {
+        html! {
+            (navbar)
+            main ."o-mainBar" {
+                (main_content)
+            }
+        }
+    }
+
+    /// Renders the top navigation bar with Home, Support, and Settings links
+    pub fn render_top_nav(&self) -> Markup {
+        html! {
+            div ."o-topNav" {
+                a ."o-topNav__item" href="/ui" {
+                    span ."o-topNav__icon -home" {}
+                    "Home"
+                }
+                a ."o-topNav__item" href="https://github.com/dpc/rostra/discussions" {
+                    span ."o-topNav__icon -support" {}
+                    "Support"
+                }
+                a ."o-topNav__item" href="/ui/settings" {
+                    span ."o-topNav__icon -settings" {}
+                    "Settings"
+                }
+            }
+        }
+    }
 }
 
 /// A static footer.

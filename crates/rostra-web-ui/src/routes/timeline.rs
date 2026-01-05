@@ -146,18 +146,11 @@ impl UiState {
             nav ."o-navBar"
                 x-data="websocket('/ui/updates')"
             {
-                div ."o-navBar__list" {
-                    span ."o-navBar__header" { "Rostra:" }
-                    a ."o-navBar__item" href="https://github.com/dpc/rostra/discussions" { "Support" }
-                    a ."o-navBar__item" href="https://github.com/dpc/rostra/wiki" { "Wiki" }
-                    a ."o-navBar__item" href="https://github.com/dpc/rostra" { "Github" }
-                }
+                (self.render_top_nav())
 
                 div ."o-navBar__profileSummary" {
                     (self.render_self_profile_summary(session, session.ro_mode()).await?)
                 }
-
-                (self.render_add_followee_form(None))
 
                 (self.new_post_form(None, session.ro_mode(), Some(user_id)))
             }
@@ -228,14 +221,16 @@ impl UiState {
             return Ok(timeline);
         }
         // Otherwise return the full page
-        let content = html! {
-
-            (navbar)
-
-            main ."o-mainBar" {
+        let page_layout = self.render_page_layout(
+            navbar,
+            html! {
                 (self.render_new_posts_alert(false, 0))
                 (timeline)
-            }
+            },
+        );
+
+        let content = html! {
+            (page_layout)
 
             // Dialog containers for timeline interactions
             div id="preview-dialog" ."o-previewDialog" x-sync {}
