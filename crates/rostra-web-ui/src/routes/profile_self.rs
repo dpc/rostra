@@ -134,7 +134,6 @@ impl UiState {
                             action="/ui/self/edit"
                             method="get"
                             x-target="self-profile-summary"
-                            x-swap="outerHTML"
                         {
                             button
                                 ."m-profileSummary__editButton u-button"
@@ -175,7 +174,6 @@ impl UiState {
                 action="/ui/self/edit"
                 method="post"
                 x-target="self-profile-summary"
-                x-swap="outerHTML"
                 enctype="multipart/form-data"
             {
                 script {

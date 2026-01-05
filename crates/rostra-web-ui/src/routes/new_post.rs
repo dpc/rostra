@@ -175,7 +175,6 @@ pub async fn get_post_preview_dialog(
                         action="/ui/post"
                         method="post"
                         x-target="new-post-form preview-dialog post-preview ajax-scripts"
-                        x-swap="outerHTML"
                     {
                         input type="hidden" name="content" value=(form.content) {}
                         @if let Some(reply_to) = form.reply_to {
@@ -323,7 +322,6 @@ impl UiState {
                 method="post"
                 style="display: none;"
                 x-target="post-preview"
-                x-swap="outerHTML"
                 x-autofocus
             {
                 input type="hidden" name="content" value="" {}
@@ -333,7 +331,6 @@ impl UiState {
                 action="/ui/post/preview_dialog"
                 method="post"
                 x-target="preview-dialog"
-                x-swap="outerHTML"
             {
                 (self.render_reply_to_line(None, None))
                 div ."m-newPostForm__textareaWrapper"
@@ -461,7 +458,6 @@ impl UiState {
                     action=(format!("/ui/media/{}/list", uid))
                     method="get"
                     x-target="media-list"
-                    x-swap="outerHTML"
                     style="display: none;"
                 {}
 

@@ -497,9 +497,10 @@ impl UiState {
 
     pub fn render_new_posts_alert(&self, visible: bool, count: u64) -> Markup {
         html! {
+            // TODO: Update new posts alert - need Alpine.js event or different approach
+            // (alpine-ajax doesn't support x-swap-oob)
             a ."o-mainBar__newPostsAlert"
                 ."-hidden"[!visible]
-                x-swap-oob=[visible.then_some("outerHTML:.o-mainBar__newPostsAlert")]
                  href="/ui"
             {
                 (if count == 0 {

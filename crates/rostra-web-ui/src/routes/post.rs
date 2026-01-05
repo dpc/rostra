@@ -427,7 +427,6 @@ impl UiState {
                                     action={"/ui/comments/"(ext_event_id.event_id().to_short())}
                                     method="get"
                                     x-target=(format!("post-comments-{}", ext_event_id.event_id().to_short()))
-                                    x-swap="outerHTML"
                                     "@ajax:after"="$el.querySelector('button').classList.add('u-hidden')"
                                 {
                                     button ."m-postView__commentsButton u-button"
@@ -450,7 +449,6 @@ impl UiState {
                                     action={"/ui/post/"(author)"/"(event_id)"/fetch"}
                                     method="post"
                                     x-target=(format!("post-content-{}-{}", author, event_id))
-                                    x-swap="outerHTML"
                                 {
                                     button type="submit" style="all: unset; cursor: pointer;" {
                                         span ."m-postView__fetchButtonIcon u-buttonIcon" width="1rem" height="1rem" {}
@@ -464,7 +462,6 @@ impl UiState {
                                 action={"/ui/post/"(author)"/"(event_id.unwrap())"/delete"}
                                 method="post"
                                 x-target=(format!("post-{}-{}", author, event_id.unwrap()))
-                                x-swap="outerHTML"
                                 "@ajax:before"="confirm('Are you sure you want to delete this post?') || $event.preventDefault()"
                             {
                                 button ."m-postView__deleteButton u-button u-button--danger"
@@ -481,7 +478,6 @@ impl UiState {
                             action="/ui/post/reply_to"
                             method="get"
                             x-target="reply-to-line"
-                            x-swap="outerHTML"
                             x-autofocus
                         {
                             input type="hidden" name="reply_to" value=(ext_event_id) {}

@@ -44,7 +44,6 @@ impl UiState {
                 action="/ui/followee"
                 method="post"
                 x-target="add-followee-form"
-                x-swap="outerHTML"
             {
                 input ."m-addFolloweeForm__content"
                     placeholder="RostraId"

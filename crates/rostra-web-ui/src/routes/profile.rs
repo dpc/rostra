@@ -62,7 +62,6 @@ pub async fn get_follow_dialog(
                 action=(format!("/ui/profile/{}/follow", profile_id))
                 method="post"
                 x-target="profile-summary"
-                x-swap="outerHTML"
             {
                 div ."o-followDialog__optionsContainer" {
                     div ."o-followDialog__selectContainer" {
@@ -176,9 +175,9 @@ pub async fn post_follow(
             .render_profile_summary(profile_id, &session, session.ro_mode())
             .await?)
 
-        // Close the follow dialog
+        // TODO: Close the follow dialog - need Alpine.js event or different approach
+        // (alpine-ajax doesn't support x-swap-oob)
         div ."o-followDialog -empty"
-            x-swap-oob="outerHTML:.o-followDialog"
         {}
     }))
 }
@@ -282,7 +281,6 @@ impl UiState {
                                 action=(format!("/ui/profile/{}/follow?following={}", profile_id, following))
                                 method="get"
                                 x-target="follow-dialog-content"
-                                x-swap="innerHTML"
                                 "@ajax:after"="document.querySelector('.o-followDialog').classList.add('-active')"
                             {
                                 button
