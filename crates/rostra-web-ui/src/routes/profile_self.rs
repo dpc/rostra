@@ -204,15 +204,6 @@ impl UiState {
                         name="name"
                         value=(self_profile.display_name) {
                     }
-                    textarea."m-profileSummary__bio"
-                        placeholder="Bio..."
-                        type="text"
-                        dir="auto"
-                        name="bio"
-                        "x-on:keyup.enter.ctrl"="$el.form.requestSubmit()"
-                    {
-                        {(self_profile.bio)}
-                    }
 
                     div ."m-profileSummary__buttons" {
                         button
@@ -221,6 +212,16 @@ impl UiState {
                             "Save"
                         }
                     }
+                }
+
+                textarea."m-profileSummary__bio"
+                    placeholder="Bio..."
+                    rows="8"
+                    dir="auto"
+                    name="bio"
+                    "x-on:keyup.enter.ctrl"="$el.form.requestSubmit()"
+                {
+                    {(self_profile.bio)}
                 }
             }
         })
