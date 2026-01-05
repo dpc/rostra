@@ -11,7 +11,6 @@ use rostra_core::id::{RostraId, ToShort as _};
 use super::Maud;
 use super::unlock::session::{RoMode, UserSession};
 use crate::error::RequestResult;
-use crate::html_utils::submit_on_ctrl_enter;
 use crate::{SharedState, UiState};
 
 pub async fn get_self_account_edit(
@@ -180,7 +179,7 @@ impl UiState {
                     (PreEscaped(r#"
                         function previewAvatar(event) {
                             document.querySelector('.m-profileSummary__userImage').src=URL.createObjectURL(event.target.files[0]);
-                        }    
+                        }
                     "#))
                 }
                 label for="avatar-upload" ."m-profileSummary__userImageLabel" {
@@ -209,7 +208,9 @@ impl UiState {
                         placeholder="Bio..."
                         type="text"
                         dir="auto"
-                        name="bio" {
+                        name="bio"
+                        "x-on:keyup.enter.ctrl"="$el.form.requestSubmit()"
+                    {
                         {(self_profile.bio)}
                     }
 
@@ -222,7 +223,6 @@ impl UiState {
                     }
                 }
             }
-            (submit_on_ctrl_enter(".m-profileSummary", ".m-profileSummary__bio"))
         })
     }
 }

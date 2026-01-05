@@ -15,23 +15,3 @@ pub(crate) fn re_typeset_mathjax() -> Markup {
         }
     }
 }
-
-/// Add ctrl+enter submit behavior to an input in a form
-pub(crate) fn submit_on_ctrl_enter(form_selector: &str, input_selector: &str) -> Markup {
-    html! {
-        script {
-            (PreEscaped(format!(r#"
-                (function() {{
-                    const form = document.querySelector('{}');
-                    const input = document.querySelector('{}');
-
-                    input.addEventListener('keydown', (e) => {{
-                        if (e.ctrlKey && e.key === 'Enter') {{
-                            form.requestSubmit();
-                        }}
-                    }});
-                }}())
-            "#, form_selector, input_selector)))
-        }
-    }
-}

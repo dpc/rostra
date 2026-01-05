@@ -14,7 +14,7 @@ use super::Maud;
 use super::cookies::CookiesExt as _;
 use super::unlock::session::{RoMode, UserSession};
 use crate::UiState;
-use crate::html_utils::{re_typeset_mathjax, submit_on_ctrl_enter};
+use crate::html_utils::re_typeset_mathjax;
 
 #[derive(Deserialize)]
 pub struct PostInput {
@@ -85,11 +85,7 @@ pub async fn post_new_post(
         .await?;
 
     // Clear the form content after posting
-    let clean_form = state.new_post_form(
-        None,
-        session.ro_mode(),
-        Some(client_ref.rostra_id()),
-    );
+    let clean_form = state.new_post_form(None, session.ro_mode(), Some(client_ref.rostra_id()));
     let reply_to = if let Some(reply_to) = form.reply_to {
         Some((
             reply_to.rostra_id(),
@@ -175,6 +171,7 @@ pub async fn get_post_preview_dialog(
                         action="/ui/post"
                         method="post"
                         x-target="new-post-form preview-dialog post-preview ajax-scripts"
+                        "x-on:keyup.enter.ctrl.shift"="$el.requestSubmit()"
                     {
                         input type="hidden" name="content" value=(form.content) {}
                         @if let Some(reply_to) = form.reply_to {
@@ -187,6 +184,7 @@ pub async fn get_post_preview_dialog(
                                     name="persona"
                                     id="persona-select"
                                     ."o-previewDialog__personaSelect"
+                                    x-autofocus
                                 {
                                     @for (persona_id, persona_display_name) in personas {
                                         option
@@ -359,6 +357,7 @@ impl UiState {
                         autocomplete="off"
                         autofocus
                         disabled[ro.to_disabled()]
+                        "x-on:keyup.enter.ctrl"="$el.form.requestSubmit()"
                         {}
 
                     // Autocomplete dropdown
@@ -484,8 +483,6 @@ impl UiState {
                     data-source="/assets/libs/emoji-picker-element/data.json"
                 {}
             }
-
-            (submit_on_ctrl_enter(".m-newPostForm", ".m-newPostForm__content"))
         }
     }
 }
