@@ -595,33 +595,41 @@ impl UiState {
                             ."-reply"[post.reply_to.is_some()]
                             ."-post"[post.reply_to.is_none()]
                             {
-                                (self.render_post_context(
-                                    &client_ref,
-                                    post.author,
+                                (
+                                    self.render_post_context(
+                                        &client_ref,
+                                        post.author,
                                     ).maybe_persona_display_name(
-                                    author_personas.get(&(post.author, post.content.persona)).map(AsRef::as_ref)
-
-                                        )
-                                        .maybe_reply_to(
+                                        author_personas.get(&(post.author, post.content.persona)).map(AsRef::as_ref)
+                                    )
+                                    .maybe_reply_to(
                                         post.reply_to
-                                            .map(|reply_to| (reply_to.rostra_id(), reply_to.event_id(), parents.get(&reply_to.event_id().to_short())))
+                                            .map(|reply_to| (
+                                                reply_to.rostra_id(),
+                                                reply_to.event_id(),
+                                                parents.get(&reply_to.event_id().to_short()))
+                                            )
                                         )
                                         .event_id(post.event_id)
                                         .content(djot_content)
                                         .reply_count(post.reply_count)
                                         .timestamp(post.ts)
                                         .ro(session.ro_mode())
-                                        .call().await?)
+                                        .call()
+                                        .await?
+                                )
                             }
                         }
                     }
                 }
                 @if let Some(cursor) = cursor {
                     @let href = format!("{}?ts={}&event_id={}", mode.to_path(), cursor.ts, cursor.event_id);
-                    div id="load-more-posts" ."o-mainBarTimeline__rest -empty"
-                        "data-url"=(href)
-                        "x-intersect.once"="$ajax($el.dataset.url, { targets: ['timeline-posts', 'load-more-posts'] })"
-                    { }
+                    a
+                        id="load-more-posts" ."o-mainBarTimeline__rest -empty"
+                        "href"=(href)
+                        x-init
+                        "x-intersect"="$ajax($el.dataset.url, { targets: ['timeline-posts', 'load-more-posts'] })"
+                    { "More posts" }
                 } @else {
                     div id="load-more-posts" ."o-mainBarTimeline__rest -empty" {}
                 }

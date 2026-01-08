@@ -2,8 +2,7 @@
   description = "Rostra";
 
   inputs = {
-    nixpkgs.url = "github:NixOS/nixpkgs/nixos-25.05";
-    nixpkgs-unstable.url = "github:NixOS/nixpkgs/nixos-unstable";
+    nixpkgs.url = "github:NixOS/nixpkgs/nixos-25.11";
     flake-utils.url = "github:numtide/flake-utils";
     flakebox.url = "github:rustshop/flakebox?rev=f96cbeafded56bc6f5c27fbd96e4fcc78b8a8861";
 
@@ -17,7 +16,6 @@
     {
       self,
       nixpkgs,
-      nixpkgs-unstable,
       flake-utils,
       flakebox,
       bundlers,
@@ -28,7 +26,6 @@
     // flake-utils.lib.eachDefaultSystem (
       system:
       let
-        pkgs-unstable = nixpkgs-unstable.legacyPackages.${system};
         pkgs = nixpkgs.legacyPackages.${system};
         projectName = "rostra";
 
@@ -139,7 +136,7 @@
 
 
           # Start rostra web-ui with oniux (Tor proxy) in background
-          ${pkgs-unstable.oniux}/bin/oniux ${multiBuild.rostra}/bin/rostra "$@" &
+          ${pkgs.oniux}/bin/oniux ${multiBuild.rostra}/bin/rostra "$@" &
           rostra_pid=$!
 
           cleanup_rostra() { kill -9 "$rostra_pid" 2>/dev/null || true; }
@@ -193,10 +190,12 @@
 
         devShells = flakeboxLib.mkShells {
           toolchain = toolchainAll;
-          packages = [
-            pkgs.jq
-            pkgs.systemfd
-            (pkgs-unstable.callPackage ./nix/pkgs/wild.nix { })
+          packages = with pkgs; [
+            jq
+            systemfd
+            treefmt
+
+            (pkgs.callPackage ./nix/pkgs/wild.nix { })
           ];
           shellHook = ''
             export FLAKEBOX_GIT_LS_TEXT_IGNORE="crates/rostra-web-ui/assets/libs/|crates/rostra-web-ui/assets/icons"

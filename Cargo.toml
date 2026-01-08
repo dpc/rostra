@@ -26,6 +26,8 @@ description = "A p2p (f2f) social network."
 [workspace.lints.clippy]
 collapsible_if = "allow"
 collapsible_else_if = "allow"
+dbg_macro = "deny"
+literal_string_with_formatting_args = "deny"
 
 [workspace.metadata]
 name = "rostra"

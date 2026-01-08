@@ -9,5 +9,8 @@ version = { workspace = true }
 [features]
 default = []
 
+[lints]
+workspace = true
+
 [dependencies]
 snafu = { workspace = true }

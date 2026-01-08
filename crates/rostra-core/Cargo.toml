@@ -50,3 +50,6 @@ divan = { workspace = true }
 test-log = { workspace = true, features = ["trace"] }
 serde_json = { workspace = true }
 tracing = { workspace = true }
+
+[lints]
+workspace = true

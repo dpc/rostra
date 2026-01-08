@@ -3,34 +3,8 @@ set -eou pipefail
 
 
 function job_lint() {
-  set -x
-
-  # Get zero-terminated list of non-symlink files (reusable)
-  git_ls_files="$(git ls-files -z | while IFS= read -r -d '' file; do
-    [ ! -L "$file" ] && printf '%s\0' "$file"
-  done)"
-
-  selfci step start "check leftover dbg!"
-  while IFS= read -r -d '' path; do
-    if grep -q 'dbg!(' "$path"; then
-      >&2 echo "$path contains dbg! macro"
-      selfci step fail
-    fi
-  done <<< "$git_ls_files"
-
-  selfci step start "nixfmt"
-  nix_files=()
-  while IFS= read -r -d '' path; do
-    [[ "$path" == *.nix ]] && nix_files+=("$path")
-  done <<< "$git_ls_files"
-  if [ ${#nix_files[@]} -gt 0 ]; then
-    if ! nixfmt -c "${nix_files[@]}"; then
-      selfci step fail
-    fi
-  fi
-
-  selfci step start "cargo fmt"
-  if ! cargo fmt --all --check ; then
+  selfci step start "treefmt"
+  if ! treefmt --ci ; then
     selfci step fail
   fi
 }
