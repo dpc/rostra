@@ -20,7 +20,7 @@ bytes = { workspace = true }
 brotli = { workspace = true }
 futures = { workspace = true }
 futures-util = { workspace = true }
-jotdown = { workspace = true }
+jotup = { workspace = true }
 maud = { workspace = true }
 listenfd = { workspace = true }
 snafu = { workspace = true }

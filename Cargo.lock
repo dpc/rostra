@@ -2407,9 +2407,10 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8eaf4bc02d17cbdd7ff4c7438cafcdf7fb9a4613313ad11b4f8fefe7d3fa0130"
 
 [[package]]
-name = "jotdown"
-version = "0.9.0"
-source = "git+https://github.com/dpc/jotdown?rev=6a4528812cd9a4621b56dab02b724f5d5a5371a1#6a4528812cd9a4621b56dab02b724f5d5a5371a1"
+name = "jotup"
+version = "0.10.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "50d3c3691f7b31371fb48b44aef52049179b2044f29d747a56902831d5f257dc"
 dependencies = [
  "async-trait",
  "tokio",
@@ -3901,7 +3902,7 @@ dependencies = [
  "bytes",
  "futures",
  "futures-util",
- "jotdown",
+ "jotup",
  "listenfd",
  "maud",
  "rostra-client",

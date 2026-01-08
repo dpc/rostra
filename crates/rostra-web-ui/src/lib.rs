@@ -1,6 +1,6 @@
 mod error;
-mod layout;
 pub mod html_utils;
+mod layout;
 mod routes;
 // TODO: move to own crate
 mod serde_util;

@@ -1,8 +1,8 @@
 use std::borrow::Cow;
 use std::str::FromStr as _;
 
-use jotdown::r#async::{AsyncRender, AsyncRenderOutputExt};
-use jotdown::html::filters::AsyncSanitizeExt;
+use jotup::r#async::{AsyncRender, AsyncRenderOutputExt};
+use jotup::html::filters::AsyncSanitizeExt;
 use maud::{Markup, PreEscaped};
 use rostra_client::ClientRef;
 use rostra_core::ShortEventId;
@@ -55,7 +55,7 @@ impl UiState {
     ) -> Markup {
         // Compose the filters using extension traits: Renderer -> ProfileLinks ->
         // Images -> PrismCodeBlocks -> Sanitize
-        let renderer = jotdown::html::tokio::Renderer::default()
+        let renderer = jotup::html::tokio::Renderer::default()
             .rostra_profile_links(client.clone())
             .rostra_images(author_id)
             .prism_code_blocks()
@@ -73,7 +73,7 @@ impl UiState {
     /// transformations)
     pub(crate) async fn render_bio(&self, client: ClientRef<'_>, content: &str) -> Markup {
         // Only sanitize for bio - no profile links or image transforms
-        let renderer = jotdown::html::tokio::Renderer::default()
+        let renderer = jotup::html::tokio::Renderer::default()
             .rostra_profile_links(client)
             .sanitize();
 

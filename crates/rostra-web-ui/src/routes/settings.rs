@@ -57,11 +57,7 @@ pub async fn post_unfollow(
 
     // Return updated followee list
     let followees = client_ref.db().get_followees(user_id).await;
-    Ok(Maud(
-        state
-            .render_followee_list(&session, followees)
-            .await?,
-    ))
+    Ok(Maud(state.render_followee_list(&session, followees).await?))
 }
 
 impl UiState {

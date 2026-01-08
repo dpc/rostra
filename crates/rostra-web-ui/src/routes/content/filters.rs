@@ -1,7 +1,7 @@
 use std::borrow::Cow;
 
-use jotdown::r#async::{AsyncRender, AsyncRenderOutput};
-use jotdown::{AttributeKind, AttributeValue, Attributes, Container, Event};
+use jotup::r#async::{AsyncRender, AsyncRenderOutput};
+use jotup::{AttributeKind, AttributeValue, Attributes, Container, Event};
 use rostra_client::ClientRef;
 use rostra_core::id::RostraId;
 
@@ -42,7 +42,7 @@ where
 
     async fn emit(&mut self, event: Event<'s>) -> Result<(), Self::Error> {
         match event {
-            Event::Start(Container::Link(s, jotdown::LinkType::AutoLink), attr) => {
+            Event::Start(Container::Link(s, jotup::LinkType::AutoLink), attr) => {
                 if let Some(rostra_id) = UiState::extra_rostra_id_link(&s) {
                     let display_name = self
                         .client
@@ -56,7 +56,7 @@ where
                         .emit(Event::Start(
                             Container::Link(
                                 format!("/ui/profile/{rostra_id}").into(),
-                                jotdown::LinkType::Span(jotdown::SpanLinkType::Inline),
+                                jotup::LinkType::Span(jotup::SpanLinkType::Inline),
                             ),
                             attr,
                         ))
@@ -65,7 +65,7 @@ where
                     self.container_stack.push(ContainerKind::Other);
                     self.inner
                         .emit(Event::Start(
-                            Container::Link(s, jotdown::LinkType::AutoLink),
+                            Container::Link(s, jotup::LinkType::AutoLink),
                             attr,
                         ))
                         .await
@@ -132,7 +132,7 @@ enum ImageTransform<'s> {
     /// External embeddable media (YouTube, etc.) - stores the HTML and alt text
     EmbeddableMedia(String, String),
     /// Regular external image - stores the URL, link type, and alt text
-    ExternalImage(Cow<'s, str>, jotdown::SpanLinkType, String),
+    ExternalImage(Cow<'s, str>, jotup::SpanLinkType, String),
 }
 
 /// Filter that transforms images:
@@ -174,7 +174,7 @@ where
                         .emit(Event::Start(
                             Container::Image(
                                 format!("/ui/media/{}/{}", self.author_id, event_id).into(),
-                                jotdown::SpanLinkType::Inline,
+                                jotup::SpanLinkType::Inline,
                             ),
                             attr,
                         ))
@@ -198,7 +198,7 @@ where
                             Container::Div {
                                 class: "lazyload-wrapper".into(),
                             },
-                            jotdown::Attributes::try_from(
+                            jotup::Attributes::try_from(
                                 "{ onclick=\"this.classList.add('-expanded')\" }",
                             )
                             .expect("Can't fail"),

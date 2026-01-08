@@ -90,6 +90,22 @@
                 );
               in
               rec {
+                workspaceDeps = craneLib.buildWorkspaceDepsOnly { };
+
+                workspace = craneLib.buildWorkspace {
+                  cargoArtifacts = workspaceDeps;
+                };
+
+                tests = craneLib.cargoNextest {
+                  cargoArtifacts = workspace;
+                };
+
+                clippy = craneLib.cargoClippy {
+                  # must be deps, otherwise it will not rebuild
+                  # anything and thus not detect anything
+                  cargoArtifacts = workspaceDeps;
+                };
+
                 rostraDeps = craneLib.buildDepsOnly { };
                 rostra = craneLib.buildPackage {
                   meta.mainProgram = "rostra";
