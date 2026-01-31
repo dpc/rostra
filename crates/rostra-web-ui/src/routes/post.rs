@@ -445,12 +445,12 @@ impl UiState {
                         }
                         @if post_content_is_missing {
                             @if let Some(event_id) = event_id {
-                                form ."u-button u-button--small"
+                                form
                                     action={"/ui/post/"(author)"/"(event_id)"/fetch"}
                                     method="post"
                                     x-target=(format!("post-content-{}-{}", author, event_id))
                                 {
-                                    button type="submit" style="all: unset; cursor: pointer;" {
+                                    button ."m-postView__fetchButton u-button" type="submit" {
                                         span ."m-postView__fetchButtonIcon u-buttonIcon" width="1rem" height="1rem" {}
                                         "Fetch"
                                     }
