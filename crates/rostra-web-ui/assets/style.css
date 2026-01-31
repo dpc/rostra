@@ -530,7 +530,7 @@ img.u-userImage[loading="lazy"][src][width][height] {
   opacity: 0.6;
 }
 
-.o-mainBarTimeline>.o-mainBarTimeline__item:not(:last-child) {
+#timeline-posts>.o-mainBarTimeline__item:not(:last-child) {
   border-bottom: 1px solid var(--color-timeline-item-border);
 }
 
