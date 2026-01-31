@@ -338,6 +338,26 @@ img.u-userImage[loading="lazy"][src][width][height] {
   filter: invert(var(--invert));
 }
 
+/* Loading spinner for buttons */
+@keyframes u-spin {
+  to { transform: rotate(360deg); }
+}
+
+.u-button.-loading {
+  pointer-events: none;
+  opacity: 0.8;
+}
+
+.u-button.-loading .u-buttonIcon {
+  /* Hide the icon background, show spinner instead */
+  background: none !important;
+  border: 2px solid var(--color-button-border);
+  border-top-color: var(--color-text-default);
+  border-radius: 50%;
+  animation: u-spin 0.6s linear infinite;
+  filter: none;
+}
+
 .u-displayName {
   font-weight: bold;
   color: var(--color-text-default);

@@ -44,6 +44,8 @@ impl UiState {
                 action="/ui/followee"
                 method="post"
                 x-target="add-followee-form"
+                "@ajax:before"="clearTimeout($el._lt); $el._lt = setTimeout(() => $el.querySelector('.u-button')?.classList.add('-loading'), 150)"
+                "@ajax:after"="clearTimeout($el._lt); $el.querySelector('.u-button')?.classList.remove('-loading')"
             {
                 input ."m-addFolloweeForm__content"
                     placeholder="RostraId"

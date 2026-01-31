@@ -427,7 +427,8 @@ impl UiState {
                                     action={"/ui/comments/"(ext_event_id.event_id().to_short())}
                                     method="get"
                                     x-target=(format!("post-comments-{}", ext_event_id.event_id().to_short()))
-                                    "@ajax:after"="$el.querySelector('button').classList.add('u-hidden')"
+                                    "@ajax:before"="clearTimeout($el._lt); $el._lt = setTimeout(() => $el.querySelector('.u-button')?.classList.add('-loading'), 150)"
+                                    "@ajax:after"="clearTimeout($el._lt); $el.querySelector('button').classList.add('u-hidden')"
                                 {
                                     button ."m-postView__commentsButton u-button"
                                         type="submit"
@@ -449,6 +450,8 @@ impl UiState {
                                     action={"/ui/post/"(author)"/"(event_id)"/fetch"}
                                     method="post"
                                     x-target=(format!("post-content-{}-{}", author, event_id))
+                                    "@ajax:before"="clearTimeout($el._lt); $el._lt = setTimeout(() => $el.querySelector('.u-button')?.classList.add('-loading'), 150)"
+                                    "@ajax:after"="clearTimeout($el._lt); $el.querySelector('.u-button')?.classList.remove('-loading')"
                                 {
                                     button ."m-postView__fetchButton u-button" type="submit" {
                                         span ."m-postView__fetchButtonIcon u-buttonIcon" width="1rem" height="1rem" {}
@@ -462,7 +465,8 @@ impl UiState {
                                 action={"/ui/post/"(author)"/"(event_id.unwrap())"/delete"}
                                 method="post"
                                 x-target=(format!("post-{}-{}", author, event_id.unwrap()))
-                                "@ajax:before"="confirm('Are you sure you want to delete this post?') || $event.preventDefault()"
+                                "@ajax:before"="if (!confirm('Are you sure you want to delete this post?')) { $event.preventDefault(); return; } clearTimeout($el._lt); $el._lt = setTimeout(() => $el.querySelector('.u-button')?.classList.add('-loading'), 150)"
+                                "@ajax:after"="clearTimeout($el._lt); $el.querySelector('.u-button')?.classList.remove('-loading')"
                             {
                                 button ."m-postView__deleteButton u-button u-button--danger"
                                     type="submit"
@@ -479,6 +483,8 @@ impl UiState {
                             method="get"
                             x-target="reply-to-line"
                             x-autofocus
+                            "@ajax:before"="clearTimeout($el._lt); $el._lt = setTimeout(() => $el.querySelector('.u-button')?.classList.add('-loading'), 150)"
+                            "@ajax:after"="clearTimeout($el._lt); $el.querySelector('.u-button')?.classList.remove('-loading')"
                         {
                             input type="hidden" name="reply_to" value=(ext_event_id) {}
                             button ."m-postView__replyToButton u-button"

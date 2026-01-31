@@ -172,6 +172,8 @@ pub async fn get_post_preview_dialog(
                         method="post"
                         x-target="new-post-form preview-dialog post-preview ajax-scripts"
                         "x-on:keyup.enter.ctrl.shift"="$el.requestSubmit()"
+                        "@ajax:before"="clearTimeout($el._lt); $el._lt = setTimeout(() => $el.querySelector('.o-previewDialog__submitButton')?.classList.add('-loading'), 150)"
+                        "@ajax:after"="clearTimeout($el._lt); $el.querySelector('.o-previewDialog__submitButton')?.classList.remove('-loading')"
                     {
                         input type="hidden" name="content" value=(form.content) {}
                         @if let Some(reply_to) = form.reply_to {
@@ -329,6 +331,8 @@ impl UiState {
                 action="/ui/post/preview_dialog"
                 method="post"
                 x-target="preview-dialog"
+                "@ajax:before"="clearTimeout($el._lt); $el._lt = setTimeout(() => $el.querySelector('.m-newPostForm__previewButton')?.classList.add('-loading'), 150)"
+                "@ajax:after"="clearTimeout($el._lt); $el.querySelector('.m-newPostForm__previewButton')?.classList.remove('-loading')"
             {
                 (self.render_reply_to_line(None, None))
                 div ."m-newPostForm__textareaWrapper"
@@ -458,6 +462,8 @@ impl UiState {
                     method="get"
                     x-target="media-list"
                     style="display: none;"
+                    "@ajax:before"="clearTimeout($el._lt); $el._lt = setTimeout(() => document.querySelector('.m-newPostForm__attachButton')?.classList.add('-loading'), 150)"
+                    "@ajax:after"="clearTimeout($el._lt); document.querySelector('.m-newPostForm__attachButton')?.classList.remove('-loading')"
                 {}
 
                 form id="media-upload-form"
@@ -466,6 +472,8 @@ impl UiState {
                     enctype="multipart/form-data"
                     x-target="ajax-scripts"
                     style="display: none;"
+                    "@ajax:before"="clearTimeout($el._lt); $el._lt = setTimeout(() => document.querySelector('.m-newPostForm__uploadButton')?.classList.add('-loading'), 150)"
+                    "@ajax:after"="clearTimeout($el._lt); document.querySelector('.m-newPostForm__uploadButton')?.classList.remove('-loading')"
                 {
                     input id="media-file-input"
                         name="media_file"

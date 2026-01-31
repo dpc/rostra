@@ -166,6 +166,8 @@ impl UiState {
                                 action="/ui/settings/unfollow"
                                 method="post"
                                 x-target="followee-list"
+                                "@ajax:before"="clearTimeout($el._lt); $el._lt = setTimeout(() => $el.querySelector('.u-button')?.classList.add('-loading'), 150)"
+                                "@ajax:after"="clearTimeout($el._lt); $el.querySelector('.u-button')?.classList.remove('-loading')"
                             {
                                 input type="hidden" name="rostra_id" value=(followee_id) {}
                                 button ."m-followeeList__unfollowButton u-button"

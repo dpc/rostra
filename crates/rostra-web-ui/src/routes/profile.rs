@@ -62,6 +62,8 @@ pub async fn get_follow_dialog(
                 action=(format!("/ui/profile/{}/follow", profile_id))
                 method="post"
                 x-target="profile-summary"
+                "@ajax:before"="clearTimeout($el._lt); $el._lt = setTimeout(() => $el.querySelector('.o-followDialog__submitButton')?.classList.add('-loading'), 150)"
+                "@ajax:after"="clearTimeout($el._lt); $el.querySelector('.o-followDialog__submitButton')?.classList.remove('-loading')"
             {
                 div ."o-followDialog__optionsContainer" {
                     div ."o-followDialog__selectContainer" {
@@ -274,7 +276,8 @@ impl UiState {
                                 action=(format!("/ui/profile/{}/follow?following={}", profile_id, following))
                                 method="get"
                                 x-target="follow-dialog-content"
-                                "@ajax:after"="document.querySelector('.o-followDialog').classList.add('-active')"
+                                "@ajax:before"="clearTimeout($el._lt); $el._lt = setTimeout(() => $el.querySelector('.u-button')?.classList.add('-loading'), 150)"
+                                "@ajax:after"="clearTimeout($el._lt); $el.querySelector('.u-button')?.classList.remove('-loading'); document.querySelector('.o-followDialog').classList.add('-active')"
                             {
                                 button
                                     ."m-profileSummary__unfollowButton u-button"

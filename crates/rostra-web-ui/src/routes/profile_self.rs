@@ -133,6 +133,8 @@ impl UiState {
                             action="/ui/self/edit"
                             method="get"
                             x-target="self-profile-summary"
+                            "@ajax:before"="clearTimeout($el._lt); $el._lt = setTimeout(() => $el.querySelector('.u-button')?.classList.add('-loading'), 150)"
+                            "@ajax:after"="clearTimeout($el._lt); $el.querySelector('.u-button')?.classList.remove('-loading')"
                         {
                             button
                                 ."m-profileSummary__editButton u-button"
@@ -174,6 +176,8 @@ impl UiState {
                 method="post"
                 x-target="self-profile-summary"
                 enctype="multipart/form-data"
+                "@ajax:before"="clearTimeout($el._lt); $el._lt = setTimeout(() => $el.querySelector('.m-profileSummary__saveButton')?.classList.add('-loading'), 150)"
+                "@ajax:after"="clearTimeout($el._lt); $el.querySelector('.m-profileSummary__saveButton')?.classList.remove('-loading')"
             {
                 script {
                     (PreEscaped(r#"
