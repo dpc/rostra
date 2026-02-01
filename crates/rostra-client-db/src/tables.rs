@@ -44,10 +44,12 @@ use ids::{
 };
 use rostra_core::event::{EventAuxKey, EventKind, IrohNodeId, PersonaId};
 use rostra_core::id::{RestRostraId, RostraId, ShortRostraId};
-use rostra_core::{ShortEventId, Timestamp};
+use rostra_core::{ContentHash, ShortEventId, Timestamp};
 use serde::Serialize;
 
-pub use self::event::EventsHeadsTableRecord;
+pub use self::event::{
+    ContentStoreRecordOwned, EventContentResult, EventContentStateNew, EventsHeadsTableRecord,
+};
 pub(crate) mod event;
 pub(crate) mod id_self;
 pub(crate) mod ids;
@@ -214,11 +216,50 @@ def_table! {
 }
 
 def_table! {
-    /// Reference count for event content.
+    /// Reference count for event content (DEPRECATED - use content_rc).
     ///
     /// Tracks how many references exist to each piece of content. When count
     /// reaches zero, content can be garbage collected.
     events_content_rc_count: ShortEventId => u64
+}
+
+// ============================================================================
+// CONTENT DEDUPLICATION TABLES (V1)
+// These tables store content by hash for deduplication across events.
+// ============================================================================
+
+def_table! {
+    /// Content store - stores content by its hash for deduplication.
+    ///
+    /// Key: ContentHash (blake3 hash of the content)
+    /// Value: The actual content
+    ///
+    /// This enables identical content (e.g., same image posted by multiple
+    /// users) to be stored only once.
+    content_store: ContentHash => ContentStoreRecordOwned
+}
+
+def_table! {
+    /// Reference count for content by hash.
+    ///
+    /// Key: ContentHash
+    /// Value: Number of events referencing this content
+    ///
+    /// When count reaches zero, content can be garbage collected from
+    /// content_store.
+    content_rc: ContentHash => u64
+}
+
+def_table! {
+    /// Per-event content state (replaces events_content for new events).
+    ///
+    /// Key: ShortEventId
+    /// Value: State of content for this event (Available, Deleted, Pruned)
+    ///
+    /// Unlike events_content which stored content inline, this just tracks
+    /// state. The actual content is in content_store, looked up via the
+    /// event's content_hash field.
+    events_content_state: ShortEventId => EventContentStateNew
 }
 
 def_table! {

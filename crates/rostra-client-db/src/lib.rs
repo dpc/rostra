@@ -15,7 +15,7 @@ use std::collections::{BTreeMap, HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::{io, ops, result};
 
-use event::EventContentState;
+use event::ContentStoreRecord;
 pub use ids::{IdsFolloweesRecord, IdsFollowersRecord};
 use itertools::Itertools as _;
 use process_event_content_ops::ProcessEventError;
@@ -255,7 +255,10 @@ impl Database {
                 "events_singletons" => {
                     Self::dump_table_dbtx(tx, &tables::events_singletons::TABLE)?
                 }
-                "events_content" => Self::dump_table_dbtx(tx, &tables::events_content::TABLE)?,
+                "content_store" => Self::dump_table_dbtx(tx, &tables::content_store::TABLE)?,
+                "events_content_state" => {
+                    Self::dump_table_dbtx(tx, &tables::events_content_state::TABLE)?
+                }
                 "events_content_missing" => {
                     Self::dump_table_dbtx(tx, &tables::events_content_missing::TABLE)?
                 }
@@ -413,17 +416,23 @@ impl Database {
     ) -> Option<EventContentRaw> {
         let event_id = event_id.into();
         self.read_with(|tx| {
-            let events_content_table = tx.open_table(&crate::events_content::TABLE)?;
-            Ok(
-                Database::get_event_content_tx(event_id, &events_content_table)?.and_then(
-                    |content_state| match content_state {
-                        crate::event::EventContentState::Present(b) => Some(b.into_owned()),
-                        crate::event::EventContentState::Invalid(b) => Some(b.into_owned()),
-                        crate::event::EventContentState::Deleted { .. }
-                        | crate::event::EventContentState::Pruned => None,
-                    },
-                ),
-            )
+            let events_table = tx.open_table(&events::TABLE)?;
+            let events_content_state_table = tx.open_table(&events_content_state::TABLE)?;
+            let content_store_table = tx.open_table(&content_store::TABLE)?;
+
+            // Get the event to find its content hash
+            let Some(event_record) = Database::get_event_tx(event_id, &events_table)? else {
+                return Ok(None);
+            };
+            let content_hash = event_record.content_hash();
+
+            Ok(Database::get_event_content_full_tx(
+                event_id,
+                content_hash,
+                &events_content_state_table,
+                &content_store_table,
+            )?
+            .and_then(|result| result.content().cloned()))
         })
         .await
         .expect("Database panic")
@@ -486,8 +495,11 @@ impl Database {
         tx: &WriteTransactionCtx,
     ) -> DbResult<()> {
         let events_table = tx.open_table(&events::TABLE)?;
-        let mut events_content_table = tx.open_table(&events_content::TABLE)?;
-
+        let events_content_state_table = tx.open_table(&events_content_state::TABLE)?;
+        let content_store_table = tx.open_table(&content_store::TABLE)?;
+        let mut content_store_table_mut = tx.open_table(&content_store::TABLE)?;
+        let mut content_rc_table = tx.open_table(&content_rc::TABLE)?;
+        let mut events_content_state_table_mut = tx.open_table(&events_content_state::TABLE)?;
         let mut events_content_missing_table =
             tx.open_table(&tables::events_content_missing::TABLE)?;
 
@@ -500,19 +512,20 @@ impl Database {
 
         let can_insert = if u32::from(event_content.event.event.content_len) < Self::MAX_CONTENT_LEN
         {
-            Database::can_insert_event_content_tx(event_content, &mut events_content_table)?
+            Database::can_insert_event_content_tx(
+                event_content,
+                &events_content_state_table,
+                &content_store_table,
+            )?
         } else {
             false
         };
 
         if can_insert {
             if let Some(content) = event_content.content.as_ref() {
-                match self.process_event_content_inserted_tx(event_content, tx) {
+                let content_hash = event_content.content_hash();
+                let is_valid = match self.process_event_content_inserted_tx(event_content, tx) {
                     Ok(()) => {
-                        events_content_table.insert(
-                            &event_content.event_id().to_short(),
-                            &EventContentState::Present(Cow::Owned(content.clone())),
-                        )?;
                         info!(target: LOG_TARGET,
                             kind = %event_content.kind(),
                             event_id = %event_content.event_id().to_short(),
@@ -520,6 +533,7 @@ impl Database {
                             len = %event_content.content_len(),
                             "New event content inserted"
                         );
+                        true
                     }
                     Err(ProcessEventError::Invalid { source, location }) => {
                         info!(
@@ -528,15 +542,34 @@ impl Database {
                             %location,
                             "Invalid event content"
                         );
-                        events_content_table.insert(
-                            &event_content.event_id().to_short(),
-                            &EventContentState::Invalid(Cow::Owned(content.clone())),
-                        )?;
+                        false
                     }
                     Err(ProcessEventError::Db { source }) => {
                         return Err(source);
                     }
                 };
+
+                // Check if content already exists in store (deduplication)
+                let content_exists = content_store_table.get(&content_hash)?.is_some();
+
+                if !content_exists {
+                    // Store content in content_store
+                    let store_record = if is_valid {
+                        ContentStoreRecord::Present(Cow::Owned(content.clone()))
+                    } else {
+                        ContentStoreRecord::Invalid(Cow::Owned(content.clone()))
+                    };
+                    content_store_table_mut.insert(&content_hash, &store_record)?;
+                }
+
+                // Increment RC for this content
+                Database::increment_content_rc_tx(content_hash, &mut content_rc_table)?;
+
+                // Mark per-event state as available
+                events_content_state_table_mut.insert(
+                    &event_content.event_id().to_short(),
+                    &EventContentStateNew::Available,
+                )?;
 
                 // Valid or not, we notify about new thing
                 tx.on_commit({
@@ -567,9 +600,9 @@ impl Database {
         }
 
         self.read_with(|tx| {
-            let events_content_table = tx.open_table(&events_content::TABLE)?;
+            let events_content_state_table = tx.open_table(&events_content_state::TABLE)?;
 
-            Database::has_event_content_tx(event_id.into(), &events_content_table)
+            Database::has_event_content_tx(event_id.into(), &events_content_state_table)
         })
         .await
         .expect("Storage error")

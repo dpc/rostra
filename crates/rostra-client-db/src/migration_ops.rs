@@ -6,13 +6,14 @@ use tracing::{debug, info};
 
 use crate::ids::IdsFolloweesRecordV0;
 use crate::{
-    Database, DbResult, DbVersionTooHighSnafu, IdSocialProfileRecord, IdsFolloweesRecord,
-    LOG_TARGET, Latest, SocialPostRecord, WriteTransactionCtx, db_version, events, events_by_time,
-    events_content, events_content_missing, events_heads, events_missing, events_self,
-    events_singletons, events_singletons_new, ids_followees, ids_followees_v0, ids_followers,
-    ids_full, ids_personas, ids_self, ids_unfollowed, social_posts, social_posts_by_time,
-    social_posts_reactions, social_posts_replies, social_posts_v0, social_profiles,
-    social_profiles_v0,
+    ContentStoreRecordOwned, Database, DbResult, DbVersionTooHighSnafu, EventContentStateNew,
+    IdSocialProfileRecord, IdsFolloweesRecord, LOG_TARGET, Latest, SocialPostRecord,
+    WriteTransactionCtx, content_rc, content_store, db_version, events, events_by_time,
+    events_content, events_content_missing, events_content_state, events_heads, events_missing,
+    events_self, events_singletons, events_singletons_new, ids_followees, ids_followees_v0,
+    ids_followers, ids_full, ids_personas, ids_self, ids_unfollowed, social_posts,
+    social_posts_by_time, social_posts_reactions, social_posts_replies, social_posts_v0,
+    social_profiles, social_profiles_v0,
 };
 
 impl Database {
@@ -36,6 +37,10 @@ impl Database {
         tx.open_table(&events_self::TABLE)?;
         tx.open_table(&events_heads::TABLE)?;
 
+        tx.open_table(&content_store::TABLE)?;
+        tx.open_table(&content_rc::TABLE)?;
+        tx.open_table(&events_content_state::TABLE)?;
+
         tx.open_table(&social_profiles::TABLE)?;
         tx.open_table(&social_posts::TABLE)?;
         tx.open_table(&social_posts_by_time::TABLE)?;
@@ -45,7 +50,7 @@ impl Database {
     }
 
     pub(crate) fn handle_db_ver_migrations(dbtx: &WriteTransactionCtx) -> DbResult<()> {
-        const DB_VER: u64 = 3;
+        const DB_VER: u64 = 4;
 
         let mut table_db_ver = dbtx.open_table(&db_version::TABLE)?;
 
@@ -70,6 +75,7 @@ impl Database {
                 0 => Self::migrate_v0(dbtx)?,
                 1 => Self::migrate_v1(dbtx)?,
                 2 => Self::migrate_v2(dbtx)?,
+                3 => Self::migrate_v3(dbtx)?,
                 DB_VER => { /* ensures we didn't forget to increment DB_VER */ }
                 x => panic!("Unexpected db ver: {x}"),
             }
@@ -188,6 +194,126 @@ impl Database {
             .delete_table(ids_followees_v0::TABLE.as_raw())?
             .not()
             .then(|| panic!("Expected to delete the table"));
+        Ok(())
+    }
+
+    /// Migrate from events_content (inline content) to content_store (by hash).
+    ///
+    /// This migration:
+    /// 1. For each event with content, stores the content by its content_hash
+    ///    in content_store (enabling deduplication)
+    /// 2. Tracks reference counts in content_rc
+    /// 3. Stores per-event state in events_content_state
+    /// 4. Deletes the old events_content and events_content_rc_count tables
+    pub(crate) fn migrate_v3(dbtx: &WriteTransactionCtx) -> DbResult<()> {
+        use rostra_core::event::EventExt;
+
+        use crate::event::EventContentState;
+
+        info!(target: LOG_TARGET, "Migrating content to content_store (may take a while)...");
+
+        let events_table = dbtx.open_table(&events::TABLE)?;
+        let old_content_table = dbtx.open_table(&events_content::TABLE)?;
+        let mut store_table = dbtx.open_table(&content_store::TABLE)?;
+        let mut rc_table = dbtx.open_table(&content_rc::TABLE)?;
+        let mut state_table = dbtx.open_table(&events_content_state::TABLE)?;
+
+        let mut migrated_count = 0u64;
+        let mut deduplicated_count = 0u64;
+
+        for entry in old_content_table.range(..)? {
+            let (event_id_guard, content_state_guard) = entry?;
+            let event_id = event_id_guard.value();
+            let content_state = content_state_guard.value();
+
+            // Get the event to find its content_hash
+            let Some(event_record_guard) = events_table.get(&event_id)? else {
+                // Event not found - skip this orphaned content
+                debug!(target: LOG_TARGET, ?event_id, "Orphaned content entry, skipping");
+                continue;
+            };
+            let content_hash = event_record_guard.value().content_hash();
+
+            match content_state {
+                EventContentState::Present(content) => {
+                    // Check if content already exists in store (deduplication)
+                    let existing_rc = rc_table.get(&content_hash)?.map(|g| g.value());
+
+                    if existing_rc.is_none() {
+                        // First time seeing this content hash - store it
+                        store_table
+                            .insert(&content_hash, &ContentStoreRecordOwned::Present(content))?;
+                    } else {
+                        deduplicated_count += 1;
+                    }
+
+                    // Increment reference count
+                    let new_rc = existing_rc.unwrap_or(0) + 1;
+                    rc_table.insert(&content_hash, &new_rc)?;
+
+                    // Set per-event state
+                    state_table.insert(&event_id, &EventContentStateNew::Available)?;
+                }
+                EventContentState::Invalid(content) => {
+                    // Same as Present but marked Invalid
+                    let existing_rc = rc_table.get(&content_hash)?.map(|g| g.value());
+
+                    if existing_rc.is_none() {
+                        store_table
+                            .insert(&content_hash, &ContentStoreRecordOwned::Invalid(content))?;
+                    } else {
+                        deduplicated_count += 1;
+                    }
+
+                    let new_rc = existing_rc.unwrap_or(0) + 1;
+                    rc_table.insert(&content_hash, &new_rc)?;
+                    state_table.insert(&event_id, &EventContentStateNew::Available)?;
+                }
+                EventContentState::Deleted { deleted_by } => {
+                    // No content to store, just record the state
+                    state_table.insert(&event_id, &EventContentStateNew::Deleted { deleted_by })?;
+                }
+                EventContentState::Pruned => {
+                    // No content to store, just record the state
+                    state_table.insert(&event_id, &EventContentStateNew::Pruned)?;
+                }
+            }
+
+            migrated_count += 1;
+            if migrated_count % 10000 == 0 {
+                debug!(target: LOG_TARGET, migrated_count, deduplicated_count, "Migration progress");
+            }
+        }
+
+        info!(
+            target: LOG_TARGET,
+            migrated_count,
+            deduplicated_count,
+            "Content migration complete"
+        );
+
+        // Drop table references before deleting
+        drop(events_table);
+        drop(old_content_table);
+        drop(store_table);
+        drop(rc_table);
+        drop(state_table);
+
+        // Delete old tables
+        if dbtx.as_raw().delete_table(events_content::TABLE.as_raw())? {
+            info!(target: LOG_TARGET, "Deleted old events_content table");
+        }
+
+        // The old rc table may or may not exist
+        if dbtx.as_raw().delete_table(
+            redb_bincode::TableDefinition::<rostra_core::ShortEventId, u64>::new(
+                "events_content_rc_count",
+            )
+            .as_raw(),
+        )? {
+            info!(target: LOG_TARGET, "Deleted old events_content_rc_count table");
+        }
+
         Ok(())
     }
 }

@@ -7,8 +7,8 @@ use tracing::{info, warn};
 use crate::process_event_content_ops::ProcessEventError;
 use crate::{
     Database, DbResult, InsertEventOutcome, LOG_TARGET, ProcessEventState, WriteTransactionCtx,
-    events, events_by_time, events_content, events_content_missing, events_content_rc_count,
-    events_heads, events_missing, ids_full,
+    content_rc, content_store, events, events_by_time, events_content_missing,
+    events_content_state, events_heads, events_missing, ids_full,
 };
 
 impl Database {
@@ -18,8 +18,9 @@ impl Database {
         tx: &WriteTransactionCtx,
     ) -> DbResult<(InsertEventOutcome, ProcessEventState)> {
         let mut events_tbl = tx.open_table(&events::TABLE)?;
-        let mut events_content_tbl = tx.open_table(&events_content::TABLE)?;
-        let mut events_content_rc_count_tbl = tx.open_table(&events_content_rc_count::TABLE)?;
+        let mut events_content_state_tbl = tx.open_table(&events_content_state::TABLE)?;
+        let content_store_tbl = tx.open_table(&content_store::TABLE)?;
+        let mut content_rc_tbl = tx.open_table(&content_rc::TABLE)?;
         let mut events_content_missing_tbl = tx.open_table(&events_content_missing::TABLE)?;
         let mut events_missing_tbl = tx.open_table(&events_missing::TABLE)?;
         let mut events_heads_tbl = tx.open_table(&events_heads::TABLE)?;
@@ -33,8 +34,9 @@ impl Database {
             &mut events_missing_tbl,
             &mut events_heads_tbl,
             &mut events_by_time_tbl,
-            &mut events_content_tbl,
-            &mut events_content_rc_count_tbl,
+            &mut events_content_state_tbl,
+            &content_store_tbl,
+            &mut content_rc_tbl,
             &mut events_content_missing_tbl,
         )?;
 
@@ -118,7 +120,9 @@ impl Database {
         } else if Self::MAX_CONTENT_LEN < u32::from(event.event.content_len) {
             if Database::prune_event_content_tx(
                 event.event_id,
-                &mut events_content_tbl,
+                event.content_hash(),
+                &mut events_content_state_tbl,
+                &mut content_rc_tbl,
                 &mut events_content_missing_tbl,
             )? {
                 ProcessEventState::Pruned

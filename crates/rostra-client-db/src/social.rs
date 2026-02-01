@@ -8,10 +8,10 @@ use serde::{Deserialize, Serialize};
 use tracing::{debug, warn};
 
 use super::Database;
-use crate::event::EventContentState;
+use crate::event::{ContentStoreRecord, EventContentStateNew};
 use crate::{
-    DbResult, LOG_TARGET, events, events_content, social_posts, social_posts_by_time,
-    social_posts_reactions, social_posts_replies, tables,
+    DbResult, LOG_TARGET, content_store, events, events_content_state, social_posts,
+    social_posts_by_time, social_posts_reactions, social_posts_replies, tables,
 };
 
 #[derive(
@@ -56,29 +56,38 @@ impl Database {
             let events_table = tx.open_table(&events::TABLE)?;
             let social_posts_table = tx.open_table(&social_posts::TABLE)?;
             let social_posts_by_time_table = tx.open_table(&social_posts_by_time::TABLE)?;
-            let events_content_table = tx.open_table(&events_content::TABLE)?;
+            let events_content_state_table = tx.open_table(&events_content_state::TABLE)?;
+            let content_store_table = tx.open_table(&content_store::TABLE)?;
 
             let (ret, cursor) = Self::paginate_table(&social_posts_by_time_table,
                 cursor.map(|c| (c.ts, c.event_id)),
                 limit,
                 move |(ts, event_id), _| {
 
+                let Some(event) = Database::get_event_tx(event_id, &events_table)? else {
+                    warn!(target: LOG_TARGET, %event_id, "Missing event for a post with social_post_record?!");
+                    return Ok(None);
+                };
+                let content_hash = event.content_hash();
+
                 let Some(content_state) =
-                    Database::get_event_content_tx(event_id, &events_content_table)?
+                    Database::get_event_content_state_tx(event_id, &events_content_state_table)?
                 else {
                     return Ok(None);
                 };
-                let EventContentState::Present(content) = content_state else {
+                let EventContentStateNew::Available = content_state else {
+                    return Ok(None);
+                };
+
+                let Some(store_record) = content_store_table.get(&content_hash)?.map(|g| g.value()) else {
+                    return Ok(None);
+                };
+                let ContentStoreRecord::Present(content) = store_record else {
                     return Ok(None);
                 };
 
                 let Ok(social_post) = content.deserialize_cbor::<content_kind::SocialPost>() else {
                     debug!(target: LOG_TARGET, %event_id, "Content invalid");
-                    return Ok(None);
-                };
-
-                let Some(event) = Database::get_event_tx(event_id, &events_table)? else {
-                    warn!(target: LOG_TARGET, %event_id, "Missing event for a post with social_post_record?!");
                     return Ok(None);
                 };
 
@@ -122,29 +131,38 @@ impl Database {
             let events_table = tx.open_table(&events::TABLE)?;
             let social_posts_table = tx.open_table(&social_posts::TABLE)?;
             let social_posts_by_time_table = tx.open_table(&social_posts_by_time::TABLE)?;
-            let events_content_table = tx.open_table(&events_content::TABLE)?;
+            let events_content_state_table = tx.open_table(&events_content_state::TABLE)?;
+            let content_store_table = tx.open_table(&content_store::TABLE)?;
 
             let (ret, cursor) = Self::paginate_table_rev(&social_posts_by_time_table,
                 cursor.map(|c| (c.ts, c.event_id)),
                 limit,
                 move |(ts, event_id), _| {
 
+                let Some(event) = Database::get_event_tx(event_id, &events_table)? else {
+                    warn!(target: LOG_TARGET, %event_id, "Missing event for a post with social_post_record?!");
+                    return Ok(None);
+                };
+                let content_hash = event.content_hash();
+
                 let Some(content_state) =
-                    Database::get_event_content_tx(event_id, &events_content_table)?
+                    Database::get_event_content_state_tx(event_id, &events_content_state_table)?
                 else {
                     return Ok(None);
                 };
-                let EventContentState::Present(content) = content_state else {
+                let EventContentStateNew::Available = content_state else {
+                    return Ok(None);
+                };
+
+                let Some(store_record) = content_store_table.get(&content_hash)?.map(|g| g.value()) else {
+                    return Ok(None);
+                };
+                let ContentStoreRecord::Present(content) = store_record else {
                     return Ok(None);
                 };
 
                 let Ok(social_post) = content.deserialize_cbor::<content_kind::SocialPost>() else {
                     debug!(target: LOG_TARGET, %event_id, "Content invalid");
-                    return Ok(None);
-                };
-
-                let Some(event) = Database::get_event_tx(event_id, &events_table)? else {
-                    warn!(target: LOG_TARGET, %event_id, "Missing event for a post with social_post_record?!");
                     return Ok(None);
                 };
 
@@ -188,7 +206,8 @@ impl Database {
             let events_table = tx.open_table(&events::TABLE)?;
             let social_posts_tbl = tx.open_table(&social_posts::TABLE)?;
             let social_post_replies_tbl = tx.open_table(&social_posts_replies::TABLE)?;
-            let events_content_table = tx.open_table(&events_content::TABLE)?;
+            let events_content_state_table = tx.open_table(&events_content_state::TABLE)?;
+            let content_store_table = tx.open_table(&content_store::TABLE)?;
 
             let (ret, cursor) = Database::paginate_table_partition_rev(&social_post_replies_tbl,
                 (post_event_id, Timestamp::ZERO, ShortEventId::ZERO)..=
@@ -199,23 +218,31 @@ impl Database {
 
                 let social_post_record = Database::get_social_post_tx(event_id, &social_posts_tbl)?.unwrap_or_default();
 
+                let Some(event) = Database::get_event_tx(event_id, &events_table)? else {
+                    warn!(target: LOG_TARGET, %event_id, "Missing event for a post with social_post_record?!");
+                    return Ok(None);
+                };
+                let content_hash = event.content_hash();
+
                 let Some(content_state) =
-                    Database::get_event_content_tx(event_id, &events_content_table)?
+                    Database::get_event_content_state_tx(event_id, &events_content_state_table)?
                 else {
                     return Ok(None);
                 };
-                let EventContentState::Present(content) = content_state else {
+                let EventContentStateNew::Available = content_state else {
                     debug!(target: LOG_TARGET, %event_id, "Skipping comment without content present");
+                    return Ok(None);
+                };
+
+                let Some(store_record) = content_store_table.get(&content_hash)?.map(|g| g.value()) else {
+                    return Ok(None);
+                };
+                let ContentStoreRecord::Present(content) = store_record else {
                     return Ok(None);
                 };
 
                 let Ok(social_post) = content.deserialize_cbor::<content_kind::SocialPost>() else {
                     debug!(target: LOG_TARGET, %event_id, "Skpping comment with invalid content");
-                    return Ok(None);
-                };
-
-                let Some(event) = Database::get_event_tx(event_id, &events_table)? else {
-                    warn!(target: LOG_TARGET, %event_id, "Missing event for a post with social_post_record?!");
                     return Ok(None);
                 };
 
@@ -248,7 +275,8 @@ impl Database {
             let events_table = tx.open_table(&events::TABLE)?;
             let social_posts_tbl = tx.open_table(&social_posts::TABLE)?;
             let social_post_reactions_tbl = tx.open_table(&social_posts_reactions::TABLE)?;
-            let events_content_table = tx.open_table(&events_content::TABLE)?;
+            let events_content_state_table = tx.open_table(&events_content_state::TABLE)?;
+            let content_store_table = tx.open_table(&content_store::TABLE)?;
 
 
             let (ret, cursor) = Database::paginate_table_partition_rev(&social_post_reactions_tbl,
@@ -259,23 +287,31 @@ impl Database {
 
                 let social_post_record = Database::get_social_post_tx(event_id, &social_posts_tbl)?.unwrap_or_default();
 
+                let Some(event) = Database::get_event_tx(event_id, &events_table)? else {
+                    warn!(target: LOG_TARGET, %event_id, "Missing event for a post with social_post_record?!");
+                    return Ok(None);
+                };
+                let content_hash = event.content_hash();
+
                 let Some(content_state) =
-                    Database::get_event_content_tx(event_id, &events_content_table)?
+                    Database::get_event_content_state_tx(event_id, &events_content_state_table)?
                 else {
                     return Ok(None);
                 };
-                let EventContentState::Present(content) = content_state else {
+                let EventContentStateNew::Available = content_state else {
                     debug!(target: LOG_TARGET, %event_id, "Skipping comment without content present");
+                    return Ok(None);
+                };
+
+                let Some(store_record) = content_store_table.get(&content_hash)?.map(|g| g.value()) else {
+                    return Ok(None);
+                };
+                let ContentStoreRecord::Present(content) = store_record else {
                     return Ok(None);
                 };
 
                 let Ok(social_post) = content.deserialize_cbor::<content_kind::SocialPost>() else {
                     debug!(target: LOG_TARGET, %event_id, "Skpping comment with invalid content");
-                    return Ok(None);
-                };
-
-                let Some(event) = Database::get_event_tx(event_id, &events_table)? else {
-                    warn!(target: LOG_TARGET, %event_id, "Missing event for a post with social_post_record?!");
                     return Ok(None);
                 };
 
@@ -302,7 +338,8 @@ impl Database {
         self.read_with(|tx| {
             let events_table = tx.open_table(&events::TABLE)?;
             let social_posts_table = tx.open_table(&social_posts::TABLE)?;
-            let events_content_table = tx.open_table(&events_content::TABLE)?;
+            let events_content_state_table = tx.open_table(&events_content_state::TABLE)?;
+            let content_store_table = tx.open_table(&content_store::TABLE)?;
 
             let mut ret = HashMap::new();
 
@@ -311,7 +348,8 @@ impl Database {
                     Self::get_social_post_record_tx(
                         &events_table,
                         &social_posts_table,
-                        &events_content_table,
+                        &events_content_state_table,
+                        &content_store_table,
                         event_id,
                     )?
                 else {
@@ -395,12 +433,14 @@ impl Database {
         self.read_with(|tx| {
             let events_table = tx.open_table(&events::TABLE)?;
             let social_posts_table = tx.open_table(&social_posts::TABLE)?;
-            let events_content_table = tx.open_table(&events_content::TABLE)?;
+            let events_content_state_table = tx.open_table(&events_content_state::TABLE)?;
+            let content_store_table = tx.open_table(&content_store::TABLE)?;
 
             let Some((social_post, event, social_post_record)) = Self::get_social_post_record_tx(
                 &events_table,
                 &social_posts_table,
-                &events_content_table,
+                &events_content_state_table,
+                &content_store_table,
                 event_id,
             )?
             else {
@@ -421,27 +461,41 @@ impl Database {
     }
 
     fn get_social_post_record_tx(
-        events_table: &redb_bincode::ReadOnlyTable<ShortEventId, crate::EventRecord>,
-        social_posts_table: &redb_bincode::ReadOnlyTable<ShortEventId, crate::SocialPostRecord>,
-        events_content_table: &redb_bincode::ReadOnlyTable<
-            ShortEventId,
-            EventContentState<'static>,
-        >,
+        events_table: &impl events::ReadableTable,
+        social_posts_table: &impl social_posts::ReadableTable,
+        events_content_state_table: &impl events_content_state::ReadableTable,
+        content_store_table: &impl content_store::ReadableTable,
         event_id: ShortEventId,
     ) -> DbResult<Option<(SocialPost, crate::EventRecord, crate::SocialPostRecord)>> {
-        let Some(content_state) = Database::get_event_content_tx(event_id, events_content_table)?
+        // Get event first to find content_hash
+        let Some(event) = Database::get_event_tx(event_id, events_table)? else {
+            warn!(target: LOG_TARGET, %event_id, "Missing event for a post with social_post_record?!");
+            return Ok(None);
+        };
+        let content_hash = event.content_hash();
+
+        // Check content state
+        let Some(content_state) =
+            Database::get_event_content_state_tx(event_id, events_content_state_table)?
         else {
             return Ok(None);
         };
-        let EventContentState::Present(content) = content_state else {
+
+        let EventContentStateNew::Available = content_state else {
             return Ok(None);
         };
+
+        // Look up content from store
+        let Some(store_record) = content_store_table.get(&content_hash)?.map(|g| g.value()) else {
+            return Ok(None);
+        };
+
+        let ContentStoreRecord::Present(content) = store_record else {
+            return Ok(None);
+        };
+
         let Ok(social_post) = content.deserialize_cbor::<content_kind::SocialPost>() else {
             debug!(target: LOG_TARGET, %event_id, "Content invalid");
-            return Ok(None);
-        };
-        let Some(event) = Database::get_event_tx(event_id, events_table)? else {
-            warn!(target: LOG_TARGET, %event_id, "Missing event for a post with social_post_record?!");
             return Ok(None);
         };
         let social_post_record =

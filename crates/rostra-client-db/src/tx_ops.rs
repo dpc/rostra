@@ -9,16 +9,18 @@ use rostra_core::event::{
     EventContentRaw, EventExt as _, VerifiedEvent, VerifiedEventContent, content_kind,
 };
 use rostra_core::id::{RostraId, ToShort as _};
-use rostra_core::{ShortEventId, Timestamp};
+use rostra_core::{ContentHash, ShortEventId, Timestamp};
 use tables::EventRecord;
-use tables::event::{EventContentState, EventsMissingRecord};
+use tables::event::{
+    ContentStoreRecord, EventContentResult, EventContentStateNew, EventsMissingRecord,
+};
 use tables::ids::IdsFolloweesRecord;
 use tracing::debug;
 
 use super::id_self::IdSelfAccountRecord;
 use super::{
-    Database, DbError, DbResult, EventsHeadsTableRecord, InsertEventOutcome, events,
-    events_by_time, events_content, events_content_rc_count, events_heads, events_missing,
+    Database, DbError, DbResult, EventsHeadsTableRecord, InsertEventOutcome, content_rc,
+    content_store, events, events_by_time, events_content_state, events_heads, events_missing,
     events_self, get_first_in_range, get_last_in_range, ids, ids_followees, ids_followers,
     ids_self, tables,
 };
@@ -75,8 +77,9 @@ impl Database {
         events_missing_table: &mut events_missing::Table,
         events_heads_table: &mut events_heads::Table,
         events_by_time_table: &mut events_by_time::Table,
-        events_content_table: &mut events_content::Table,
-        events_content_rc_count_table: &mut events_content_rc_count::Table,
+        events_content_state_table: &mut events_content_state::Table,
+        content_store_table: &impl content_store::ReadableTable,
+        content_rc_table: &mut content_rc::Table,
         events_content_missing_table: &mut events_content_missing::Table,
     ) -> DbResult<InsertEventOutcome> {
         let author = event.author();
@@ -98,8 +101,8 @@ impl Database {
                 (
                     true,
                     if let Some(deleted_by) = prev_missing.deleted_by {
-                        events_content_table
-                            .insert(&event_id, &EventContentState::Deleted { deleted_by })?;
+                        events_content_state_table
+                            .insert(&event_id, &EventContentStateNew::Deleted { deleted_by })?;
                         true
                     } else {
                         false
@@ -132,25 +135,34 @@ impl Database {
             };
 
             let parent_event = events_table.get(&parent_id)?.map(|r| r.value());
-            if let Some(_parent_event) = parent_event {
+            if let Some(parent_event_record) = parent_event {
                 if event.is_delete_parent_aux_content_set() && parent_is_aux {
                     deleted_parent = Some(parent_id);
                     events_content_missing_table.remove(&parent_id)?;
-                    reverted_parent_content = events_content_table
+
+                    // Get the old state to potentially return reverted content
+                    let parent_content_hash = parent_event_record.content_hash();
+                    let old_state = events_content_state_table
                         .insert(
                             &parent_id,
-                            &EventContentState::Deleted {
+                            &EventContentStateNew::Deleted {
                                 deleted_by: event_id,
                             },
                         )?
-                        .and_then(|deleted_content| match deleted_content.value() {
-                            EventContentState::Present(cow) => Some(cow.into_owned()),
-                            EventContentState::Deleted { deleted_by: _ } => None,
-                            EventContentState::Pruned
-                            |
-                            // There is no need to revert this event, so we don't return it
-                            EventContentState::Invalid(_) => None,
-                        });
+                        .map(|g| g.value());
+
+                    // If content was available, look it up and decrement RC
+                    if matches!(old_state, Some(EventContentStateNew::Available)) {
+                        // Look up content from content_store to return for reverting
+                        if let Some(ContentStoreRecord::Present(cow)) = content_store_table
+                            .get(&parent_content_hash)?
+                            .map(|g| g.value())
+                        {
+                            reverted_parent_content = Some(cow.into_owned());
+                        }
+                        // Decrement RC for the deleted content
+                        Database::decrement_content_rc_tx(parent_content_hash, content_rc_table)?;
+                    }
                 }
             } else {
                 // We do not have this parent yet, so we mark it as missing
@@ -176,8 +188,9 @@ impl Database {
         )?;
         events_by_time_table.insert(&(event.timestamp(), event_id), &())?;
 
-        // Increment reference count for this event's content
-        Database::increment_event_content_rc_tx(event_id, events_content_rc_count_table)?;
+        // Increment reference count for this event's content hash
+        let content_hash = event.content_hash();
+        Database::increment_content_rc_tx(content_hash, content_rc_table)?;
 
         Ok(InsertEventOutcome::Inserted {
             was_missing,
@@ -191,18 +204,32 @@ impl Database {
 
     pub fn can_insert_event_content_tx(
         VerifiedEventContent { event, .. }: &VerifiedEventContent,
-        events_content_table: &mut events_content::Table,
+        events_content_state_table: &impl events_content_state::ReadableTable,
+        content_store_table: &impl content_store::ReadableTable,
     ) -> DbResult<bool> {
         let event_id = event.event_id.to_short();
-        if let Some(existing_content) = events_content_table.get(&event_id)?.map(|g| g.value()) {
-            match existing_content {
-                EventContentState::Deleted { .. } => {
+
+        // Check per-event state first
+        if let Some(existing_state) = events_content_state_table
+            .get(&event_id)?
+            .map(|g| g.value())
+        {
+            match existing_state {
+                EventContentStateNew::Deleted { .. } => {
                     return Ok(false);
                 }
-                EventContentState::Present(_) | EventContentState::Invalid(_) => {
+                EventContentStateNew::Available => {
+                    // Content already present
                     return Ok(false);
                 }
-                EventContentState::Pruned => {}
+                EventContentStateNew::Pruned => {
+                    // Was pruned - check if content is in store (might be from another event)
+                    let content_hash = event.content_hash();
+                    if content_store_table.get(&content_hash)?.is_some() {
+                        // Content exists in store, we can reference it
+                        return Ok(true);
+                    }
+                }
             }
         }
 
@@ -211,26 +238,32 @@ impl Database {
 
     pub fn prune_event_content_tx(
         event_id: impl Into<ShortEventId>,
-        events_content_table: &mut events_content::Table,
+        content_hash: ContentHash,
+        events_content_state_table: &mut events_content_state::Table,
+        content_rc_table: &mut content_rc::Table,
         events_content_missing_table: &mut events_content_missing::Table,
     ) -> DbResult<bool> {
         let event_id = event_id.into();
-        if let Some(existing_content) = events_content_table.get(&event_id)?.map(|g| g.value()) {
-            match existing_content {
-                EventContentState::Deleted { .. } => {
+        if let Some(existing_state) = events_content_state_table
+            .get(&event_id)?
+            .map(|g| g.value())
+        {
+            match existing_state {
+                EventContentStateNew::Deleted { .. } => {
                     return Ok(false);
                 }
-                EventContentState::Pruned => {
+                EventContentStateNew::Pruned => {
                     // already pruned, no need to do anything
                     return Ok(true);
                 }
-                EventContentState::Invalid(_) | EventContentState::Present(_) => {
-                    // Go ahead and mark as pruned
+                EventContentStateNew::Available => {
+                    // Was available - decrement RC before marking as pruned
+                    Database::decrement_content_rc_tx(content_hash, content_rc_table)?;
                 }
             }
         }
 
-        events_content_table.insert(&event_id, &EventContentState::Pruned)?;
+        events_content_state_table.insert(&event_id, &EventContentStateNew::Pruned)?;
         events_content_missing_table.remove(&event_id)?;
 
         Ok(true)
@@ -276,17 +309,75 @@ impl Database {
         Ok(events_table.get(&event.into())?.is_some())
     }
 
-    pub fn get_event_content_tx(
+    /// Get the per-event content state (not the content itself).
+    ///
+    /// To get the actual content, use `get_event_content_full_tx` which also
+    /// looks up the content from the content_store.
+    pub fn get_event_content_state_tx(
         event: impl Into<ShortEventId>,
-        events_content_table: &impl events_content::ReadableTable,
-    ) -> DbResult<Option<EventContentState<'static>>> {
-        Ok(events_content_table.get(&event.into())?.map(|r| r.value()))
+        events_content_state_table: &impl events_content_state::ReadableTable,
+    ) -> DbResult<Option<EventContentStateNew>> {
+        Ok(events_content_state_table
+            .get(&event.into())?
+            .map(|r| r.value()))
     }
+
+    /// Get the full content for an event, including looking it up from
+    /// content_store.
+    ///
+    /// Returns:
+    /// - `None` if no state recorded for this event
+    /// - `Some(Present(content))` if content is available
+    /// - `Some(Invalid(content))` if content was invalid
+    /// - `Some(Deleted { deleted_by })` if content was deleted
+    /// - `Some(Pruned)` if content was pruned
+    pub fn get_event_content_full_tx(
+        event_id: impl Into<ShortEventId>,
+        content_hash: ContentHash,
+        events_content_state_table: &impl events_content_state::ReadableTable,
+        content_store_table: &impl content_store::ReadableTable,
+    ) -> DbResult<Option<EventContentResult>> {
+        let event_id = event_id.into();
+
+        let Some(state) = events_content_state_table
+            .get(&event_id)?
+            .map(|r| r.value())
+        else {
+            return Ok(None);
+        };
+
+        Ok(Some(match state {
+            EventContentStateNew::Available => {
+                // Look up content from content_store
+                match content_store_table.get(&content_hash)?.map(|r| r.value()) {
+                    Some(ContentStoreRecord::Present(content)) => {
+                        EventContentResult::Present(content.into_owned())
+                    }
+                    Some(ContentStoreRecord::Invalid(content)) => {
+                        EventContentResult::Invalid(content.into_owned())
+                    }
+                    None => {
+                        // Content hash is in state but not in store - shouldn't happen
+                        // but treat as missing
+                        EventContentResult::Missing
+                    }
+                }
+            }
+            EventContentStateNew::Deleted { deleted_by } => {
+                EventContentResult::Deleted { deleted_by }
+            }
+            EventContentStateNew::Pruned => EventContentResult::Pruned,
+        }))
+    }
+
     pub fn has_event_content_tx(
         event: impl Into<ShortEventId>,
-        events_content_table: &impl events_content::ReadableTable,
+        events_content_state_table: &impl events_content_state::ReadableTable,
     ) -> DbResult<bool> {
-        Ok(events_content_table.get(&event.into())?.is_some())
+        let state = events_content_state_table
+            .get(&event.into())?
+            .map(|r| r.value());
+        Ok(matches!(state, Some(EventContentStateNew::Available)))
     }
 
     pub(crate) fn insert_follow_tx(
@@ -469,81 +560,96 @@ impl Database {
         Ok(iroh::SecretKey::from_bytes(&self_id.iroh_secret))
     }
 
-    /// Increment reference count for event content when an event is inserted
-    pub fn increment_event_content_rc_tx(
-        event_id: ShortEventId,
-        events_content_rc_count_table: &mut events_content_rc_count::Table,
+    /// Increment reference count for content by its hash.
+    ///
+    /// Called when a new event referencing this content is inserted.
+    pub fn increment_content_rc_tx(
+        content_hash: ContentHash,
+        content_rc_table: &mut content_rc::Table,
     ) -> DbResult<u64> {
-        let current_count = events_content_rc_count_table
-            .get(&event_id)?
+        let current_count = content_rc_table
+            .get(&content_hash)?
             .map(|g| g.value())
             .unwrap_or(0); // Default to 0 if missing (first reference)
 
         let new_count = current_count + 1;
-        events_content_rc_count_table.insert(&event_id, &new_count)?;
+        content_rc_table.insert(&content_hash, &new_count)?;
         Ok(new_count)
     }
 
-    /// Decrement reference count for event content when an event is removed
-    /// Returns true if content should be deleted (count reached 0)
-    pub fn decrement_event_content_rc_tx(
-        event_id: ShortEventId,
-        events_content_table: &mut events_content::Table,
-        events_content_rc_count_table: &mut events_content_rc_count::Table,
-        events_content_missing_table: &mut events_content_missing::Table,
-    ) -> DbResult<bool> {
-        let current_count = events_content_rc_count_table
-            .get(&event_id)?
+    /// Decrement reference count for content by its hash.
+    ///
+    /// Called when an event's content is deleted or pruned.
+    /// Note: This does NOT remove the content from content_store - that should
+    /// be done separately via garbage collection when RC reaches 0.
+    pub fn decrement_content_rc_tx(
+        content_hash: ContentHash,
+        content_rc_table: &mut content_rc::Table,
+    ) -> DbResult<u64> {
+        let current_count = content_rc_table
+            .get(&content_hash)?
             .map(|g| g.value())
             .unwrap_or(1); // Default to 1 if missing (assume single reference)
 
         if current_count <= 1 {
-            // Count will reach 0, remove everything
-            events_content_table.remove(&event_id)?;
-            events_content_rc_count_table.remove(&event_id)?;
-            events_content_missing_table.remove(&event_id)?;
-            Ok(true)
+            // Count reached 0, remove the RC entry
+            // (content_store cleanup is separate)
+            content_rc_table.remove(&content_hash)?;
+            Ok(0)
         } else {
-            // Decrement count
             let new_count = current_count
                 .checked_sub(1)
                 .expect("Reference count should never underflow");
-            events_content_rc_count_table.insert(&event_id, &new_count)?;
-            Ok(false)
+            content_rc_table.insert(&content_hash, &new_count)?;
+            Ok(new_count)
         }
     }
 
-    /// Get the reference count for an event content entry
-    pub fn get_event_content_rc_tx(
-        event_id: ShortEventId,
-        events_content_rc_count_table: &impl events_content_rc_count::ReadableTable,
+    /// Get the reference count for content by its hash.
+    pub fn get_content_rc_tx(
+        content_hash: ContentHash,
+        content_rc_table: &impl content_rc::ReadableTable,
     ) -> DbResult<u64> {
-        Ok(events_content_rc_count_table
-            .get(&event_id)?
+        Ok(content_rc_table
+            .get(&content_hash)?
             .map(|g| g.value())
             .unwrap_or(0)) // Default to 0 if missing
     }
 
-    /// Remove an event and handle reference counting for its content
+    /// Remove an event and handle reference counting for its content.
+    ///
+    /// This removes the event from the events table and decrements the
+    /// reference count for its content hash.
     pub fn remove_event_tx(
         event_id: ShortEventId,
         events_table: &mut events::Table,
-        events_content_table: &mut events_content::Table,
-        events_content_rc_count_table: &mut events_content_rc_count::Table,
+        events_content_state_table: &mut events_content_state::Table,
+        content_rc_table: &mut content_rc::Table,
         events_content_missing_table: &mut events_content_missing::Table,
     ) -> DbResult<bool> {
-        let event_existed = events_table.remove(&event_id)?.is_some();
+        let event = events_table.remove(&event_id)?.map(|g| g.value());
 
-        if event_existed {
-            // Decrement reference count and potentially clean up content
-            Database::decrement_event_content_rc_tx(
-                event_id,
-                events_content_table,
-                events_content_rc_count_table,
-                events_content_missing_table,
-            )?;
+        if let Some(event_record) = event {
+            let content_hash = event_record.content_hash();
+
+            // Check if content was available before removing state
+            let was_available = events_content_state_table
+                .get(&event_id)?
+                .map(|g| matches!(g.value(), EventContentStateNew::Available))
+                .unwrap_or(false);
+
+            // Remove per-event state
+            events_content_state_table.remove(&event_id)?;
+            events_content_missing_table.remove(&event_id)?;
+
+            // Decrement RC if content was available
+            if was_available {
+                Database::decrement_content_rc_tx(content_hash, content_rc_table)?;
+            }
+
+            Ok(true)
+        } else {
+            Ok(false)
         }
-
-        Ok(event_existed)
     }
 }
