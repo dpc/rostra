@@ -206,6 +206,7 @@ pub fn route_handler(state: SharedState) -> Router<Arc<UiState>> {
             get(settings::get_settings_followers),
         )
         .route("/ui/settings/unfollow", post(settings::post_unfollow))
+        .route("/ui/timeline/prime", get(timeline_prime))
         // .route("/a/", put(account_new))
         // .route("/t/", put(token_new))
         // .route("/m/", put(metric_new).get(metric_find))
@@ -218,4 +219,16 @@ pub fn route_handler(state: SharedState) -> Router<Arc<UiState>> {
 
 async fn root() -> Redirect {
     Redirect::permanent("/ui")
+}
+
+/// Returns empty timeline-posts div for priming alpine-ajax.
+///
+/// Workaround: The first alpine-ajax request on a page causes the browser to
+/// scroll to the top. By triggering a dummy ajax request on page load (when
+/// we're already at the top), the first real infinite scroll request won't
+/// cause the unwanted scroll jump.
+async fn timeline_prime() -> Maud {
+    Maud(maud::html! {
+        div id="timeline-posts" x-merge="append" {}
+    })
 }

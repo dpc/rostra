@@ -548,6 +548,8 @@ impl UiState {
 
         Ok(html! {
             div ."o-mainBarTimeline" "x-data"="{}" {
+                // Workaround: first alpine-ajax request scrolls to top; prime it on load
+                div style="display:none" x-init="$ajax('/ui/timeline/prime', { targets: ['timeline-posts'] })" {}
                 div ."o-mainBarTimeline__tabs" {
                     a ."o-mainBarTimeline__back" onclick="history.back()" { "<" }
 
