@@ -635,43 +635,12 @@ impl UiState {
                         id="load-more-posts" ."o-mainBarTimeline__rest -empty"
                         "href"=(href)
                         x-init
-                        "x-intersect"="$ajax($el.dataset.url, { targets: ['timeline-posts', 'load-more-posts'] })"
+                        "x-intersect.once"="$ajax($el.href, { targets: ['load-more-posts', 'timeline-posts'] })"
                     { "More posts" }
                 } @else {
                     div id="load-more-posts" ."o-mainBarTimeline__rest -empty" {}
                 }
             }
-            script {
-                (PreEscaped(r#"
-                    // Fix: Prevent unwanted scroll-to-top during infinite scroll
-                    let savedScrollTop = 0;
-                    let isLoadingMore = false;
-
-                    document.addEventListener('ajax:before', () => {
-                        savedScrollTop = document.body.scrollTop;
-                        isLoadingMore = true;
-                    });
-
-                    document.body.addEventListener('scroll', () => {
-                        // Detect and prevent unwanted scroll-to-top during infinite scroll load
-                        if (isLoadingMore && savedScrollTop > 100 && document.body.scrollTop < 100) {
-                            document.body.scrollTop = savedScrollTop;
-                            isLoadingMore = false;
-                            savedScrollTop = 0;
-                        }
-                    });
-                "#))
-            }
-            // TODO: we probably need it, but I don't know why :D
-            // script {
-            //     (PreEscaped(r#"
-            //         document.querySelector('.o-mainBarTimeline')
-            //             .classList.toggle(
-            //                 '-hideReplies',
-            //                 !document.querySelector('.o-mainBarTimeline__showReplies').checked
-            //             );
-            //     "#))
-            // }
         })
     }
 
