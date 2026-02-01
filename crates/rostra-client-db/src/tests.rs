@@ -823,6 +823,635 @@ async fn test_lazy_content_claiming() -> BoxedErrorResult<()> {
     Ok(())
 }
 
+/// Test: Delete event arrives before its target (out-of-order).
+///
+/// Verifies that when a delete event arrives before its target:
+/// - The target is marked as "to be deleted" in events_missing
+/// - Non-delete events with parent_aux don't mark their parents as deleted
+#[test_log::test(tokio::test(flavor = "multi_thread"))]
+async fn test_delete_event_arrives_before_target() -> BoxedErrorResult<()> {
+    use rostra_core::id::ToShort as _;
+
+    let id_secret = RostraIdSecretKey::generate();
+    let author = id_secret.id();
+    let (_dir, db) = temp_db(author).await?;
+
+    // Create fake event IDs for events that don't exist yet
+    // We'll use these as parent references
+    let fake_event_a = {
+        let content = EventContentRaw::new(vec![1, 2, 3]);
+        let event = Event::builder_raw_content()
+            .author(author)
+            .kind(EventKind::SOCIAL_POST)
+            .content(&content)
+            .build();
+        event.signed_by(id_secret)
+    };
+    let fake_event_a_id = fake_event_a.compute_id();
+
+    let fake_event_d = {
+        let content = EventContentRaw::new(vec![4, 5, 6]);
+        let event = Event::builder_raw_content()
+            .author(author)
+            .kind(EventKind::SOCIAL_POST)
+            .content(&content)
+            .build();
+        event.signed_by(id_secret)
+    };
+    let fake_event_d_id = fake_event_d.compute_id();
+
+    // Event B: DELETE event targeting A (A doesn't exist yet)
+    let event_b = {
+        let content = EventContentRaw::new(vec![10, 11, 12]);
+        let event = Event::builder_raw_content()
+            .author(author)
+            .kind(EventKind::SOCIAL_POST)
+            .delete(fake_event_a_id.to_short()) // This sets delete flag AND parent_aux
+            .content(&content)
+            .build();
+        let signed = event.signed_by(id_secret);
+        VerifiedEvent::verify_signed(author, signed).expect("Valid event")
+    };
+    let event_b_id = event_b.event_id.to_short();
+
+    // Event C: Non-delete event with parent_aux = D (D doesn't exist yet)
+    let event_c = {
+        let content = EventContentRaw::new(vec![13, 14, 15]);
+        let event = Event::builder_raw_content()
+            .author(author)
+            .kind(EventKind::SOCIAL_POST)
+            .parent_aux(fake_event_d_id.to_short()) // Just parent_aux, no delete flag
+            .content(&content)
+            .build();
+        let signed = event.signed_by(id_secret);
+        VerifiedEvent::verify_signed(author, signed).expect("Valid event")
+    };
+
+    // Event E: DELETE event but referencing F via parent_prev (not parent_aux)
+    // Note: delete() sets parent_aux, so we need to manually construct this
+    // Actually, looking at the builder, delete() sets BOTH the flag AND parent_aux
+    // So we can't have a delete event with missing parent_prev but existing
+    // parent_aux Let's test with: delete event B targeting A, and verify A is
+    // marked deleted And: event C with parent_aux D (non-delete), verify D is
+    // NOT marked deleted
+
+    db.write_with(|tx| {
+        let mut ids_full_tbl = tx.open_table(&ids_full::TABLE)?;
+        let mut events_table = tx.open_table(&events::TABLE)?;
+        let mut events_missing_table = tx.open_table(&events_missing::TABLE)?;
+        let mut events_by_time_table = tx.open_table(&events_by_time::TABLE)?;
+        let mut events_content_state_table = tx.open_table(&events_content_state::TABLE)?;
+        let content_store_table = tx.open_table(&content_store::TABLE)?;
+        let mut content_rc_table = tx.open_table(&content_rc::TABLE)?;
+        let mut events_content_missing_table = tx.open_table(&events_content_missing::TABLE)?;
+        let mut events_heads_table = tx.open_table(&events_heads::TABLE)?;
+
+        // Insert delete event B (targeting missing A)
+        Database::insert_event_tx(
+            event_b,
+            &mut ids_full_tbl,
+            &mut events_table,
+            &mut events_missing_table,
+            &mut events_heads_table,
+            &mut events_by_time_table,
+            &mut events_content_state_table,
+            &content_store_table,
+            &mut content_rc_table,
+            &mut events_content_missing_table,
+        )?;
+
+        // Verify: A should be marked as missing with deleted_by = B
+        let missing_a = events_missing_table
+            .get(&(author, fake_event_a_id.to_short()))?
+            .map(|g| g.value());
+        assert!(
+            missing_a.is_some(),
+            "A should be in events_missing (referenced by B)"
+        );
+        assert_eq!(
+            missing_a.unwrap().deleted_by,
+            Some(event_b_id),
+            "A should be marked as deleted_by = B (delete event targeting missing parent_aux)"
+        );
+
+        // Insert non-delete event C (with parent_aux = missing D)
+        Database::insert_event_tx(
+            event_c,
+            &mut ids_full_tbl,
+            &mut events_table,
+            &mut events_missing_table,
+            &mut events_heads_table,
+            &mut events_by_time_table,
+            &mut events_content_state_table,
+            &content_store_table,
+            &mut content_rc_table,
+            &mut events_content_missing_table,
+        )?;
+
+        // Verify: D should be marked as missing but WITHOUT deleted_by
+        let missing_d = events_missing_table
+            .get(&(author, fake_event_d_id.to_short()))?
+            .map(|g| g.value());
+        assert!(
+            missing_d.is_some(),
+            "D should be in events_missing (referenced by C)"
+        );
+        assert_eq!(
+            missing_d.unwrap().deleted_by,
+            None,
+            "D should NOT be marked as deleted (C is not a delete event)"
+        );
+
+        Ok(())
+    })
+    .await?;
+
+    Ok(())
+}
+
+/// Test: Follow/unfollow timestamp ordering - newer timestamps replace older.
+///
+/// Verifies that:
+/// - A follow with newer timestamp replaces older follow record
+/// - A follow with older or equal timestamp is rejected
+/// - Same logic applies to unfollows
+#[test_log::test(tokio::test(flavor = "multi_thread"))]
+async fn test_follow_unfollow_timestamp_ordering() -> BoxedErrorResult<()> {
+    use rostra_core::Timestamp;
+    use rostra_core::event::content_kind;
+
+    use crate::{ids_followees, ids_followers, ids_unfollowed};
+
+    let id_secret = RostraIdSecretKey::generate();
+    let author = id_secret.id();
+    let followee = RostraIdSecretKey::generate().id();
+    let (_dir, db) = temp_db(author).await?;
+
+    db.write_with(|tx| {
+        let mut followees_table = tx.open_table(&ids_followees::TABLE)?;
+        let mut followers_table = tx.open_table(&ids_followers::TABLE)?;
+        let mut unfollowed_table = tx.open_table(&ids_unfollowed::TABLE)?;
+
+        let ts_100 = Timestamp::from(100);
+        let ts_200 = Timestamp::from(200);
+        let ts_150 = Timestamp::from(150);
+
+        // Initial follow at timestamp 100
+        let follow_content = content_kind::Follow {
+            followee,
+            persona: None,
+            selector: None,
+        };
+        let result = Database::insert_follow_tx(
+            author,
+            ts_100,
+            follow_content.clone(),
+            &mut followees_table,
+            &mut followers_table,
+            &mut unfollowed_table,
+        )?;
+        assert!(result, "Initial follow should succeed");
+
+        // Verify the record exists with ts=100
+        let record = followees_table.get(&(author, followee))?.unwrap().value();
+        assert_eq!(record.ts, ts_100);
+
+        // Try to follow with older timestamp - should be rejected
+        let result = Database::insert_follow_tx(
+            author,
+            Timestamp::from(50),
+            follow_content.clone(),
+            &mut followees_table,
+            &mut followers_table,
+            &mut unfollowed_table,
+        )?;
+        assert!(!result, "Follow with older timestamp should be rejected");
+
+        // Try to follow with same timestamp - should be rejected
+        let result = Database::insert_follow_tx(
+            author,
+            ts_100,
+            follow_content.clone(),
+            &mut followees_table,
+            &mut followers_table,
+            &mut unfollowed_table,
+        )?;
+        assert!(!result, "Follow with same timestamp should be rejected");
+
+        // Follow with newer timestamp - should succeed
+        let result = Database::insert_follow_tx(
+            author,
+            ts_200,
+            follow_content,
+            &mut followees_table,
+            &mut followers_table,
+            &mut unfollowed_table,
+        )?;
+        assert!(result, "Follow with newer timestamp should succeed");
+
+        // Verify the record was updated
+        let record = followees_table.get(&(author, followee))?.unwrap().value();
+        assert_eq!(record.ts, ts_200);
+
+        // Now test unfollow timestamp ordering
+        // Unfollow with older timestamp than current follow - should be rejected
+        let result = Database::insert_unfollow_tx(
+            author,
+            ts_150, // older than ts_200
+            followee,
+            &mut followees_table,
+            &mut followers_table,
+            &mut unfollowed_table,
+        )?;
+        assert!(
+            !result,
+            "Unfollow with timestamp older than follow should be rejected"
+        );
+
+        // Unfollow with newer timestamp - should succeed
+        let ts_300 = Timestamp::from(300);
+        let result = Database::insert_unfollow_tx(
+            author,
+            ts_300,
+            followee,
+            &mut followees_table,
+            &mut followers_table,
+            &mut unfollowed_table,
+        )?;
+        assert!(result, "Unfollow with newer timestamp should succeed");
+
+        // Now there's an unfollowed record at ts_300
+        // Try to follow with timestamp older than unfollowed - should be rejected
+        let follow_content2 = content_kind::Follow {
+            followee,
+            persona: None,
+            selector: None,
+        };
+        let result = Database::insert_follow_tx(
+            author,
+            ts_200, // older than ts_300 unfollow
+            follow_content2.clone(),
+            &mut followees_table,
+            &mut followers_table,
+            &mut unfollowed_table,
+        )?;
+        assert!(
+            !result,
+            "Follow with timestamp older than unfollow should be rejected"
+        );
+
+        // Follow with newer timestamp than unfollow - should succeed
+        let ts_400 = Timestamp::from(400);
+        let result = Database::insert_follow_tx(
+            author,
+            ts_400,
+            follow_content2,
+            &mut followees_table,
+            &mut followers_table,
+            &mut unfollowed_table,
+        )?;
+        assert!(
+            result,
+            "Follow with timestamp newer than unfollow should succeed"
+        );
+
+        // Try to unfollow with timestamp older than both current follow and unfollow
+        // This tests the second <= check in insert_unfollow_tx
+        let result = Database::insert_unfollow_tx(
+            author,
+            ts_300, // equal to old unfollow, older than current follow
+            followee,
+            &mut followees_table,
+            &mut followers_table,
+            &mut unfollowed_table,
+        )?;
+        assert!(
+            !result,
+            "Unfollow with timestamp older than current state should be rejected"
+        );
+
+        Ok(())
+    })
+    .await?;
+
+    Ok(())
+}
+
+/// Test: get_random_self_event returns events correctly.
+#[test_log::test(tokio::test(flavor = "multi_thread"))]
+async fn test_get_random_self_event() -> BoxedErrorResult<()> {
+    use rostra_core::id::ToShort as _;
+
+    use crate::events_self;
+
+    let id_secret = RostraIdSecretKey::generate();
+    let author = id_secret.id();
+    let (_dir, db) = temp_db(author).await?;
+
+    // Create some test events
+    let event_a = build_test_event(id_secret, None);
+    let event_b = build_test_event(id_secret, event_a.event_id);
+    let event_a_short = event_a.event_id.to_short();
+    let event_b_short = event_b.event_id.to_short();
+
+    db.write_with(|tx| {
+        let mut events_self_table = tx.open_table(&events_self::TABLE)?;
+
+        // Empty table should return None
+        let result = Database::get_random_self_event(&events_self_table)?;
+        assert!(result.is_none(), "Empty table should return None");
+
+        // Insert one event
+        events_self_table.insert(&event_a_short, &())?;
+
+        // Should return the only event
+        let result = Database::get_random_self_event(&events_self_table)?;
+        assert_eq!(result, Some(event_a_short), "Should return the only event");
+
+        // Insert another event
+        events_self_table.insert(&event_b_short, &())?;
+
+        // Should return one of the two events (we can't predict which due to
+        // randomness)
+        let result = Database::get_random_self_event(&events_self_table)?;
+        assert!(
+            result == Some(event_a_short) || result == Some(event_b_short),
+            "Should return one of the events"
+        );
+
+        Ok(())
+    })
+    .await?;
+
+    Ok(())
+}
+
+/// Test: get_random_self_event exercises both search directions and fallback
+/// paths.
+///
+/// By running many iterations with a single event, we exercise both primary
+/// search directions and their fallbacks, since the random pivot determines
+/// which branch is taken.
+#[test_log::test(tokio::test(flavor = "multi_thread"))]
+async fn test_get_random_self_event_fallback_paths() -> BoxedErrorResult<()> {
+    use rostra_core::ShortEventId;
+    use rostra_core::id::ToShort as _;
+
+    use crate::events_self;
+
+    let id_secret = RostraIdSecretKey::generate();
+    let author = id_secret.id();
+    let (_dir, db) = temp_db(author).await?;
+
+    let event = build_test_event(id_secret, None);
+    let event_short = event.event_id.to_short();
+
+    db.write_with(|tx| {
+        let mut events_self_table = tx.open_table(&events_self::TABLE)?;
+
+        // Insert the single event
+        events_self_table.insert(&event_short, &())?;
+
+        // Run many iterations to ensure both random branches and fallback paths are
+        // exercised. With a single event and random pivot, sometimes the
+        // primary direction won't find it and the fallback will be used.
+        for _ in 0..100 {
+            let result = Database::get_random_self_event(&events_self_table)?;
+            assert_eq!(
+                result,
+                Some(event_short),
+                "Should always find the single event via primary or fallback path"
+            );
+        }
+
+        // Test with extreme event IDs to ensure both primary paths work
+        events_self_table.remove(&event_short)?;
+
+        // Event near the start of the ID space (will be found by before_pivot primary)
+        // Using from_bytes with a very low value (just above ZERO to avoid edge case)
+        let low_event_id =
+            ShortEventId::from_bytes([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1]);
+        events_self_table.insert(&low_event_id, &())?;
+
+        for _ in 0..50 {
+            let result = Database::get_random_self_event(&events_self_table)?;
+            assert_eq!(
+                result,
+                Some(low_event_id),
+                "Should find low event ID via primary or fallback"
+            );
+        }
+
+        events_self_table.remove(&low_event_id)?;
+
+        // Event near the end of the ID space (will be found by after_pivot primary)
+        let high_event_id = ShortEventId::from_bytes([
+            0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
+            0xFF, 0xFE,
+        ]);
+        events_self_table.insert(&high_event_id, &())?;
+
+        for _ in 0..50 {
+            let result = Database::get_random_self_event(&events_self_table)?;
+            assert_eq!(
+                result,
+                Some(high_event_id),
+                "Should find high event ID via primary or fallback"
+            );
+        }
+
+        Ok(())
+    })
+    .await?;
+
+    Ok(())
+}
+
+/// Test: Duplicate unfollows with older timestamps are rejected.
+///
+/// Verifies that when an unfollow record already exists, attempting to unfollow
+/// again with the same or older timestamp is rejected.
+#[test_log::test(tokio::test(flavor = "multi_thread"))]
+async fn test_duplicate_unfollow_rejected() -> BoxedErrorResult<()> {
+    use rostra_core::Timestamp;
+
+    use crate::{ids_followees, ids_followers, ids_unfollowed};
+
+    let id_secret = RostraIdSecretKey::generate();
+    let author = id_secret.id();
+    let followee = RostraIdSecretKey::generate().id();
+    let (_dir, db) = temp_db(author).await?;
+
+    db.write_with(|tx| {
+        let mut followees_table = tx.open_table(&ids_followees::TABLE)?;
+        let mut followers_table = tx.open_table(&ids_followers::TABLE)?;
+        let mut unfollowed_table = tx.open_table(&ids_unfollowed::TABLE)?;
+
+        let ts_100 = Timestamp::from(100);
+        let ts_200 = Timestamp::from(200);
+
+        // Initial unfollow at timestamp 100 (no prior follow)
+        let result = Database::insert_unfollow_tx(
+            author,
+            ts_100,
+            followee,
+            &mut followees_table,
+            &mut followers_table,
+            &mut unfollowed_table,
+        )?;
+        assert!(result, "Initial unfollow should succeed");
+
+        // Verify unfollow record exists
+        let record = unfollowed_table.get(&(author, followee))?.unwrap().value();
+        assert_eq!(record.ts, ts_100);
+
+        // Try to unfollow again with same timestamp - should be rejected
+        let result = Database::insert_unfollow_tx(
+            author,
+            ts_100,
+            followee,
+            &mut followees_table,
+            &mut followers_table,
+            &mut unfollowed_table,
+        )?;
+        assert!(!result, "Unfollow with same timestamp should be rejected");
+
+        // Try to unfollow with older timestamp - should be rejected
+        let result = Database::insert_unfollow_tx(
+            author,
+            Timestamp::from(50),
+            followee,
+            &mut followees_table,
+            &mut followers_table,
+            &mut unfollowed_table,
+        )?;
+        assert!(!result, "Unfollow with older timestamp should be rejected");
+
+        // Unfollow with newer timestamp - should succeed and update record
+        let result = Database::insert_unfollow_tx(
+            author,
+            ts_200,
+            followee,
+            &mut followees_table,
+            &mut followers_table,
+            &mut unfollowed_table,
+        )?;
+        assert!(result, "Unfollow with newer timestamp should succeed");
+
+        // Verify record was updated
+        let record = unfollowed_table.get(&(author, followee))?.unwrap().value();
+        assert_eq!(record.ts, ts_200);
+
+        Ok(())
+    })
+    .await?;
+
+    Ok(())
+}
+
+/// Test: insert_latest_value_tx respects timestamp ordering.
+///
+/// Verifies that values with older or equal timestamps are rejected while
+/// newer timestamps update the stored value.
+#[test_log::test(tokio::test(flavor = "multi_thread"))]
+async fn test_insert_latest_value_timestamp_ordering() -> BoxedErrorResult<()> {
+    use rostra_core::Timestamp;
+    use rostra_core::id::ToShort as _;
+
+    use crate::{IdSocialProfileRecord, social_profiles};
+
+    let id_secret = RostraIdSecretKey::generate();
+    let author = id_secret.id();
+    let (_dir, db) = temp_db(author).await?;
+
+    // Create a fake event id for the profile record
+    let event = build_test_event(id_secret, None);
+    let event_short = event.event_id.to_short();
+
+    db.write_with(|tx| {
+        let mut profiles_table = tx.open_table(&social_profiles::TABLE)?;
+
+        let ts_100 = Timestamp::from(100);
+        let ts_200 = Timestamp::from(200);
+
+        let profile_alice = IdSocialProfileRecord {
+            event_id: event_short,
+            display_name: "Alice".to_string(),
+            bio: "".to_string(),
+            avatar: None,
+        };
+
+        // Initial insert at timestamp 100
+        let result = Database::insert_latest_value_tx(
+            ts_100,
+            &author,
+            profile_alice.clone(),
+            &mut profiles_table,
+        )?;
+        assert!(result, "Initial insert should succeed");
+
+        // Verify the value was stored
+        let record = profiles_table.get(&author)?.unwrap().value();
+        assert_eq!(record.ts, ts_100);
+        assert_eq!(record.inner.display_name, "Alice");
+
+        let profile_bob = IdSocialProfileRecord {
+            event_id: event_short,
+            display_name: "Bob".to_string(),
+            bio: "".to_string(),
+            avatar: None,
+        };
+
+        // Try to insert with same timestamp - should be rejected
+        let result = Database::insert_latest_value_tx(
+            ts_100,
+            &author,
+            profile_bob.clone(),
+            &mut profiles_table,
+        )?;
+        assert!(!result, "Insert with same timestamp should be rejected");
+
+        // Verify value unchanged
+        let record = profiles_table.get(&author)?.unwrap().value();
+        assert_eq!(record.inner.display_name, "Alice");
+
+        let profile_charlie = IdSocialProfileRecord {
+            event_id: event_short,
+            display_name: "Charlie".to_string(),
+            bio: "".to_string(),
+            avatar: None,
+        };
+
+        // Try to insert with older timestamp - should be rejected
+        let result = Database::insert_latest_value_tx(
+            Timestamp::from(50),
+            &author,
+            profile_charlie,
+            &mut profiles_table,
+        )?;
+        assert!(!result, "Insert with older timestamp should be rejected");
+
+        // Verify value unchanged
+        let record = profiles_table.get(&author)?.unwrap().value();
+        assert_eq!(record.inner.display_name, "Alice");
+
+        // Insert with newer timestamp - should succeed
+        let result =
+            Database::insert_latest_value_tx(ts_200, &author, profile_bob, &mut profiles_table)?;
+        assert!(result, "Insert with newer timestamp should succeed");
+
+        // Verify value was updated
+        let record = profiles_table.get(&author)?.unwrap().value();
+        assert_eq!(record.ts, ts_200);
+        assert_eq!(record.inner.display_name, "Bob");
+
+        Ok(())
+    })
+    .await?;
+
+    Ok(())
+}
+
 // ============================================================================
 // Property-based testing for RC counting correctness
 // ============================================================================
