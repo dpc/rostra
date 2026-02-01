@@ -6,6 +6,11 @@ mutants PACKAGE *ARGS:
 mutants-list PACKAGE *ARGS:
     cargo mutants --list --package {{PACKAGE}} {{ARGS}}
 
+# mutation testing for rostra-client-db
+alias mutants-db := _mutants-db
+_mutants-db *ARGS:
+    cargo mutants --package rostra-client-db {{ARGS}}
+
 # run and restart on changes
 dev PORT="2345":
     #!/usr/bin/env bash
