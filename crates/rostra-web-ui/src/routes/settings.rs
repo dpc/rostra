@@ -6,6 +6,7 @@ use rostra_core::id::RostraId;
 use serde::Deserialize;
 
 use super::Maud;
+use super::fragment;
 use super::unlock::session::UserSession;
 use crate::error::RequestResult;
 use crate::{SharedState, UiState};
@@ -162,22 +163,17 @@ impl UiState {
                             {
                                 (display_name)
                             }
-                            form ."m-followeeList__actions"
-                                action="/ui/settings/unfollow"
-                                method="post"
-                                x-target="followee-list"
-                                "@ajax:before"="clearTimeout($el._lt); $el._lt = setTimeout(() => $el.querySelector('.u-button')?.classList.add('-loading'), 150)"
-                                "@ajax:after"="clearTimeout($el._lt); $el.querySelector('.u-button')?.classList.remove('-loading')"
-                            {
-                                input type="hidden" name="rostra_id" value=(followee_id) {}
-                                button ."m-followeeList__unfollowButton u-button"
-                                    ."-disabled"[session.ro_mode().to_disabled()]
-                                    type="submit"
-                                {
-                                    span ."m-followeeList__unfollowButtonIcon u-buttonIcon" width="1rem" height="1rem" {}
-                                    "Unfollow"
-                                }
-                            }
+                            (fragment::ajax_button(
+                                "/ui/settings/unfollow",
+                                "post",
+                                "followee-list",
+                                "m-followeeList__unfollowButton",
+                                "Unfollow",
+                            )
+                            .disabled(session.ro_mode().to_disabled())
+                            .hidden_inputs(html! { input type="hidden" name="rostra_id" value=(followee_id) {} })
+                            .form_class("m-followeeList__actions")
+                            .call())
                         }
                     }
                 }

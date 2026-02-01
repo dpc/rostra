@@ -9,6 +9,7 @@ use rostra_core::ShortEventId;
 use rostra_core::id::{RostraId, ToShort as _};
 
 use super::Maud;
+use super::fragment;
 use super::unlock::session::{RoMode, UserSession};
 use crate::error::RequestResult;
 use crate::{SharedState, UiState};
@@ -129,34 +130,22 @@ impl UiState {
                                 span ."m-profileSummary__copyButtonIcon u-buttonIcon" width="1rem" height="1rem" {}
                                 "RostraId"
                             }
-                        form
-                            action="/ui/self/edit"
-                            method="get"
-                            x-target="self-profile-summary"
-                            "@ajax:before"="clearTimeout($el._lt); $el._lt = setTimeout(() => $el.querySelector('.u-button')?.classList.add('-loading'), 150)"
-                            "@ajax:after"="clearTimeout($el._lt); $el.querySelector('.u-button')?.classList.remove('-loading')"
-                        {
-                            button
-                                ."m-profileSummary__editButton u-button"
-                                ."-disabled"[ro.to_disabled()]
-                                type="submit"
-                            {
-                                span ."m-profileSummary__editButtonIcon u-buttonIcon" width="1rem" height="1rem" {}
-                                "Edit"
-                            }
-                        }
+                        (fragment::ajax_button(
+                            "/ui/self/edit",
+                            "get",
+                            "self-profile-summary",
+                            "m-profileSummary__editButton",
+                            "Edit",
+                        )
+                        .disabled(ro.to_disabled())
+                        .call())
+
                         form
                             action="/ui/unlock/logout"
                             method="post"
                             style="display: inline;"
-                            {
-                            button
-                                ."m-profileSummary__logoutButton u-button"
-                                type="submit"
-                                {
-                                    span ."m-profileSummary__logoutButtonIcon u-buttonIcon" width="1rem" height="1rem" {}
-                                    "Logout"
-                                }
+                        {
+                            (fragment::button("m-profileSummary__logoutButton", "Logout").call())
                         }
                     }
                 }
@@ -170,14 +159,15 @@ impl UiState {
         let self_profile = self
             .get_social_profile(client_ref.rostra_id(), &client_ref)
             .await;
+        let ajax_attrs = fragment::AjaxLoadingAttrs::for_class("m-profileSummary__saveButton");
         Ok(html! {
             form id="self-profile-summary" ."m-profileSummary -edit"
                 action="/ui/self/edit"
                 method="post"
                 x-target="self-profile-summary"
                 enctype="multipart/form-data"
-                "@ajax:before"="clearTimeout($el._lt); $el._lt = setTimeout(() => $el.querySelector('.m-profileSummary__saveButton')?.classList.add('-loading'), 150)"
-                "@ajax:after"="clearTimeout($el._lt); $el.querySelector('.m-profileSummary__saveButton')?.classList.remove('-loading')"
+                "@ajax:before"=(ajax_attrs.before)
+                "@ajax:after"=(ajax_attrs.after)
             {
                 script {
                     (PreEscaped(r#"
@@ -210,11 +200,7 @@ impl UiState {
                     }
 
                     div ."m-profileSummary__buttons" {
-                        button
-                            ."m-profileSummary__saveButton u-button" {
-                            span ."m-profileSummary__saveButtonIcon u-buttonIcon" width="1rem" height="1rem" {}
-                            "Save"
-                        }
+                        (fragment::button("m-profileSummary__saveButton", "Save").call())
                     }
                 }
 

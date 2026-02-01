@@ -7,6 +7,7 @@ use rostra_core::id::RostraId;
 use serde::Deserialize;
 
 use super::Maud;
+use super::fragment;
 use super::unlock::session::UserSession;
 use crate::error::RequestResult;
 use crate::{SharedState, UiState};
@@ -39,13 +40,14 @@ pub async fn add_followee(
 impl UiState {
     pub fn render_add_followee_form(&self, notification: impl Into<Option<Markup>>) -> Markup {
         let notification = notification.into();
+        let ajax_attrs = fragment::AjaxLoadingAttrs::for_button();
         html! {
             form id="add-followee-form" ."m-addFolloweeForm"
                 action="/ui/followee"
                 method="post"
                 x-target="add-followee-form"
-                "@ajax:before"="clearTimeout($el._lt); $el._lt = setTimeout(() => $el.querySelector('.u-button')?.classList.add('-loading'), 150)"
-                "@ajax:after"="clearTimeout($el._lt); $el.querySelector('.u-button')?.classList.remove('-loading')"
+                "@ajax:before"=(ajax_attrs.before)
+                "@ajax:after"=(ajax_attrs.after)
             {
                 input ."m-addFolloweeForm__content"
                     placeholder="RostraId"
@@ -60,10 +62,7 @@ impl UiState {
                                 (n)
                         }
                     }
-                    button ."m-addFolloweeForm__followButton u-button" {
-                        span ."m-addFolloweeForm__followButtonIcon u-buttonIcon" width="1rem" height="1rem" {}
-                        "Follow"
-                    }
+                    (fragment::button("m-addFolloweeForm__followButton", "Follow").call())
                 }
             }
         }

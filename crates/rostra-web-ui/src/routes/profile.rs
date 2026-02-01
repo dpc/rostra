@@ -9,6 +9,7 @@ use serde::Deserialize;
 use tower_cookies::Cookies;
 
 use super::Maud;
+use super::fragment;
 use super::timeline::{TimelineMode, TimelinePaginationInput};
 use super::unlock::session::{RoMode, UserSession};
 use crate::error::RequestResult;
@@ -56,14 +57,15 @@ pub async fn get_follow_dialog(
     let client = state.client(session.id()).await?;
     let client_ref = client.client_ref()?;
     let personas = client_ref.db().get_personas_for_id(profile_id).await;
+    let ajax_attrs = fragment::AjaxLoadingAttrs::for_class("o-followDialog__submitButton");
     Ok(Maud(html! {
         div ."o-followDialog__content" {
             form ."o-followDialog__form"
                 action=(format!("/ui/profile/{}/follow", profile_id))
                 method="post"
                 x-target="profile-summary"
-                "@ajax:before"="clearTimeout($el._lt); $el._lt = setTimeout(() => $el.querySelector('.o-followDialog__submitButton')?.classList.add('-loading'), 150)"
-                "@ajax:after"="clearTimeout($el._lt); $el.querySelector('.o-followDialog__submitButton')?.classList.remove('-loading')"
+                "@ajax:before"=(ajax_attrs.before)
+                "@ajax:after"=(ajax_attrs.after)
             {
                 div ."o-followDialog__optionsContainer" {
                     div ."o-followDialog__selectContainer" {
@@ -108,21 +110,12 @@ pub async fn get_follow_dialog(
                 }
 
                 div ."o-followDialog__actions" {
-                    button
-                        ."o-followDialog__cancelButton u-button"
-                        type="button"
-                        onclick="document.querySelector('.o-followDialog').classList.remove('-active')"
-                    {
-                        span ."o-followDialog__cancelButtonIcon u-buttonIcon"
-                            width="1rem" height="1rem" {}
-                        "Back"
-                    }
+                    (fragment::button("o-followDialog__cancelButton", "Back")
+                        .button_type("button")
+                        .onclick("document.querySelector('.o-followDialog').classList.remove('-active')")
+                        .call())
 
-                    button ."o-followDialog__submitButton u-button" type="submit" {
-                        span ."o-followDialog__submitButtonIcon u-buttonIcon"
-                            width="1rem" height="1rem" {}
-                        "Submit"
-                    }
+                    (fragment::button("o-followDialog__submitButton", "Submit").call())
                 }
             }
         }
@@ -272,27 +265,17 @@ impl UiState {
                             "RostraId"
                         }
                         @if session.id() != profile_id {
-                            form
-                                action=(format!("/ui/profile/{}/follow?following={}", profile_id, following))
-                                method="get"
-                                x-target="follow-dialog-content"
-                                "@ajax:before"="clearTimeout($el._lt); $el._lt = setTimeout(() => $el.querySelector('.u-button')?.classList.add('-loading'), 150)"
-                                "@ajax:after"="clearTimeout($el._lt); $el.querySelector('.u-button')?.classList.remove('-loading'); document.querySelector('.o-followDialog').classList.add('-active')"
-                            {
-                                button
-                                    ."m-profileSummary__unfollowButton u-button"
-                                    ."-disabled"[ro.to_disabled()]
-                                    type="submit"
-                                {
-                                    span ."m-profileSummary__followButtonIcon u-buttonIcon" width="1rem" height="1rem"
-                                    {}
-                                    @if following {
-                                        "Following..."
-                                    } @else {
-                                        "Follow..."
-                                    }
-                                }
-                            }
+                            @let label = if following { "Following..." } else { "Follow..." };
+                            (fragment::ajax_button(
+                                &format!("/ui/profile/{}/follow?following={}", profile_id, following),
+                                "get",
+                                "follow-dialog-content",
+                                "m-profileSummary__followButton",
+                                label,
+                            )
+                            .disabled(ro.to_disabled())
+                            .after_js("document.querySelector('.o-followDialog').classList.add('-active')")
+                            .call())
                         }
                     }
                 }

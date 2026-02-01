@@ -16,6 +16,7 @@ use snafu::ResultExt as _;
 use tower_cookies::Cookies;
 
 use super::Maud;
+use super::fragment;
 use super::timeline::TimelineMode;
 use super::unlock::session::{RoMode, UserSession};
 use crate::error::{OtherSnafu, RequestResult};
@@ -423,78 +424,53 @@ impl UiState {
                     div ."m-postView__buttons" {
                         @if let Some(reply_count) = reply_count {
                             @if reply_count > 0 {
-                                form
-                                    action={"/ui/comments/"(ext_event_id.event_id().to_short())}
-                                    method="get"
-                                    x-target=(format!("post-comments-{}", ext_event_id.event_id().to_short()))
-                                    "@ajax:before"="clearTimeout($el._lt); $el._lt = setTimeout(() => $el.querySelector('.u-button')?.classList.add('-loading'), 150)"
-                                    "@ajax:after"="clearTimeout($el._lt); $el.querySelector('button').classList.add('u-hidden')"
-                                {
-                                    button ."m-postView__commentsButton u-button"
-                                        type="submit"
-                                    {
-                                        span ."m-postView__commentsButtonIcon u-buttonIcon" width="1rem" height="1rem" {}
-                                        @if reply_count == 1 {
-                                            ("1 Reply".to_string())
-                                        } @else {
-                                            (format!("{} Replies", reply_count))
-                                        }
-                                    }
-                                }
+                                @let label = if reply_count == 1 { "1 Reply".to_string() } else { format!("{} Replies", reply_count) };
+                                (fragment::ajax_form(
+                                    &format!("/ui/comments/{}", ext_event_id.event_id().to_short()),
+                                    "get",
+                                    &format!("post-comments-{}", ext_event_id.event_id().to_short()),
+                                    fragment::button("m-postView__commentsButton", &label).call(),
+                                )
+                                .after_js("$el.querySelector('button').classList.add('u-hidden')")
+                                .call())
                             }
-
                         }
                         @if post_content_is_missing {
                             @if let Some(event_id) = event_id {
-                                form
-                                    action={"/ui/post/"(author)"/"(event_id)"/fetch"}
-                                    method="post"
-                                    x-target=(format!("post-content-{}-{}", author, event_id))
-                                    "@ajax:before"="clearTimeout($el._lt); $el._lt = setTimeout(() => $el.querySelector('.u-button')?.classList.add('-loading'), 150)"
-                                    "@ajax:after"="clearTimeout($el._lt); $el.querySelector('.u-button')?.classList.remove('-loading')"
-                                {
-                                    button ."m-postView__fetchButton u-button" type="submit" {
-                                        span ."m-postView__fetchButtonIcon u-buttonIcon" width="1rem" height="1rem" {}
-                                        "Fetch"
-                                    }
-                                }
+                                (fragment::ajax_button(
+                                    &format!("/ui/post/{author}/{event_id}/fetch"),
+                                    "post",
+                                    &format!("post-content-{}-{}", author, event_id),
+                                    "m-postView__fetchButton",
+                                    "Fetch",
+                                ).call())
                             }
                         }
                         @if author == client.rostra_id() {
-                            form
-                                action={"/ui/post/"(author)"/"(event_id.unwrap())"/delete"}
-                                method="post"
-                                x-target=(format!("post-{}-{}", author, event_id.unwrap()))
-                                "@ajax:before"="if (!confirm('Are you sure you want to delete this post?')) { $event.preventDefault(); return; } clearTimeout($el._lt); $el._lt = setTimeout(() => $el.querySelector('.u-button')?.classList.add('-loading'), 150)"
-                                "@ajax:after"="clearTimeout($el._lt); $el.querySelector('.u-button')?.classList.remove('-loading')"
-                            {
-                                button ."m-postView__deleteButton u-button u-button--danger"
-                                    type="submit"
-                                    disabled[ro.to_disabled()]
-                                {
-                                    span ."m-postView__deleteButtonIcon u-buttonIcon" width="1rem" height="1rem" {}
-                                    "Delete"
-                                }
-                            }
+                            (fragment::ajax_button(
+                                &format!("/ui/post/{}/{}/delete", author, event_id.unwrap()),
+                                "post",
+                                &format!("post-{}-{}", author, event_id.unwrap()),
+                                "m-postView__deleteButton",
+                                "Delete",
+                            )
+                            .disabled(ro.to_disabled())
+                            .variant("--danger")
+                            .before_js("if (!confirm('Are you sure you want to delete this post?')) { $event.preventDefault(); return; }")
+                            .call())
                         }
 
-                        form
-                            action="/ui/post/reply_to"
-                            method="get"
-                            x-target="reply-to-line"
-                            x-autofocus
-                            "@ajax:before"="clearTimeout($el._lt); $el._lt = setTimeout(() => $el.querySelector('.u-button')?.classList.add('-loading'), 150)"
-                            "@ajax:after"="clearTimeout($el._lt); $el.querySelector('.u-button')?.classList.remove('-loading')"
-                        {
-                            input type="hidden" name="reply_to" value=(ext_event_id) {}
-                            button ."m-postView__replyToButton u-button"
-                                type="submit"
-                                disabled[ro.to_disabled()]
-                            {
-                                span ."m-postView__replyToButtonIcon u-buttonIcon" width="1rem" height="1rem" {}
-                                "Reply"
-                            }
-                        }
+                        (fragment::ajax_button(
+                            "/ui/post/reply_to",
+                            "get",
+                            "reply-to-line",
+                            "m-postView__replyToButton",
+                            "Reply",
+                        )
+                        .disabled(ro.to_disabled())
+                        .hidden_inputs(html! { input type="hidden" name="reply_to" value=(ext_event_id) {} })
+                        .autofocus(true)
+                        .call())
                     }
                 }
             }

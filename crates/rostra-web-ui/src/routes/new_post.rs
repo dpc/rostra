@@ -12,6 +12,7 @@ use super::super::SharedState;
 use super::super::error::RequestResult;
 use super::Maud;
 use super::cookies::CookiesExt as _;
+use super::fragment;
 use super::unlock::session::{RoMode, UserSession};
 use crate::UiState;
 use crate::html_utils::re_typeset_mathjax;
@@ -166,14 +167,15 @@ pub async fn get_post_preview_dialog(
                     )
                 }
 
+                @let ajax_attrs = fragment::AjaxLoadingAttrs::for_class("o-previewDialog__submitButton");
                 div ."o-previewDialog__actions" {
                     form ."o-previewDialog__form"
                         action="/ui/post"
                         method="post"
                         x-target="new-post-form preview-dialog post-preview ajax-scripts"
                         "x-on:keyup.enter.ctrl.shift"="$el.requestSubmit()"
-                        "@ajax:before"="clearTimeout($el._lt); $el._lt = setTimeout(() => $el.querySelector('.o-previewDialog__submitButton')?.classList.add('-loading'), 150)"
-                        "@ajax:after"="clearTimeout($el._lt); $el.querySelector('.o-previewDialog__submitButton')?.classList.remove('-loading')"
+                        "@ajax:before"=(ajax_attrs.before)
+                        "@ajax:after"=(ajax_attrs.after)
                     {
                         input type="hidden" name="content" value=(form.content) {}
                         @if let Some(reply_to) = form.reply_to {
@@ -198,20 +200,12 @@ pub async fn get_post_preview_dialog(
                             }
 
                             div ."o-previewDialog__actionButtons" {
-                                button ."o-previewDialog__cancelButton u-button"
-                                    type="button"
-                                    onclick="document.querySelector('.o-previewDialog').classList.remove('-active')"
-                                {
-                                    span ."o-previewDialog__cancelButtonIcon u-buttonIcon"
-                                        width="1rem" height="1rem" {}
-                                    "Cancel"
-                                }
+                                (fragment::button("o-previewDialog__cancelButton", "Cancel")
+                                    .button_type("button")
+                                    .onclick("document.querySelector('.o-previewDialog').classList.remove('-active')")
+                                    .call())
 
-                                button ."o-previewDialog__submitButton u-button" type="submit" {
-                                    span ."o-previewDialog__submitButtonIcon u-buttonIcon"
-                                        width="1rem" height="1rem" {}
-                                    "Post"
-                                }
+                                (fragment::button("o-previewDialog__submitButton", "Post").call())
                             }
                         }
                     }
@@ -327,12 +321,13 @@ impl UiState {
                 input type="hidden" name="content" value="" {}
             }
 
+            @let form_ajax = fragment::AjaxLoadingAttrs::for_class("m-newPostForm__previewButton");
             form id="new-post-form" ."m-newPostForm"
                 action="/ui/post/preview_dialog"
                 method="post"
                 x-target="preview-dialog"
-                "@ajax:before"="clearTimeout($el._lt); $el._lt = setTimeout(() => $el.querySelector('.m-newPostForm__previewButton')?.classList.add('-loading'), 150)"
-                "@ajax:after"="clearTimeout($el._lt); $el.querySelector('.m-newPostForm__previewButton')?.classList.remove('-loading')"
+                "@ajax:before"=(form_ajax.before)
+                "@ajax:after"=(form_ajax.after)
             {
                 (self.render_reply_to_line(None, None))
                 div ."m-newPostForm__textareaWrapper"
@@ -406,13 +401,9 @@ impl UiState {
                                 }
                             "#
                         { "😀" }
-                        button ."m-newPostForm__previewButton u-button"
-                            disabled[ro.to_disabled()]
-                            type="submit"
-                        {
-                            span ."m-newPostForm__previewButtonIcon u-buttonIcon" width="1rem" height="1rem" {}
-                            "Preview"
-                        }
+                        (fragment::button("m-newPostForm__previewButton", "Preview")
+                            .disabled(ro.to_disabled())
+                            .call())
                     }
                     div ."m-newPostForm__footerRow m-newPostForm__footerRow--media" {
                         @if user_id.is_some() {
@@ -457,23 +448,25 @@ impl UiState {
 
             // Separate forms for media operations (outside main form to avoid nesting)
             @if let Some(uid) = user_id {
+                @let attach_ajax = fragment::AjaxLoadingAttrs::for_document_class("m-newPostForm__attachButton");
                 form id="media-attach-form"
                     action=(format!("/ui/media/{}/list", uid))
                     method="get"
                     x-target="media-list"
                     style="display: none;"
-                    "@ajax:before"="clearTimeout($el._lt); $el._lt = setTimeout(() => document.querySelector('.m-newPostForm__attachButton')?.classList.add('-loading'), 150)"
-                    "@ajax:after"="clearTimeout($el._lt); document.querySelector('.m-newPostForm__attachButton')?.classList.remove('-loading')"
+                    "@ajax:before"=(attach_ajax.before)
+                    "@ajax:after"=(attach_ajax.after)
                 {}
 
+                @let upload_ajax = fragment::AjaxLoadingAttrs::for_document_class("m-newPostForm__uploadButton");
                 form id="media-upload-form"
                     action="/ui/media/publish"
                     method="post"
                     enctype="multipart/form-data"
                     x-target="ajax-scripts"
                     style="display: none;"
-                    "@ajax:before"="clearTimeout($el._lt); $el._lt = setTimeout(() => document.querySelector('.m-newPostForm__uploadButton')?.classList.add('-loading'), 150)"
-                    "@ajax:after"="clearTimeout($el._lt); document.querySelector('.m-newPostForm__uploadButton')?.classList.remove('-loading')"
+                    "@ajax:before"=(upload_ajax.before)
+                    "@ajax:after"=(upload_ajax.after)
                 {
                     input id="media-file-input"
                         name="media_file"
