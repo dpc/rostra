@@ -149,7 +149,7 @@ pub async fn delete_post(
 pub async fn fetch_missing_post(
     state: State<SharedState>,
     session: UserSession,
-    Path((author_id, event_id)): Path<(RostraId, ShortEventId)>,
+    Path((post_thread_id, author_id, event_id)): Path<(ShortEventId, RostraId, ShortEventId)>,
 ) -> RequestResult<impl IntoResponse> {
     let client_handle = state.client(session.id()).await?;
     let client = client_handle.client_ref()?;
@@ -173,16 +173,16 @@ pub async fn fetch_missing_post(
     let db = client.db();
     let post_record = db.get_social_post(event_id).await;
 
+    let content_id = post_content_html_id(post_thread_id, event_id);
+
     if let Some(post_record) = post_record {
         if let Some(djot_content) = post_record.content.djot_content.as_ref() {
             let post_content_rendered = state
                 .render_content(&client, post_record.author, djot_content)
                 .await;
             return Ok(Maud(html! {
-                div ."m-postView__content -present" {
-                    p {
-                        (post_content_rendered)
-                    }
+                div #(content_id) ."m-postView__content -present" {
+                    (post_content_rendered)
                 }
             }));
         }
@@ -190,7 +190,7 @@ pub async fn fetch_missing_post(
 
     // Fetch attempt completed but post still not available
     Ok(Maud(html! {
-        div ."m-postView__content -missing" {
+        div #(content_id) ."m-postView__content -missing" {
             p {
                 "Post not found"
             }
@@ -468,7 +468,7 @@ impl UiState {
                             @if let (Some(ctx), Some(event_id)) = (post_thread_id, event_id) {
                                 @let content_target = post_content_html_id(ctx, event_id);
                                 (fragment::ajax_button(
-                                    &format!("/ui/post/{author}/{event_id}/fetch"),
+                                    &format!("/ui/post/{ctx}/{author}/{event_id}/fetch"),
                                     "post",
                                     &content_target,
                                     "m-postView__fetchButton",

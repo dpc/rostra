@@ -176,7 +176,7 @@ pub fn route_handler(state: SharedState) -> Router<Arc<UiState>> {
         .route("/ui/updates", get(timeline::get_updates))
         .route("/ui/post/{author}/{event}", get(post::get_single_post))
         .route(
-            "/ui/post/{author}/{event}/fetch",
+            "/ui/post/{post_thread_id}/{author}/{event}/fetch",
             post(post::fetch_missing_post).get(post::fetch_missing_post),
         )
         .route("/ui/post/{author}/{event}/delete", post(post::delete_post))
