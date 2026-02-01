@@ -1,0 +1,29 @@
+# cargo-mutants configuration
+# See: https://mutants.rs/mutants-toml.html
+
+# Timeout multiplier for mutant tests (default is 5x baseline)
+# timeout_multiplier = 5
+
+# Additional arguments passed to cargo test
+additional_cargo_test_args = ["--", "--test-threads=1"]
+
+# Functions/methods to skip mutating (regex patterns)
+# These are typically trivial getters, trait impls, or test code
+exclude_globs = [
+    # Test modules
+    "**/tests.rs",
+    "**/tests/**",
+    # Generated code
+    "**/generated/**",
+]
+
+# Exclude specific functions that are not worth testing
+# (add patterns as needed when you find false positives)
+exclude_re = [
+    # Trivial Default implementations
+    "impl Default for .* -> Self",
+    # Display/Debug implementations
+    "impl (Display|Debug) for",
+    # Simple From/Into conversions
+    "impl From<.*> for .* -> Self$",
+]

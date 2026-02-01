@@ -194,6 +194,7 @@
             jq
             systemfd
             treefmt
+            cargo-mutants
 
             (pkgs.callPackage ./nix/pkgs/wild.nix { })
           ];
