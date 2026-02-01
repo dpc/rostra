@@ -26,11 +26,9 @@ pub fn button(
 ) -> Markup {
     let disabled = disabled.unwrap_or(false);
     let button_type = button_type.unwrap_or("submit");
-    let icon_class = format!("{}Icon", class);
+    let icon_class = format!("{class}Icon");
 
-    let variant_class = variant
-        .map(|v| format!("u-button{}", v))
-        .unwrap_or_default();
+    let variant_class = variant.map(|v| format!("u-button{v}")).unwrap_or_default();
 
     html! {
         button
@@ -51,13 +49,9 @@ pub fn button(
 /// Returns the @ajax:before and @ajax:after attribute values.
 fn ajax_loading_js(button_selector: &str) -> (String, String) {
     let before = format!(
-        "clearTimeout($el._lt); $el._lt = setTimeout(() => {}?.classList.add('-loading'), 150)",
-        button_selector
+        "clearTimeout($el._lt); $el._lt = setTimeout(() => {button_selector}?.classList.add('-loading'), 150)"
     );
-    let after = format!(
-        "clearTimeout($el._lt); {}?.classList.remove('-loading')",
-        button_selector
-    );
+    let after = format!("clearTimeout($el._lt); {button_selector}?.classList.remove('-loading')");
     (before, after)
 }
 
@@ -87,14 +81,14 @@ impl AjaxLoadingAttrs {
     /// Create loading attributes for a button with a specific class inside the
     /// form.
     pub fn for_class(class: &str) -> Self {
-        Self::new(&format!("$el.querySelector('.{}')", class))
+        Self::new(&format!("$el.querySelector('.{class}')"))
     }
 
     /// Create loading attributes for a button found via document.querySelector.
     ///
     /// Use this when the button is outside the form element.
     pub fn for_document_class(class: &str) -> Self {
-        Self::new(&format!("document.querySelector('.{}')", class))
+        Self::new(&format!("document.querySelector('.{class}')"))
     }
 }
 
@@ -139,20 +133,14 @@ pub fn ajax_form(
     // Combine before_js with loading logic
     let ajax_before = match before_js {
         Some(js) => format!(
-            "{} {}; {}",
-            js,
-            "clearTimeout($el._lt)",
-            format!(
-                "$el._lt = setTimeout(() => {}?.classList.add('-loading'), 150)",
-                selector
-            )
+            "{js} clearTimeout($el._lt); $el._lt = setTimeout(() => {selector}?.classList.add('-loading'), 150)"
         ),
         None => loading_before,
     };
 
     // Combine loading cleanup with after_js
     let ajax_after = match after_js {
-        Some(js) => format!("{}; {}", loading_after, js),
+        Some(js) => format!("{loading_after}; {js}"),
         None => loading_after,
     };
 

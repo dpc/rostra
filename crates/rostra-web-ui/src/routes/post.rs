@@ -451,7 +451,7 @@ impl UiState {
                         @if let Some(reply_count) = reply_count {
                             @if reply_count > 0 {
                                 @if let Some(ctx) = post_thread_id {
-                                    @let label = if reply_count == 1 { "1 Reply".to_string() } else { format!("{} Replies", reply_count) };
+                                    @let label = if reply_count == 1 { "1 Reply".to_string() } else { format!("{reply_count} Replies") };
                                     @let comments_target = post_comments_html_id(ctx, ext_event_id.event_id().to_short());
                                     (fragment::ajax_form(
                                         &format!("/ui/comments/{}/{}", ctx, ext_event_id.event_id().to_short()),
@@ -468,7 +468,7 @@ impl UiState {
                             @if let (Some(ctx), Some(event_id)) = (post_thread_id, event_id) {
                                 @let content_target = post_content_html_id(ctx, event_id);
                                 (fragment::ajax_button(
-                                    &format!("/ui/post/{}/{}/fetch", author, event_id),
+                                    &format!("/ui/post/{author}/{event_id}/fetch"),
                                     "post",
                                     &content_target,
                                     "m-postView__fetchButton",
@@ -480,7 +480,7 @@ impl UiState {
                             @if let (Some(ctx), Some(event_id)) = (post_thread_id, event_id) {
                                 @let post_target = post_html_id(ctx, event_id);
                                 (fragment::ajax_button(
-                                    &format!("/ui/post/{}/{}/delete", author, event_id),
+                                    &format!("/ui/post/{author}/{event_id}/delete"),
                                     "post",
                                     &post_target,
                                     "m-postView__deleteButton",

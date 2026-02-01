@@ -266,7 +266,7 @@ impl UiState {
                         @if session.id() != profile_id {
                             @let label = if following { "Following..." } else { "Follow..." };
                             (fragment::ajax_button(
-                                &format!("/ui/profile/{}/follow?following={}", profile_id, following),
+                                &format!("/ui/profile/{profile_id}/follow?following={following}"),
                                 "get",
                                 "follow-dialog-content",
                                 "m-profileSummary__followButton",

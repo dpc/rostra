@@ -111,10 +111,9 @@ impl IntoResponse for RequestError {
                     RequestError::LoginRequired { redirect } => {
                         // Use standard HTTP redirect for Alpine-ajax
                         let url = match redirect {
-                            Some(ref path) => format!(
-                                "/ui/unlock?redirect={}",
-                                urlencoding::encode(path)
-                            ),
+                            Some(ref path) => {
+                                format!("/ui/unlock?redirect={}", urlencoding::encode(path))
+                            }
                             None => "/ui/unlock".to_string(),
                         };
                         return Redirect::to(&url).into_response();
