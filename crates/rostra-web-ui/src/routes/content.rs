@@ -132,8 +132,8 @@ fn maybe_embed_media_html(s: &str) -> Option<String> {
 
     match extract_media(&url)? {
         ExternalMedia::YT(vid) => Some(format!(
-            "<iframe loading=lazy width=\"100%\" style=\"aspect-ratio: 16 / 9;\"
- src=\"https://www.youtube.com/embed/{vid}\" frameborder=\"0\"></iframe>"
+            "<iframe loading=\"lazy\" width=\"100%\" style=\"aspect-ratio: 16 / 9;\" \
+data-src=\"https://www.youtube.com/embed/{vid}\" frameborder=\"0\"></iframe>"
         )),
     }
 }

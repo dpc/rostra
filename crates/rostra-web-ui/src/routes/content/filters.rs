@@ -199,7 +199,7 @@ where
                                 class: "lazyload-wrapper".into(),
                             },
                             jotup::Attributes::try_from(
-                                "{ onclick=\"this.classList.add('-expanded')\" }",
+                                "{ onclick=\"this.classList.add('-expanded'); this.lastElementChild.src = this.lastElementChild.dataset.src\" }",
                             )
                             .expect("Can't fail"),
                         ))
@@ -289,10 +289,20 @@ where
                                 .await?;
                             self.inner.emit(Event::Str(load_msg.into())).await?;
                             self.inner.emit(Event::End).await?;
+                            // Use placeholder src and data-src to prevent eager loading
+                            // 1x1 transparent gif as placeholder
+                            const PLACEHOLDER: &str = "data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7";
+                            let mut attrs = Attributes::new();
+                            attrs.push((
+                                AttributeKind::Pair {
+                                    key: Cow::Borrowed("data-src"),
+                                },
+                                AttributeValue::from(s.clone()),
+                            ));
                             self.inner
                                 .emit(Event::Start(
-                                    Container::Image(s.clone(), link_type),
-                                    Attributes::try_from("{ loading=lazy }").expect("Can't fail"),
+                                    Container::Image(PLACEHOLDER.into(), link_type),
+                                    attrs,
                                 ))
                                 .await?;
                             self.inner.emit(Event::Str(alt.to_string().into())).await?;
