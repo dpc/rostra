@@ -329,10 +329,15 @@ async fn test_content_reference_counting() -> BoxedErrorResult<()> {
     Ok(())
 }
 
-/// Test content deduplication - same content from different events shares
-/// storage.
+/// Test: Event arrives before content (normal flow).
+///
+/// Flow:
+/// 1. Event is inserted - content not in store yet
+/// 2. Event is added to events_content_missing, no RC, no state
+/// 3. Content is stored and event claims it via try_claim_content_tx
+/// 4. RC becomes 1, event marked Available, removed from missing
 #[test_log::test(tokio::test(flavor = "multi_thread"))]
-async fn test_content_deduplication() -> BoxedErrorResult<()> {
+async fn test_event_arrives_before_content() -> BoxedErrorResult<()> {
     use std::borrow::Cow;
 
     use rostra_core::id::ToShort;
@@ -342,18 +347,201 @@ async fn test_content_deduplication() -> BoxedErrorResult<()> {
     let id_secret = RostraIdSecretKey::generate();
     let (_dir, db) = temp_db(id_secret.id()).await?;
 
-    // Create two events with the same content
+    let event = build_test_event(id_secret, None);
+    let event_id = event.event_id.to_short();
+    let content_hash = event.content_hash();
+
+    db.write_with(|tx| {
+        let mut ids_full_tbl = tx.open_table(&ids_full::TABLE)?;
+        let mut events_table = tx.open_table(&events::TABLE)?;
+        let mut events_missing_table = tx.open_table(&events_missing::TABLE)?;
+        let mut events_by_time_table = tx.open_table(&events_by_time::TABLE)?;
+        let mut events_content_state_table = tx.open_table(&events_content_state::TABLE)?;
+        let mut content_store_table = tx.open_table(&content_store::TABLE)?;
+        let mut content_rc_table = tx.open_table(&content_rc::TABLE)?;
+        let mut events_content_missing_table = tx.open_table(&events_content_missing::TABLE)?;
+        let mut events_heads_table = tx.open_table(&events_heads::TABLE)?;
+
+        // Step 1: Insert event - content not in store yet
+        Database::insert_event_tx(
+            event,
+            &mut ids_full_tbl,
+            &mut events_table,
+            &mut events_missing_table,
+            &mut events_heads_table,
+            &mut events_by_time_table,
+            &mut events_content_state_table,
+            &content_store_table,
+            &mut content_rc_table,
+            &mut events_content_missing_table,
+        )?;
+
+        // Verify: Event should be in events_content_missing
+        assert!(
+            events_content_missing_table.get(&event_id)?.is_some(),
+            "Event should be in events_content_missing"
+        );
+
+        // Verify: No state set for event
+        assert!(
+            Database::get_event_content_state_tx(event_id, &events_content_state_table)?.is_none(),
+            "Event should have no content state yet"
+        );
+
+        // Verify: RC should be 0
+        let rc = Database::get_content_rc_tx(content_hash, &content_rc_table)?;
+        assert_eq!(rc, 0, "RC should be 0 - event hasn't claimed content");
+
+        // Step 2: Store content in content_store (simulating content arrival)
+        let test_content = EventContentRaw::new(vec![]);
+        content_store_table.insert(
+            &content_hash,
+            &ContentStoreRecord::Present(Cow::Owned(test_content)),
+        )?;
+
+        // Step 3: Event claims content via try_claim_content_tx
+        let claimed = Database::try_claim_content_tx(
+            event_id,
+            content_hash,
+            &mut events_content_state_table,
+            &content_store_table,
+            &mut content_rc_table,
+            &mut events_content_missing_table,
+        )?;
+        assert!(claimed, "Event should successfully claim content");
+
+        // Verify: Event removed from missing
+        assert!(
+            events_content_missing_table.get(&event_id)?.is_none(),
+            "Event should be removed from events_content_missing"
+        );
+
+        // Verify: Event marked as Available
+        let state = Database::get_event_content_state_tx(event_id, &events_content_state_table)?;
+        assert!(
+            matches!(state, Some(EventContentStateNew::Available)),
+            "Event should be marked as Available"
+        );
+
+        // Verify: RC is now 1
+        let rc = Database::get_content_rc_tx(content_hash, &content_rc_table)?;
+        assert_eq!(rc, 1, "RC should be 1 after claiming");
+
+        Ok(())
+    })
+    .await?;
+
+    Ok(())
+}
+
+/// Test: Content exists when event arrives (immediate claiming).
+///
+/// Flow:
+/// 1. Content is pre-stored in content_store (from another event)
+/// 2. Event is inserted - detects content exists
+/// 3. RC is incremented immediately, event marked Available
+/// 4. Event is NOT added to events_content_missing
+#[test_log::test(tokio::test(flavor = "multi_thread"))]
+async fn test_content_exists_when_event_arrives() -> BoxedErrorResult<()> {
+    use std::borrow::Cow;
+
+    use rostra_core::id::ToShort;
+
+    use crate::event::ContentStoreRecord;
+
+    let id_secret = RostraIdSecretKey::generate();
+    let (_dir, db) = temp_db(id_secret.id()).await?;
+
+    let event = build_test_event(id_secret, None);
+    let event_id = event.event_id.to_short();
+    let content_hash = event.content_hash();
+
+    db.write_with(|tx| {
+        let mut ids_full_tbl = tx.open_table(&ids_full::TABLE)?;
+        let mut events_table = tx.open_table(&events::TABLE)?;
+        let mut events_missing_table = tx.open_table(&events_missing::TABLE)?;
+        let mut events_by_time_table = tx.open_table(&events_by_time::TABLE)?;
+        let mut events_content_state_table = tx.open_table(&events_content_state::TABLE)?;
+        let mut content_store_table = tx.open_table(&content_store::TABLE)?;
+        let mut content_rc_table = tx.open_table(&content_rc::TABLE)?;
+        let mut events_content_missing_table = tx.open_table(&events_content_missing::TABLE)?;
+        let mut events_heads_table = tx.open_table(&events_heads::TABLE)?;
+
+        // Step 1: Pre-store content in content_store
+        let test_content = EventContentRaw::new(vec![]);
+        content_store_table.insert(
+            &content_hash,
+            &ContentStoreRecord::Present(Cow::Owned(test_content)),
+        )?;
+
+        // Step 2: Insert event - content already exists
+        Database::insert_event_tx(
+            event,
+            &mut ids_full_tbl,
+            &mut events_table,
+            &mut events_missing_table,
+            &mut events_heads_table,
+            &mut events_by_time_table,
+            &mut events_content_state_table,
+            &content_store_table,
+            &mut content_rc_table,
+            &mut events_content_missing_table,
+        )?;
+
+        // Verify: Event should NOT be in events_content_missing
+        assert!(
+            events_content_missing_table.get(&event_id)?.is_none(),
+            "Event should NOT be in events_content_missing"
+        );
+
+        // Verify: Event should be marked as Available immediately
+        let state = Database::get_event_content_state_tx(event_id, &events_content_state_table)?;
+        assert!(
+            matches!(state, Some(EventContentStateNew::Available)),
+            "Event should be marked as Available immediately"
+        );
+
+        // Verify: RC should be 1
+        let rc = Database::get_content_rc_tx(content_hash, &content_rc_table)?;
+        assert_eq!(rc, 1, "RC should be 1 after event claims content");
+
+        Ok(())
+    })
+    .await?;
+
+    Ok(())
+}
+
+/// Test: Multiple events with same content hash share storage.
+///
+/// Flow:
+/// 1. Event A arrives (no content) -> added to missing, RC=0
+/// 2. Content arrives for A -> stored, A claims it, RC=1
+/// 3. Event B arrives (content exists) -> claims immediately, RC=2
+/// 4. Prune A -> RC=1, content still exists for B
+/// 5. Prune B -> RC=0, content can be GC'd
+#[test_log::test(tokio::test(flavor = "multi_thread"))]
+async fn test_multiple_events_share_content() -> BoxedErrorResult<()> {
+    use std::borrow::Cow;
+
+    use rostra_core::id::ToShort;
+
+    use crate::event::ContentStoreRecord;
+
+    let id_secret = RostraIdSecretKey::generate();
+    let (_dir, db) = temp_db(id_secret.id()).await?;
+
+    // Create two events with the same content hash (empty content)
     let event_a = build_test_event(id_secret, None);
     let event_a_id = event_a.event_id.to_short();
     let event_b = build_test_event(id_secret, event_a.event_id);
     let event_b_id = event_b.event_id.to_short();
-
-    // Both events have empty content, so they share the same content hash
     let content_hash = event_a.content_hash();
+
     assert_eq!(
         content_hash,
         event_b.content_hash(),
-        "Both events should have the same content hash"
+        "Both events should have same content hash"
     );
 
     db.write_with(|tx| {
@@ -367,7 +555,7 @@ async fn test_content_deduplication() -> BoxedErrorResult<()> {
         let mut events_content_missing_table = tx.open_table(&events_content_missing::TABLE)?;
         let mut events_heads_table = tx.open_table(&events_heads::TABLE)?;
 
-        // Insert first event
+        // Step 1: Event A arrives - no content in store
         Database::insert_event_tx(
             event_a,
             &mut ids_full_tbl,
@@ -381,11 +569,38 @@ async fn test_content_deduplication() -> BoxedErrorResult<()> {
             &mut events_content_missing_table,
         )?;
 
-        // RC should be 1 for this content hash
-        let rc_after_first = Database::get_content_rc_tx(content_hash, &content_rc_table)?;
-        assert_eq!(rc_after_first, 1, "RC should be 1 after first event");
+        assert_eq!(
+            Database::get_content_rc_tx(content_hash, &content_rc_table)?,
+            0,
+            "RC=0 after A arrives (no content yet)"
+        );
+        assert!(
+            events_content_missing_table.get(&event_a_id)?.is_some(),
+            "A should be in missing"
+        );
 
-        // Insert second event with same content
+        // Step 2: Content arrives for A - store and claim
+        let test_content = EventContentRaw::new(vec![]);
+        content_store_table.insert(
+            &content_hash,
+            &ContentStoreRecord::Present(Cow::Owned(test_content)),
+        )?;
+        Database::try_claim_content_tx(
+            event_a_id,
+            content_hash,
+            &mut events_content_state_table,
+            &content_store_table,
+            &mut content_rc_table,
+            &mut events_content_missing_table,
+        )?;
+
+        assert_eq!(
+            Database::get_content_rc_tx(content_hash, &content_rc_table)?,
+            1,
+            "RC=1 after A claims content"
+        );
+
+        // Step 3: Event B arrives - content already exists, claims immediately
         Database::insert_event_tx(
             event_b,
             &mut ids_full_tbl,
@@ -399,20 +614,24 @@ async fn test_content_deduplication() -> BoxedErrorResult<()> {
             &mut events_content_missing_table,
         )?;
 
-        // RC should be 2 now - both events reference same content
-        let rc_after_second = Database::get_content_rc_tx(content_hash, &content_rc_table)?;
-        assert_eq!(rc_after_second, 2, "RC should be 2 after second event");
+        assert_eq!(
+            Database::get_content_rc_tx(content_hash, &content_rc_table)?,
+            2,
+            "RC=2 after B claims content"
+        );
+        assert!(
+            events_content_missing_table.get(&event_b_id)?.is_none(),
+            "B should NOT be in missing"
+        );
+        assert!(
+            matches!(
+                Database::get_event_content_state_tx(event_b_id, &events_content_state_table)?,
+                Some(EventContentStateNew::Available)
+            ),
+            "B should be Available"
+        );
 
-        // Store some content to make the test complete
-        let test_content = EventContentRaw::new(vec![]);
-        content_store_table.insert(
-            &content_hash,
-            &ContentStoreRecord::Present(Cow::Owned(test_content)),
-        )?;
-        events_content_state_table.insert(&event_a_id, &EventContentStateNew::Available)?;
-        events_content_state_table.insert(&event_b_id, &EventContentStateNew::Available)?;
-
-        // Now prune event_a's content - RC should decrement
+        // Step 4: Prune A's content - RC decrements, B still has content
         Database::prune_event_content_tx(
             event_a_id,
             content_hash,
@@ -421,25 +640,180 @@ async fn test_content_deduplication() -> BoxedErrorResult<()> {
             &mut events_content_missing_table,
         )?;
 
-        let rc_after_prune = Database::get_content_rc_tx(content_hash, &content_rc_table)?;
         assert_eq!(
-            rc_after_prune, 1,
-            "RC should be 1 after pruning first event"
+            Database::get_content_rc_tx(content_hash, &content_rc_table)?,
+            1,
+            "RC=1 after pruning A"
+        );
+        assert!(
+            matches!(
+                Database::get_event_content_state_tx(event_a_id, &events_content_state_table)?,
+                Some(EventContentStateNew::Pruned)
+            ),
+            "A should be Pruned"
+        );
+        assert!(
+            content_store_table.get(&content_hash)?.is_some(),
+            "Content should still exist (RC > 0)"
         );
 
-        // Event_b should still see content as available
-        let state_b =
-            Database::get_event_content_state_tx(event_b_id, &events_content_state_table)?;
+        // Step 5: Prune B's content - RC goes to 0
+        Database::prune_event_content_tx(
+            event_b_id,
+            content_hash,
+            &mut events_content_state_table,
+            &mut content_rc_table,
+            &mut events_content_missing_table,
+        )?;
+
+        assert_eq!(
+            Database::get_content_rc_tx(content_hash, &content_rc_table)?,
+            0,
+            "RC=0 after pruning B"
+        );
         assert!(
-            matches!(state_b, Some(EventContentStateNew::Available)),
-            "Event B should still have content available"
+            matches!(
+                Database::get_event_content_state_tx(event_b_id, &events_content_state_table)?,
+                Some(EventContentStateNew::Pruned)
+            ),
+            "B should be Pruned"
+        );
+        // Note: Content still exists in store - would need explicit GC to remove
+
+        Ok(())
+    })
+    .await?;
+
+    Ok(())
+}
+
+/// Test: Lazy claiming for event that was waiting when content arrived via
+/// another event.
+///
+/// Flow:
+/// 1. Event A and B arrive (both waiting for content) -> both in missing, RC=0
+/// 2. Content is stored (simulating arrival via A)
+/// 3. A claims content -> RC=1
+/// 4. B is still in missing (lazy - hasn't been processed yet)
+/// 5. B calls try_claim_content_tx -> RC=2, B marked Available
+#[test_log::test(tokio::test(flavor = "multi_thread"))]
+async fn test_lazy_content_claiming() -> BoxedErrorResult<()> {
+    use std::borrow::Cow;
+
+    use rostra_core::id::ToShort;
+
+    use crate::event::ContentStoreRecord;
+
+    let id_secret = RostraIdSecretKey::generate();
+    let (_dir, db) = temp_db(id_secret.id()).await?;
+
+    let event_a = build_test_event(id_secret, None);
+    let event_a_id = event_a.event_id.to_short();
+    let event_b = build_test_event(id_secret, event_a.event_id);
+    let event_b_id = event_b.event_id.to_short();
+    let content_hash = event_a.content_hash();
+
+    db.write_with(|tx| {
+        let mut ids_full_tbl = tx.open_table(&ids_full::TABLE)?;
+        let mut events_table = tx.open_table(&events::TABLE)?;
+        let mut events_missing_table = tx.open_table(&events_missing::TABLE)?;
+        let mut events_by_time_table = tx.open_table(&events_by_time::TABLE)?;
+        let mut events_content_state_table = tx.open_table(&events_content_state::TABLE)?;
+        let mut content_store_table = tx.open_table(&content_store::TABLE)?;
+        let mut content_rc_table = tx.open_table(&content_rc::TABLE)?;
+        let mut events_content_missing_table = tx.open_table(&events_content_missing::TABLE)?;
+        let mut events_heads_table = tx.open_table(&events_heads::TABLE)?;
+
+        // Step 1: Both events arrive - no content in store
+        Database::insert_event_tx(
+            event_a,
+            &mut ids_full_tbl,
+            &mut events_table,
+            &mut events_missing_table,
+            &mut events_heads_table,
+            &mut events_by_time_table,
+            &mut events_content_state_table,
+            &content_store_table,
+            &mut content_rc_table,
+            &mut events_content_missing_table,
+        )?;
+        Database::insert_event_tx(
+            event_b,
+            &mut ids_full_tbl,
+            &mut events_table,
+            &mut events_missing_table,
+            &mut events_heads_table,
+            &mut events_by_time_table,
+            &mut events_content_state_table,
+            &content_store_table,
+            &mut content_rc_table,
+            &mut events_content_missing_table,
+        )?;
+
+        // Both should be in missing
+        assert!(events_content_missing_table.get(&event_a_id)?.is_some());
+        assert!(events_content_missing_table.get(&event_b_id)?.is_some());
+        assert_eq!(
+            Database::get_content_rc_tx(content_hash, &content_rc_table)?,
+            0
         );
 
-        // Content should still exist in store
-        let content_exists = content_store_table.get(&content_hash)?.is_some();
+        // Step 2: Content is stored
+        let test_content = EventContentRaw::new(vec![]);
+        content_store_table.insert(
+            &content_hash,
+            &ContentStoreRecord::Present(Cow::Owned(test_content)),
+        )?;
+
+        // Step 3: A claims content
+        Database::try_claim_content_tx(
+            event_a_id,
+            content_hash,
+            &mut events_content_state_table,
+            &content_store_table,
+            &mut content_rc_table,
+            &mut events_content_missing_table,
+        )?;
+
+        assert_eq!(
+            Database::get_content_rc_tx(content_hash, &content_rc_table)?,
+            1
+        );
+        assert!(events_content_missing_table.get(&event_a_id)?.is_none());
+
+        // Step 4: B is still in missing (lazy - not processed yet)
         assert!(
-            content_exists,
-            "Content should still exist in store (RC > 0)"
+            events_content_missing_table.get(&event_b_id)?.is_some(),
+            "B should still be in missing (lazy)"
+        );
+        assert!(
+            Database::get_event_content_state_tx(event_b_id, &events_content_state_table)?
+                .is_none(),
+            "B should have no state yet"
+        );
+
+        // Step 5: B lazily claims content
+        let claimed = Database::try_claim_content_tx(
+            event_b_id,
+            content_hash,
+            &mut events_content_state_table,
+            &content_store_table,
+            &mut content_rc_table,
+            &mut events_content_missing_table,
+        )?;
+
+        assert!(claimed, "B should successfully claim content");
+        assert_eq!(
+            Database::get_content_rc_tx(content_hash, &content_rc_table)?,
+            2
+        );
+        assert!(events_content_missing_table.get(&event_b_id)?.is_none());
+        assert!(
+            matches!(
+                Database::get_event_content_state_tx(event_b_id, &events_content_state_table)?,
+                Some(EventContentStateNew::Available)
+            ),
+            "B should be Available after lazy claim"
         );
 
         Ok(())

@@ -495,11 +495,9 @@ impl Database {
         tx: &WriteTransactionCtx,
     ) -> DbResult<()> {
         let events_table = tx.open_table(&events::TABLE)?;
-        let events_content_state_table = tx.open_table(&events_content_state::TABLE)?;
-        let content_store_table = tx.open_table(&content_store::TABLE)?;
-        let mut content_store_table_mut = tx.open_table(&content_store::TABLE)?;
+        let mut events_content_state_table = tx.open_table(&events_content_state::TABLE)?;
+        let mut content_store_table = tx.open_table(&content_store::TABLE)?;
         let mut content_rc_table = tx.open_table(&content_rc::TABLE)?;
-        let mut events_content_state_table_mut = tx.open_table(&events_content_state::TABLE)?;
         let mut events_content_missing_table =
             tx.open_table(&tables::events_content_missing::TABLE)?;
 
@@ -559,14 +557,14 @@ impl Database {
                     } else {
                         ContentStoreRecord::Invalid(Cow::Owned(content.clone()))
                     };
-                    content_store_table_mut.insert(&content_hash, &store_record)?;
+                    content_store_table.insert(&content_hash, &store_record)?;
                 }
 
-                // Increment RC for this content
+                // Increment RC for this event claiming the content
                 Database::increment_content_rc_tx(content_hash, &mut content_rc_table)?;
 
-                // Mark per-event state as available
-                events_content_state_table_mut.insert(
+                // Mark per-event state as available (this event now holds an RC)
+                events_content_state_table.insert(
                     &event_content.event_id().to_short(),
                     &EventContentStateNew::Available,
                 )?;

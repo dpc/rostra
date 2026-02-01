@@ -188,9 +188,21 @@ impl Database {
         )?;
         events_by_time_table.insert(&(event.timestamp(), event_id), &())?;
 
-        // Increment reference count for this event's content hash
+        // Handle content state for this event
+        // Only claim content (increment RC) if event is not deleted AND content is
+        // already in store
         let content_hash = event.content_hash();
-        Database::increment_content_rc_tx(content_hash, content_rc_table)?;
+        if !is_deleted {
+            // Check if content already exists in the store
+            if content_store_table.get(&content_hash)?.is_some() {
+                // Content exists - claim it immediately
+                Database::increment_content_rc_tx(content_hash, content_rc_table)?;
+                events_content_state_table.insert(&event_id, &EventContentStateNew::Available)?;
+            } else {
+                // Content not in store yet - mark as missing
+                events_content_missing_table.insert(&event_id, &())?;
+            }
+        }
 
         Ok(InsertEventOutcome::Inserted {
             was_missing,
@@ -378,6 +390,55 @@ impl Database {
             .get(&event.into())?
             .map(|r| r.value());
         Ok(matches!(state, Some(EventContentStateNew::Available)))
+    }
+
+    /// Try to lazily claim content for an event that was waiting for it.
+    ///
+    /// This is for cases where:
+    /// - Event A was inserted but its content wasn't available yet (added to
+    ///   missing)
+    /// - Later, content arrived via event B (which has the same content hash)
+    /// - Now we want event A to "claim" that content
+    ///
+    /// This function:
+    /// 1. Checks if event has no state yet (meaning it's waiting for content)
+    /// 2. Checks if content is already in content_store (from another event)
+    /// 3. If both: increments RC, marks event as Available, removes from
+    ///    missing
+    ///
+    /// Returns `true` if content was successfully claimed, `false` otherwise.
+    pub fn try_claim_content_tx(
+        event_id: impl Into<ShortEventId>,
+        content_hash: ContentHash,
+        events_content_state_table: &mut events_content_state::Table,
+        content_store_table: &impl content_store::ReadableTable,
+        content_rc_table: &mut content_rc::Table,
+        events_content_missing_table: &mut events_content_missing::Table,
+    ) -> DbResult<bool> {
+        let event_id = event_id.into();
+
+        // Check if event already has a state
+        if events_content_state_table.get(&event_id)?.is_some() {
+            // Event already has a state (Available, Deleted, or Pruned)
+            // Nothing to claim
+            return Ok(false);
+        }
+
+        // Check if content is in store (from another event)
+        if content_store_table.get(&content_hash)?.is_none() {
+            // Content not in store yet
+            return Ok(false);
+        }
+
+        // Content exists! Claim it for this event.
+        // Increment RC
+        Database::increment_content_rc_tx(content_hash, content_rc_table)?;
+        // Mark event as Available
+        events_content_state_table.insert(&event_id, &EventContentStateNew::Available)?;
+        // Remove from missing (if present)
+        events_content_missing_table.remove(&event_id)?;
+
+        Ok(true)
     }
 
     pub(crate) fn insert_follow_tx(
