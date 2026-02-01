@@ -711,6 +711,24 @@ emoji-picker {
   font-style: italic;
 }
 
+.lazyload-message::before {
+  content: "";
+  display: inline-block;
+  width: 1em;
+  height: 1em;
+  margin-right: 0.3em;
+  vertical-align: -0.1em;
+  filter: invert(var(--invert));
+}
+
+.lazyload-message.-video::before {
+  background: url('/assets/icons/film.svg') center/contain no-repeat;
+}
+
+.lazyload-message.-image::before {
+  background: url('/assets/icons/image.svg') center/contain no-repeat;
+}
+
 .m-postView__content.-missing {
   color: red;
   font-style: italic;

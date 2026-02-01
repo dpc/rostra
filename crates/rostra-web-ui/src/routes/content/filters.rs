@@ -250,7 +250,11 @@ where
                             };
 
                             self.inner
-                                .emit(Event::Start(Container::Paragraph, Attributes::new()))
+                                .emit(Event::Start(
+                                    Container::Paragraph,
+                                    Attributes::try_from("{ class=\"lazyload-message -video\" }")
+                                        .expect("valid"),
+                                ))
                                 .await?;
                             self.inner.emit(Event::Str(load_msg.into())).await?;
                             self.inner.emit(Event::End).await?;
@@ -277,7 +281,11 @@ where
                             };
 
                             self.inner
-                                .emit(Event::Start(Container::Paragraph, Attributes::new()))
+                                .emit(Event::Start(
+                                    Container::Paragraph,
+                                    Attributes::try_from("{ class=\"lazyload-message -image\" }")
+                                        .expect("valid"),
+                                ))
                                 .await?;
                             self.inner.emit(Event::Str(load_msg.into())).await?;
                             self.inner.emit(Event::End).await?;
