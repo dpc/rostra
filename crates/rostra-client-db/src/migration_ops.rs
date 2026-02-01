@@ -7,13 +7,13 @@ use tracing::{debug, info};
 use crate::ids::IdsFolloweesRecordV0;
 use crate::{
     ContentStoreRecordOwned, Database, DbResult, DbVersionTooHighSnafu, EventContentStateNew,
-    IdSocialProfileRecord, IdsFolloweesRecord, LOG_TARGET, Latest, SocialPostRecord,
-    WriteTransactionCtx, content_rc, content_store, db_version, events, events_by_time,
-    events_content, events_content_missing, events_content_state, events_heads, events_missing,
-    events_self, events_singletons, events_singletons_new, ids_followees, ids_followees_v0,
-    ids_followers, ids_full, ids_personas, ids_self, ids_unfollowed, social_posts,
-    social_posts_by_time, social_posts_reactions, social_posts_replies, social_posts_v0,
-    social_profiles, social_profiles_v0,
+    IdSocialProfileRecord, IdsDataUsageRecord, IdsFolloweesRecord, LOG_TARGET, Latest,
+    SocialPostRecord, WriteTransactionCtx, content_rc, content_store, db_version, events,
+    events_by_time, events_content, events_content_missing, events_content_state, events_heads,
+    events_missing, events_self, events_singletons, events_singletons_new, ids_data_usage,
+    ids_followees, ids_followees_v0, ids_followers, ids_full, ids_personas, ids_self,
+    ids_unfollowed, social_posts, social_posts_by_time, social_posts_reactions,
+    social_posts_replies, social_posts_v0, social_profiles, social_profiles_v0,
 };
 
 impl Database {
@@ -26,6 +26,7 @@ impl Database {
         tx.open_table(&ids_followees::TABLE)?;
         tx.open_table(&ids_unfollowed::TABLE)?;
         tx.open_table(&ids_personas::TABLE)?;
+        tx.open_table(&ids_data_usage::TABLE)?;
 
         tx.open_table(&events::TABLE)?;
         tx.open_table(&events_singletons::TABLE)?;
@@ -50,7 +51,7 @@ impl Database {
     }
 
     pub(crate) fn handle_db_ver_migrations(dbtx: &WriteTransactionCtx) -> DbResult<()> {
-        const DB_VER: u64 = 4;
+        const DB_VER: u64 = 5;
 
         let mut table_db_ver = dbtx.open_table(&db_version::TABLE)?;
 
@@ -76,6 +77,7 @@ impl Database {
                 1 => Self::migrate_v1(dbtx)?,
                 2 => Self::migrate_v2(dbtx)?,
                 3 => Self::migrate_v3(dbtx)?,
+                4 => Self::migrate_v4(dbtx)?,
                 DB_VER => { /* ensures we didn't forget to increment DB_VER */ }
                 x => panic!("Unexpected db ver: {x}"),
             }
@@ -313,6 +315,62 @@ impl Database {
         )? {
             info!(target: LOG_TARGET, "Deleted old events_content_rc_count table");
         }
+
+        Ok(())
+    }
+
+    /// Migration v4: Calculate initial data usage per identity.
+    ///
+    /// Iterates all events to calculate:
+    /// 1. metadata_size: count of events × EVENT_METADATA_SIZE (192 bytes)
+    /// 2. content_size: sum of content_len for events in Available state
+    pub(crate) fn migrate_v4(dbtx: &WriteTransactionCtx) -> DbResult<()> {
+        use std::collections::HashMap;
+
+        use rostra_core::event::EventExt as _;
+
+        /// Size of event metadata in bytes (Event struct + signature).
+        /// See rostra_core::event::Event documentation.
+        const EVENT_METADATA_SIZE: u64 = 192;
+
+        let events_table = dbtx.open_table(&events::TABLE)?;
+        let state_table = dbtx.open_table(&events_content_state::TABLE)?;
+        let mut usage_table = dbtx.open_table(&ids_data_usage::TABLE)?;
+
+        // Collect usage per author
+        let mut usage_map: HashMap<rostra_core::id::RostraId, IdsDataUsageRecord> = HashMap::new();
+
+        for entry in events_table.range(..)? {
+            let (event_id, record) = entry?;
+            let event_id = event_id.value();
+            let record = record.value();
+            let author = record.author();
+
+            let usage = usage_map.entry(author).or_default();
+
+            // Every event contributes to metadata size
+            usage.metadata_size += EVENT_METADATA_SIZE;
+
+            // Content only counts if state is Available
+            if let Some(state) = state_table.get(&event_id)?.map(|g| g.value()) {
+                if matches!(state, EventContentStateNew::Available) {
+                    usage.content_size += u64::from(record.content_len());
+                }
+            }
+        }
+
+        // Write aggregated usage to table
+        let mut count = 0u64;
+        for (author, usage) in usage_map {
+            usage_table.insert(&author, &usage)?;
+            count += 1;
+        }
+
+        info!(
+            target: LOG_TARGET,
+            "Calculated data usage for {} identities",
+            count
+        );
 
         Ok(())
     }

@@ -500,6 +500,7 @@ impl Database {
         let mut content_rc_table = tx.open_table(&content_rc::TABLE)?;
         let mut events_content_missing_table =
             tx.open_table(&tables::events_content_missing::TABLE)?;
+        let mut ids_data_usage_table = tx.open_table(&ids_data_usage::TABLE)?;
 
         debug_assert!(Database::has_event_tx(
             event_content.event.event_id,
@@ -562,6 +563,13 @@ impl Database {
 
                 // Increment RC for this event claiming the content
                 Database::increment_content_rc_tx(content_hash, &mut content_rc_table)?;
+
+                // Track content size for the author
+                Database::increment_content_size_tx(
+                    event_content.author(),
+                    event_content.content_len(),
+                    &mut ids_data_usage_table,
+                )?;
 
                 // Mark per-event state as available (this event now holds an RC)
                 events_content_state_table.insert(

@@ -101,6 +101,7 @@ async fn test_store_event() -> BoxedErrorResult<()> {
                     &content_store_table,
                     &mut content_rc_table,
                     &mut events_content_missing_table,
+                    None,
                 )?;
 
                 info!(event_id = %event.event_id, "Checking missing");
@@ -208,6 +209,7 @@ async fn test_store_deleted_event() -> BoxedErrorResult<()> {
                     &content_store_table,
                     &mut content_rc_table,
                     &mut events_content_missing_table,
+                    None,
                 )?;
 
                 for (event_id, expected_state) in [event_a_id, event_b_id, event_c_id, event_d_id]
@@ -374,6 +376,7 @@ async fn test_event_arrives_before_content() -> BoxedErrorResult<()> {
             &content_store_table,
             &mut content_rc_table,
             &mut events_content_missing_table,
+            None,
         )?;
 
         // Verify: Event should be in events_content_missing
@@ -486,6 +489,7 @@ async fn test_content_exists_when_event_arrives() -> BoxedErrorResult<()> {
             &content_store_table,
             &mut content_rc_table,
             &mut events_content_missing_table,
+            None,
         )?;
 
         // Verify: Event should NOT be in events_content_missing
@@ -567,6 +571,7 @@ async fn test_multiple_events_share_content() -> BoxedErrorResult<()> {
             &content_store_table,
             &mut content_rc_table,
             &mut events_content_missing_table,
+            None,
         )?;
 
         assert_eq!(
@@ -612,6 +617,7 @@ async fn test_multiple_events_share_content() -> BoxedErrorResult<()> {
             &content_store_table,
             &mut content_rc_table,
             &mut events_content_missing_table,
+            None,
         )?;
 
         assert_eq!(
@@ -638,6 +644,7 @@ async fn test_multiple_events_share_content() -> BoxedErrorResult<()> {
             &mut events_content_state_table,
             &mut content_rc_table,
             &mut events_content_missing_table,
+            None,
         )?;
 
         assert_eq!(
@@ -664,6 +671,7 @@ async fn test_multiple_events_share_content() -> BoxedErrorResult<()> {
             &mut events_content_state_table,
             &mut content_rc_table,
             &mut events_content_missing_table,
+            None,
         )?;
 
         assert_eq!(
@@ -736,6 +744,7 @@ async fn test_lazy_content_claiming() -> BoxedErrorResult<()> {
             &content_store_table,
             &mut content_rc_table,
             &mut events_content_missing_table,
+            None,
         )?;
         Database::insert_event_tx(
             event_b,
@@ -748,6 +757,7 @@ async fn test_lazy_content_claiming() -> BoxedErrorResult<()> {
             &content_store_table,
             &mut content_rc_table,
             &mut events_content_missing_table,
+            None,
         )?;
 
         // Both should be in missing
@@ -918,6 +928,7 @@ async fn test_delete_event_arrives_before_target() -> BoxedErrorResult<()> {
             &content_store_table,
             &mut content_rc_table,
             &mut events_content_missing_table,
+            None,
         )?;
 
         // Verify: A should be marked as missing with deleted_by = B
@@ -946,6 +957,7 @@ async fn test_delete_event_arrives_before_target() -> BoxedErrorResult<()> {
             &content_store_table,
             &mut content_rc_table,
             &mut events_content_missing_table,
+            None,
         )?;
 
         // Verify: D should be marked as missing but WITHOUT deleted_by
@@ -1453,6 +1465,194 @@ async fn test_insert_latest_value_timestamp_ordering() -> BoxedErrorResult<()> {
 }
 
 // ============================================================================
+// Data Usage Tracking Tests
+// ============================================================================
+
+/// Test: Data usage tracking for metadata and content sizes.
+///
+/// Verifies that metadata size increases when events are added, and content
+/// size tracks Available content correctly.
+#[test_log::test(tokio::test(flavor = "multi_thread"))]
+async fn test_data_usage_tracking() -> BoxedErrorResult<()> {
+    use std::borrow::Cow;
+
+    use crate::event::ContentStoreRecord;
+    use crate::ids_data_usage;
+
+    let id_secret = RostraIdSecretKey::generate();
+    let author = id_secret.id();
+    let (_dir, db) = temp_db(author).await?;
+
+    // Create events with content
+    let event_a = build_test_event(id_secret, None);
+    let event_b = build_test_event(id_secret, event_a.event_id);
+    let content_hash = event_a.content_hash();
+
+    db.write_with(|tx| {
+        let mut ids_full_tbl = tx.open_table(&ids_full::TABLE)?;
+        let mut events_table = tx.open_table(&events::TABLE)?;
+        let mut events_missing_table = tx.open_table(&events_missing::TABLE)?;
+        let mut events_heads_table = tx.open_table(&events_heads::TABLE)?;
+        let mut events_by_time_table = tx.open_table(&events_by_time::TABLE)?;
+        let mut events_content_state_table = tx.open_table(&events_content_state::TABLE)?;
+        let mut content_store_table = tx.open_table(&content_store::TABLE)?;
+        let mut content_rc_table = tx.open_table(&content_rc::TABLE)?;
+        let mut events_content_missing_table = tx.open_table(&events_content_missing::TABLE)?;
+        let mut ids_data_usage_table = tx.open_table(&ids_data_usage::TABLE)?;
+
+        // Initially, no data usage
+        let usage = Database::get_data_usage_tx(author, &ids_data_usage_table)?;
+        assert_eq!(usage.metadata_size, 0);
+        assert_eq!(usage.content_size, 0);
+
+        // Insert event A (content not in store yet)
+        Database::insert_event_tx(
+            event_a,
+            &mut ids_full_tbl,
+            &mut events_table,
+            &mut events_missing_table,
+            &mut events_heads_table,
+            &mut events_by_time_table,
+            &mut events_content_state_table,
+            &content_store_table,
+            &mut content_rc_table,
+            &mut events_content_missing_table,
+            Some(&mut ids_data_usage_table),
+        )?;
+
+        // Check metadata size increased, content still 0 (content not claimed)
+        let usage = Database::get_data_usage_tx(author, &ids_data_usage_table)?;
+        assert_eq!(
+            usage.metadata_size,
+            Database::EVENT_METADATA_SIZE,
+            "Metadata should be 192 bytes for one event"
+        );
+        assert_eq!(usage.content_size, 0, "Content should still be 0");
+
+        // Store content in content_store
+        let test_content = EventContentRaw::new(vec![1, 2, 3, 4, 5]); // 5 bytes
+        content_store_table.insert(
+            &content_hash,
+            &ContentStoreRecord::Present(Cow::Owned(test_content)),
+        )?;
+
+        // Insert event B (content exists, should be claimed immediately)
+        Database::insert_event_tx(
+            event_b,
+            &mut ids_full_tbl,
+            &mut events_table,
+            &mut events_missing_table,
+            &mut events_heads_table,
+            &mut events_by_time_table,
+            &mut events_content_state_table,
+            &content_store_table,
+            &mut content_rc_table,
+            &mut events_content_missing_table,
+            Some(&mut ids_data_usage_table),
+        )?;
+
+        // Check metadata doubled, and content size now reflects B's claim
+        let usage = Database::get_data_usage_tx(author, &ids_data_usage_table)?;
+        assert_eq!(
+            usage.metadata_size,
+            Database::EVENT_METADATA_SIZE * 2,
+            "Metadata should be 384 bytes for two events"
+        );
+        // Note: content_len is from the event header (0 for our test events from
+        // build_test_event) Since build_test_event uses Event::default() which
+        // has content_len = 0
+        assert_eq!(
+            usage.content_size, 0,
+            "Content size tracks event.content_len (0 for test events)"
+        );
+
+        Ok(())
+    })
+    .await?;
+
+    Ok(())
+}
+
+/// Test: Data usage tracks content size correctly when content is claimed.
+#[test_log::test(tokio::test(flavor = "multi_thread"))]
+async fn test_data_usage_content_tracking() -> BoxedErrorResult<()> {
+    use std::borrow::Cow;
+
+    use rostra_core::event::{Event, EventExt as _, EventKind, VerifiedEvent};
+
+    use crate::event::ContentStoreRecord;
+    use crate::ids_data_usage;
+
+    let id_secret = RostraIdSecretKey::generate();
+    let author = id_secret.id();
+    let (_dir, db) = temp_db(author).await?;
+
+    // Create an event with a non-zero content_len (1000 bytes of content)
+    let content_data = vec![0u8; 1000];
+    let content = EventContentRaw::new(content_data.clone());
+    let content_len = content.len() as u32;
+
+    let event = {
+        let base_event = Event::builder_raw_content()
+            .author(author)
+            .kind(EventKind::SOCIAL_POST)
+            .content(&content)
+            .build();
+        let signed = base_event.signed_by(id_secret);
+        VerifiedEvent::verify_signed(author, signed).expect("Valid event")
+    };
+    let content_hash = event.content_hash();
+
+    db.write_with(|tx| {
+        let mut ids_full_tbl = tx.open_table(&ids_full::TABLE)?;
+        let mut events_table = tx.open_table(&events::TABLE)?;
+        let mut events_missing_table = tx.open_table(&events_missing::TABLE)?;
+        let mut events_heads_table = tx.open_table(&events_heads::TABLE)?;
+        let mut events_by_time_table = tx.open_table(&events_by_time::TABLE)?;
+        let mut events_content_state_table = tx.open_table(&events_content_state::TABLE)?;
+        let mut content_store_table = tx.open_table(&content_store::TABLE)?;
+        let mut content_rc_table = tx.open_table(&content_rc::TABLE)?;
+        let mut events_content_missing_table = tx.open_table(&events_content_missing::TABLE)?;
+        let mut ids_data_usage_table = tx.open_table(&ids_data_usage::TABLE)?;
+
+        // Store content first so it's claimed immediately on insert
+        content_store_table.insert(
+            &content_hash,
+            &ContentStoreRecord::Present(Cow::Owned(content.clone())),
+        )?;
+
+        // Insert the event
+        Database::insert_event_tx(
+            event,
+            &mut ids_full_tbl,
+            &mut events_table,
+            &mut events_missing_table,
+            &mut events_heads_table,
+            &mut events_by_time_table,
+            &mut events_content_state_table,
+            &content_store_table,
+            &mut content_rc_table,
+            &mut events_content_missing_table,
+            Some(&mut ids_data_usage_table),
+        )?;
+
+        // Verify data usage
+        let usage = Database::get_data_usage_tx(author, &ids_data_usage_table)?;
+        assert_eq!(usage.metadata_size, Database::EVENT_METADATA_SIZE);
+        assert_eq!(
+            usage.content_size,
+            u64::from(content_len),
+            "Content size should match content_len from event"
+        );
+
+        Ok(())
+    })
+    .await?;
+
+    Ok(())
+}
+
+// ============================================================================
 // Property-based testing for RC counting correctness
 // ============================================================================
 
@@ -1801,6 +2001,7 @@ mod proptest_rc {
                             &content_store_table,
                             &mut content_rc_table,
                             &mut events_content_missing_table,
+                            None,
                         )?;
 
                         events_inserted.insert(event_idx);

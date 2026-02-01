@@ -148,6 +148,33 @@ def_table! {
     ids_personas: (RostraId, PersonaId) => IdsPersonaRecord
 }
 
+def_table! {
+    /// Aggregate data usage per identity.
+    ///
+    /// Tracks the total storage used by each identity's events and content.
+    /// Updated incrementally as events are added and content state changes.
+    ids_data_usage: RostraId => IdsDataUsageRecord
+}
+
+/// Aggregate data usage record for an identity.
+///
+/// Tracks both event metadata size (fixed per event) and content size
+/// (variable, based on actual content stored).
+#[derive(Debug, Encode, Decode, Clone, Copy, Default, Serialize)]
+pub struct IdsDataUsageRecord {
+    /// Total size of event metadata (envelopes) in bytes.
+    ///
+    /// Each event contributes a fixed size (Event struct + signature = 192
+    /// bytes).
+    pub metadata_size: u64,
+
+    /// Total size of content (payloads) in bytes.
+    ///
+    /// Only content in the `Available` state is counted. Pruned/Deleted content
+    /// is not included (as it doesn't consume storage).
+    pub content_size: u64,
+}
+
 // ============================================================================
 // EVENT TABLES
 // ============================================================================

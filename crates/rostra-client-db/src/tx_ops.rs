@@ -25,8 +25,8 @@ use super::{
     ids_self, tables,
 };
 use crate::{
-    IdSocialProfileRecord, LOG_TARGET, Latest, SocialPostRecord, events_content_missing, ids_full,
-    social_posts, social_profiles,
+    IdSocialProfileRecord, IdsDataUsageRecord, LOG_TARGET, Latest, SocialPostRecord,
+    events_content_missing, ids_data_usage, ids_full, social_posts, social_profiles,
 };
 
 impl Database {
@@ -81,6 +81,7 @@ impl Database {
         content_store_table: &impl content_store::ReadableTable,
         content_rc_table: &mut content_rc::Table,
         events_content_missing_table: &mut events_content_missing::Table,
+        mut ids_data_usage_table: Option<&mut ids_data_usage::Table>,
     ) -> DbResult<InsertEventOutcome> {
         let author = event.author();
         let event_id = event.event_id.to_short();
@@ -162,6 +163,16 @@ impl Database {
                         }
                         // Decrement RC for the deleted content
                         Database::decrement_content_rc_tx(parent_content_hash, content_rc_table)?;
+
+                        // Decrement content size for the parent's author
+                        if let Some(ref mut usage_table) = ids_data_usage_table {
+                            let parent_author = parent_event_record.author();
+                            Database::decrement_content_size_tx(
+                                parent_author,
+                                parent_event_record.content_len(),
+                                usage_table,
+                            )?;
+                        }
                     }
                 }
             } else {
@@ -188,6 +199,11 @@ impl Database {
         )?;
         events_by_time_table.insert(&(event.timestamp(), event_id), &())?;
 
+        // Track metadata size for this event
+        if let Some(ref mut usage_table) = ids_data_usage_table {
+            Database::increment_metadata_size_tx(author, usage_table)?;
+        }
+
         // Handle content state for this event
         // Only claim content (increment RC) if event is not deleted AND content is
         // already in store
@@ -198,6 +214,11 @@ impl Database {
                 // Content exists - claim it immediately
                 Database::increment_content_rc_tx(content_hash, content_rc_table)?;
                 events_content_state_table.insert(&event_id, &EventContentStateNew::Available)?;
+
+                // Track content size
+                if let Some(ref mut usage_table) = ids_data_usage_table {
+                    Database::increment_content_size_tx(author, event.content_len(), usage_table)?;
+                }
             } else {
                 // Content not in store yet - mark as missing
                 events_content_missing_table.insert(&event_id, &())?;
@@ -254,6 +275,7 @@ impl Database {
         events_content_state_table: &mut events_content_state::Table,
         content_rc_table: &mut content_rc::Table,
         events_content_missing_table: &mut events_content_missing::Table,
+        data_usage_info: Option<(RostraId, u32, &mut ids_data_usage::Table)>,
     ) -> DbResult<bool> {
         let event_id = event_id.into();
         if let Some(existing_state) = events_content_state_table
@@ -271,6 +293,11 @@ impl Database {
                 EventContentStateNew::Available => {
                     // Was available - decrement RC before marking as pruned
                     Database::decrement_content_rc_tx(content_hash, content_rc_table)?;
+
+                    // Decrement content size for the author
+                    if let Some((author, content_len, usage_table)) = data_usage_info {
+                        Database::decrement_content_size_tx(author, content_len, usage_table)?;
+                    }
                 }
             }
         }
@@ -712,5 +739,77 @@ impl Database {
         } else {
             Ok(false)
         }
+    }
+
+    // ========================================================================
+    // Data Usage Tracking
+    // ========================================================================
+
+    /// Size of event metadata in bytes (Event struct + signature).
+    /// See rostra_core::event::Event documentation.
+    pub const EVENT_METADATA_SIZE: u64 = 192;
+
+    /// Increment the metadata size for an identity.
+    ///
+    /// Called when a new event is inserted.
+    pub fn increment_metadata_size_tx(
+        author: RostraId,
+        ids_data_usage_table: &mut ids_data_usage::Table,
+    ) -> DbResult<()> {
+        let mut usage = ids_data_usage_table
+            .get(&author)?
+            .map(|g| g.value())
+            .unwrap_or_default();
+
+        usage.metadata_size += Self::EVENT_METADATA_SIZE;
+        ids_data_usage_table.insert(&author, &usage)?;
+        Ok(())
+    }
+
+    /// Increment the content size for an identity.
+    ///
+    /// Called when content transitions to Available state.
+    pub fn increment_content_size_tx(
+        author: RostraId,
+        content_len: u32,
+        ids_data_usage_table: &mut ids_data_usage::Table,
+    ) -> DbResult<()> {
+        let mut usage = ids_data_usage_table
+            .get(&author)?
+            .map(|g| g.value())
+            .unwrap_or_default();
+
+        usage.content_size += u64::from(content_len);
+        ids_data_usage_table.insert(&author, &usage)?;
+        Ok(())
+    }
+
+    /// Decrement the content size for an identity.
+    ///
+    /// Called when content transitions from Available to Pruned/Deleted.
+    pub fn decrement_content_size_tx(
+        author: RostraId,
+        content_len: u32,
+        ids_data_usage_table: &mut ids_data_usage::Table,
+    ) -> DbResult<()> {
+        let mut usage = ids_data_usage_table
+            .get(&author)?
+            .map(|g| g.value())
+            .unwrap_or_default();
+
+        usage.content_size = usage.content_size.saturating_sub(u64::from(content_len));
+        ids_data_usage_table.insert(&author, &usage)?;
+        Ok(())
+    }
+
+    /// Get the data usage for an identity.
+    pub fn get_data_usage_tx(
+        author: RostraId,
+        ids_data_usage_table: &impl ids_data_usage::ReadableTable,
+    ) -> DbResult<IdsDataUsageRecord> {
+        Ok(ids_data_usage_table
+            .get(&author)?
+            .map(|g| g.value())
+            .unwrap_or_default())
     }
 }

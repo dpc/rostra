@@ -8,7 +8,7 @@ use crate::process_event_content_ops::ProcessEventError;
 use crate::{
     Database, DbResult, InsertEventOutcome, LOG_TARGET, ProcessEventState, WriteTransactionCtx,
     content_rc, content_store, events, events_by_time, events_content_missing,
-    events_content_state, events_heads, events_missing, ids_full,
+    events_content_state, events_heads, events_missing, ids_data_usage, ids_full,
 };
 
 impl Database {
@@ -26,6 +26,7 @@ impl Database {
         let mut events_heads_tbl = tx.open_table(&events_heads::TABLE)?;
         let mut events_by_time_tbl = tx.open_table(&events_by_time::TABLE)?;
         let mut ids_full_tbl = tx.open_table(&ids_full::TABLE)?;
+        let mut ids_data_usage_tbl = tx.open_table(&ids_data_usage::TABLE)?;
 
         let insert_event_outcome = Database::insert_event_tx(
             *event,
@@ -38,6 +39,7 @@ impl Database {
             &content_store_tbl,
             &mut content_rc_tbl,
             &mut events_content_missing_tbl,
+            Some(&mut ids_data_usage_tbl),
         )?;
 
         if let InsertEventOutcome::Inserted {
@@ -124,6 +126,7 @@ impl Database {
                 &mut events_content_state_tbl,
                 &mut content_rc_tbl,
                 &mut events_content_missing_tbl,
+                Some((event.author(), event.content_len(), &mut ids_data_usage_tbl)),
             )? {
                 ProcessEventState::Pruned
             } else {
