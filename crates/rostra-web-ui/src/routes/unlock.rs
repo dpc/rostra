@@ -1,7 +1,7 @@
 pub mod session;
 
 use axum::Form;
-use axum::extract::State;
+use axum::extract::{Query, State};
 use axum::response::{IntoResponse, Redirect, Response};
 use maud::{Markup, html};
 use rostra_core::id::{RostraId, RostraIdSecretKey};
@@ -18,9 +18,15 @@ use crate::serde_util::empty_string_as_none;
 use crate::util::extractors::AjaxRequest;
 use crate::{SharedState, UiState};
 
+#[derive(Deserialize)]
+pub struct RedirectQuery {
+    redirect: Option<String>,
+}
+
 pub async fn get(
     state: State<SharedState>,
     AjaxRequest(is_ajax): AjaxRequest,
+    Query(query): Query<RedirectQuery>,
 ) -> RequestResult<impl IntoResponse> {
     // If we're called due to an AJAX request, that probably means something failed
     // or required auth, and was redirected here. We don't want to respond with
@@ -28,17 +34,29 @@ pub async fn get(
     // the page altogether. Use a standard HTTP redirect which Alpine-ajax will
     // follow with a full page reload.
     if is_ajax {
-        return Ok(Redirect::to("/ui/unlock").into_response());
+        let url = match &query.redirect {
+            Some(path) => format!("/ui/unlock?redirect={}", urlencoding::encode(path)),
+            None => "/ui/unlock".to_string(),
+        };
+        return Ok(Redirect::to(&url).into_response());
     }
 
-    Ok(Maud(state.unlock_page(None, None, None).await?).into_response())
+    Ok(Maud(state.unlock_page(None, None, None, query.redirect).await?).into_response())
 }
 
-pub async fn get_random(state: State<SharedState>) -> RequestResult<impl IntoResponse> {
+pub async fn get_random(
+    state: State<SharedState>,
+    Query(query): Query<RedirectQuery>,
+) -> RequestResult<impl IntoResponse> {
     let random_secret_key = RostraIdSecretKey::generate();
     Ok(Maud(
         state
-            .unlock_page(Some(random_secret_key.id()), Some(random_secret_key), None)
+            .unlock_page(
+                Some(random_secret_key.id()),
+                Some(random_secret_key),
+                None,
+                query.redirect,
+            )
             .await?,
     ))
 }
@@ -51,6 +69,9 @@ pub struct Input {
     #[serde(rename = "password")]
     #[serde(deserialize_with = "empty_string_as_none")]
     mnemonic: Option<RostraIdSecretKey>,
+    #[serde(default)]
+    #[serde(deserialize_with = "empty_string_as_none")]
+    redirect: Option<String>,
 }
 
 impl Input {
@@ -66,6 +87,7 @@ pub async fn post_unlock(
     session: Session,
     Form(form): Form<Input>,
 ) -> RequestResult<Response> {
+    let redirect_path = form.redirect.clone();
     Ok(
         match state
             .unlock(form.rostra_id().context(UnlockSnafu)?, form.mnemonic)
@@ -75,14 +97,18 @@ pub async fn post_unlock(
                 let rostra_id = secret_key_opt
                     .map(|secret| secret.id())
                     .or(form.rostra_id)
-                    .ok_or_else(|| LoginRequiredSnafu.build())?;
+                    .ok_or_else(|| LoginRequiredSnafu { redirect: None }.build())?;
                 session
                     .insert(SESSION_KEY, &UserSession::new(rostra_id, secret_key_opt))
                     .await
                     .boxed()
                     .context(OtherSnafu)?;
                 // Use standard HTTP redirect for Alpine-ajax
-                Redirect::to("/ui").into_response()
+                // Redirect to the original path if provided, otherwise to /ui
+                let target = redirect_path
+                    .filter(|p| p.starts_with('/'))
+                    .unwrap_or_else(|| "/ui".to_string());
+                Redirect::to(&target).into_response()
             }
             Err(e) => Maud(
                 state
@@ -92,6 +118,7 @@ pub async fn post_unlock(
                         html! {
                             span ."o-unlockScreen_notice" { (e)}
                         },
+                        redirect_path,
                     )
                     .await?,
             )
@@ -113,6 +140,7 @@ impl UiState {
         current_rostra_id: Option<RostraId>,
         current_secret_key: Option<RostraIdSecretKey>,
         notification: impl Into<Option<Markup>>,
+        redirect: Option<String>,
     ) -> RequestResult<Markup> {
         let random_rostra_id_secret = &RostraIdSecretKey::generate();
         let random_mnemonic = random_rostra_id_secret.to_string();
@@ -126,6 +154,9 @@ impl UiState {
                     method="post"
                     autocomplete="on"
                 {
+                    @if let Some(ref redirect_path) = redirect {
+                        input type="hidden" name="redirect" value=(redirect_path) {}
+                    }
                     @if let Some(n) = notification {
                         (n)
                     }

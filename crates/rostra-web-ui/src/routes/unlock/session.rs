@@ -133,7 +133,9 @@ impl FromRequestParts<Arc<UiState>> for UserSession {
                     Ok(user)
                 } else {
                     // No default profile, require login
-                    Err(LoginRequiredSnafu.build())
+                    // Capture the original path for redirect after login
+                    let redirect = req.uri.path_and_query().map(|pq| pq.to_string());
+                    Err(LoginRequiredSnafu { redirect }.build())
                 }
             }
             Err(e) => Err(e),

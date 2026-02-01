@@ -80,7 +80,7 @@ pub enum RequestError {
     #[snafu(visibility(pub(crate)))]
     InternalServerError { msg: &'static str },
     #[snafu(visibility(pub(crate)))]
-    LoginRequired,
+    LoginRequired { redirect: Option<String> },
     #[snafu(visibility(pub(crate)))]
     Unlock { source: UnlockError },
     #[snafu(visibility(pub(crate)))]
@@ -108,12 +108,16 @@ impl IntoResponse for RequestError {
                     RequestError::StateClient { .. } => {
                         return Redirect::temporary("/ui/unlock").into_response();
                     }
-                    RequestError::LoginRequired => {
+                    RequestError::LoginRequired { redirect } => {
                         // Use standard HTTP redirect for Alpine-ajax
-                        return Redirect::to("/ui/unlock").into_response();
-
-                        // return Redirect::temporary("/ui/unlock").
-                        // into_response();
+                        let url = match redirect {
+                            Some(ref path) => format!(
+                                "/ui/unlock?redirect={}",
+                                urlencoding::encode(path)
+                            ),
+                            None => "/ui/unlock".to_string(),
+                        };
+                        return Redirect::to(&url).into_response();
                     }
                     _ => (
                         StatusCode::INTERNAL_SERVER_ERROR,
