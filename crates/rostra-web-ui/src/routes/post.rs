@@ -15,14 +15,32 @@ use serde::Deserialize;
 use snafu::ResultExt as _;
 use tower_cookies::Cookies;
 
-use super::Maud;
-use super::fragment;
 use super::timeline::TimelineMode;
 use super::unlock::session::{RoMode, UserSession};
+use super::{Maud, fragment};
 use crate::error::{OtherSnafu, RequestResult};
 use crate::util::extractors::AjaxRequest;
 use crate::util::time::format_timestamp;
 use crate::{SharedState, UiState};
+
+/// Generate HTML ID for post content element.
+///
+/// The `post_thread_id` identifies the timeline item/thread context (to
+/// disambiguate the same post appearing in multiple places), and `event_id` is
+/// the post's ID.
+pub fn post_content_html_id(post_thread_id: ShortEventId, event_id: ShortEventId) -> String {
+    format!("post-content-{post_thread_id}-{event_id}")
+}
+
+/// Generate HTML ID for post comments container.
+pub fn post_comments_html_id(post_thread_id: ShortEventId, event_id: ShortEventId) -> String {
+    format!("post-comments-{post_thread_id}-{event_id}")
+}
+
+/// Generate HTML ID for the whole post element (used for delete target).
+pub fn post_html_id(post_thread_id: ShortEventId, event_id: ShortEventId) -> String {
+    format!("post-{post_thread_id}-{event_id}")
+}
 
 #[derive(Deserialize)]
 pub struct SinglePostQuery {
@@ -52,6 +70,7 @@ pub async fn get_single_post(
                 state
                     .render_post_context(&client_ref, author)
                     .event_id(event_id)
+                    .post_thread_id(event_id)
                     .maybe_content(post_record.content.djot_content.as_deref())
                     .timestamp(post_record.ts)
                     .ro(session.ro_mode())
@@ -117,11 +136,9 @@ pub async fn delete_post(
         .call()
         .await?;
 
-    // Return empty content to replace the post
+    // Return empty content to replace the post (x-target handles targeting)
     Ok(Maud(html! {
-        div ."m-postView -deleted"
-            id=(format!("post-{}-{}", author_id, event_id))
-        {
+        div ."m-postView -deleted" {
             div ."m-postView__deletedMessage" {
                 "This post has been deleted"
             }
@@ -198,6 +215,9 @@ impl UiState {
             Option<&SocialPostRecord<SocialPost>>,
         )>,
         event_id: Option<ShortEventId>,
+        /// Post thread ID for HTML element IDs (to disambiguate same post in
+        /// multiple places). If not provided, defaults to event_id.
+        post_thread_id: Option<ShortEventId>,
         content: Option<&str>,
         reply_count: Option<u64>,
         timestamp: Option<Timestamp>,
@@ -235,6 +255,9 @@ impl UiState {
             }
         }
 
+        // Use post_thread_id if provided, otherwise default to event_id
+        let post_thread_id = post_thread_id.or(event_id);
+
         let post_id = format!(
             "post-{}",
             event_id
@@ -245,6 +268,7 @@ impl UiState {
             .render_post_view(client, author)
             .maybe_persona_display_name(persona_display_name)
             .maybe_event_id(event_id)
+            .maybe_post_thread_id(post_thread_id)
             .maybe_content(content)
             .maybe_reply_count(reply_count)
             .maybe_timestamp(timestamp)
@@ -258,8 +282,6 @@ impl UiState {
                 ."m-postContext"
              {
                 @if let Some((reply_to_author, reply_to_event_id, reply_to_post)) = reply_to {
-
-
                     div ."m-postContext__postParent"
                         onclick="this.classList.add('-expanded')"
                     {
@@ -268,6 +290,7 @@ impl UiState {
                             reply_to_author,
                             )
                             .event_id(reply_to_event_id)
+                            .maybe_post_thread_id(post_thread_id)
                             .ro(ro)
                             .maybe_content(reply_to_post.and_then(|r| r.content.djot_content.as_deref()))
                             .maybe_timestamp(reply_to_post.map(|r| r.ts))
@@ -293,14 +316,17 @@ impl UiState {
         #[builder(start_fn)] author: RostraId,
         persona_display_name: Option<&str>,
         event_id: Option<ShortEventId>,
+        /// Post thread ID for HTML element IDs (to disambiguate same post in
+        /// multiple places). If not provided, defaults to event_id.
+        post_thread_id: Option<ShortEventId>,
         content: Option<&str>,
         reply_count: Option<u64>,
         timestamp: Option<Timestamp>,
         ro: RoMode,
-        // Is the post loaded as a comment to an existing post (already being
-        // displayed)
     ) -> RequestResult<Markup> {
         let external_event_id = event_id.map(|e| ExternalEventId::new(author, e));
+        // Use post_thread_id if provided, otherwise default to event_id
+        let post_thread_id = post_thread_id.or(event_id);
         let user_profile = self.get_social_profile_opt(author, client).await;
 
         // Note: we are actually not doing pagination, and just ignore
@@ -402,7 +428,7 @@ impl UiState {
                     div."m-postView__content"
                         ."-missing"[post_content_rendered.is_none()]
                         ."-present"[post_content_rendered.is_some()]
-                        id=[event_id.map(|id| format!("post-content-{author}-{id}"))]
+                        id=[post_thread_id.zip(event_id).map(|(ctx, id)| post_content_html_id(ctx, id))]
                     {
                         @if let Some(post_content_rendered) = post_content_rendered {
                             (post_content_rendered)
@@ -424,40 +450,47 @@ impl UiState {
                     div ."m-postView__buttons" {
                         @if let Some(reply_count) = reply_count {
                             @if reply_count > 0 {
-                                @let label = if reply_count == 1 { "1 Reply".to_string() } else { format!("{} Replies", reply_count) };
-                                (fragment::ajax_form(
-                                    &format!("/ui/comments/{}", ext_event_id.event_id().to_short()),
-                                    "get",
-                                    &format!("post-comments-{}", ext_event_id.event_id().to_short()),
-                                    fragment::button("m-postView__commentsButton", &label).call(),
-                                )
-                                .after_js("$el.querySelector('button').classList.add('u-hidden')")
-                                .call())
+                                @if let Some(ctx) = post_thread_id {
+                                    @let label = if reply_count == 1 { "1 Reply".to_string() } else { format!("{} Replies", reply_count) };
+                                    @let comments_target = post_comments_html_id(ctx, ext_event_id.event_id().to_short());
+                                    (fragment::ajax_form(
+                                        &format!("/ui/comments/{}/{}", ctx, ext_event_id.event_id().to_short()),
+                                        "get",
+                                        &comments_target,
+                                        fragment::button("m-postView__commentsButton", &label).call(),
+                                    )
+                                    .after_js("$el.querySelector('button').classList.add('u-hidden')")
+                                    .call())
+                                }
                             }
                         }
                         @if post_content_is_missing {
-                            @if let Some(event_id) = event_id {
+                            @if let (Some(ctx), Some(event_id)) = (post_thread_id, event_id) {
+                                @let content_target = post_content_html_id(ctx, event_id);
                                 (fragment::ajax_button(
-                                    &format!("/ui/post/{author}/{event_id}/fetch"),
+                                    &format!("/ui/post/{}/{}/fetch", author, event_id),
                                     "post",
-                                    &format!("post-content-{}-{}", author, event_id),
+                                    &content_target,
                                     "m-postView__fetchButton",
                                     "Fetch",
                                 ).call())
                             }
                         }
                         @if author == client.rostra_id() {
-                            (fragment::ajax_button(
-                                &format!("/ui/post/{}/{}/delete", author, event_id.unwrap()),
-                                "post",
-                                &format!("post-{}-{}", author, event_id.unwrap()),
-                                "m-postView__deleteButton",
-                                "Delete",
-                            )
-                            .disabled(ro.to_disabled())
-                            .variant("--danger")
-                            .before_js("if (!confirm('Are you sure you want to delete this post?')) { $event.preventDefault(); return; }")
-                            .call())
+                            @if let (Some(ctx), Some(event_id)) = (post_thread_id, event_id) {
+                                @let post_target = post_html_id(ctx, event_id);
+                                (fragment::ajax_button(
+                                    &format!("/ui/post/{}/{}/delete", author, event_id),
+                                    "post",
+                                    &post_target,
+                                    "m-postView__deleteButton",
+                                    "Delete",
+                                )
+                                .disabled(ro.to_disabled())
+                                .variant("--danger")
+                                .before_js("if (!confirm('Are you sure you want to delete this post?')) { $event.preventDefault(); return; }")
+                                .call())
+                            }
                         }
 
                         (fragment::ajax_button(
@@ -477,20 +510,17 @@ impl UiState {
         };
 
         Ok(html! {
-
             div
                 ."m-postView"
-                id=[event_id.map(|id| format!("post-{author}-{id}"))]
+                id=[post_thread_id.zip(event_id).map(|(ctx, id)| post_html_id(ctx, id))]
              {
-
                 (post_main)
 
                 (button_bar)
 
                 div ."m-postView__comments"
-                    id=[event_id.map(|id| format!("post-comments-{id}"))]
+                    id=[post_thread_id.zip(event_id).map(|(ctx, id)| post_comments_html_id(ctx, id))]
                 {}
-
             }
         })
     }

@@ -191,7 +191,10 @@ pub fn route_handler(state: SharedState) -> Router<Arc<UiState>> {
         .route("/ui/unlock", get(unlock::get).post(unlock::post_unlock))
         .route("/ui/unlock/logout", get(unlock::get).post(unlock::logout))
         .route("/ui/unlock/random", get(unlock::get_random))
-        .route("/ui/comments/{event_id}", get(timeline::get_post_comments))
+        .route(
+            "/ui/comments/{post_thread_id}/{event_id}",
+            get(timeline::get_post_comments),
+        )
         .route(
             "/ui/self/edit",
             get(profile_self::get_self_account_edit).post(profile_self::post_self_account_edit),

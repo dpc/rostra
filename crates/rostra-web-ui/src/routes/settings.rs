@@ -5,9 +5,8 @@ use maud::{Markup, html};
 use rostra_core::id::RostraId;
 use serde::Deserialize;
 
-use super::Maud;
-use super::fragment;
 use super::unlock::session::UserSession;
+use super::{Maud, fragment};
 use crate::error::RequestResult;
 use crate::{SharedState, UiState};
 

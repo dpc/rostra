@@ -127,9 +127,13 @@ pub async fn get_updates(
 pub async fn get_post_comments(
     state: State<SharedState>,
     session: UserSession,
-    Path(id): Path<ShortEventId>,
+    Path((post_thread_id, event_id)): Path<(ShortEventId, ShortEventId)>,
 ) -> RequestResult<impl IntoResponse> {
-    Ok(Maud(state.render_post_comments(id, &session).await?))
+    Ok(Maud(
+        state
+            .render_post_comments(post_thread_id, event_id, &session)
+            .await?,
+    ))
 }
 
 #[bon::bon]
@@ -445,6 +449,7 @@ impl UiState {
 
     pub async fn render_post_comments(
         &self,
+        post_thread_id: ShortEventId,
         post_id: ShortEventId,
         session: &UserSession,
     ) -> RequestResult<Markup> {
@@ -461,7 +466,7 @@ impl UiState {
 
         Ok(html! {
             div ."m-postView__comments"
-                id=(format!("post-comments-{}", post_id))
+                id=(super::post::post_comments_html_id(post_thread_id, post_id))
             {
                 @for comment in comments {
                     @if let Some(djot_content) = comment.content.djot_content.as_ref() {
@@ -470,6 +475,7 @@ impl UiState {
                                 &client_ref,
                                 comment.author
                                 ).event_id(comment.event_id)
+                                .post_thread_id(post_thread_id)
                                 .content(djot_content)
                                 .reply_count(comment.reply_count)
                                 .timestamp(comment.ts)
@@ -611,6 +617,7 @@ impl UiState {
                                             )
                                         )
                                         .event_id(post.event_id)
+                                        .post_thread_id(post.event_id)
                                         .content(djot_content)
                                         .reply_count(post.reply_count)
                                         .timestamp(post.ts)

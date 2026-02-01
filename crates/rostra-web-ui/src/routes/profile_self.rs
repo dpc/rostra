@@ -8,9 +8,8 @@ use rostra_client_db::IdSocialProfileRecord;
 use rostra_core::ShortEventId;
 use rostra_core::id::{RostraId, ToShort as _};
 
-use super::Maud;
-use super::fragment;
 use super::unlock::session::{RoMode, UserSession};
+use super::{Maud, fragment};
 use crate::error::RequestResult;
 use crate::{SharedState, UiState};
 

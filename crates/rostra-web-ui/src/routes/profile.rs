@@ -8,10 +8,9 @@ use rostra_core::id::RostraId;
 use serde::Deserialize;
 use tower_cookies::Cookies;
 
-use super::Maud;
-use super::fragment;
 use super::timeline::{TimelineMode, TimelinePaginationInput};
 use super::unlock::session::{RoMode, UserSession};
+use super::{Maud, fragment};
 use crate::error::RequestResult;
 use crate::util::extractors::AjaxRequest;
 use crate::{SharedState, UiState};

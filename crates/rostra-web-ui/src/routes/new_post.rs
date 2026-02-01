@@ -10,10 +10,9 @@ use tower_cookies::Cookies;
 
 use super::super::SharedState;
 use super::super::error::RequestResult;
-use super::Maud;
 use super::cookies::CookiesExt as _;
-use super::fragment;
 use super::unlock::session::{RoMode, UserSession};
+use super::{Maud, fragment};
 use crate::UiState;
 use crate::html_utils::re_typeset_mathjax;
 

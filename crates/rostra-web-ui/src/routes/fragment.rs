@@ -4,9 +4,9 @@ use maud::{Markup, html};
 
 /// Renders a button with an icon.
 ///
-/// The icon class is automatically derived from the button class by appending "Icon".
-/// For example, if `class` is "m-postView__fetchButton", the icon class will be
-/// "m-postView__fetchButtonIcon".
+/// The icon class is automatically derived from the button class by appending
+/// "Icon". For example, if `class` is "m-postView__fetchButton", the icon class
+/// will be "m-postView__fetchButtonIcon".
 #[bon::builder]
 pub fn button(
     /// Base CSS class for the button (e.g., "m-postView__fetchButton")
@@ -28,7 +28,9 @@ pub fn button(
     let button_type = button_type.unwrap_or("submit");
     let icon_class = format!("{}Icon", class);
 
-    let variant_class = variant.map(|v| format!("u-button{}", v)).unwrap_or_default();
+    let variant_class = variant
+        .map(|v| format!("u-button{}", v))
+        .unwrap_or_default();
 
     html! {
         button
@@ -82,7 +84,8 @@ impl AjaxLoadingAttrs {
         Self::new("$el.querySelector('.u-button')")
     }
 
-    /// Create loading attributes for a button with a specific class inside the form.
+    /// Create loading attributes for a button with a specific class inside the
+    /// form.
     pub fn for_class(class: &str) -> Self {
         Self::new(&format!("$el.querySelector('.{}')", class))
     }
@@ -95,7 +98,8 @@ impl AjaxLoadingAttrs {
     }
 }
 
-/// Renders a form with a button that shows a loading state during ajax requests.
+/// Renders a form with a button that shows a loading state during ajax
+/// requests.
 ///
 /// This is the primary abstraction for ajax-enabled action buttons.
 #[bon::builder]
@@ -117,7 +121,8 @@ pub fn ajax_form(
     /// Extra JavaScript to run before the request (e.g., confirm dialog).
     /// If this returns early (via preventDefault), loading won't be triggered.
     before_js: Option<&str>,
-    /// Extra JavaScript to run after the request completes (e.g., opening dialogs)
+    /// Extra JavaScript to run after the request completes (e.g., opening
+    /// dialogs)
     after_js: Option<&str>,
     /// Hidden form inputs
     hidden_inputs: Option<Markup>,
@@ -133,8 +138,15 @@ pub fn ajax_form(
 
     // Combine before_js with loading logic
     let ajax_before = match before_js {
-        Some(js) => format!("{} {}; {}", js, "clearTimeout($el._lt)",
-            format!("$el._lt = setTimeout(() => {}?.classList.add('-loading'), 150)", selector)),
+        Some(js) => format!(
+            "{} {}; {}",
+            js,
+            "clearTimeout($el._lt)",
+            format!(
+                "$el._lt = setTimeout(() => {}?.classList.add('-loading'), 150)",
+                selector
+            )
+        ),
         None => loading_before,
     };
 
