@@ -286,9 +286,10 @@ where
                                             r#"<span class="m-rostraMedia"><img src="{url_escaped}" alt="{alt_escaped}"/></span>"#
                                         )
                                     } else if media.mime.starts_with("video/") {
-                                        // Render as video player
+                                        // Render as video player - plays when visible via
+                                        // IntersectionObserver
                                         format!(
-                                            r#"<span class="m-rostraMedia"><video src="{url_escaped}" controls class="m-rostraMedia__video"></video></span>"#
+                                            r#"<span class="m-rostraMedia"><video src="{url_escaped}" controls muted playsinline class="m-rostraMedia__video"></video></span>"#
                                         )
                                     } else {
                                         // Render as download link

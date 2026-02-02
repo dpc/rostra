@@ -236,7 +236,10 @@ pub async fn list(
                                     video
                                         src=(format!("/ui/media/{}/{}", author, media.event_id))
                                         ."o-mediaList__videoThumbnail"
-                                        preload="metadata"
+                                        autoplay
+                                        muted
+                                        loop
+                                        playsinline
                                         {}
                                 } @else {
                                     div ."o-mediaList__fileInfo" {

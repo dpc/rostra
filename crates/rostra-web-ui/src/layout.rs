@@ -204,6 +204,42 @@ pub(crate) fn render_html_footer() -> Markup {
             "#))
         }
 
+        // Play/pause videos based on visibility
+        script {
+            (PreEscaped(r#"
+                document.addEventListener('DOMContentLoaded', () => {
+                    const videoObserver = new IntersectionObserver((entries) => {
+                        entries.forEach(entry => {
+                            const video = entry.target;
+                            if (entry.isIntersecting) {
+                                video.play().catch(() => {});
+                            } else {
+                                video.pause();
+                            }
+                        });
+                    }, { threshold: 0.5 });
+
+                    // Observe existing videos
+                    document.querySelectorAll('.m-rostraMedia__video').forEach(v => videoObserver.observe(v));
+
+                    // Observe new videos added dynamically (for AJAX/htmx)
+                    const mutationObserver = new MutationObserver((mutations) => {
+                        mutations.forEach(mutation => {
+                            mutation.addedNodes.forEach(node => {
+                                if (node.nodeType === 1) {
+                                    node.querySelectorAll?.('.m-rostraMedia__video').forEach(v => videoObserver.observe(v));
+                                    if (node.classList?.contains('m-rostraMedia__video')) {
+                                        videoObserver.observe(node);
+                                    }
+                                }
+                            });
+                        });
+                    });
+                    mutationObserver.observe(document.body, { childList: true, subtree: true });
+                });
+            "#))
+        }
+
         // Alpine.js initialization
         script {
             (PreEscaped(r#"
