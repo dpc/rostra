@@ -13,7 +13,7 @@ use crate::UiState;
 
 mod filters;
 
-use filters::{PrismCodeBlocks, RostraImages, RostraProfileLinks};
+use filters::{PrismCodeBlocks, RostraMedia, RostraProfileLinks};
 
 /// Extension trait for adding rostra-specific rendering transformations
 pub trait RostraRenderExt {
@@ -26,13 +26,17 @@ pub trait RostraRenderExt {
         RostraProfileLinks::new(self, client)
     }
 
-    /// Transform images (rostra-media: links and external media with lazy
-    /// loading)
-    fn rostra_images<'s>(self, author_id: RostraId) -> RostraImages<'s, Self>
+    /// Transform media elements (rostra-media: links rendered based on mime
+    /// type)
+    fn rostra_media<'s, 'c>(
+        self,
+        client: ClientRef<'c>,
+        author_id: RostraId,
+    ) -> RostraMedia<'s, 'c, Self>
     where
         Self: Sized + AsyncRender<'s>,
     {
-        RostraImages::new(self, author_id)
+        RostraMedia::new(self, client, author_id)
     }
 
     /// Add Prism.js classes to code blocks for syntax highlighting
@@ -54,10 +58,10 @@ impl UiState {
         content: &str,
     ) -> Markup {
         // Compose the filters using extension traits: Renderer -> ProfileLinks ->
-        // Images -> PrismCodeBlocks -> Sanitize
+        // Media -> PrismCodeBlocks -> Sanitize
         let renderer = jotup::html::tokio::Renderer::default()
             .rostra_profile_links(client.clone())
-            .rostra_images(author_id)
+            .rostra_media(client.clone(), author_id)
             .prism_code_blocks()
             .sanitize();
 

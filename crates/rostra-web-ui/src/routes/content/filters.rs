@@ -3,6 +3,8 @@ use std::borrow::Cow;
 use jotup::r#async::{AsyncRender, AsyncRenderOutput};
 use jotup::{AttributeKind, AttributeValue, Attributes, Container, Event};
 use rostra_client::ClientRef;
+use rostra_core::ShortEventId;
+use rostra_core::event::content_kind;
 use rostra_core::id::RostraId;
 
 use crate::UiState;
@@ -139,31 +141,33 @@ where
     }
 }
 
-/// Tracks the type of image transformation being applied
-enum ImageTransform<'s> {
-    /// Regular rostra media link - stores the URL and alt text
-    RostraMedia(String, String),
+/// Tracks the type of media transformation being applied
+enum MediaTransform<'s> {
+    /// Rostra media link - stores the event_id and alt text
+    RostraMedia(ShortEventId, String),
     /// External embeddable media (YouTube, etc.) - stores the HTML and alt text
     EmbeddableMedia(String, String),
     /// Regular external image - stores the URL, link type, and alt text
     ExternalImage(Cow<'s, str>, jotup::SpanLinkType, String),
 }
 
-/// Filter that transforms images:
-/// - rostra-media: links to /ui/media/{author_id}/{event_id}
+/// Filter that transforms media elements:
+/// - rostra-media: links rendered based on mime type (image/video/download)
 /// - External embeddable media (YouTube) to lazy-loaded iframes
 /// - Other external images to lazy-loaded images with "Load" messages
-pub(crate) struct RostraImages<'s, R> {
+pub(crate) struct RostraMedia<'s, 'c, R> {
+    client: ClientRef<'c>,
     inner: R,
     author_id: RostraId,
-    /// Stack tracking image transformations in progress
+    /// Stack tracking media transformations in progress
     /// Also tracks other containers as None to maintain proper nesting
-    container_stack: Vec<Option<ImageTransform<'s>>>,
+    container_stack: Vec<Option<MediaTransform<'s>>>,
 }
 
-impl<'s, R> RostraImages<'s, R> {
-    pub(crate) fn new(inner: R, author_id: RostraId) -> Self {
+impl<'s, 'c, R> RostraMedia<'s, 'c, R> {
+    pub(crate) fn new(inner: R, client: ClientRef<'c>, author_id: RostraId) -> Self {
         Self {
+            client,
             inner,
             author_id,
             container_stack: vec![],
@@ -172,8 +176,9 @@ impl<'s, R> RostraImages<'s, R> {
 }
 
 #[async_trait::async_trait]
-impl<'s, R> AsyncRender<'s> for RostraImages<'s, R>
+impl<'s, 'c, R> AsyncRender<'s> for RostraMedia<'s, 'c, R>
 where
+    'c: 's,
     R: AsyncRender<'s> + Send,
 {
     type Error = R::Error;
@@ -182,20 +187,19 @@ where
         match event {
             Event::Start(Container::Image(s, link_type), _attr) => {
                 if let Some(event_id) = UiState::extra_rostra_media_link(&s) {
-                    // Transform rostra-media: links to /ui/media/ URLs
-                    let url = format!("/ui/media/{}/{}", self.author_id, event_id);
+                    // Store event_id to look up content later
                     self.container_stack
-                        .push(Some(ImageTransform::RostraMedia(url, String::new())));
+                        .push(Some(MediaTransform::RostraMedia(event_id, String::new())));
                     // Don't emit Start yet - we'll emit everything in End
                     Ok(())
                 } else {
                     // External image - check if it's embeddable media
                     if let Some(html) = super::maybe_embed_media_html(&s) {
                         self.container_stack
-                            .push(Some(ImageTransform::EmbeddableMedia(html, String::new())));
+                            .push(Some(MediaTransform::EmbeddableMedia(html, String::new())));
                     } else {
                         self.container_stack
-                            .push(Some(ImageTransform::ExternalImage(
+                            .push(Some(MediaTransform::ExternalImage(
                                 s.clone(),
                                 link_type,
                                 String::new(),
@@ -220,20 +224,20 @@ where
                 self.inner.emit(Event::Start(container, attr)).await
             }
             Event::Str(s) => {
-                // If we're inside an image transformation, capture the alt text
+                // If we're inside a media transformation, capture the alt text
                 if let Some(Some(transform)) = self.container_stack.last_mut() {
                     match transform {
-                        ImageTransform::RostraMedia(_, alt) => {
+                        MediaTransform::RostraMedia(_, alt) => {
                             // Capture alt text for rostra media
                             *alt = s.to_string();
                             Ok(())
                         }
-                        ImageTransform::EmbeddableMedia(_, alt) => {
+                        MediaTransform::EmbeddableMedia(_, alt) => {
                             // Capture alt text, skip emitting the str for now
                             *alt = s.to_string();
                             Ok(())
                         }
-                        ImageTransform::ExternalImage(_, _, alt) => {
+                        MediaTransform::ExternalImage(_, _, alt) => {
                             // Capture alt text, skip emitting the str for now
                             *alt = s.to_string();
                             Ok(())
@@ -246,8 +250,9 @@ where
             Event::End => {
                 if let Some(Some(transform)) = self.container_stack.pop() {
                     match transform {
-                        ImageTransform::RostraMedia(url, alt) => {
-                            // Render rostra media with download fallback for unsupported types
+                        MediaTransform::RostraMedia(event_id, alt) => {
+                            // Look up the content to get mime type
+                            let url = format!("/ui/media/{}/{}", self.author_id, event_id);
                             let alt = alt.trim();
                             let display_name = if alt.is_empty() { "media" } else { alt };
 
@@ -263,15 +268,46 @@ where
                                 })
                                 .collect();
 
-                            // Emit raw HTML with onerror fallback
                             let url_escaped = escape_html(&url);
                             let alt_escaped = escape_html(alt);
                             let filename_escaped = escape_html(&filename);
                             let display_escaped = escape_html(display_name);
 
-                            let html = format!(
-                                r#"<span class="m-rostraMedia"><img src="{url_escaped}" alt="{alt_escaped}" onerror="this.parentElement.innerHTML='<a href=\'{url_escaped}\' download=\'{filename_escaped}\' class=\'m-rostraMedia__download\'><span class=\'m-rostraMedia__downloadIcon\'></span>{display_escaped}</a>'"/></span>"#
-                            );
+                            // Look up content from database
+                            let html = if let Some(content) =
+                                self.client.db().get_event_content(event_id).await
+                            {
+                                if let Ok(media) =
+                                    content.deserialize_cbor::<content_kind::SocialMedia>()
+                                {
+                                    if media.mime.starts_with("image/") {
+                                        // Render as image
+                                        format!(
+                                            r#"<span class="m-rostraMedia"><img src="{url_escaped}" alt="{alt_escaped}"/></span>"#
+                                        )
+                                    } else if media.mime.starts_with("video/") {
+                                        // Render as video player
+                                        format!(
+                                            r#"<span class="m-rostraMedia"><video src="{url_escaped}" controls class="m-rostraMedia__video"></video></span>"#
+                                        )
+                                    } else {
+                                        // Render as download link
+                                        format!(
+                                            r#"<span class="m-rostraMedia"><a href="{url_escaped}" download="{filename_escaped}" class="m-rostraMedia__download"><span class="m-rostraMedia__downloadIcon"></span>{display_escaped}</a></span>"#
+                                        )
+                                    }
+                                } else {
+                                    // Failed to deserialize - show as download
+                                    format!(
+                                        r#"<span class="m-rostraMedia"><a href="{url_escaped}" download="{filename_escaped}" class="m-rostraMedia__download"><span class="m-rostraMedia__downloadIcon"></span>{display_escaped}</a></span>"#
+                                    )
+                                }
+                            } else {
+                                // Content not available yet
+                                format!(
+                                    r#"<span class="m-rostraMedia -unavailable"><span class="m-rostraMedia__unavailableIcon"></span><span class="m-rostraMedia__unavailableText">Content not available yet</span></span>"#
+                                )
+                            };
 
                             self.inner
                                 .emit(Event::Start(
@@ -284,7 +320,7 @@ where
                             self.inner.emit(Event::Str(html.into())).await?;
                             self.inner.emit(Event::End).await
                         }
-                        ImageTransform::EmbeddableMedia(html, alt) => {
+                        MediaTransform::EmbeddableMedia(html, alt) => {
                             // Emit the load message and embedded HTML
                             let alt = alt.trim();
                             let load_msg = if alt.is_empty() {
@@ -315,7 +351,7 @@ where
                             // Close the div
                             self.inner.emit(Event::End).await
                         }
-                        ImageTransform::ExternalImage(s, link_type, alt) => {
+                        MediaTransform::ExternalImage(s, link_type, alt) => {
                             // Emit load message and the actual image
                             let alt = alt.trim();
                             let load_msg = if alt.is_empty() {
@@ -366,8 +402,9 @@ where
 }
 
 #[async_trait::async_trait]
-impl<'s, R> AsyncRenderOutput<'s> for RostraImages<'s, R>
+impl<'s, 'c, R> AsyncRenderOutput<'s> for RostraMedia<'s, 'c, R>
 where
+    'c: 's,
     R: AsyncRenderOutput<'s> + Send,
 {
     type Output = R::Output;

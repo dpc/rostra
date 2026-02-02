@@ -148,6 +148,7 @@ struct MediaInfo {
     mime: String,
     size: usize,
     is_image: bool,
+    is_video: bool,
 }
 
 pub async fn list(
@@ -198,11 +199,13 @@ pub async fn list(
             if let Ok(media_content) = event_content.deserialize_cbor::<content_kind::SocialMedia>()
             {
                 let is_image = media_content.mime.starts_with("image/");
+                let is_video = media_content.mime.starts_with("video/");
                 media_items.push(MediaInfo {
                     event_id,
                     mime: media_content.mime,
                     size: media_content.data.len(),
                     is_image,
+                    is_video,
                 });
             }
         }
@@ -228,6 +231,12 @@ pub async fn list(
                                         src=(format!("/ui/media/{}/{}", author, media.event_id))
                                         ."o-mediaList__thumbnail"
                                         loading="lazy"
+                                        {}
+                                } @else if media.is_video {
+                                    video
+                                        src=(format!("/ui/media/{}/{}", author, media.event_id))
+                                        ."o-mediaList__videoThumbnail"
+                                        preload="metadata"
                                         {}
                                 } @else {
                                     div ."o-mediaList__fileInfo" {
