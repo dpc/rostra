@@ -1432,38 +1432,30 @@ input:checked+.slider:before {
 
 .o-mediaList__items {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
-  gap: 10px;
-  margin-bottom: 20px;
+  grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
+  gap: 4px;
+  margin-bottom: 16px;
   overflow-y: auto;
   flex-grow: 1;
   max-height: calc(80vh - 120px);
-  /* Leave space for header and close button */
-  padding: 10px;
-  border: 1px solid var(--color-timeline-item-border);
-  border-radius: var(--border-radius-std);
 }
 
 .o-mediaList__item {
   cursor: pointer;
-  border: 1px solid var(--color-button-border);
+  aspect-ratio: 1;
+  overflow: hidden;
   border-radius: var(--border-radius-std);
-  padding: 8px;
-  text-align: center;
-  transition: background-color 0.2s;
+  transition: opacity 0.2s;
 }
 
 .o-mediaList__item:hover {
-  background-color: var(--color-button-bg-hover);
+  opacity: 0.8;
 }
 
 .o-mediaList__thumbnail {
   width: 100%;
-  max-width: 120px;
-  height: 80px;
+  height: 100%;
   object-fit: cover;
-  border-radius: var(--border-radius-std);
-  margin-bottom: 5px;
 }
 
 .o-mediaList__info {
@@ -1483,11 +1475,21 @@ input:checked+.slider:before {
   display: flex;
   justify-content: flex-end;
   gap: 10px;
-  margin-top: 20px;
+  margin-top: 12px;
+}
+
+.o-mediaList__title {
+  margin: 0 0 12px 0;
+  font-size: 1.1rem;
+  font-weight: bold;
 }
 
 .o-mediaList__closeButton {
   background-color: var(--color-button-bg);
+}
+
+.o-mediaList__closeButtonIcon {
+  background: url('/assets/icons/xmark.svg') center/contain no-repeat;
 }
 
 /* Mention Autocomplete Dropdown */

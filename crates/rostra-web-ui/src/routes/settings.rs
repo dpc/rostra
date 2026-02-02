@@ -45,9 +45,7 @@ pub async fn get_settings_followers(
     let followers = client_ref.db().get_followers(user_id).await;
 
     let navbar = state.render_settings_navbar(&session, "followers").await?;
-    let content = state
-        .render_followers_settings(&session, followers)
-        .await?;
+    let content = state.render_followers_settings(&session, followers).await?;
 
     Ok(Maud(
         state

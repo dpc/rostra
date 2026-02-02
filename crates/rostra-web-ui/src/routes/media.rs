@@ -10,8 +10,8 @@ use rostra_core::event::content_kind;
 use rostra_core::id::{RostraId, ToShort as _};
 use snafu::ResultExt as _;
 
-use super::Maud;
 use super::unlock::session::UserSession;
+use super::{Maud, fragment};
 use crate::SharedState;
 use crate::error::{OtherSnafu, RequestResult};
 
@@ -169,8 +169,9 @@ pub async fn list(
 
     Ok(Maud(html! {
         div id="media-list" ."o-mediaList -active" {
+            (fragment::dialog_escape_handler("media-list"))
             div ."o-mediaList__content" {
-                h3 { "Select media to attach:" }
+                h4 ."o-mediaList__title" { "Select media to attach" }
                 div ."o-mediaList__items" {
                     @if media_events.is_empty() {
                         div ."o-mediaList__empty" {
@@ -191,12 +192,10 @@ pub async fn list(
                     }
                 }
                 div ."o-mediaList__actionButtons" {
-                    button ."o-mediaList__closeButton u-button"
-                        type="button"
-                        onclick="document.getElementById('media-list').classList.remove('-active')"
-                    {
-                        "Close"
-                    }
+                    (fragment::button("o-mediaList__closeButton", "Close")
+                        .button_type("button")
+                        .onclick("document.getElementById('media-list').classList.remove('-active')")
+                        .call())
                 }
             }
         }
