@@ -93,19 +93,21 @@ pub async fn publish(
                     data: data.to_vec(),
                 };
 
-                let _event = client_ref
+                let event = client_ref
                     .publish_event(session.id_secret()?, media_event)
                     .call()
                     .await?;
 
+                let event_id = event.event_id.to_short();
                 return Ok(Maud(html! {
                     div id="ajax-scripts" {
                         script {
-                            (PreEscaped(r#"
-                                window.dispatchEvent(new CustomEvent('notify', {
-                                    detail: { type: 'success', message: 'Media uploaded successfully' }
-                                }));
-                            "#))
+                            (PreEscaped(format!(r#"
+                                insertMediaSyntax('{}');
+                                window.dispatchEvent(new CustomEvent('notify', {{
+                                    detail: {{ type: 'success', message: 'Media uploaded and inserted' }}
+                                }}));
+                            "#, event_id)))
                         }
                     }
                 }));

@@ -407,24 +407,6 @@ impl UiState {
                     }
                     div ."m-newPostForm__footerRow m-newPostForm__footerRow--media" {
                         @if user_id.is_some() {
-                            button ."m-newPostForm__attachButton u-button"
-                                ."-disabled"[ro.to_disabled()]
-                                type="submit"
-                                form="media-attach-form"
-                            {
-                                span ."m-newPostForm__attachButtonIcon u-buttonIcon" width="1rem" height="1rem" {}
-                                "Attach"
-                            }
-                        } @else {
-                            button ."m-newPostForm__attachButton u-button"
-                                disabled
-                                type="button"
-                            {
-                                span ."m-newPostForm__attachButtonIcon u-buttonIcon" width="1rem" height="1rem" {}
-                                "Attach"
-                            }
-                        }
-                        @if user_id.is_some() {
                             button ."m-newPostForm__uploadButton u-button"
                                 disabled[ro.to_disabled()]
                                 type="button"
@@ -440,6 +422,24 @@ impl UiState {
                             {
                                 span ."m-newPostForm__uploadButtonIcon u-buttonIcon" width="1rem" height="1rem" {}
                                 "Upload"
+                            }
+                        }
+                        @if user_id.is_some() {
+                            button ."m-newPostForm__attachButton u-button"
+                                ."-disabled"[ro.to_disabled()]
+                                type="submit"
+                                form="media-attach-form"
+                            {
+                                span ."m-newPostForm__attachButtonIcon u-buttonIcon" width="1rem" height="1rem" {}
+                                "Attach"
+                            }
+                        } @else {
+                            button ."m-newPostForm__attachButton u-button"
+                                disabled
+                                type="button"
+                            {
+                                span ."m-newPostForm__attachButtonIcon u-buttonIcon" width="1rem" height="1rem" {}
+                                "Attach"
                             }
                         }
                     }
