@@ -55,15 +55,34 @@ pub async fn get_follow_dialog(
 ) -> RequestResult<impl IntoResponse> {
     let client = state.client(session.id()).await?;
     let client_ref = client.client_ref()?;
+    let profile = state.get_social_profile(profile_id, &client_ref).await;
     let personas = client_ref.db().get_personas_for_id(profile_id).await;
     let ajax_attrs = fragment::AjaxLoadingAttrs::for_class("o-followDialog__submitButton");
     Ok(Maud(html! {
         div id="follow-dialog-content" ."o-followDialog -active" {
+            script {
+                (PreEscaped(r#"
+                function togglePersonaList() {
+                    const selectedOption = document.querySelector('#follow-type-select').value;
+                    const personaList = document.querySelector('.o-followDialog__personaList');
+
+                    if (selectedOption === 'follow_all' || selectedOption === 'follow_only') {
+                        personaList.classList.add('-visible');
+                    } else {
+                        personaList.classList.remove('-visible');
+                    }
+                }
+                "#))
+            }
             div ."o-followDialog__content" {
+                h4 ."o-followDialog__title" {
+                    "Following "
+                    (profile.display_name)
+                }
                 form ."o-followDialog__form"
                     action=(format!("/ui/profile/{}/follow", profile_id))
                     method="post"
-                    x-target="profile-summary follow-dialog-content"
+                    x-target="profile-summary followee-list follow-dialog-content"
                     "@ajax:before"=(ajax_attrs.before)
                     "@ajax:after"=(ajax_attrs.after)
             {
@@ -136,21 +155,18 @@ pub async fn post_follow(
     Path(profile_id): Path<RostraId>,
     axum_extra::extract::Form(form): axum_extra::extract::Form<FollowFormData>,
 ) -> RequestResult<impl IntoResponse> {
+    let client = state.client(session.id()).await?;
+    let client_ref = client.client_ref()?;
+
     match form.follow_type.as_str() {
         "unfollow" => {
-            state
-                .client(session.id())
-                .await?
-                .client_ref()?
+            client_ref
                 .unfollow(session.id_secret()?, profile_id)
                 .await?;
         }
         "follow_all" | "follow_only" => {
             let ids = form.personas;
-            state
-                .client(session.id())
-                .await?
-                .client_ref()?
+            client_ref
                 .follow(
                     session.id_secret()?,
                     profile_id,
@@ -165,11 +181,17 @@ pub async fn post_follow(
         _ => {}
     }
 
+    // Get updated followees list for settings page
+    let followees = client_ref.db().get_followees(session.id()).await;
+
     Ok(Maud(html! {
-        // Update the profile summary
+        // Update the profile summary (for profile page)
         (state
             .render_profile_summary(profile_id, &session, session.ro_mode())
             .await?)
+
+        // Update the followee list (for settings page)
+        (state.render_followee_list(&session, followees).await?)
 
         // Close the follow dialog by replacing with empty non-active version
         div id="follow-dialog-content" {}
@@ -226,18 +248,6 @@ impl UiState {
                             target.classList.remove('-active');
                         }, 1000);
                     }
-
-                    function togglePersonaList() {
-                        const selectedOption = document.querySelector('#follow-type-select').value;
-                        const personaList = document.querySelector('.o-followDialog__personaList');
-
-                        if (selectedOption === 'follow_all' || selectedOption === 'follow_only') {
-                            personaList.classList.add('-visible');
-                        } else {
-                            personaList.classList.remove('-visible');
-                        }
-                    }
-
                     "#
                     ))
                 }

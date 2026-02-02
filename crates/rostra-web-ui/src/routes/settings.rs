@@ -1,9 +1,7 @@
-use axum::Form;
 use axum::extract::State;
 use axum::response::{IntoResponse, Redirect};
 use maud::{Markup, html};
 use rostra_core::id::RostraId;
-use serde::Deserialize;
 
 use super::unlock::session::UserSession;
 use super::{Maud, fragment};
@@ -34,30 +32,6 @@ pub async fn get_settings_followers(
             .render_settings_page(&session, navbar, content)
             .await?,
     ))
-}
-
-#[derive(Deserialize)]
-pub struct UnfollowForm {
-    rostra_id: RostraId,
-}
-
-pub async fn post_unfollow(
-    state: State<SharedState>,
-    session: UserSession,
-    Form(form): Form<UnfollowForm>,
-) -> RequestResult<impl IntoResponse> {
-    let client = state.client(session.id()).await?;
-    let client_ref = client.client_ref()?;
-    let user_id = client_ref.rostra_id();
-
-    // Perform unfollow
-    client_ref
-        .unfollow(session.id_secret()?, form.rostra_id)
-        .await?;
-
-    // Return updated followee list
-    let followees = client_ref.db().get_followees(user_id).await;
-    Ok(Maud(state.render_followee_list(&session, followees).await?))
 }
 
 impl UiState {
@@ -116,6 +90,9 @@ impl UiState {
                     h3 ."o-settingsContent__sectionHeader" { "Following" }
                     (self.render_followee_list(session, followees).await?)
                 }
+
+                // Follow dialog container (shared by all followee items)
+                div id="follow-dialog-content" {}
             }
         })
     }
@@ -163,14 +140,14 @@ impl UiState {
                                 (display_name)
                             }
                             (fragment::ajax_button(
-                                "/ui/settings/unfollow",
-                                "post",
-                                "followee-list",
-                                "m-followeeList__unfollowButton",
-                                "Unfollow",
+                                &format!("/ui/profile/{followee_id}/follow"),
+                                "get",
+                                "follow-dialog-content",
+                                "m-followeeList__followButton",
+                                "Following...",
                             )
                             .disabled(session.ro_mode().to_disabled())
-                            .hidden_inputs(html! { input type="hidden" name="rostra_id" value=(followee_id) {} })
+                            .hidden_inputs(html! { input type="hidden" name="following" value="true" {} })
                             .form_class("m-followeeList__actions")
                             .call())
                         }
