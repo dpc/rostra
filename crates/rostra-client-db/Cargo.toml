@@ -49,3 +49,4 @@ tracing-subscriber = { workspace = true }
 proptest = { workspace = true }
 tempfile = { workspace = true }
 test-log = { workspace = true, features = ["trace"] }
+time = { workspace = true }

@@ -351,9 +351,13 @@ impl Database {
             // Every event contributes to metadata size
             usage.metadata_size += EVENT_METADATA_SIZE;
 
-            // Content only counts if state is Available
+            // Content only counts if state is Available or ClaimedUnprocessed (both have
+            // RC)
             if let Some(state) = state_table.get(&event_id)?.map(|g| g.value()) {
-                if matches!(state, EventContentStateNew::Available) {
+                if matches!(
+                    state,
+                    EventContentStateNew::Available | EventContentStateNew::ClaimedUnprocessed
+                ) {
                     usage.content_size += u64::from(record.content_len());
                 }
             }

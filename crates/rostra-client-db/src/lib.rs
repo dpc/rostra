@@ -523,6 +523,16 @@ impl Database {
         if can_insert {
             if let Some(content) = event_content.content.as_ref() {
                 let content_hash = event_content.content_hash();
+
+                // Check if this event was already claimed (content deduplicated) by
+                // insert_event_tx. In that case, RC and content size were
+                // already incremented, content is already in store - we just
+                // need to run event-specific processing and update state.
+                let was_claimed_early = events_content_state_table
+                    .get(&event_content.event_id().to_short())?
+                    .map(|g| matches!(g.value(), EventContentStateNew::ClaimedUnprocessed))
+                    .unwrap_or(false);
+
                 let is_valid = match self.process_event_content_inserted_tx(event_content, tx) {
                     Ok(()) => {
                         info!(target: LOG_TARGET,
@@ -548,28 +558,31 @@ impl Database {
                     }
                 };
 
-                // Check if content already exists in store (deduplication)
-                let content_exists = content_store_table.get(&content_hash)?.is_some();
+                // Only do content storage and RC tracking if not already claimed
+                if !was_claimed_early {
+                    // Check if content already exists in store (deduplication)
+                    let content_exists = content_store_table.get(&content_hash)?.is_some();
 
-                if !content_exists {
-                    // Store content in content_store
-                    let store_record = if is_valid {
-                        ContentStoreRecord::Present(Cow::Owned(content.clone()))
-                    } else {
-                        ContentStoreRecord::Invalid(Cow::Owned(content.clone()))
-                    };
-                    content_store_table.insert(&content_hash, &store_record)?;
+                    if !content_exists {
+                        // Store content in content_store
+                        let store_record = if is_valid {
+                            ContentStoreRecord::Present(Cow::Owned(content.clone()))
+                        } else {
+                            ContentStoreRecord::Invalid(Cow::Owned(content.clone()))
+                        };
+                        content_store_table.insert(&content_hash, &store_record)?;
+                    }
+
+                    // Increment RC for this event claiming the content
+                    Database::increment_content_rc_tx(content_hash, &mut content_rc_table)?;
+
+                    // Track content size for the author
+                    Database::increment_content_size_tx(
+                        event_content.author(),
+                        event_content.content_len(),
+                        &mut ids_data_usage_table,
+                    )?;
                 }
-
-                // Increment RC for this event claiming the content
-                Database::increment_content_rc_tx(content_hash, &mut content_rc_table)?;
-
-                // Track content size for the author
-                Database::increment_content_size_tx(
-                    event_content.author(),
-                    event_content.content_len(),
-                    &mut ids_data_usage_table,
-                )?;
 
                 // Mark per-event state as available (this event now holds an RC)
                 events_content_state_table.insert(

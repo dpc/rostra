@@ -130,10 +130,19 @@ pub type ContentStoreRecordOwned = ContentStoreRecord<'static>;
 /// looked up via the event's content_hash.
 #[derive(Debug, Encode, Decode, Clone, Copy, Serialize)]
 pub enum EventContentStateNew {
-    /// Content is available in the content_store.
+    /// Content is available in the content_store and has been processed.
     ///
     /// Look up the content using the event's content_hash field.
     Available,
+
+    /// Content was claimed early (deduplicated) by insert_event_tx but hasn't
+    /// been processed by process_event_content_tx yet.
+    ///
+    /// This happens when an event arrives and its content already exists in
+    /// content_store (from another event with the same content hash).
+    /// The RC was incremented, but event-specific processing (like updating
+    /// follow/unfollow tables) still needs to run.
+    ClaimedUnprocessed,
 
     /// Content was deleted by the author via a deletion event.
     Deleted {

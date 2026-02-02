@@ -67,7 +67,7 @@ impl Follow {
     }
 
     pub fn is_unfollow(&self) -> bool {
-        self.selector.is_none() && self.selector.is_none()
+        self.persona.is_none() && self.selector.is_none()
     }
 }
 impl EventContentKind for Follow {

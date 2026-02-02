@@ -75,11 +75,15 @@ impl Database {
                 else {
                     return Ok(None);
                 };
-                let EventContentStateNew::Available = content_state else {
+                let (EventContentStateNew::Available | EventContentStateNew::ClaimedUnprocessed) =
+                    content_state
+                else {
                     return Ok(None);
                 };
 
-                let Some(store_record) = content_store_table.get(&content_hash)?.map(|g| g.value()) else {
+                let Some(store_record) =
+                    content_store_table.get(&content_hash)?.map(|g| g.value())
+                else {
                     return Ok(None);
                 };
                 let ContentStoreRecord::Present(content) = store_record else {
@@ -92,8 +96,7 @@ impl Database {
                 };
 
                 let social_post_record =
-                    Database::get_social_post_tx(event_id, &social_posts_table)?.unwrap_or_default()
-                ;
+                    Database::get_social_post_tx(event_id, &social_posts_table)?.unwrap_or_default();
 
                 let social_post_record = SocialPostRecord {
                     ts,
@@ -150,11 +153,15 @@ impl Database {
                 else {
                     return Ok(None);
                 };
-                let EventContentStateNew::Available = content_state else {
+                let (EventContentStateNew::Available | EventContentStateNew::ClaimedUnprocessed) =
+                    content_state
+                else {
                     return Ok(None);
                 };
 
-                let Some(store_record) = content_store_table.get(&content_hash)?.map(|g| g.value()) else {
+                let Some(store_record) =
+                    content_store_table.get(&content_hash)?.map(|g| g.value())
+                else {
                     return Ok(None);
                 };
                 let ContentStoreRecord::Present(content) = store_record else {
@@ -167,8 +174,7 @@ impl Database {
                 };
 
                 let social_post_record =
-                    Database::get_social_post_tx(event_id, &social_posts_table)?.unwrap_or_default()
-                ;
+                    Database::get_social_post_tx(event_id, &social_posts_table)?.unwrap_or_default();
 
                 let social_post_record = SocialPostRecord {
                     ts,
@@ -229,7 +235,9 @@ impl Database {
                 else {
                     return Ok(None);
                 };
-                let EventContentStateNew::Available = content_state else {
+                let (EventContentStateNew::Available | EventContentStateNew::ClaimedUnprocessed) =
+                    content_state
+                else {
                     debug!(target: LOG_TARGET, %event_id, "Skipping comment without content present");
                     return Ok(None);
                 };
@@ -298,7 +306,9 @@ impl Database {
                 else {
                     return Ok(None);
                 };
-                let EventContentStateNew::Available = content_state else {
+                let (EventContentStateNew::Available | EventContentStateNew::ClaimedUnprocessed) =
+                    content_state
+                else {
                     debug!(target: LOG_TARGET, %event_id, "Skipping comment without content present");
                     return Ok(None);
                 };
@@ -481,7 +491,9 @@ impl Database {
             return Ok(None);
         };
 
-        let EventContentStateNew::Available = content_state else {
+        let (EventContentStateNew::Available | EventContentStateNew::ClaimedUnprocessed) =
+            content_state
+        else {
             return Ok(None);
         };
 

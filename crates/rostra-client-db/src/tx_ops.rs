@@ -152,8 +152,14 @@ impl Database {
                         )?
                         .map(|g| g.value());
 
-                    // If content was available, look it up and decrement RC
-                    if matches!(old_state, Some(EventContentStateNew::Available)) {
+                    // If content was available (or claimed), look it up and decrement RC
+                    if matches!(
+                        old_state,
+                        Some(
+                            EventContentStateNew::Available
+                                | EventContentStateNew::ClaimedUnprocessed
+                        )
+                    ) {
                         // Look up content from content_store to return for reverting
                         if let Some(ContentStoreRecord::Present(cow)) = content_store_table
                             .get(&parent_content_hash)?
@@ -211,9 +217,12 @@ impl Database {
         if !is_deleted {
             // Check if content already exists in the store
             if content_store_table.get(&content_hash)?.is_some() {
-                // Content exists - claim it immediately
+                // Content exists - claim it (increment RC) but mark as unprocessed.
+                // Event-specific processing (like follow table updates) will run
+                // when process_event_content is called.
                 Database::increment_content_rc_tx(content_hash, content_rc_table)?;
-                events_content_state_table.insert(&event_id, &EventContentStateNew::Available)?;
+                events_content_state_table
+                    .insert(&event_id, &EventContentStateNew::ClaimedUnprocessed)?;
 
                 // Track content size
                 if let Some(ref mut usage_table) = ids_data_usage_table {
@@ -252,8 +261,14 @@ impl Database {
                     return Ok(false);
                 }
                 EventContentStateNew::Available => {
-                    // Content already present
+                    // Content already present and processed
                     return Ok(false);
+                }
+                EventContentStateNew::ClaimedUnprocessed => {
+                    // Content was claimed early by insert_event_tx but not yet processed.
+                    // We need to run processing, but content is already in store and RC
+                    // was already incremented, so we don't need to store again.
+                    return Ok(true);
                 }
                 EventContentStateNew::Pruned => {
                     // Was pruned - check if content is in store (might be from another event)
@@ -290,8 +305,8 @@ impl Database {
                     // already pruned, no need to do anything
                     return Ok(true);
                 }
-                EventContentStateNew::Available => {
-                    // Was available - decrement RC before marking as pruned
+                EventContentStateNew::Available | EventContentStateNew::ClaimedUnprocessed => {
+                    // Was available (or claimed) - decrement RC before marking as pruned
                     Database::decrement_content_rc_tx(content_hash, content_rc_table)?;
 
                     // Decrement content size for the author
@@ -386,8 +401,9 @@ impl Database {
         };
 
         Ok(Some(match state {
-            EventContentStateNew::Available => {
+            EventContentStateNew::Available | EventContentStateNew::ClaimedUnprocessed => {
                 // Look up content from content_store
+                // (ClaimedUnprocessed also has content in store, just not yet processed)
                 match content_store_table.get(&content_hash)?.map(|r| r.value()) {
                     Some(ContentStoreRecord::Present(content)) => {
                         EventContentResult::Present(content.into_owned())
@@ -416,7 +432,10 @@ impl Database {
         let state = events_content_state_table
             .get(&event.into())?
             .map(|r| r.value());
-        Ok(matches!(state, Some(EventContentStateNew::Available)))
+        Ok(matches!(
+            state,
+            Some(EventContentStateNew::Available | EventContentStateNew::ClaimedUnprocessed)
+        ))
     }
 
     /// Try to lazily claim content for an event that was waiting for it.
@@ -723,7 +742,12 @@ impl Database {
             // Check if content was available before removing state
             let was_available = events_content_state_table
                 .get(&event_id)?
-                .map(|g| matches!(g.value(), EventContentStateNew::Available))
+                .map(|g| {
+                    matches!(
+                        g.value(),
+                        EventContentStateNew::Available | EventContentStateNew::ClaimedUnprocessed
+                    )
+                })
                 .unwrap_or(false);
 
             // Remove per-event state

@@ -498,11 +498,12 @@ async fn test_content_exists_when_event_arrives() -> BoxedErrorResult<()> {
             "Event should NOT be in events_content_missing"
         );
 
-        // Verify: Event should be marked as Available immediately
+        // Verify: Event should be marked as ClaimedUnprocessed (claimed early but not
+        // processed)
         let state = Database::get_event_content_state_tx(event_id, &events_content_state_table)?;
         assert!(
-            matches!(state, Some(EventContentStateNew::Available)),
-            "Event should be marked as Available immediately"
+            matches!(state, Some(EventContentStateNew::ClaimedUnprocessed)),
+            "Event should be marked as ClaimedUnprocessed when content exists"
         );
 
         // Verify: RC should be 1
@@ -632,9 +633,9 @@ async fn test_multiple_events_share_content() -> BoxedErrorResult<()> {
         assert!(
             matches!(
                 Database::get_event_content_state_tx(event_b_id, &events_content_state_table)?,
-                Some(EventContentStateNew::Available)
+                Some(EventContentStateNew::ClaimedUnprocessed)
             ),
-            "B should be Available"
+            "B should be ClaimedUnprocessed (claimed early but not processed)"
         );
 
         // Step 4: Prune A's content - RC decrements, B still has content
@@ -1652,6 +1653,273 @@ async fn test_data_usage_content_tracking() -> BoxedErrorResult<()> {
     Ok(())
 }
 
+/// Test: Follow, unfollow, and re-follow flow with event processing.
+///
+/// Verifies the complete lifecycle:
+/// 1. User A follows User B - check followees/followers tables
+/// 2. User A unfollows User B - check tables are updated
+/// 3. User A re-follows User B - check tables are restored
+///
+/// This test processes events through the full event content processing path.
+#[test_log::test(tokio::test(flavor = "multi_thread"))]
+async fn test_follow_unfollow_refollow_flow() -> BoxedErrorResult<()> {
+    use rostra_core::event::content_kind::{EventContentKind as _, Follow};
+    use rostra_core::event::{
+        Event, EventKind, PersonaSelector, VerifiedEvent, VerifiedEventContent,
+    };
+
+    use crate::{ids_followees, ids_followers, ids_unfollowed};
+
+    let user_a_secret = RostraIdSecretKey::generate();
+    let user_a = user_a_secret.id();
+    let user_b_secret = RostraIdSecretKey::generate();
+    let user_b = user_b_secret.id();
+
+    let (_dir, db) = temp_db(user_a).await?;
+
+    // Helper to create a follow event with explicit timestamp
+    let make_follow_event = |secret: RostraIdSecretKey,
+                             followee: rostra_core::id::RostraId,
+                             selector: Option<PersonaSelector>,
+                             timestamp: time::OffsetDateTime|
+     -> (VerifiedEvent, rostra_core::event::EventContentRaw) {
+        let follow = Follow {
+            followee,
+            persona: None,
+            selector,
+        };
+        let content = follow.serialize_cbor().expect("valid");
+        let event = Event::builder_raw_content()
+            .author(secret.id())
+            .kind(EventKind::FOLLOW)
+            .content(&content)
+            .timestamp(timestamp)
+            .build();
+        let signed = event.signed_by(secret);
+        let verified = VerifiedEvent::verify_signed(secret.id(), signed).expect("Valid event");
+        (verified, content)
+    };
+
+    // Use explicit timestamps to ensure proper ordering (1-second resolution)
+    let base_time = time::OffsetDateTime::now_utc();
+    let follow_time = base_time;
+    let unfollow_time = base_time + time::Duration::seconds(1);
+    let refollow_time = base_time + time::Duration::seconds(2);
+
+    // Step 1: User A follows User B (Follow All except none = follow all personas)
+    let (follow_event_1, follow_content_1) = make_follow_event(
+        user_a_secret,
+        user_b,
+        Some(PersonaSelector::Except { ids: vec![] }),
+        follow_time,
+    );
+
+    // Insert the event first (without content in store - content arrives later)
+    db.write_with(|tx| {
+        let mut ids_full_tbl = tx.open_table(&ids_full::TABLE)?;
+        let mut events_table = tx.open_table(&events::TABLE)?;
+        let mut events_missing_table = tx.open_table(&events_missing::TABLE)?;
+        let mut events_heads_table = tx.open_table(&events_heads::TABLE)?;
+        let mut events_by_time_table = tx.open_table(&events_by_time::TABLE)?;
+        let mut events_content_state_table = tx.open_table(&events_content_state::TABLE)?;
+        let content_store_table = tx.open_table(&content_store::TABLE)?;
+        let mut content_rc_table = tx.open_table(&content_rc::TABLE)?;
+        let mut events_content_missing_table = tx.open_table(&events_content_missing::TABLE)?;
+
+        // Insert the event (content not in store yet)
+        Database::insert_event_tx(
+            follow_event_1,
+            &mut ids_full_tbl,
+            &mut events_table,
+            &mut events_missing_table,
+            &mut events_heads_table,
+            &mut events_by_time_table,
+            &mut events_content_state_table,
+            &content_store_table,
+            &mut content_rc_table,
+            &mut events_content_missing_table,
+            None,
+        )?;
+
+        Ok(())
+    })
+    .await?;
+
+    // Process the follow event content
+    let verified_content_1 =
+        VerifiedEventContent::assume_verified(follow_event_1, follow_content_1);
+    db.process_event_content(&verified_content_1).await;
+
+    // Verify: User A should be following User B
+    db.write_with(|tx| {
+        let followees_table = tx.open_table(&ids_followees::TABLE)?;
+        let followers_table = tx.open_table(&ids_followers::TABLE)?;
+        let unfollowed_table = tx.open_table(&ids_unfollowed::TABLE)?;
+
+        // Check followees: (user_a, user_b) should exist
+        assert!(
+            followees_table.get(&(user_a, user_b))?.is_some(),
+            "User A should be following User B after follow"
+        );
+
+        // Check followers: (user_b, user_a) should exist
+        assert!(
+            followers_table.get(&(user_b, user_a))?.is_some(),
+            "User B should have User A as follower"
+        );
+
+        // No unfollowed record should exist
+        assert!(
+            unfollowed_table.get(&(user_a, user_b))?.is_none(),
+            "No unfollow record should exist"
+        );
+
+        Ok(())
+    })
+    .await?;
+
+    // Step 2: User A unfollows User B (Follow with no selector = unfollow)
+    let (unfollow_event, unfollow_content) =
+        make_follow_event(user_a_secret, user_b, None, unfollow_time);
+
+    db.write_with(|tx| {
+        let mut ids_full_tbl = tx.open_table(&ids_full::TABLE)?;
+        let mut events_table = tx.open_table(&events::TABLE)?;
+        let mut events_missing_table = tx.open_table(&events_missing::TABLE)?;
+        let mut events_heads_table = tx.open_table(&events_heads::TABLE)?;
+        let mut events_by_time_table = tx.open_table(&events_by_time::TABLE)?;
+        let mut events_content_state_table = tx.open_table(&events_content_state::TABLE)?;
+        let content_store_table = tx.open_table(&content_store::TABLE)?;
+        let mut content_rc_table = tx.open_table(&content_rc::TABLE)?;
+        let mut events_content_missing_table = tx.open_table(&events_content_missing::TABLE)?;
+
+        Database::insert_event_tx(
+            unfollow_event,
+            &mut ids_full_tbl,
+            &mut events_table,
+            &mut events_missing_table,
+            &mut events_heads_table,
+            &mut events_by_time_table,
+            &mut events_content_state_table,
+            &content_store_table,
+            &mut content_rc_table,
+            &mut events_content_missing_table,
+            None,
+        )?;
+
+        Ok(())
+    })
+    .await?;
+
+    // Process the unfollow event content
+    let verified_content_2 =
+        VerifiedEventContent::assume_verified(unfollow_event, unfollow_content);
+    db.process_event_content(&verified_content_2).await;
+
+    // Verify: User A should no longer be following User B
+    db.write_with(|tx| {
+        let followees_table = tx.open_table(&ids_followees::TABLE)?;
+        let followers_table = tx.open_table(&ids_followers::TABLE)?;
+        let unfollowed_table = tx.open_table(&ids_unfollowed::TABLE)?;
+
+        // Followee record should be removed
+        assert!(
+            followees_table.get(&(user_a, user_b))?.is_none(),
+            "User A should not be following User B after unfollow"
+        );
+
+        // Follower record should be removed
+        assert!(
+            followers_table.get(&(user_b, user_a))?.is_none(),
+            "User B should not have User A as follower after unfollow"
+        );
+
+        // Unfollowed record should exist
+        assert!(
+            unfollowed_table.get(&(user_a, user_b))?.is_some(),
+            "Unfollow record should exist"
+        );
+
+        Ok(())
+    })
+    .await?;
+
+    // Step 3: User A re-follows User B (same selector as initial follow - tests
+    // deduplication) This tests that even with content deduplication (same
+    // content hash as initial follow), the event-specific processing (follow
+    // table updates) still runs correctly.
+    let (refollow_event, refollow_content) = make_follow_event(
+        user_a_secret,
+        user_b,
+        Some(PersonaSelector::Except { ids: vec![] }),
+        refollow_time,
+    );
+
+    db.write_with(|tx| {
+        let mut ids_full_tbl = tx.open_table(&ids_full::TABLE)?;
+        let mut events_table = tx.open_table(&events::TABLE)?;
+        let mut events_missing_table = tx.open_table(&events_missing::TABLE)?;
+        let mut events_heads_table = tx.open_table(&events_heads::TABLE)?;
+        let mut events_by_time_table = tx.open_table(&events_by_time::TABLE)?;
+        let mut events_content_state_table = tx.open_table(&events_content_state::TABLE)?;
+        let content_store_table = tx.open_table(&content_store::TABLE)?;
+        let mut content_rc_table = tx.open_table(&content_rc::TABLE)?;
+        let mut events_content_missing_table = tx.open_table(&events_content_missing::TABLE)?;
+
+        Database::insert_event_tx(
+            refollow_event,
+            &mut ids_full_tbl,
+            &mut events_table,
+            &mut events_missing_table,
+            &mut events_heads_table,
+            &mut events_by_time_table,
+            &mut events_content_state_table,
+            &content_store_table,
+            &mut content_rc_table,
+            &mut events_content_missing_table,
+            None,
+        )?;
+
+        Ok(())
+    })
+    .await?;
+
+    // Process the re-follow event content
+    let verified_content_3 =
+        VerifiedEventContent::assume_verified(refollow_event, refollow_content);
+    db.process_event_content(&verified_content_3).await;
+
+    // Verify: User A should be following User B again
+    db.write_with(|tx| {
+        let followees_table = tx.open_table(&ids_followees::TABLE)?;
+        let followers_table = tx.open_table(&ids_followers::TABLE)?;
+        let unfollowed_table = tx.open_table(&ids_unfollowed::TABLE)?;
+
+        // Check followees: (user_a, user_b) should exist again
+        assert!(
+            followees_table.get(&(user_a, user_b))?.is_some(),
+            "User A should be following User B after re-follow"
+        );
+
+        // Check followers: (user_b, user_a) should exist again
+        assert!(
+            followers_table.get(&(user_b, user_a))?.is_some(),
+            "User B should have User A as follower after re-follow"
+        );
+
+        // Unfollowed record should be removed (follow with newer timestamp removes it)
+        assert!(
+            unfollowed_table.get(&(user_a, user_b))?.is_none(),
+            "Unfollow record should be removed after re-follow"
+        );
+
+        Ok(())
+    })
+    .await?;
+
+    Ok(())
+}
+
 // ============================================================================
 // Property-based testing for RC counting correctness
 // ============================================================================
@@ -1725,8 +1993,11 @@ mod proptest_rc {
             let state =
                 Database::get_event_content_state_tx(*event_id, events_content_state_table)?;
 
-            // Only count events with Available state
-            if matches!(state, Some(EventContentStateNew::Available)) {
+            // Only count events with Available or ClaimedUnprocessed state (both have RC)
+            if matches!(
+                state,
+                Some(EventContentStateNew::Available | EventContentStateNew::ClaimedUnprocessed)
+            ) {
                 *expected_rc.entry(*content_hash).or_insert(0) += 1;
             }
         }
@@ -1852,9 +2123,9 @@ mod proptest_rc {
     #[test]
     fn proptest_rc_counting() {
         // Use proptest runner
-        proptest!(ProptestConfig::with_cases(50), |(
+        proptest!(ProptestConfig::with_cases(500), |(
             seed in 0u64..10000,
-            num_events in 5usize..20,
+            num_events in 1usize..=50,
             content_seeds in prop::array::uniform10(any::<[u8; 8]>()),
         )| {
             // Run the async test
@@ -2025,6 +2296,287 @@ mod proptest_rc {
         if let Some(errors) = consistency_result {
             return Err(format!("RC consistency check failed:\n{errors}").into());
         }
+
+        Ok(())
+    }
+}
+
+// ============================================================================
+// Property-based testing for follow/unfollow correctness
+// ============================================================================
+
+mod proptest_follow {
+    use proptest::prelude::*;
+    use rostra_core::event::content_kind::{EventContentKind as _, Follow, PersonaSelector};
+    use rostra_core::event::{Event, EventKind, VerifiedEvent, VerifiedEventContent};
+    use rostra_core::id::RostraIdSecretKey;
+    use tracing::debug;
+
+    use crate::{
+        Database, content_rc, content_store, events, events_by_time, events_content_missing,
+        events_content_state, events_heads, events_missing, ids_followees, ids_followers, ids_full,
+        ids_unfollowed,
+    };
+
+    /// Represents a follow or unfollow operation
+    #[derive(Debug, Clone, Copy)]
+    enum FollowOp {
+        /// Follow with a specific "variant" to create different content hashes
+        Follow {
+            variant: u8,
+        },
+        Unfollow,
+    }
+
+    /// Represents when to deliver event vs content
+    #[derive(Debug, Clone, Copy)]
+    enum DeliveryStep {
+        /// Insert event at index
+        InsertEvent(usize),
+        /// Process content for event at index
+        ProcessContent(usize),
+    }
+
+    /// Strategy to generate a sequence of follow/unfollow operations
+    fn follow_ops_strategy() -> impl Strategy<Value = Vec<FollowOp>> {
+        // Generate 10-50 operations
+        prop::collection::vec(
+            prop_oneof![
+                // Follow with variant 0-3 to create different content hashes
+                (0u8..4).prop_map(|variant| FollowOp::Follow { variant }),
+                Just(FollowOp::Unfollow),
+            ],
+            10..=50,
+        )
+    }
+
+    proptest! {
+        #![proptest_config(ProptestConfig::with_cases(500))]
+
+        /// Test that follow/unfollow operations work correctly regardless of delivery order.
+        ///
+        /// This test:
+        /// 1. Generates a sequence of follow/unfollow operations with increasing timestamps
+        /// 2. Generates a random delivery order for events and content
+        /// 3. Verifies the final following status matches the latest operation by timestamp
+        #[test]
+        fn test_follow_unfollow_delivery_order(
+            ops in follow_ops_strategy(),
+            seed: u64,
+        ) {
+            let rt = tokio::runtime::Builder::new_multi_thread()
+                .enable_all()
+                .build()
+                .unwrap();
+
+            rt.block_on(async {
+                run_follow_unfollow_test(ops, seed).await
+            }).expect("Test failed");
+        }
+    }
+
+    async fn run_follow_unfollow_test(
+        ops: Vec<FollowOp>,
+        seed: u64,
+    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+        use rand::SeedableRng;
+        use rand::seq::SliceRandom;
+
+        if ops.is_empty() {
+            return Ok(());
+        }
+
+        let user_a_secret = RostraIdSecretKey::generate();
+        let user_a = user_a_secret.id();
+        let user_b_secret = RostraIdSecretKey::generate();
+        let user_b = user_b_secret.id();
+
+        let (_dir, db) = super::temp_db(user_a).await?;
+
+        // Create events for each operation with increasing timestamps
+        let base_time = time::OffsetDateTime::now_utc();
+        let mut events_and_content: Vec<(VerifiedEvent, rostra_core::event::EventContentRaw)> =
+            Vec::new();
+
+        for (i, op) in ops.iter().enumerate() {
+            let timestamp = base_time + time::Duration::seconds(i as i64);
+            let selector = match op {
+                FollowOp::Follow { variant } => {
+                    // Use variant to create slightly different content
+                    // by including different persona IDs in the selector
+                    let ids: Vec<_> = (0..*variant)
+                        .map(|v| rostra_core::event::PersonaId(v))
+                        .collect();
+                    Some(PersonaSelector::Except { ids })
+                }
+                FollowOp::Unfollow => None,
+            };
+
+            let follow = Follow {
+                followee: user_b,
+                persona: None,
+                selector,
+            };
+            let content = follow.serialize_cbor().expect("valid");
+            let event = Event::builder_raw_content()
+                .author(user_a)
+                .kind(EventKind::FOLLOW)
+                .content(&content)
+                .timestamp(timestamp)
+                .build();
+            let signed = event.signed_by(user_a_secret);
+            let verified = VerifiedEvent::verify_signed(user_a, signed).expect("Valid event");
+            events_and_content.push((verified, content));
+        }
+
+        // Generate delivery order using seed
+        let mut rng = rand::rngs::StdRng::seed_from_u64(seed);
+        let mut delivery_order: Vec<DeliveryStep> = (0..ops.len())
+            .flat_map(|i| {
+                vec![
+                    DeliveryStep::InsertEvent(i),
+                    DeliveryStep::ProcessContent(i),
+                ]
+            })
+            .collect();
+        delivery_order.shuffle(&mut rng);
+
+        debug!(
+            "Testing {} ops with delivery order: {:?}",
+            ops.len(),
+            delivery_order
+        );
+
+        // Track what has been done
+        let mut events_inserted = std::collections::HashSet::new();
+        let mut content_processed = std::collections::HashSet::new();
+
+        // Execute delivery order
+        for step in &delivery_order {
+            match step {
+                DeliveryStep::InsertEvent(idx) => {
+                    if events_inserted.contains(idx) {
+                        continue;
+                    }
+
+                    let (event, _content) = &events_and_content[*idx];
+
+                    db.write_with(|tx| {
+                        let mut ids_full_tbl = tx.open_table(&ids_full::TABLE)?;
+                        let mut events_table = tx.open_table(&events::TABLE)?;
+                        let mut events_missing_table = tx.open_table(&events_missing::TABLE)?;
+                        let mut events_heads_table = tx.open_table(&events_heads::TABLE)?;
+                        let mut events_by_time_table = tx.open_table(&events_by_time::TABLE)?;
+                        let mut events_content_state_table =
+                            tx.open_table(&events_content_state::TABLE)?;
+                        let content_store_table = tx.open_table(&content_store::TABLE)?;
+                        let mut content_rc_table = tx.open_table(&content_rc::TABLE)?;
+                        let mut events_content_missing_table =
+                            tx.open_table(&events_content_missing::TABLE)?;
+
+                        Database::insert_event_tx(
+                            *event,
+                            &mut ids_full_tbl,
+                            &mut events_table,
+                            &mut events_missing_table,
+                            &mut events_heads_table,
+                            &mut events_by_time_table,
+                            &mut events_content_state_table,
+                            &content_store_table,
+                            &mut content_rc_table,
+                            &mut events_content_missing_table,
+                            None,
+                        )?;
+
+                        Ok(())
+                    })
+                    .await?;
+
+                    events_inserted.insert(*idx);
+                }
+                DeliveryStep::ProcessContent(idx) => {
+                    if content_processed.contains(idx) {
+                        continue;
+                    }
+                    // Content can only be processed if event was inserted
+                    if !events_inserted.contains(idx) {
+                        continue;
+                    }
+
+                    let (event, content) = &events_and_content[*idx];
+                    let verified_content =
+                        VerifiedEventContent::assume_verified(*event, content.clone());
+                    db.process_event_content(&verified_content).await;
+
+                    content_processed.insert(*idx);
+                }
+            }
+        }
+
+        // Process any remaining content that wasn't processed due to ordering
+        for idx in 0..ops.len() {
+            if events_inserted.contains(&idx) && !content_processed.contains(&idx) {
+                let (event, content) = &events_and_content[idx];
+                let verified_content =
+                    VerifiedEventContent::assume_verified(*event, content.clone());
+                db.process_event_content(&verified_content).await;
+                content_processed.insert(idx);
+            }
+        }
+
+        // Determine expected final state: the operation with the highest timestamp wins
+        // Since timestamps are ordered by index, the last operation determines the
+        // state
+        let last_op = ops.last().unwrap();
+        let expected_following = matches!(last_op, FollowOp::Follow { .. });
+
+        // Verify final state
+        db.write_with(|tx| {
+            let followees_table = tx.open_table(&ids_followees::TABLE)?;
+            let followers_table = tx.open_table(&ids_followers::TABLE)?;
+            let unfollowed_table = tx.open_table(&ids_unfollowed::TABLE)?;
+
+            let is_following = followees_table.get(&(user_a, user_b))?.is_some();
+            let has_follower = followers_table.get(&(user_b, user_a))?.is_some();
+            let is_unfollowed = unfollowed_table.get(&(user_a, user_b))?.is_some();
+
+            if expected_following {
+                assert!(
+                    is_following,
+                    "Expected user_a to be following user_b (ops: {:?})",
+                    ops
+                );
+                assert!(
+                    has_follower,
+                    "Expected user_b to have user_a as follower (ops: {:?})",
+                    ops
+                );
+                assert!(
+                    !is_unfollowed,
+                    "Expected no unfollow record when following (ops: {:?})",
+                    ops
+                );
+            } else {
+                assert!(
+                    !is_following,
+                    "Expected user_a to NOT be following user_b (ops: {:?})",
+                    ops
+                );
+                assert!(
+                    !has_follower,
+                    "Expected user_b to NOT have user_a as follower (ops: {:?})",
+                    ops
+                );
+                assert!(
+                    is_unfollowed,
+                    "Expected unfollow record when not following (ops: {:?})",
+                    ops
+                );
+            }
+
+            Ok(())
+        })
+        .await?;
 
         Ok(())
     }
