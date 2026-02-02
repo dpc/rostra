@@ -128,6 +128,28 @@ pub async fn publish(
     }))
 }
 
+/// Format file size in human-readable form
+fn format_file_size(bytes: usize) -> String {
+    const KB: usize = 1024;
+    const MB: usize = 1024 * KB;
+
+    if bytes >= MB {
+        format!("{:.1} MB", bytes as f64 / MB as f64)
+    } else if bytes >= KB {
+        format!("{:.1} KB", bytes as f64 / KB as f64)
+    } else {
+        format!("{} B", bytes)
+    }
+}
+
+/// Information about a media item for display
+struct MediaInfo {
+    event_id: ShortEventId,
+    mime: String,
+    size: usize,
+    is_image: bool,
+}
+
 pub async fn list(
     state: State<SharedState>,
     session: UserSession,
@@ -138,7 +160,7 @@ pub async fn list(
 
     // Get all SocialMedia events for this user from events_singleton2 table
     // This should work for different images as they have different hashes
-    let media_events = client_ref
+    let media_event_ids: Vec<ShortEventId> = client_ref
         .db()
         .read_with(|tx| {
             let singletons_table = tx.open_table(&events_singletons_new::TABLE)?;
@@ -159,15 +181,32 @@ pub async fn list(
                 debug_assert_eq!(key.0, author);
                 debug_assert_eq!(key.1, kind);
 
-                events.push((value.ts, value.inner.event_id, value.inner.clone()));
+                events.push((value.ts, value.inner.event_id.into()));
             }
 
-            events.sort_by_key(|val| val.0);
+            events.sort_by_key(|val: &(rostra_core::Timestamp, ShortEventId)| val.0);
 
-            Ok(events)
+            Ok(events.into_iter().map(|(_, id)| id).collect())
         })
         .await
         .unwrap_or_default();
+
+    // Fetch media info for each event
+    let mut media_items = Vec::new();
+    for event_id in media_event_ids {
+        if let Some(event_content) = client_ref.db().get_event_content(event_id).await {
+            if let Ok(media_content) = event_content.deserialize_cbor::<content_kind::SocialMedia>()
+            {
+                let is_image = media_content.mime.starts_with("image/");
+                media_items.push(MediaInfo {
+                    event_id,
+                    mime: media_content.mime,
+                    size: media_content.data.len(),
+                    is_image,
+                });
+            }
+        }
+    }
 
     Ok(Maud(html! {
         div id="media-list" ."o-mediaList -active" {
@@ -175,20 +214,30 @@ pub async fn list(
             div ."o-mediaList__content" {
                 h4 ."o-mediaList__title" { "Select media to attach" }
                 div ."o-mediaList__items" {
-                    @if media_events.is_empty() {
+                    @if media_items.is_empty() {
                         div ."o-mediaList__empty" {
                             "No media files uploaded yet."
                         }
                     } @else {
-                        @for (_ts, event_id, _event_record) in media_events {
+                        @for media in &media_items {
                             div ."o-mediaList__item"
-                                onclick=(format!("insertMediaSyntax('{}'); document.getElementById('media-list').classList.remove('-active')", event_id.to_short()))
+                                onclick=(format!("insertMediaSyntax('{}'); document.getElementById('media-list').classList.remove('-active')", media.event_id))
                             {
-                                img
-                                    src=(format!("/ui/media/{}/{}", author, event_id.to_short()))
-                                    ."o-mediaList__thumbnail"
-                                    loading="lazy"
-                                    {}
+                                @if media.is_image {
+                                    img
+                                        src=(format!("/ui/media/{}/{}", author, media.event_id))
+                                        ."o-mediaList__thumbnail"
+                                        loading="lazy"
+                                        {}
+                                } @else {
+                                    div ."o-mediaList__fileInfo" {
+                                        div ."o-mediaList__fileIcon" {}
+                                        div ."o-mediaList__fileMeta" {
+                                            div ."o-mediaList__fileMime" { (media.mime.as_str()) }
+                                            div ."o-mediaList__fileSize" { (format_file_size(media.size)) }
+                                        }
+                                    }
+                                }
                             }
                         }
                     }
