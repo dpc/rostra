@@ -729,6 +729,31 @@ emoji-picker {
   background: url('/assets/icons/image.svg') center/contain no-repeat;
 }
 
+/* Rostra media with download fallback */
+.m-rostraMedia img {
+  max-width: 100%;
+}
+
+.m-rostraMedia__download {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3em;
+  color: var(--color-link);
+  text-decoration: none;
+}
+
+.m-rostraMedia__download:hover {
+  text-decoration: underline;
+}
+
+.m-rostraMedia__downloadIcon {
+  display: inline-block;
+  width: 1em;
+  height: 1em;
+  background: url('/assets/icons/download.svg') center/contain no-repeat;
+  filter: invert(var(--invert));
+}
+
 .m-postView__content.-missing {
   color: red;
   font-style: italic;

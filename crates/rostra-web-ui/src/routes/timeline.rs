@@ -360,7 +360,7 @@ impl UiState {
                 (PreEscaped(r#"
                     window.insertMediaSyntax = function(eventId) {
                         const textarea = document.querySelector('.m-newPostForm__content');
-                        const syntax = '![](rostra-media:' + eventId + ')';
+                        const syntax = '![media](rostra-media:' + eventId + ')';
 
                         if (textarea) {
                             const start = textarea.selectionStart;

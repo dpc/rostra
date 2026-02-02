@@ -7,6 +7,20 @@ use rostra_core::id::RostraId;
 
 use crate::UiState;
 
+/// Escape HTML special characters for use in attributes and text
+fn escape_html(s: &str) -> String {
+    s.chars()
+        .flat_map(|c| match c {
+            '&' => vec!['&', 'a', 'm', 'p', ';'],
+            '<' => vec!['&', 'l', 't', ';'],
+            '>' => vec!['&', 'g', 't', ';'],
+            '"' => vec!['&', 'q', 'u', 'o', 't', ';'],
+            '\'' => vec!['&', '#', '3', '9', ';'],
+            c => vec![c],
+        })
+        .collect()
+}
+
 /// Tracks what type of container we're in for proper Event::End handling
 #[derive(Clone)]
 enum ContainerKind {
@@ -127,8 +141,8 @@ where
 
 /// Tracks the type of image transformation being applied
 enum ImageTransform<'s> {
-    /// Regular rostra media link
-    RostraMedia,
+    /// Regular rostra media link - stores the URL and alt text
+    RostraMedia(String, String),
     /// External embeddable media (YouTube, etc.) - stores the HTML and alt text
     EmbeddableMedia(String, String),
     /// Regular external image - stores the URL, link type, and alt text
@@ -166,19 +180,14 @@ where
 
     async fn emit(&mut self, event: Event<'s>) -> Result<(), Self::Error> {
         match event {
-            Event::Start(Container::Image(s, link_type), attr) => {
+            Event::Start(Container::Image(s, link_type), _attr) => {
                 if let Some(event_id) = UiState::extra_rostra_media_link(&s) {
                     // Transform rostra-media: links to /ui/media/ URLs
-                    self.container_stack.push(Some(ImageTransform::RostraMedia));
-                    self.inner
-                        .emit(Event::Start(
-                            Container::Image(
-                                format!("/ui/media/{}/{}", self.author_id, event_id).into(),
-                                jotup::SpanLinkType::Inline,
-                            ),
-                            attr,
-                        ))
-                        .await
+                    let url = format!("/ui/media/{}/{}", self.author_id, event_id);
+                    self.container_stack
+                        .push(Some(ImageTransform::RostraMedia(url, String::new())));
+                    // Don't emit Start yet - we'll emit everything in End
+                    Ok(())
                 } else {
                     // External image - check if it's embeddable media
                     if let Some(html) = super::maybe_embed_media_html(&s) {
@@ -214,9 +223,10 @@ where
                 // If we're inside an image transformation, capture the alt text
                 if let Some(Some(transform)) = self.container_stack.last_mut() {
                     match transform {
-                        ImageTransform::RostraMedia => {
-                            // For rostra media, pass through the str
-                            self.inner.emit(Event::Str(s)).await
+                        ImageTransform::RostraMedia(_, alt) => {
+                            // Capture alt text for rostra media
+                            *alt = s.to_string();
+                            Ok(())
                         }
                         ImageTransform::EmbeddableMedia(_, alt) => {
                             // Capture alt text, skip emitting the str for now
@@ -236,8 +246,42 @@ where
             Event::End => {
                 if let Some(Some(transform)) = self.container_stack.pop() {
                     match transform {
-                        ImageTransform::RostraMedia => {
-                            // Just emit End for rostra media
+                        ImageTransform::RostraMedia(url, alt) => {
+                            // Render rostra media with download fallback for unsupported types
+                            let alt = alt.trim();
+                            let display_name = if alt.is_empty() { "media" } else { alt };
+
+                            // Sanitize filename from alt text
+                            let filename: String = display_name
+                                .chars()
+                                .map(|c| {
+                                    if c.is_ascii_alphanumeric() || c == '.' || c == '_' {
+                                        c
+                                    } else {
+                                        '-'
+                                    }
+                                })
+                                .collect();
+
+                            // Emit raw HTML with onerror fallback
+                            let url_escaped = escape_html(&url);
+                            let alt_escaped = escape_html(alt);
+                            let filename_escaped = escape_html(&filename);
+                            let display_escaped = escape_html(display_name);
+
+                            let html = format!(
+                                r#"<span class="m-rostraMedia"><img src="{url_escaped}" alt="{alt_escaped}" onerror="this.parentElement.innerHTML='<a href=\'{url_escaped}\' download=\'{filename_escaped}\' class=\'m-rostraMedia__download\'><span class=\'m-rostraMedia__downloadIcon\'></span>{display_escaped}</a>'"/></span>"#
+                            );
+
+                            self.inner
+                                .emit(Event::Start(
+                                    Container::RawInline {
+                                        format: "html".into(),
+                                    },
+                                    Attributes::new(),
+                                ))
+                                .await?;
+                            self.inner.emit(Event::Str(html.into())).await?;
                             self.inner.emit(Event::End).await
                         }
                         ImageTransform::EmbeddableMedia(html, alt) => {
