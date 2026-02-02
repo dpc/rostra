@@ -240,9 +240,7 @@ impl UiState {
             div id="preview-dialog" ."o-previewDialog" x-sync {}
             div id="media-list" ."o-mediaList" x-sync {}
             div id="ajax-scripts" style="display: none;" {}
-            div ."o-followDialog" {
-                div id="follow-dialog-content" {}
-            }
+            div id="follow-dialog-content" {}
 
             // Initialize emoji picker once (outside form to avoid re-execution)
             script type="module" {

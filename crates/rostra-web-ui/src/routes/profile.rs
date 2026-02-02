@@ -58,13 +58,14 @@ pub async fn get_follow_dialog(
     let personas = client_ref.db().get_personas_for_id(profile_id).await;
     let ajax_attrs = fragment::AjaxLoadingAttrs::for_class("o-followDialog__submitButton");
     Ok(Maud(html! {
-        div ."o-followDialog__content" {
-            form ."o-followDialog__form"
-                action=(format!("/ui/profile/{}/follow", profile_id))
-                method="post"
-                x-target="profile-summary"
-                "@ajax:before"=(ajax_attrs.before)
-                "@ajax:after"=(ajax_attrs.after)
+        div id="follow-dialog-content" ."o-followDialog -active" {
+            div ."o-followDialog__content" {
+                form ."o-followDialog__form"
+                    action=(format!("/ui/profile/{}/follow", profile_id))
+                    method="post"
+                    x-target="profile-summary follow-dialog-content"
+                    "@ajax:before"=(ajax_attrs.before)
+                    "@ajax:after"=(ajax_attrs.after)
             {
                 div ."o-followDialog__optionsContainer" {
                     div ."o-followDialog__selectContainer" {
@@ -111,11 +112,12 @@ pub async fn get_follow_dialog(
                 div ."o-followDialog__actions" {
                     (fragment::button("o-followDialog__cancelButton", "Back")
                         .button_type("button")
-                        .onclick("document.querySelector('.o-followDialog').classList.remove('-active')")
+                        .onclick("document.querySelector('#follow-dialog-content').classList.remove('-active')")
                         .call())
 
                     (fragment::button("o-followDialog__submitButton", "Submit").call())
                 }
+            }
             }
         }
     }))
@@ -169,10 +171,8 @@ pub async fn post_follow(
             .render_profile_summary(profile_id, &session, session.ro_mode())
             .await?)
 
-        // TODO: Close the follow dialog - need Alpine.js event or different approach
-        // (alpine-ajax doesn't support x-swap-oob)
-        div ."o-followDialog -empty"
-        {}
+        // Close the follow dialog by replacing with empty non-active version
+        div id="follow-dialog-content" {}
     }))
 }
 
@@ -266,14 +266,16 @@ impl UiState {
                         @if session.id() != profile_id {
                             @let label = if following { "Following..." } else { "Follow..." };
                             (fragment::ajax_button(
-                                &format!("/ui/profile/{profile_id}/follow?following={following}"),
+                                &format!("/ui/profile/{profile_id}/follow"),
                                 "get",
                                 "follow-dialog-content",
                                 "m-profileSummary__followButton",
                                 label,
                             )
                             .disabled(ro.to_disabled())
-                            .after_js("document.querySelector('.o-followDialog').classList.add('-active')")
+                            .hidden_inputs(html! {
+                                input type="hidden" name="following" value=(following);
+                            })
                             .call())
                         }
                     }
