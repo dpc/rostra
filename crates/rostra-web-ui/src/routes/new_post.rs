@@ -153,6 +153,7 @@ pub async fn get_post_preview_dialog(
 
     Ok(Maud(html! {
         div id="preview-dialog" ."o-previewDialog -active" {
+            (fragment::dialog_escape_handler("preview-dialog"))
             div ."o-previewDialog__content" {
                 div ."o-previewDialog__post" {
                     (state.render_post_context(

@@ -217,3 +217,25 @@ pub fn ajax_button(
         .maybe_autofocus(autofocus)
         .call()
 }
+
+/// Generates a script that closes a dialog when Escape is pressed.
+///
+/// The handler is registered only once per dialog (using a window property).
+/// The dialog element should use `-active` class to indicate it's open.
+pub fn dialog_escape_handler(dialog_id: &str) -> Markup {
+    let handler_name = format!("_escHandler_{}", dialog_id.replace('-', "_"));
+    html! {
+        script {
+            (maud::PreEscaped(format!(r#"
+                if (!window.{handler_name}) {{
+                    window.{handler_name} = function(e) {{
+                        if (e.key === 'Escape') {{
+                            document.querySelector('#{dialog_id}')?.classList.remove('-active');
+                        }}
+                    }};
+                    document.addEventListener('keydown', window.{handler_name});
+                }}
+            "#)))
+        }
+    }
+}

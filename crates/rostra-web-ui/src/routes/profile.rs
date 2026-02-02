@@ -74,6 +74,7 @@ pub async fn get_follow_dialog(
                 }
                 "#))
             }
+            (fragment::dialog_escape_handler("follow-dialog-content"))
             div ."o-followDialog__content" {
                 h4 ."o-followDialog__title" {
                     "Following "
