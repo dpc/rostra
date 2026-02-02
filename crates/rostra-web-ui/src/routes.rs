@@ -202,6 +202,10 @@ pub fn route_handler(state: SharedState) -> Router<Arc<UiState>> {
         .route("/ui/search/profiles", get(search::search_profiles))
         .route("/ui/settings", get(settings::get_settings))
         .route(
+            "/ui/settings/following",
+            get(settings::get_settings_following),
+        )
+        .route(
             "/ui/settings/followers",
             get(settings::get_settings_followers),
         )

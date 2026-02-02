@@ -9,7 +9,29 @@ use crate::error::RequestResult;
 use crate::{SharedState, UiState};
 
 pub async fn get_settings() -> impl IntoResponse {
-    Redirect::to("/ui/settings/followers")
+    Redirect::to("/ui/settings/following")
+}
+
+pub async fn get_settings_following(
+    state: State<SharedState>,
+    session: UserSession,
+) -> RequestResult<impl IntoResponse> {
+    let client = state.client(session.id()).await?;
+    let client_ref = client.client_ref()?;
+    let user_id = client_ref.rostra_id();
+
+    let followees = client_ref.db().get_followees(user_id).await;
+
+    let navbar = state.render_settings_navbar(&session, "following").await?;
+    let content = state
+        .render_following_settings(&session, user_id, followees)
+        .await?;
+
+    Ok(Maud(
+        state
+            .render_settings_page(&session, navbar, content)
+            .await?,
+    ))
 }
 
 pub async fn get_settings_followers(
@@ -20,11 +42,11 @@ pub async fn get_settings_followers(
     let client_ref = client.client_ref()?;
     let user_id = client_ref.rostra_id();
 
-    let followees = client_ref.db().get_followees(user_id).await;
+    let followers = client_ref.db().get_followers(user_id).await;
 
     let navbar = state.render_settings_navbar(&session, "followers").await?;
     let content = state
-        .render_followers_settings(&session, user_id, followees)
+        .render_followers_settings(&session, followers)
         .await?;
 
     Ok(Maud(
@@ -61,6 +83,12 @@ impl UiState {
 
                 div ."o-settingsNav" {
                     a ."o-settingsNav__item"
+                        ."-active"[active_category == "following"]
+                        href="/ui/settings/following"
+                    {
+                        "Followees"
+                    }
+                    a ."o-settingsNav__item"
                         ."-active"[active_category == "followers"]
                         href="/ui/settings/followers"
                     {
@@ -71,7 +99,7 @@ impl UiState {
         })
     }
 
-    pub async fn render_followers_settings(
+    pub async fn render_following_settings(
         &self,
         session: &UserSession,
         _user_id: RostraId,
@@ -79,20 +107,37 @@ impl UiState {
     ) -> RequestResult<Markup> {
         Ok(html! {
             div ."o-settingsContent" {
-                h2 ."o-settingsContent__header" { "Followers" }
+                h2 ."o-settingsContent__header" { "Followees" }
 
                 div ."o-settingsContent__section" {
-                    h3 ."o-settingsContent__sectionHeader" { "Add Followee" }
+                    h3 ."o-settingsContent__sectionHeader" { "Add" }
                     (self.render_add_followee_form(None))
                 }
 
                 div ."o-settingsContent__section" {
-                    h3 ."o-settingsContent__sectionHeader" { "Following" }
+                    h3 ."o-settingsContent__sectionHeader" { "People You Follow" }
                     (self.render_followee_list(session, followees).await?)
                 }
 
                 // Follow dialog container (shared by all followee items)
                 div id="follow-dialog-content" {}
+            }
+        })
+    }
+
+    pub async fn render_followers_settings(
+        &self,
+        session: &UserSession,
+        followers: Vec<RostraId>,
+    ) -> RequestResult<Markup> {
+        Ok(html! {
+            div ."o-settingsContent" {
+                h2 ."o-settingsContent__header" { "Followers" }
+
+                div ."o-settingsContent__section" {
+                    h3 ."o-settingsContent__sectionHeader" { "People Who Follow You" }
+                    (self.render_follower_list(session, followers).await?)
+                }
             }
         })
     }
@@ -150,6 +195,55 @@ impl UiState {
                             .hidden_inputs(html! { input type="hidden" name="following" value="true" {} })
                             .form_class("m-followeeList__actions")
                             .call())
+                        }
+                    }
+                }
+            }
+        })
+    }
+
+    pub async fn render_follower_list(
+        &self,
+        session: &UserSession,
+        followers: Vec<RostraId>,
+    ) -> RequestResult<Markup> {
+        let client = self.client(session.id()).await?;
+        let client_ref = client.client_ref()?;
+
+        let mut follower_items = Vec::new();
+        for follower_id in followers {
+            let profile = self.get_social_profile_opt(follower_id, &client_ref).await;
+            let display_name = profile
+                .as_ref()
+                .map(|p| p.display_name.clone())
+                .unwrap_or_else(|| follower_id.to_string());
+            follower_items.push((follower_id, display_name));
+        }
+
+        // Sort by display name
+        follower_items.sort_by(|a, b| a.1.to_lowercase().cmp(&b.1.to_lowercase()));
+
+        Ok(html! {
+            div ."m-followeeList" {
+                @if follower_items.is_empty() {
+                    p ."o-settingsContent__empty" {
+                        "No one is following you yet (that you know of)."
+                    }
+                } @else {
+                    @for (follower_id, display_name) in &follower_items {
+                        div ."m-followeeList__item" {
+                            img ."m-followeeList__avatar u-userImage"
+                                src=(self.avatar_url(*follower_id))
+                                alt="Avatar"
+                                width="32"
+                                height="32"
+                                loading="lazy"
+                                {}
+                            a ."m-followeeList__name"
+                                href=(format!("/ui/profile/{}", follower_id))
+                            {
+                                (display_name)
+                            }
                         }
                     }
                 }
