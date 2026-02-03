@@ -188,7 +188,11 @@ async fn handle_cmd(opts: Opts) -> CliResult<serde_json::Value> {
             pending().await
         }
         cli::OptsCmd::WebUi(ref web_opts) => {
-            let clients = MultiClient::new(opts.global.data_dir().to_owned(), web_opts.max_clients);
+            let clients = MultiClient::new(
+                opts.global.data_dir().to_owned(),
+                web_opts.max_clients,
+                web_opts.public,
+            );
             let ui_opts = make_web_opts(opts.global.data_dir(), web_opts);
 
             if !web_opts.skip_xdg_open {

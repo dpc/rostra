@@ -39,15 +39,19 @@ pub struct MultiClient {
     inner: tokio::sync::RwLock<HashMap<RostraId, ClientInfo>>,
     max_clients: usize,
     usage_queue: tokio::sync::RwLock<VecDeque<RostraId>>,
+    /// When true, allows direct IP connections (exposes IP address).
+    /// When false (default), uses relay-only mode for privacy.
+    public_mode: bool,
 }
 
 impl MultiClient {
-    pub fn new(data_dir: PathBuf, max_clients: usize) -> Self {
+    pub fn new(data_dir: PathBuf, max_clients: usize, public_mode: bool) -> Self {
         Self {
             data_dir,
             inner: RwLock::new(Default::default()),
             max_clients: max_clients.max(1), // Ensure at least 1 client
             usage_queue: RwLock::new(VecDeque::new()),
+            public_mode,
         }
     }
 }
@@ -87,6 +91,7 @@ impl MultiClient {
 
         let client = Client::builder(id)
             .db(db)
+            .public_mode(self.public_mode)
             .build()
             .await
             .context(ClientInitSnafu)?;

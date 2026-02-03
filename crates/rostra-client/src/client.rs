@@ -150,6 +150,10 @@ impl Client {
         #[builder(default = true)] start_request_handler: bool,
         db: Option<Database>,
         secret: Option<RostraIdSecretKey>,
+        /// When true, allows direct IP connections (exposes IP address).
+        /// When false (default), uses relay-only mode for privacy.
+        #[builder(default = false)]
+        public_mode: bool,
     ) -> InitResult<Arc<Self>> {
         debug!(target: LOG_TARGET, id = %id, "Starting Rostra client");
         let is_mode_full = db.is_some();
@@ -163,7 +167,8 @@ impl Client {
             .into();
 
         trace!(target: LOG_TARGET, id = %id, "Creating Iroh endpoint");
-        let endpoint = Self::make_iroh_endpoint(db.as_ref().map(|s| s.iroh_secret())).await?;
+        let endpoint =
+            Self::make_iroh_endpoint(db.as_ref().map(|s| s.iroh_secret()), public_mode).await?;
         let (check_for_updates_tx, _) = watch::channel(());
 
         let db = match db {
@@ -352,6 +357,7 @@ impl Client {
 
     pub(crate) async fn make_iroh_endpoint(
         iroh_secret: impl Into<Option<iroh::SecretKey>>,
+        public_mode: bool,
     ) -> InitResult<iroh::Endpoint> {
         use iroh::{Endpoint, SecretKey};
         let secret_key = iroh_secret
@@ -361,15 +367,20 @@ impl Client {
         // We rely entirely on tickets published by our own publisher
         // for every RostraId via Pkarr, so we don't need discovery
         // Address lookup is used for publishing our address and resolving others
-        let ep = Endpoint::builder()
+        let mut builder = Endpoint::builder()
             .secret_key(secret_key)
             .alpns(vec![ROSTRA_P2P_V0_ALPN.to_vec()])
             .address_lookup(PkarrPublisher::n0_dns())
-            .address_lookup(DnsAddressLookup::n0_dns())
-            .bind()
-            .await
-            .context(InitIrohClientSnafu)?;
-        debug!(target: LOG_TARGET, iroh_id = %ep.id(), "Created Iroh endpoint");
+            .address_lookup(DnsAddressLookup::n0_dns());
+
+        // By default, use relay-only mode for privacy (no direct IP connections).
+        // In public mode, allow direct IP connections (useful for hosted nodes).
+        if !public_mode {
+            builder = builder.clear_ip_transports();
+        }
+
+        let ep = builder.bind().await.context(InitIrohClientSnafu)?;
+        debug!(target: LOG_TARGET, iroh_id = %ep.id(), public_mode, "Created Iroh endpoint");
         Ok(ep)
     }
 

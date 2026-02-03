@@ -112,6 +112,11 @@ pub struct WebUiOpts {
     #[arg(long, env = "ROSTRA_CORS_ORIGIN")]
     pub cors_origin: Option<String>,
 
+    /// Enable public mode - allows direct IP connections (exposes your IP
+    /// address). By default, Rostra uses relay-only mode for privacy.
+    #[arg(long, env = "ROSTRA_PUBLIC")]
+    pub public: bool,
+
     /// Root directory of the assets dir
     #[arg(long, env = "ROSTRA_ASSETS_DIR")]
     pub assets_dir: Option<PathBuf>,

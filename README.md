@@ -82,11 +82,18 @@ Pick the last build and at the bottom of the page look for "Artifacts".
 
 In the future, the official releases will come with prebuilt binaries as well.
 
+### Privacy
+
+By default Rostra clients use a relay-only mode, which prevents your IP
+from being directly exposed to other peers.
+
+Use `--public` command line argument when exposing IP is not an issue
+(it rarely is) to enable making direct p2p connections which can
+by much faster.
+
 #### Running over Tor
 
-Rostra is a p2p software, which means it will establish direct connections
-between you and other users. If you would like to hide your IP for other
-users for privacy reasons it is possible to run Rostra over Tor using
+For best privacy/anonimity it is possible to run Rostra over Tor using
 [`oniux`](https://blog.torproject.org/introducing-oniux-tor-isolation-using-linux-namespaces/)
 
 You can run:
