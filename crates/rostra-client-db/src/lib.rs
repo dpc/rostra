@@ -817,7 +817,7 @@ impl Database {
 
             // Iterate events_by_time in reverse (newest first)
             for entry in events_by_time_table.range(..)?.rev() {
-                if results.len() >= limit {
+                if limit <= results.len() {
                     break;
                 }
 

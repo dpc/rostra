@@ -428,7 +428,7 @@ impl UiState {
                         span ."m-eventExplorer__flags" {
                             "Flags: "
                             @for (i, flag) in flags.iter().enumerate() {
-                                @if i > 0 { ", " }
+                                @if 0 < i { ", " }
                                 span ."m-eventExplorer__flag" { (flag) }
                             }
                         }
