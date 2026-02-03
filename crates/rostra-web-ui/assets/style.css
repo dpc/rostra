@@ -744,7 +744,7 @@ emoji-picker {
 }
 
 .m-rostraMedia__download:hover {
-  text-decoration: underline;
+  /* Underline handled by global a::after */
 }
 
 .m-rostraMedia__downloadIcon {
@@ -1814,7 +1814,7 @@ input:checked+.slider:before {
 }
 
 .m-followeeList__name:hover {
-  text-decoration: underline;
+  /* Underline handled by global a::after */
 }
 
 .m-followeeList__actions {
@@ -1974,7 +1974,7 @@ input:checked+.slider:before {
 }
 
 .m-eventExplorer__parentLink:hover {
-  text-decoration: underline;
+  /* Underline handled by global a::after */
   color: var(--color-link-hover);
 }
 
