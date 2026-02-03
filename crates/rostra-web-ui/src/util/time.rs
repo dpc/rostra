@@ -9,15 +9,8 @@ pub fn format_timestamp(timestamp: Timestamp) -> String {
 
     let seconds = duration_since.as_secs();
 
-    if seconds < 60 {
-        format!("{seconds}s")
-    } else if seconds < 3600 {
-        format!("{}m", seconds / 60)
-    } else if seconds < 86400 {
-        format!("{}h", seconds / 3600)
-    } else if seconds < 2592000 {
-        // 30 days
-        format!("{}d", seconds / 86400)
+    if let Some(relative) = rostra_util_fmt::format_duration_relative(seconds) {
+        relative
     } else {
         // For older posts, show the actual date
         let timestamp_secs = system_time

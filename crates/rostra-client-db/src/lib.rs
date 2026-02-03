@@ -798,6 +798,76 @@ impl Database {
         .await
         .expect("Database panic")
     }
+
+    /// Get events for an identity, sorted by timestamp (most recent first).
+    ///
+    /// Returns a vector of (EventRecord, Timestamp, EventContentStateNew
+    /// option) limited to the specified count.
+    pub async fn get_events_for_id(
+        &self,
+        id: RostraId,
+        limit: usize,
+    ) -> Vec<(event::EventRecord, Timestamp, Option<EventContentStateNew>)> {
+        self.read_with(|tx| {
+            let events_table = tx.open_table(&events::TABLE)?;
+            let events_by_time_table = tx.open_table(&events_by_time::TABLE)?;
+            let events_content_state_table = tx.open_table(&events_content_state::TABLE)?;
+
+            let mut results = Vec::new();
+
+            // Iterate events_by_time in reverse (newest first)
+            for entry in events_by_time_table.range(..)?.rev() {
+                if results.len() >= limit {
+                    break;
+                }
+
+                let entry = entry?;
+                let (ts, event_id) = entry.0.value();
+
+                // Get the event record
+                let Some(event_record) = events_table.get(&event_id)?.map(|g| g.value()) else {
+                    continue;
+                };
+
+                // Check if this event belongs to the requested identity
+                if event_record.signed.event.author != id {
+                    continue;
+                }
+
+                // Get content state if available
+                let content_state = events_content_state_table
+                    .get(&event_id)?
+                    .map(|g| g.value());
+
+                results.push((event_record, ts, content_state));
+            }
+
+            Ok(results)
+        })
+        .await
+        .expect("Database panic")
+    }
+
+    /// Get all known identities (from followees, followers, and events).
+    pub async fn get_known_identities(&self) -> Vec<RostraId> {
+        self.read_with(|tx| {
+            let ids_full_table = tx.open_table(&ids_full::TABLE)?;
+
+            let mut ids = HashSet::new();
+
+            for entry in ids_full_table.range(..)? {
+                let entry = entry?;
+                let short_id = entry.0.value();
+                let rest_id = entry.1.value();
+                let full_id = RostraId::assemble(short_id, rest_id);
+                ids.insert(full_id);
+            }
+
+            Ok(ids.into_iter().collect())
+        })
+        .await
+        .expect("Database panic")
+    }
 }
 
 fn get_first_in_range<K, V>(

@@ -209,6 +209,7 @@ pub fn route_handler(state: SharedState) -> Router<Arc<UiState>> {
             "/ui/settings/followers",
             get(settings::get_settings_followers),
         )
+        .route("/ui/settings/events", get(settings::get_settings_events))
         .route("/ui/timeline/prime", get(timeline_prime))
         // .route("/a/", put(account_new))
         // .route("/t/", put(token_new))

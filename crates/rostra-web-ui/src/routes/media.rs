@@ -128,20 +128,6 @@ pub async fn publish(
     }))
 }
 
-/// Format file size in human-readable form
-fn format_file_size(bytes: usize) -> String {
-    const KB: usize = 1024;
-    const MB: usize = 1024 * KB;
-
-    if bytes >= MB {
-        format!("{:.1} MB", bytes as f64 / MB as f64)
-    } else if bytes >= KB {
-        format!("{:.1} KB", bytes as f64 / KB as f64)
-    } else {
-        format!("{} B", bytes)
-    }
-}
-
 /// Information about a media item for display
 struct MediaInfo {
     event_id: ShortEventId,
@@ -246,7 +232,7 @@ pub async fn list(
                                         div ."o-mediaList__fileIcon" {}
                                         div ."o-mediaList__fileMeta" {
                                             div ."o-mediaList__fileMime" { (media.mime.as_str()) }
-                                            div ."o-mediaList__fileSize" { (format_file_size(media.size)) }
+                                            div ."o-mediaList__fileSize" { (rostra_util_fmt::format_bytes(media.size as u64)) }
                                         }
                                     }
                                 }

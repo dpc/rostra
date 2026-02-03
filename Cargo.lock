@@ -3988,6 +3988,7 @@ dependencies = [
  "rostra-util",
  "rostra-util-bind-addr",
  "rostra-util-error",
+ "rostra-util-fmt",
  "serde",
  "serde_json",
  "snafu",

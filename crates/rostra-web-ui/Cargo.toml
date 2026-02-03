@@ -32,6 +32,7 @@ rostra-p2p-api = { workspace = true }
 rostra-util = { workspace = true }
 rostra-util-bind-addr = { workspace = true }
 rostra-util-error = { workspace = true }
+rostra-util-fmt = { workspace = true }
 tokio = { workspace = true }
 tokio-stream = { workspace = true, features = ["fs"] }
 tower = { workspace = true }

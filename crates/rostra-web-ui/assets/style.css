@@ -1822,3 +1822,150 @@ input:checked+.slider:before {
 .m-followeeList__followButtonIcon {
   background: url('/assets/icons/arrow-right.svg') center/contain no-repeat;
 }
+
+/* Event Explorer */
+
+.m-eventExplorer__form {
+  margin-bottom: 1rem;
+}
+
+.m-eventExplorer__select {
+  padding: 0.5rem 1rem;
+  font-size: 1rem;
+  border: 1px solid var(--color-button-border);
+  border-radius: var(--border-radius-std);
+  background-color: var(--color-text-input-bg);
+  color: var(--color-text-default);
+  min-width: 200px;
+  max-width: 100%;
+}
+
+.m-eventExplorer__list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.m-eventExplorer__row {
+  display: grid;
+  grid-template-columns: [label] 5rem [col1] 1fr [col2] auto [col3] auto [end];
+  gap: 0.25rem 0.75rem;
+  padding: 0.75rem;
+  background: var(--color-post-bg);
+  border: 1px solid var(--color-button-border);
+  border-radius: var(--border-radius-std);
+  font-size: 0.875rem;
+  align-items: baseline;
+}
+
+.m-eventExplorer__row:target {
+  outline: 2px solid var(--color-link);
+  outline-offset: 2px;
+}
+
+/* Row 1: KIND, ID, Flags, Timestamp */
+.m-eventExplorer__rowHeader {
+  grid-column: label / end;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0.5rem 1rem;
+}
+
+.m-eventExplorer__kind {
+  font-weight: 600;
+  text-transform: uppercase;
+}
+
+.m-eventExplorer__eventId {
+  font-family: monospace;
+  background-color: var(--color-pre-bg);
+  padding: 0.125rem 0.375rem;
+  border-radius: var(--border-radius-std);
+}
+
+.m-eventExplorer__flags {
+  font-size: 0.8125rem;
+}
+
+.m-eventExplorer__flag {
+  background-color: var(--color-pre-bg);
+  padding: 0.0625rem 0.25rem;
+  border-radius: 2px;
+  font-size: 0.75rem;
+}
+
+.m-eventExplorer__timestamp {
+  font-size: 0.8125rem;
+  opacity: 0.7;
+  margin-left: auto;
+}
+
+/* Row 2 & 3: Label in first column, values in remaining columns */
+.m-eventExplorer__label {
+  grid-column: label;
+  opacity: 0.6;
+  text-align: right;
+}
+
+.m-eventExplorer__contentHash {
+  grid-column: col1;
+  font-family: monospace;
+  background-color: var(--color-pre-bg);
+  padding: 0.125rem 0.375rem;
+  border-radius: var(--border-radius-std);
+  justify-self: start;
+}
+
+.m-eventExplorer__contentSize {
+  grid-column: col2;
+  font-family: monospace;
+}
+
+.m-eventExplorer__contentState {
+  grid-column: col3;
+}
+
+.m-eventExplorer__contentState[data-state="available"] {
+  color: oklch(55% 0.15 145);
+}
+
+.m-eventExplorer__contentState[data-state="claimed"] {
+  color: oklch(60% 0.15 60);
+}
+
+.m-eventExplorer__contentState[data-state="deleted"] {
+  color: oklch(55% 0.15 25);
+}
+
+.m-eventExplorer__contentState[data-state="pruned"] {
+  color: oklch(60% 0.1 270);
+}
+
+.m-eventExplorer__contentState[data-state="unknown"] {
+  opacity: 0.5;
+}
+
+/* Row 3: Parents */
+.m-eventExplorer__parentPrev {
+  grid-column: col1;
+}
+
+.m-eventExplorer__parentAux {
+  grid-column: col2;
+}
+
+.m-eventExplorer__parentLink {
+  font-family: monospace;
+  color: var(--color-link);
+  text-decoration: none;
+}
+
+.m-eventExplorer__parentLink:hover {
+  text-decoration: underline;
+  color: var(--color-link-hover);
+}
+
+.m-eventExplorer__parentNone {
+  opacity: 0.5;
+}
