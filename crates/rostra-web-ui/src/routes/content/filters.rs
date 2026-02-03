@@ -227,24 +227,105 @@ where
                 // If we're inside a media transformation, capture the alt text
                 if let Some(Some(transform)) = self.container_stack.last_mut() {
                     match transform {
-                        MediaTransform::RostraMedia(_, alt) => {
-                            // Capture alt text for rostra media
-                            *alt = s.to_string();
-                            Ok(())
-                        }
-                        MediaTransform::EmbeddableMedia(_, alt) => {
-                            // Capture alt text, skip emitting the str for now
-                            *alt = s.to_string();
-                            Ok(())
-                        }
-                        MediaTransform::ExternalImage(_, _, alt) => {
-                            // Capture alt text, skip emitting the str for now
-                            *alt = s.to_string();
+                        MediaTransform::RostraMedia(_, alt)
+                        | MediaTransform::EmbeddableMedia(_, alt)
+                        | MediaTransform::ExternalImage(_, _, alt) => {
+                            // Append to alt text (may be split across multiple Str events)
+                            alt.push_str(&s);
                             Ok(())
                         }
                     }
                 } else {
                     self.inner.emit(Event::Str(s)).await
+                }
+            }
+            // Handle smart punctuation within media alt text
+            Event::LeftSingleQuote
+            | Event::RightSingleQuote
+            | Event::LeftDoubleQuote
+            | Event::RightDoubleQuote
+            | Event::Ellipsis
+            | Event::EnDash
+            | Event::EmDash => {
+                if let Some(Some(transform)) = self.container_stack.last_mut() {
+                    // Append the punctuation character to alt text
+                    // Using Unicode escape sequences for curly quotes
+                    let ch = match event {
+                        Event::LeftSingleQuote => '\u{2018}',  // '
+                        Event::RightSingleQuote => '\u{2019}', // '
+                        Event::LeftDoubleQuote => '\u{201C}',  // "
+                        Event::RightDoubleQuote => '\u{201D}', // "
+                        Event::Ellipsis => '\u{2026}',         // …
+                        Event::EnDash => '\u{2013}',           // –
+                        Event::EmDash => '\u{2014}',           // —
+                        _ => unreachable!(),
+                    };
+                    match transform {
+                        MediaTransform::RostraMedia(_, alt)
+                        | MediaTransform::EmbeddableMedia(_, alt)
+                        | MediaTransform::ExternalImage(_, _, alt) => {
+                            alt.push(ch);
+                        }
+                    }
+                    Ok(())
+                } else {
+                    self.inner.emit(event).await
+                }
+            }
+            // Handle whitespace/break events within media alt text
+            Event::NonBreakingSpace | Event::Softbreak => {
+                if let Some(Some(transform)) = self.container_stack.last_mut() {
+                    match transform {
+                        MediaTransform::RostraMedia(_, alt)
+                        | MediaTransform::EmbeddableMedia(_, alt)
+                        | MediaTransform::ExternalImage(_, _, alt) => {
+                            alt.push(' ');
+                        }
+                    }
+                    Ok(())
+                } else {
+                    self.inner.emit(event).await
+                }
+            }
+            Event::Hardbreak => {
+                if let Some(Some(transform)) = self.container_stack.last_mut() {
+                    match transform {
+                        MediaTransform::RostraMedia(_, alt)
+                        | MediaTransform::EmbeddableMedia(_, alt)
+                        | MediaTransform::ExternalImage(_, _, alt) => {
+                            alt.push('\n');
+                        }
+                    }
+                    Ok(())
+                } else {
+                    self.inner.emit(event).await
+                }
+            }
+            // Handle symbol syntax (:sym:) within media alt text
+            Event::Symbol(s) => {
+                if let Some(Some(transform)) = self.container_stack.last_mut() {
+                    match transform {
+                        MediaTransform::RostraMedia(_, alt)
+                        | MediaTransform::EmbeddableMedia(_, alt)
+                        | MediaTransform::ExternalImage(_, _, alt) => {
+                            // Render as :symbol_name:
+                            alt.push(':');
+                            alt.push_str(&s);
+                            alt.push(':');
+                        }
+                    }
+                    Ok(())
+                } else {
+                    self.inner.emit(Event::Symbol(s)).await
+                }
+            }
+            // Escape events are markers for escaped characters, skip them in alt text
+            Event::Escape => {
+                if self.container_stack.last().is_some_and(|t| t.is_some()) {
+                    // Inside media transform, just skip the escape marker
+                    Ok(())
+                } else {
+                    self.inner.emit(Event::Escape).await
                 }
             }
             Event::End => {
@@ -393,7 +474,8 @@ where
                         }
                     }
                 } else {
-                    self.container_stack.pop();
+                    // Not a media transform - just pass through the End event
+                    // Note: the pop already happened in the if-let condition above
                     self.inner.emit(Event::End).await
                 }
             }
