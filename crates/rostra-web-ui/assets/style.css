@@ -180,7 +180,8 @@ pre {
   overflow-x: auto;
   white-space: pre;
   max-width: 100%;
-  padding: 1em;
+  padding: 0.5em 1em;
+  margin: 0.5em 0;
 }
 
 pre code {
