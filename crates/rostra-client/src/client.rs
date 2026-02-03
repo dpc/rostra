@@ -11,9 +11,8 @@ use std::sync::{Arc, Weak};
 use std::time::Duration;
 
 use backon::Retryable as _;
-use iroh::discovery::ConcurrentDiscovery;
-use iroh::discovery::dns::DnsDiscovery;
-use iroh::discovery::pkarr::PkarrPublisher;
+use iroh::address_lookup::dns::DnsAddressLookup;
+use iroh::address_lookup::pkarr::PkarrPublisher;
 use iroh_base::EndpointAddr;
 use rostra_client_db::{Database, DbResult, IdsFolloweesRecord, IdsFollowersRecord};
 use rostra_core::event::{
@@ -359,17 +358,14 @@ impl Client {
             .into()
             .unwrap_or_else(|| SecretKey::generate(&mut rand::rng()));
 
-        let discovery = ConcurrentDiscovery::from_services(vec![
-            Box::new(PkarrPublisher::n0_dns().build(secret_key.clone())),
-            Box::new(DnsDiscovery::n0_dns().build()),
-        ]);
-
         // We rely entirely on tickets published by our own publisher
         // for every RostraId via Pkarr, so we don't need discovery
+        // Address lookup is used for publishing our address and resolving others
         let ep = Endpoint::builder()
             .secret_key(secret_key)
             .alpns(vec![ROSTRA_P2P_V0_ALPN.to_vec()])
-            .discovery(discovery)
+            .address_lookup(PkarrPublisher::n0_dns())
+            .address_lookup(DnsAddressLookup::n0_dns())
             .bind()
             .await
             .context(InitIrohClientSnafu)?;
