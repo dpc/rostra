@@ -13,7 +13,7 @@ use crate::UiState;
 
 mod filters;
 
-use filters::{PrismCodeBlocks, RostraMedia, RostraProfileLinks};
+use filters::{PrismCodeBlocks, RostraMedia, RostraProfileLinks, SanitizeUrls};
 
 /// Extension trait for adding rostra-specific rendering transformations
 pub trait RostraRenderExt {
@@ -46,9 +46,38 @@ pub trait RostraRenderExt {
     {
         PrismCodeBlocks::new(self)
     }
+
+    /// Sanitize dangerous URL protocols (javascript:, vbscript:, data:)
+    fn sanitize_urls(self) -> SanitizeUrls<Self>
+    where
+        Self: Sized,
+    {
+        SanitizeUrls::new(self)
+    }
 }
 
 impl<'s, R> RostraRenderExt for R where R: Sized + AsyncRender<'s> {}
+
+/// Apply standard output filters (URL sanitization + syntax highlighting + XSS
+/// sanitization).
+///
+/// This is the final processing step for all content rendering. Takes an inner
+/// renderer and wraps it with URL sanitization, prism code blocks, and HTML
+/// sanitization.
+///
+/// - Production:
+///   `make_base_renderer(Renderer::default().profile_links().media())`
+/// - Tests: `make_base_renderer(Renderer::default())`
+pub(crate) fn make_base_renderer<'s, R>(
+    renderer: R,
+) -> jotup::html::filters::AsyncSanitize<PrismCodeBlocks<SanitizeUrls<R>>>
+where
+    R: AsyncRender<'s> + Send,
+    SanitizeUrls<R>: AsyncRender<'s> + Send,
+    PrismCodeBlocks<SanitizeUrls<R>>: AsyncRender<'s> + Send,
+{
+    renderer.sanitize_urls().prism_code_blocks().sanitize()
+}
 
 impl UiState {
     pub(crate) async fn render_content(
@@ -57,13 +86,13 @@ impl UiState {
         author_id: RostraId,
         content: &str,
     ) -> Markup {
-        // Compose the filters using extension traits: Renderer -> ProfileLinks ->
-        // Media -> PrismCodeBlocks -> Sanitize
-        let renderer = jotup::html::tokio::Renderer::default()
-            .rostra_profile_links(client.clone())
-            .rostra_media(client.clone(), author_id)
-            .prism_code_blocks()
-            .sanitize();
+        // Compose filters: ProfileLinks -> Media -> (Prism + Sanitize via
+        // make_base_renderer)
+        let renderer = make_base_renderer(
+            jotup::html::tokio::Renderer::default()
+                .rostra_profile_links(client.clone())
+                .rostra_media(client.clone(), author_id),
+        );
 
         let out = renderer
             .render_into_document(content)

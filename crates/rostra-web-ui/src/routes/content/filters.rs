@@ -553,3 +553,81 @@ where
         self.inner.into_output()
     }
 }
+
+/// Filter that sanitizes dangerous URL protocols (javascript:, vbscript:,
+/// data:) in links and images. All data: URLs are blocked out of caution.
+pub(crate) struct SanitizeUrls<R> {
+    inner: R,
+}
+
+impl<R> SanitizeUrls<R> {
+    pub(crate) fn new(inner: R) -> Self {
+        Self { inner }
+    }
+}
+
+impl<R> SanitizeUrls<R> {
+    /// Check if a URL uses a dangerous protocol that could execute code
+    fn is_dangerous_url(url: &str) -> bool {
+        let url_lower = url.trim().to_lowercase();
+        url_lower.starts_with("javascript:")
+            || url_lower.starts_with("vbscript:")
+            || url_lower.starts_with("data:")
+    }
+}
+
+#[async_trait::async_trait]
+impl<'s, R> AsyncRender<'s> for SanitizeUrls<R>
+where
+    R: AsyncRender<'s> + Send,
+{
+    type Error = R::Error;
+
+    async fn emit(&mut self, event: Event<'s>) -> Result<(), Self::Error> {
+        match event {
+            Event::Start(Container::Link(url, link_type), attr) => {
+                if Self::is_dangerous_url(&url) {
+                    // Replace dangerous URL with safe "#"
+                    self.inner
+                        .emit(Event::Start(
+                            Container::Link(Cow::Borrowed("#"), link_type),
+                            attr,
+                        ))
+                        .await
+                } else {
+                    self.inner
+                        .emit(Event::Start(Container::Link(url, link_type), attr))
+                        .await
+                }
+            }
+            Event::Start(Container::Image(url, link_type), attr) => {
+                if Self::is_dangerous_url(&url) {
+                    // Replace dangerous URL with empty string (broken image is safer)
+                    self.inner
+                        .emit(Event::Start(
+                            Container::Image(Cow::Borrowed(""), link_type),
+                            attr,
+                        ))
+                        .await
+                } else {
+                    self.inner
+                        .emit(Event::Start(Container::Image(url, link_type), attr))
+                        .await
+                }
+            }
+            event => self.inner.emit(event).await,
+        }
+    }
+}
+
+#[async_trait::async_trait]
+impl<'s, R> AsyncRenderOutput<'s> for SanitizeUrls<R>
+where
+    R: AsyncRenderOutput<'s> + Send,
+{
+    type Output = R::Output;
+
+    fn into_output(self) -> Self::Output {
+        self.inner.into_output()
+    }
+}

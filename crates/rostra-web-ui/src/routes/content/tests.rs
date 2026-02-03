@@ -3,8 +3,11 @@ use std::str::FromStr;
 use jotup::r#async::AsyncRenderOutputExt;
 use rostra_core::id::RostraId;
 
-use super::RostraRenderExt;
+use super::{RostraRenderExt, make_base_renderer};
 use crate::UiState;
+
+mod url_sanitization;
+mod xss_sanitization;
 
 #[test]
 fn extract_rostra_id_link() {
@@ -49,7 +52,6 @@ async fn code_block_gets_prism_classes() {
 
     let html = render_with_prism(content).await;
 
-    // Should have language class on code element
     assert!(
         html.contains("language-rust"),
         "Missing language-rust class"
@@ -62,7 +64,6 @@ async fn code_block_unknown_language() {
 
     let html = render_with_prism(content).await;
 
-    // Should still render as code block
     assert!(html.contains("<code"), "Missing code element");
 }
 
@@ -72,7 +73,6 @@ async fn inline_code_not_affected_by_prism() {
 
     let html = render_with_prism(content).await;
 
-    // Inline code should not get language class
     assert!(
         !html.contains("language-"),
         "Inline code should not have language class"
@@ -97,8 +97,6 @@ fn djot_image_with_apostrophe_events() {
     let content = r#"![I'ts](https://www.youtube.com/watch?v=Z0GFRcFm-aY)"#;
     let events = render_events(content);
 
-    // The apostrophe in "I'ts" is parsed as a RightSingleQuote event between Str
-    // events
     assert!(
         events
             .iter()
@@ -106,7 +104,6 @@ fn djot_image_with_apostrophe_events() {
         "Expected RightSingleQuote event for the apostrophe"
     );
 
-    // Check the Str events contain "I" and "ts" separately
     let str_contents: Vec<_> = events
         .iter()
         .filter_map(|e| match e {
@@ -126,11 +123,9 @@ fn djot_image_with_apostrophe_events() {
 
 #[test]
 fn djot_image_with_multiple_smart_punctuation() {
-    // Test various smart punctuation in alt text
     let content = r#"![It's "great"...](https://example.com/img.png)"#;
     let events = render_events(content);
 
-    // Should have right single quote, double quotes, and ellipsis
     assert!(
         events
             .iter()
@@ -151,7 +146,6 @@ fn djot_image_with_multiple_smart_punctuation() {
 
 #[test]
 fn djot_image_with_softbreak_and_symbol() {
-    // Test that multi-line alt text generates Softbreak events
     let content = "![line1\nline2](https://example.com/img.png)";
     let events = render_events(content);
 
@@ -160,7 +154,6 @@ fn djot_image_with_softbreak_and_symbol() {
         "Expected Softbreak event for newline in alt text"
     );
 
-    // Test symbol syntax in alt text
     let content_sym = "![a :smile: emoji](https://example.com/img.png)";
     let events_sym = render_events(content_sym);
 
@@ -170,4 +163,16 @@ fn djot_image_with_softbreak_and_symbol() {
             .any(|e| matches!(e, jotup::Event::Symbol(_))),
         "Expected Symbol event for :smile: in alt text"
     );
+}
+
+/// Helper to render djot content with full sanitization (like production).
+/// Uses the same sanitization chain as production code via
+/// `make_base_renderer`.
+pub(super) async fn render_sanitized(content: &str) -> String {
+    let out = make_base_renderer(jotup::html::tokio::Renderer::default())
+        .render_into_document(content)
+        .await
+        .expect("Rendering failed");
+
+    String::from_utf8(out.into_inner()).expect("valid utf8")
 }
