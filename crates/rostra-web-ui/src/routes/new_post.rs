@@ -331,7 +331,7 @@ impl UiState {
             {
                 (self.render_reply_to_line(None, None))
                 div ."m-newPostForm__textareaWrapper"
-                    x-data="mentionAutocomplete"
+                    x-data="textAutocomplete"
                     style="position: relative;"
                 {
                     textarea
@@ -345,7 +345,7 @@ impl UiState {
                         dir="auto"
                         name="content"
                         "@input"=r#"
-                            handleMentionInput($event);
+                            handleInput($event);
                             // Also handle preview update
                             const previewForm = document.getElementById('inline-preview-form');
                             const contentInput = previewForm.querySelector('input[name=content]');
@@ -359,22 +359,41 @@ impl UiState {
                         "x-on:keyup.enter.ctrl"="$el.form.requestSubmit()"
                         {}
 
-                    // Autocomplete dropdown
-                    div ."m-mentionAutocomplete"
+                    // Autocomplete dropdown (mentions and emojis)
+                    div ."m-textAutocomplete"
                         x-show="showDropdown"
                         x-cloak
                         "@click.outside"="showDropdown = false"
                     {
-                        template x-for="(result, index) in results" ":key"="result.rostra_id" {
-                            div ."m-mentionAutocomplete__item"
-                                ":class"="{ '-selected': index === selectedIndex }"
-                                "@click"="selectProfile(result)"
-                            {
-                                span ."m-mentionAutocomplete__displayName" x-text="result.display_name" {}
-                                span ."m-mentionAutocomplete__id" x-text="'@' + result.rostra_id.substring(0, 8)" {}
+                        // Mention results
+                        template x-if="autocompleteType === 'mention'" {
+                            div {
+                                template x-for="(result, index) in results" ":key"="result.rostra_id" {
+                                    div ."m-textAutocomplete__item"
+                                        ":class"="{ '-selected': index === selectedIndex }"
+                                        "@click"="selectResult(result)"
+                                    {
+                                        span ."m-textAutocomplete__displayName" x-text="result.display_name" {}
+                                        span ."m-textAutocomplete__id" x-text="'@' + result.rostra_id.substring(0, 8)" {}
+                                    }
+                                }
                             }
                         }
-                        div x-show="results.length === 0 && query.length > 0" ."m-mentionAutocomplete__empty" {
+                        // Emoji results
+                        template x-if="autocompleteType === 'emoji'" {
+                            div {
+                                template x-for="(result, index) in results" ":key"="index" {
+                                    div ."m-textAutocomplete__item"
+                                        ":class"="{ '-selected': index === selectedIndex }"
+                                        "@click"="selectResult(result)"
+                                    {
+                                        span ."m-textAutocomplete__emoji" x-text="result.emoji" {}
+                                        span ."m-textAutocomplete__shortcode" x-text="':' + result.shortcode + ':'" {}
+                                    }
+                                }
+                            }
+                        }
+                        div x-show="results.length === 0 && query.length > 0" ."m-textAutocomplete__empty" {
                             "No matches found"
                         }
                     }

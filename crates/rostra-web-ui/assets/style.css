@@ -1595,8 +1595,8 @@ input:checked+.slider:before {
   margin-top: 4px;
 }
 
-/* Mention Autocomplete Dropdown */
-.m-mentionAutocomplete {
+/* Text Autocomplete Dropdown (mentions and emojis) */
+.m-textAutocomplete {
   position: absolute;
   top: 100%;
   left: 0;
@@ -1611,7 +1611,7 @@ input:checked+.slider:before {
   margin-top: 4px;
 }
 
-.m-mentionAutocomplete__item {
+.m-textAutocomplete__item {
   padding: 8px 12px;
   cursor: pointer;
   display: flex;
@@ -1620,23 +1620,34 @@ input:checked+.slider:before {
   transition: background-color 0.15s ease;
 }
 
-.m-mentionAutocomplete__item:hover,
-.m-mentionAutocomplete__item.-selected {
+.m-textAutocomplete__item:hover,
+.m-textAutocomplete__item.-selected {
   background: var(--color-button-bg-hover);
 }
 
-.m-mentionAutocomplete__displayName {
+.m-textAutocomplete__displayName {
   font-weight: 500;
   flex: 1;
 }
 
-.m-mentionAutocomplete__id {
+.m-textAutocomplete__id {
   opacity: 0.6;
   font-size: 0.9em;
   font-family: monospace;
 }
 
-.m-mentionAutocomplete__empty {
+.m-textAutocomplete__emoji {
+  font-size: 1.4em;
+  line-height: 1;
+}
+
+.m-textAutocomplete__shortcode {
+  opacity: 0.6;
+  font-size: 0.9em;
+  font-family: monospace;
+}
+
+.m-textAutocomplete__empty {
   padding: 12px;
   text-align: center;
   opacity: 0.6;
