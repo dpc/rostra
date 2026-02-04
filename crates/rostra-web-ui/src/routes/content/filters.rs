@@ -145,8 +145,9 @@ where
 enum MediaTransform<'s> {
     /// Rostra media link - stores the event_id and alt text
     RostraMedia(ShortEventId, String),
-    /// External embeddable media (YouTube, etc.) - stores the HTML and alt text
-    EmbeddableMedia(String, String),
+    /// External embeddable media (YouTube, etc.) - stores the HTML, hostname,
+    /// and alt text
+    EmbeddableMedia(String, String, String),
     /// Regular external image - stores the URL, link type, and alt text
     ExternalImage(Cow<'s, str>, jotup::SpanLinkType, String),
 }
@@ -195,8 +196,16 @@ where
                 } else {
                     // External image - check if it's embeddable media
                     if let Some(html) = super::maybe_embed_media_html(&s) {
+                        let hostname = url::Url::parse(&s)
+                            .ok()
+                            .and_then(|u| u.host_str().map(|h| h.to_string()))
+                            .unwrap_or_default();
                         self.container_stack
-                            .push(Some(MediaTransform::EmbeddableMedia(html, String::new())));
+                            .push(Some(MediaTransform::EmbeddableMedia(
+                                html,
+                                hostname,
+                                String::new(),
+                            )));
                     } else {
                         self.container_stack
                             .push(Some(MediaTransform::ExternalImage(
@@ -228,7 +237,7 @@ where
                 if let Some(Some(transform)) = self.container_stack.last_mut() {
                     match transform {
                         MediaTransform::RostraMedia(_, alt)
-                        | MediaTransform::EmbeddableMedia(_, alt)
+                        | MediaTransform::EmbeddableMedia(_, _, alt)
                         | MediaTransform::ExternalImage(_, _, alt) => {
                             // Append to alt text (may be split across multiple Str events)
                             alt.push_str(&s);
@@ -262,7 +271,7 @@ where
                     };
                     match transform {
                         MediaTransform::RostraMedia(_, alt)
-                        | MediaTransform::EmbeddableMedia(_, alt)
+                        | MediaTransform::EmbeddableMedia(_, _, alt)
                         | MediaTransform::ExternalImage(_, _, alt) => {
                             alt.push(ch);
                         }
@@ -277,7 +286,7 @@ where
                 if let Some(Some(transform)) = self.container_stack.last_mut() {
                     match transform {
                         MediaTransform::RostraMedia(_, alt)
-                        | MediaTransform::EmbeddableMedia(_, alt)
+                        | MediaTransform::EmbeddableMedia(_, _, alt)
                         | MediaTransform::ExternalImage(_, _, alt) => {
                             alt.push(' ');
                         }
@@ -291,7 +300,7 @@ where
                 if let Some(Some(transform)) = self.container_stack.last_mut() {
                     match transform {
                         MediaTransform::RostraMedia(_, alt)
-                        | MediaTransform::EmbeddableMedia(_, alt)
+                        | MediaTransform::EmbeddableMedia(_, _, alt)
                         | MediaTransform::ExternalImage(_, _, alt) => {
                             alt.push('\n');
                         }
@@ -306,7 +315,7 @@ where
                 if let Some(Some(transform)) = self.container_stack.last_mut() {
                     match transform {
                         MediaTransform::RostraMedia(_, alt)
-                        | MediaTransform::EmbeddableMedia(_, alt)
+                        | MediaTransform::EmbeddableMedia(_, _, alt)
                         | MediaTransform::ExternalImage(_, _, alt) => {
                             // Render as :symbol_name:
                             alt.push(':');
@@ -402,13 +411,19 @@ where
                             self.inner.emit(Event::Str(html.into())).await?;
                             self.inner.emit(Event::End).await
                         }
-                        MediaTransform::EmbeddableMedia(html, alt) => {
+                        MediaTransform::EmbeddableMedia(html, hostname, alt) => {
                             // Emit the load message and embedded HTML
                             let alt = alt.trim();
-                            let load_msg = if alt.is_empty() {
-                                "Load external media".to_string()
+                            let load_msg = if hostname.is_empty() {
+                                if alt.is_empty() {
+                                    "Load external media".to_string()
+                                } else {
+                                    format!("Load \"{alt}\"")
+                                }
+                            } else if alt.is_empty() {
+                                format!("Load {hostname} media")
                             } else {
-                                format!("Load \"{alt}\"")
+                                format!("Load {hostname} media: \"{alt}\"")
                             };
 
                             self.inner
@@ -436,10 +451,20 @@ where
                         MediaTransform::ExternalImage(s, link_type, alt) => {
                             // Emit load message and the actual image
                             let alt = alt.trim();
-                            let load_msg = if alt.is_empty() {
-                                format!("Load: {s}")
+                            let hostname = url::Url::parse(&s)
+                                .ok()
+                                .and_then(|u| u.host_str().map(|h| h.to_string()))
+                                .unwrap_or_default();
+                            let load_msg = if hostname.is_empty() {
+                                if alt.is_empty() {
+                                    "Load external image".to_string()
+                                } else {
+                                    format!("Load image: \"{alt}\"")
+                                }
+                            } else if alt.is_empty() {
+                                format!("Load {hostname} image")
                             } else {
-                                format!("Load \"{alt}\": {s}")
+                                format!("Load {hostname} image: \"{alt}\"")
                             };
 
                             self.inner
