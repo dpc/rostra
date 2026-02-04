@@ -143,13 +143,20 @@ where
 
 /// Tracks the type of media transformation being applied
 enum MediaTransform<'s> {
-    /// Rostra media link - stores the event_id and alt text
-    RostraMedia(ShortEventId, String),
-    /// External embeddable media (YouTube, etc.) - stores the HTML, hostname,
-    /// and alt text
-    EmbeddableMedia(String, String, String),
-    /// Regular external image - stores the URL, link type, and alt text
-    ExternalImage(Cow<'s, str>, jotup::SpanLinkType, String),
+    /// Rostra media link
+    RostraMedia { event_id: ShortEventId, alt: String },
+    /// External embeddable media (YouTube, etc.)
+    EmbeddableMedia {
+        html: String,
+        hostname: String,
+        alt: String,
+    },
+    /// Regular external image
+    ExternalImage {
+        url: Cow<'s, str>,
+        link_type: jotup::SpanLinkType,
+        alt: String,
+    },
 }
 
 /// Filter that transforms media elements:
@@ -189,8 +196,10 @@ where
             Event::Start(Container::Image(s, link_type), _attr) => {
                 if let Some(event_id) = UiState::extra_rostra_media_link(&s) {
                     // Store event_id to look up content later
-                    self.container_stack
-                        .push(Some(MediaTransform::RostraMedia(event_id, String::new())));
+                    self.container_stack.push(Some(MediaTransform::RostraMedia {
+                        event_id,
+                        alt: String::new(),
+                    }));
                     // Don't emit Start yet - we'll emit everything in End
                     Ok(())
                 } else {
@@ -201,18 +210,18 @@ where
                             .and_then(|u| u.host_str().map(|h| h.to_string()))
                             .unwrap_or_default();
                         self.container_stack
-                            .push(Some(MediaTransform::EmbeddableMedia(
+                            .push(Some(MediaTransform::EmbeddableMedia {
                                 html,
                                 hostname,
-                                String::new(),
-                            )));
+                                alt: String::new(),
+                            }));
                     } else {
                         self.container_stack
-                            .push(Some(MediaTransform::ExternalImage(
-                                s.clone(),
+                            .push(Some(MediaTransform::ExternalImage {
+                                url: s.clone(),
                                 link_type,
-                                String::new(),
-                            )));
+                                alt: String::new(),
+                            }));
                     }
                     // Start the lazy-load wrapper div
                     self.inner
@@ -236,9 +245,9 @@ where
                 // If we're inside a media transformation, capture the alt text
                 if let Some(Some(transform)) = self.container_stack.last_mut() {
                     match transform {
-                        MediaTransform::RostraMedia(_, alt)
-                        | MediaTransform::EmbeddableMedia(_, _, alt)
-                        | MediaTransform::ExternalImage(_, _, alt) => {
+                        MediaTransform::RostraMedia { alt, .. }
+                        | MediaTransform::EmbeddableMedia { alt, .. }
+                        | MediaTransform::ExternalImage { alt, .. } => {
                             // Append to alt text (may be split across multiple Str events)
                             alt.push_str(&s);
                             Ok(())
@@ -270,9 +279,9 @@ where
                         _ => unreachable!(),
                     };
                     match transform {
-                        MediaTransform::RostraMedia(_, alt)
-                        | MediaTransform::EmbeddableMedia(_, _, alt)
-                        | MediaTransform::ExternalImage(_, _, alt) => {
+                        MediaTransform::RostraMedia { alt, .. }
+                        | MediaTransform::EmbeddableMedia { alt, .. }
+                        | MediaTransform::ExternalImage { alt, .. } => {
                             alt.push(ch);
                         }
                     }
@@ -285,9 +294,9 @@ where
             Event::NonBreakingSpace | Event::Softbreak => {
                 if let Some(Some(transform)) = self.container_stack.last_mut() {
                     match transform {
-                        MediaTransform::RostraMedia(_, alt)
-                        | MediaTransform::EmbeddableMedia(_, _, alt)
-                        | MediaTransform::ExternalImage(_, _, alt) => {
+                        MediaTransform::RostraMedia { alt, .. }
+                        | MediaTransform::EmbeddableMedia { alt, .. }
+                        | MediaTransform::ExternalImage { alt, .. } => {
                             alt.push(' ');
                         }
                     }
@@ -299,9 +308,9 @@ where
             Event::Hardbreak => {
                 if let Some(Some(transform)) = self.container_stack.last_mut() {
                     match transform {
-                        MediaTransform::RostraMedia(_, alt)
-                        | MediaTransform::EmbeddableMedia(_, _, alt)
-                        | MediaTransform::ExternalImage(_, _, alt) => {
+                        MediaTransform::RostraMedia { alt, .. }
+                        | MediaTransform::EmbeddableMedia { alt, .. }
+                        | MediaTransform::ExternalImage { alt, .. } => {
                             alt.push('\n');
                         }
                     }
@@ -314,9 +323,9 @@ where
             Event::Symbol(s) => {
                 if let Some(Some(transform)) = self.container_stack.last_mut() {
                     match transform {
-                        MediaTransform::RostraMedia(_, alt)
-                        | MediaTransform::EmbeddableMedia(_, _, alt)
-                        | MediaTransform::ExternalImage(_, _, alt) => {
+                        MediaTransform::RostraMedia { alt, .. }
+                        | MediaTransform::EmbeddableMedia { alt, .. }
+                        | MediaTransform::ExternalImage { alt, .. } => {
                             // Render as :symbol_name:
                             alt.push(':');
                             alt.push_str(&s);
@@ -340,7 +349,7 @@ where
             Event::End => {
                 if let Some(Some(transform)) = self.container_stack.pop() {
                     match transform {
-                        MediaTransform::RostraMedia(event_id, alt) => {
+                        MediaTransform::RostraMedia { event_id, alt } => {
                             // Look up the content to get mime type
                             let url = format!("/ui/media/{}/{}", self.author_id, event_id);
                             let alt = alt.trim();
@@ -411,7 +420,11 @@ where
                             self.inner.emit(Event::Str(html.into())).await?;
                             self.inner.emit(Event::End).await
                         }
-                        MediaTransform::EmbeddableMedia(html, hostname, alt) => {
+                        MediaTransform::EmbeddableMedia {
+                            html,
+                            hostname,
+                            alt,
+                        } => {
                             // Emit the load message and embedded HTML
                             let alt = alt.trim();
                             let load_msg = if hostname.is_empty() {
@@ -448,10 +461,14 @@ where
                             // Close the div
                             self.inner.emit(Event::End).await
                         }
-                        MediaTransform::ExternalImage(s, link_type, alt) => {
+                        MediaTransform::ExternalImage {
+                            url,
+                            link_type,
+                            alt,
+                        } => {
                             // Emit load message and the actual image
                             let alt = alt.trim();
-                            let hostname = url::Url::parse(&s)
+                            let hostname = url::Url::parse(&url)
                                 .ok()
                                 .and_then(|u| u.host_str().map(|h| h.to_string()))
                                 .unwrap_or_default();
@@ -484,7 +501,7 @@ where
                                 AttributeKind::Pair {
                                     key: Cow::Borrowed("data-src"),
                                 },
-                                AttributeValue::from(s.clone()),
+                                AttributeValue::from(url.clone()),
                             ));
                             self.inner
                                 .emit(Event::Start(
