@@ -1,5 +1,6 @@
 use std::cmp;
 
+use rostra_core::Timestamp;
 use rostra_core::event::{EventExt as _, EventKind, VerifiedEventContent, content_kind};
 use rostra_core::id::ToShort as _;
 use rostra_util_error::{BoxedError, FmtCompact as _};
@@ -10,8 +11,8 @@ use crate::event::EventSingletonRecord;
 use crate::{
     Database, DbError, IdSocialProfileRecord, IrohNodeRecord, LOG_TARGET, OverflowSnafu,
     SocialPostsReactionsRecord, SocialPostsRepliesRecord, WriteTransactionCtx,
-    events_singletons_new, social_posts, social_posts_by_time, social_posts_reactions,
-    social_posts_replies,
+    events_singletons_new, social_posts, social_posts_by_received_at, social_posts_by_time,
+    social_posts_reactions, social_posts_replies,
 };
 
 #[derive(Debug, Snafu)]
@@ -170,6 +171,19 @@ impl Database {
                                 event_content.timestamp(),
                                 event_content.event_id().to_short(),
                             ),
+                            &(),
+                        )
+                        .map_err(DbError::from)?;
+
+                    // Also insert into received_at index for notification ordering.
+                    // Use current time as the received timestamp - this is essentially
+                    // the same value that was recorded in events_received_at moments ago.
+                    let mut social_post_by_received_at_tbl = tx
+                        .open_table(&social_posts_by_received_at::TABLE)
+                        .map_err(DbError::from)?;
+                    social_post_by_received_at_tbl
+                        .insert(
+                            &(Timestamp::now(), event_content.event_id().to_short()),
                             &(),
                         )
                         .map_err(DbError::from)?;

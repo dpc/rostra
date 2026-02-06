@@ -16,7 +16,8 @@ use crate::{
     events, events_by_time, events_content_missing, events_content_state, events_heads,
     events_missing, events_received_at, events_self, events_singletons_new, ids_data_usage,
     ids_followees, ids_followers, ids_full, ids_personas, ids_self, ids_unfollowed, social_posts,
-    social_posts_by_time, social_posts_reactions, social_posts_replies, social_profiles,
+    social_posts_by_received_at, social_posts_by_time, social_posts_reactions,
+    social_posts_replies, social_profiles,
 };
 
 impl Database {
@@ -48,6 +49,7 @@ impl Database {
         tx.open_table(&social_profiles::TABLE)?;
         tx.open_table(&social_posts::TABLE)?;
         tx.open_table(&social_posts_by_time::TABLE)?;
+        tx.open_table(&social_posts_by_received_at::TABLE)?;
         tx.open_table(&social_posts_replies::TABLE)?;
         tx.open_table(&social_posts_reactions::TABLE)?;
         Ok(())
@@ -63,13 +65,13 @@ impl Database {
         /// Current schema version.
         ///
         /// Increment this when making schema changes that require migration.
-        const DB_VER: u64 = 9;
+        const DB_VER: u64 = 10;
 
         /// Versions older than this require a total migration.
         ///
         /// This should be set to the version where we last did a major schema
         /// overhaul. Older databases get rebuilt from scratch.
-        const DB_VER_REQUIRES_TOTAL_MIGRATION: u64 = 9;
+        const DB_VER_REQUIRES_TOTAL_MIGRATION: u64 = 10;
 
         let mut table_db_ver = dbtx.open_table(&db_version::TABLE)?;
 
@@ -87,44 +89,45 @@ impl Database {
             .fail();
         }
 
-        if cur_db_ver < DB_VER {
-            // Drop the db_version table handle before migrations
-            drop(table_db_ver);
-
-            if cur_db_ver < DB_VER_REQUIRES_TOTAL_MIGRATION {
-                // Old database - do total migration
-                info!(
-                    target: LOG_TARGET,
-                    from_ver = cur_db_ver,
-                    to_ver = DB_VER,
-                    "Database schema very old, performing total migration"
-                );
-
-                Self::total_migration(dbtx)?;
-            } else {
-                // Incremental migrations from cur_db_ver to DB_VER
-                info!(
-                    target: LOG_TARGET,
-                    from_ver = cur_db_ver,
-                    to_ver = DB_VER,
-                    "Performing incremental migrations"
-                );
-
-                // Future incremental migrations go here, e.g.:
-                // if cur_db_ver < 8 {
-                //     Self::migrate_v7_to_v8(dbtx)?;
-                // }
-                // if cur_db_ver < 9 {
-                //     Self::migrate_v8_to_v9(dbtx)?;
-                // }
-            }
-
-            // Re-open and update version
-            let mut table_db_ver = dbtx.open_table(&db_version::TABLE)?;
-            table_db_ver.insert(&(), &DB_VER)?;
+        if cur_db_ver == DB_VER {
+            debug!(target: LOG_TARGET, db_ver = DB_VER, "Database version up to date");
         }
 
-        debug!(target: LOG_TARGET, db_ver = DB_VER, "Database version");
+        // Drop the db_version table handle before migrations
+        drop(table_db_ver);
+
+        if cur_db_ver < DB_VER_REQUIRES_TOTAL_MIGRATION {
+            // Old database - do total migration
+            info!(
+                target: LOG_TARGET,
+                from_ver = cur_db_ver,
+                to_ver = DB_VER,
+                "Database schema very old, performing total migration"
+            );
+
+            Self::total_migration(dbtx)?;
+        }
+        // Incremental migrations from cur_db_ver to DB_VER
+        info!(
+            target: LOG_TARGET,
+            from_ver = cur_db_ver,
+            to_ver = DB_VER,
+            "Performing incremental migrations"
+        );
+
+        // Future incremental migrations go here, e.g.:
+        // if cur_db_ver < 8 {
+        //     Self::migrate_v7_to_v8(dbtx)?;
+        // }
+        // if cur_db_ver < 9 {
+        //     Self::migrate_v8_to_v9(dbtx)?;
+        // }
+
+        // Re-open and update version
+        let mut table_db_ver = dbtx.open_table(&db_version::TABLE)?;
+        table_db_ver.insert(&(), &DB_VER)?;
+
+        debug!(target: LOG_TARGET, db_ver = DB_VER, "New database version");
 
         Ok(())
     }

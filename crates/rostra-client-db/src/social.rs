@@ -11,7 +11,8 @@ use super::Database;
 use crate::event::ContentStoreRecord;
 use crate::{
     DbResult, LOG_TARGET, content_store, events, events_content_state, social_posts,
-    social_posts_by_time, social_posts_reactions, social_posts_replies, tables,
+    social_posts_by_received_at, social_posts_by_time, social_posts_reactions,
+    social_posts_replies, tables,
 };
 
 #[derive(
@@ -188,6 +189,174 @@ impl Database {
 
 
             Ok((ret, cursor.map(|(ts, event_id)| EventPaginationCursor{ ts, event_id })))
+        })
+        .await
+        .expect("Storage error")
+    }
+
+    /// Paginate social posts ordered by when we received them (forward).
+    ///
+    /// Used for notification badge count calculation.
+    pub async fn paginate_social_posts_by_received_at(
+        &self,
+        cursor: Option<EventPaginationCursor>,
+        limit: usize,
+        filter_fn: impl Fn(&SocialPostRecord<SocialPost>) -> bool + Send + 'static,
+    ) -> (
+        Vec<SocialPostRecord<content_kind::SocialPost>>,
+        Option<EventPaginationCursor>,
+    ) {
+        self.read_with(|tx| {
+            let events_table = tx.open_table(&events::TABLE)?;
+            let social_posts_table = tx.open_table(&social_posts::TABLE)?;
+            let social_posts_by_received_at_table =
+                tx.open_table(&social_posts_by_received_at::TABLE)?;
+            let events_content_state_table = tx.open_table(&events_content_state::TABLE)?;
+            let content_store_table = tx.open_table(&content_store::TABLE)?;
+
+            let (ret, cursor) = Self::paginate_table(
+                &social_posts_by_received_at_table,
+                cursor.map(|c| (c.ts, c.event_id)),
+                limit,
+                move |(ts, event_id), _| {
+                    let Some(event) = Database::get_event_tx(event_id, &events_table)? else {
+                        warn!(target: LOG_TARGET, %event_id, "Missing event for a post with social_post_record?!");
+                        return Ok(None);
+                    };
+                    let content_hash = event.content_hash();
+
+                    // If event has a content state, it means content is deleted or pruned
+                    if Database::get_event_content_state_tx(event_id, &events_content_state_table)?
+                        .is_some()
+                    {
+                        return Ok(None);
+                    }
+
+                    // Get content from store
+                    let Some(store_record) =
+                        content_store_table.get(&content_hash)?.map(|g| g.value())
+                    else {
+                        return Ok(None);
+                    };
+                    let ContentStoreRecord::Present(content) = store_record else {
+                        return Ok(None);
+                    };
+
+                    let Ok(social_post) = content.deserialize_cbor::<content_kind::SocialPost>()
+                    else {
+                        debug!(target: LOG_TARGET, %event_id, "Content invalid");
+                        return Ok(None);
+                    };
+
+                    let social_post_record =
+                        Database::get_social_post_tx(event_id, &social_posts_table)?
+                            .unwrap_or_default();
+
+                    let social_post_record = SocialPostRecord {
+                        ts,
+                        author: event.author(),
+                        event_id,
+                        reply_count: social_post_record.reply_count,
+                        reply_to: social_post.reply_to,
+                        content: social_post,
+                    };
+
+                    if !filter_fn(&social_post_record) {
+                        return Ok(None);
+                    }
+
+                    Ok(Some(social_post_record))
+                },
+            )?;
+
+            Ok((
+                ret,
+                cursor.map(|(ts, event_id)| EventPaginationCursor { ts, event_id }),
+            ))
+        })
+        .await
+        .expect("Storage error")
+    }
+
+    /// Paginate social posts ordered by when we received them (reverse).
+    ///
+    /// Used for notification timeline display.
+    pub async fn paginate_social_posts_by_received_at_rev(
+        &self,
+        cursor: Option<EventPaginationCursor>,
+        limit: usize,
+        filter_fn: impl Fn(&SocialPostRecord<SocialPost>) -> bool + Send + 'static,
+    ) -> (
+        Vec<SocialPostRecord<content_kind::SocialPost>>,
+        Option<EventPaginationCursor>,
+    ) {
+        self.read_with(|tx| {
+            let events_table = tx.open_table(&events::TABLE)?;
+            let social_posts_table = tx.open_table(&social_posts::TABLE)?;
+            let social_posts_by_received_at_table =
+                tx.open_table(&social_posts_by_received_at::TABLE)?;
+            let events_content_state_table = tx.open_table(&events_content_state::TABLE)?;
+            let content_store_table = tx.open_table(&content_store::TABLE)?;
+
+            let (ret, cursor) = Self::paginate_table_rev(
+                &social_posts_by_received_at_table,
+                cursor.map(|c| (c.ts, c.event_id)),
+                limit,
+                move |(ts, event_id), _| {
+                    let Some(event) = Database::get_event_tx(event_id, &events_table)? else {
+                        warn!(target: LOG_TARGET, %event_id, "Missing event for a post with social_post_record?!");
+                        return Ok(None);
+                    };
+                    let content_hash = event.content_hash();
+
+                    // If event has a content state, it means content is deleted or pruned
+                    if Database::get_event_content_state_tx(event_id, &events_content_state_table)?
+                        .is_some()
+                    {
+                        return Ok(None);
+                    }
+
+                    // Get content from store
+                    let Some(store_record) =
+                        content_store_table.get(&content_hash)?.map(|g| g.value())
+                    else {
+                        return Ok(None);
+                    };
+                    let ContentStoreRecord::Present(content) = store_record else {
+                        return Ok(None);
+                    };
+
+                    let Ok(social_post) = content.deserialize_cbor::<content_kind::SocialPost>()
+                    else {
+                        debug!(target: LOG_TARGET, %event_id, "Content invalid");
+                        return Ok(None);
+                    };
+
+                    let social_post_record =
+                        Database::get_social_post_tx(event_id, &social_posts_table)?
+                            .unwrap_or_default();
+
+                    let social_post_record = SocialPostRecord {
+                        ts,
+                        author: event.author(),
+                        event_id,
+                        reply_count: social_post_record.reply_count,
+                        reply_to: social_post.reply_to,
+                        content: social_post,
+                    };
+
+                    if !filter_fn(&social_post_record) {
+                        return Ok(None);
+                    }
+
+                    Ok(Some(social_post_record))
+                },
+            )?;
+
+            Ok((
+                ret,
+                cursor.map(|(ts, event_id)| EventPaginationCursor { ts, event_id }),
+            ))
         })
         .await
         .expect("Storage error")

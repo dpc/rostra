@@ -373,6 +373,16 @@ def_table! {
     social_posts_by_time: (Timestamp, ShortEventId) => ()
 }
 
+def_table! {
+    /// Time-ordered index of social posts by reception time.
+    ///
+    /// Key: (received_timestamp, post_event_id)
+    /// Used for notification queries - posts ordered by when we received them,
+    /// not when they were authored. This is important for notifications where
+    /// the order of reception matters more than the order of creation.
+    social_posts_by_received_at: (Timestamp, ShortEventId) => ()
+}
+
 /// Wrapper for values where only the latest version matters.
 ///
 /// Used for singleton-style data where we track timestamps to ensure

@@ -323,9 +323,11 @@ impl UiState {
                 Ok(None)
             }
             TimelineMode::Notifications => {
+                // Use received_at ordering for notifications - save the most recently
+                // received post as the last seen marker
                 if let Some(latest_event) = client
                     .db()
-                    .paginate_social_posts_rev(None, 1, |_| true)
+                    .paginate_social_posts_by_received_at_rev(None, 1, |_| true)
                     .await
                     .0
                     .into_iter()
@@ -342,9 +344,10 @@ impl UiState {
                 Ok(None)
             }
             TimelineMode::Followees | TimelineMode::Network => {
+                // Count pending notifications using received_at ordering
                 let pending_len = client
                     .db()
-                    .paginate_social_posts(
+                    .paginate_social_posts_by_received_at(
                         cookies.get_last_seen(client.rostra_id()),
                         10,
                         TimelineMode::Notifications.to_filter_fn(client).await,
@@ -639,10 +642,19 @@ impl TimelineMode {
         } else {
             let filter_fn = self.to_filter_fn(client).await;
 
-            client
-                .db()
-                .paginate_social_posts_rev(pagination, 20, filter_fn)
-                .await
+            // For Notifications, order by when we received posts rather than when
+            // they were authored. This ensures new notifications appear at the top.
+            if matches!(self, Self::Notifications) {
+                client
+                    .db()
+                    .paginate_social_posts_by_received_at_rev(pagination, 20, filter_fn)
+                    .await
+            } else {
+                client
+                    .db()
+                    .paginate_social_posts_rev(pagination, 20, filter_fn)
+                    .await
+            }
         }
     }
 
