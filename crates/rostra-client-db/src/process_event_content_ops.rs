@@ -182,8 +182,12 @@ impl Database {
                     let mut social_post_by_received_at_tbl = tx
                         .open_table(&social_posts_by_received_at::TABLE)
                         .map_err(DbError::from)?;
+                    let reception_order = self.next_reception_order();
                     social_post_by_received_at_tbl
-                        .insert(&(now, event_content.event_id().to_short()), &())
+                        .insert(
+                            &(now, reception_order, event_content.event_id().to_short()),
+                            &(),
+                        )
                         .map_err(DbError::from)?;
 
                     tx.on_commit({

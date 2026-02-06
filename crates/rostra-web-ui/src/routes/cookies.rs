@@ -1,4 +1,4 @@
-use rostra_client_db::social::EventPaginationCursor;
+use rostra_client_db::social::ReceivedAtPaginationCursor;
 use rostra_core::id::ShortRostraId;
 use rostra_util_error::FmtCompact as _;
 use tower_cookies::{Cookie, Cookies};
@@ -10,12 +10,17 @@ const NOTIFICATIONS_LAST_SEEN_COOKIE_NAME: &str = "notifications-last-seen";
 const PERSONA_COOKIE_NAME: &str = "persona";
 
 pub(crate) trait CookiesExt {
-    fn get_last_seen(&self, self_id: impl Into<ShortRostraId>) -> Option<EventPaginationCursor>;
+    /// Get the last seen notification cursor for received-time ordering.
+    fn get_last_seen(
+        &self,
+        self_id: impl Into<ShortRostraId>,
+    ) -> Option<ReceivedAtPaginationCursor>;
 
+    /// Save the last seen notification cursor for received-time ordering.
     fn save_last_seen(
         &mut self,
         self_id: impl Into<ShortRostraId>,
-        pagination: EventPaginationCursor,
+        pagination: ReceivedAtPaginationCursor,
     );
 
     fn get_persona(&self, self_id: impl Into<ShortRostraId>) -> Option<u8>;
@@ -24,7 +29,10 @@ pub(crate) trait CookiesExt {
 }
 
 impl CookiesExt for Cookies {
-    fn get_last_seen(&self, self_id: impl Into<ShortRostraId>) -> Option<EventPaginationCursor> {
+    fn get_last_seen(
+        &self,
+        self_id: impl Into<ShortRostraId>,
+    ) -> Option<ReceivedAtPaginationCursor> {
         let self_id = self_id.into();
         if let Some(s) = self.get(&format!("{self_id}-{NOTIFICATIONS_LAST_SEEN_COOKIE_NAME}")) {
             serde_json::from_str(s.value())
@@ -40,7 +48,7 @@ impl CookiesExt for Cookies {
     fn save_last_seen(
         &mut self,
         self_id: impl Into<ShortRostraId>,
-        pagination: EventPaginationCursor,
+        pagination: ReceivedAtPaginationCursor,
     ) {
         let self_id = self_id.into();
         let mut cookie = Cookie::new(

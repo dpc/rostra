@@ -59,8 +59,9 @@ impl Database {
         {
             // Record when we received this event
             let mut events_received_at_tbl = tx.open_table(&events_received_at::TABLE)?;
+            let reception_order = self.next_reception_order();
             events_received_at_tbl.insert(
-                &(now, event.event_id.to_short()),
+                &(now, reception_order, event.event_id.to_short()),
                 &EventReceivedRecord {
                     source: EventReceivedSource::Pushed {
                         from_id: None,

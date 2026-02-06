@@ -8,7 +8,9 @@ use axum::response::IntoResponse;
 use maud::{Markup, PreEscaped, html};
 use rostra_client::ClientRef;
 use rostra_client_db::IdSocialProfileRecord;
-use rostra_client_db::social::{EventPaginationCursor, SocialPostRecord};
+use rostra_client_db::social::{
+    EventPaginationCursor, ReceivedAtPaginationCursor, SocialPostRecord,
+};
 use rostra_core::event::{EventKind, PersonaId, PersonaSelector, SocialPost};
 use rostra_core::id::{RostraId, ToShort as _};
 use rostra_core::{ShortEventId, Timestamp};
@@ -28,6 +30,7 @@ use crate::{LOG_TARGET, SharedState, UiState};
 #[derive(Deserialize)]
 pub struct TimelinePaginationInput {
     pub ts: Option<Timestamp>,
+    pub reception_order: Option<u64>,
     pub event_id: Option<ShortEventId>,
 }
 
@@ -40,7 +43,7 @@ pub async fn get_followees(
 ) -> RequestResult<impl IntoResponse> {
     let pagination = form.ts.and_then(|ts| {
         form.event_id
-            .map(|event_id| EventPaginationCursor { ts, event_id })
+            .map(|event_id| TimelineCursor::ByEventTime(EventPaginationCursor { ts, event_id }))
     });
     let navbar = state.timeline_common_navbar(&session).await?;
     Ok(Maud(
@@ -66,7 +69,7 @@ pub async fn get_network(
 ) -> RequestResult<impl IntoResponse> {
     let pagination = form.ts.and_then(|ts| {
         form.event_id
-            .map(|event_id| EventPaginationCursor { ts, event_id })
+            .map(|event_id| TimelineCursor::ByEventTime(EventPaginationCursor { ts, event_id }))
     });
     let navbar = state.timeline_common_navbar(&session).await?;
     Ok(Maud(
@@ -91,8 +94,13 @@ pub async fn get_notifications(
     Form(form): Form<TimelinePaginationInput>,
 ) -> RequestResult<impl IntoResponse> {
     let pagination = form.ts.and_then(|ts| {
-        form.event_id
-            .map(|event_id| EventPaginationCursor { ts, event_id })
+        form.event_id.map(|event_id| {
+            TimelineCursor::ByReceivedTime(ReceivedAtPaginationCursor {
+                ts,
+                reception_order: form.reception_order.unwrap_or(0),
+                event_id,
+            })
+        })
     });
     let navbar = state.timeline_common_navbar(&session).await?;
     Ok(Maud(
@@ -202,7 +210,7 @@ impl UiState {
     pub(crate) async fn render_timeline_page(
         &self,
         navbar: Markup,
-        pagination: Option<EventPaginationCursor>,
+        pagination: Option<TimelineCursor>,
         session: &UserSession,
         cookies: &mut Cookies,
         mode: TimelineMode,
@@ -211,7 +219,7 @@ impl UiState {
         let client = self.client(session.id()).await?;
         let client_ref = client.client_ref()?;
         let pending_notifications = self
-            .handle_notification_cookies(&client_ref, pagination, cookies, mode)
+            .handle_notification_cookies(&client_ref, pagination.is_some(), cookies, mode)
             .await?;
 
         let timeline = self
@@ -308,12 +316,12 @@ impl UiState {
     pub(crate) async fn handle_notification_cookies(
         &self,
         client: &ClientRef<'_>,
-        pagination: Option<EventPaginationCursor>,
+        is_paginated: bool,
         cookies: &mut Cookies,
         mode: TimelineMode,
     ) -> RequestResult<Option<usize>> {
         // If this is a non-first page, we don't need to do anything
-        if pagination.is_some() {
+        if is_paginated {
             return Ok(None);
         }
 
@@ -325,21 +333,12 @@ impl UiState {
             TimelineMode::Notifications => {
                 // Use received_at ordering for notifications - save the most recently
                 // received post as the last seen marker
-                if let Some(latest_event) = client
+                let (_, cursor) = client
                     .db()
                     .paginate_social_posts_by_received_at_rev(None, 1, |_| true)
-                    .await
-                    .0
-                    .into_iter()
-                    .next()
-                {
-                    cookies.save_last_seen(
-                        client.rostra_id(),
-                        EventPaginationCursor {
-                            ts: latest_event.ts,
-                            event_id: latest_event.event_id,
-                        },
-                    );
+                    .await;
+                if let Some(cursor) = cursor {
+                    cookies.save_last_seen(client.rostra_id(), cursor);
                 }
                 Ok(None)
             }
@@ -428,7 +427,7 @@ impl UiState {
         &self,
         #[builder(start_fn)] session: &UserSession,
         #[builder(start_fn)] mode: TimelineMode,
-        pagination: Option<EventPaginationCursor>,
+        pagination: Option<TimelineCursor>,
         pending_notifications: Option<usize>,
     ) -> RequestResult<Markup> {
         let pending_notifications = pending_notifications.unwrap_or_default();
@@ -546,7 +545,7 @@ impl UiState {
                     }
                 }
                 @if let Some(cursor) = cursor {
-                    @let href = format!("{}?ts={}&event_id={}", mode.to_path(), cursor.ts, cursor.event_id);
+                    @let href = format!("{}?{}", mode.to_path(), cursor.to_query_params());
                     a
                         id="load-more-posts" ."o-mainBarTimeline__rest -empty"
                         "href"=(href)
@@ -588,6 +587,36 @@ impl UiState {
     }
 }
 
+/// Unified cursor for timeline pagination that can hold either event-time or
+/// received-time cursors.
+///
+/// - `ByEventTime`: For Followees/Network/Profile tabs - ordered by author's
+///   timestamp
+/// - `ByReceivedTime`: For Notifications tab - ordered by when we received the
+///   post
+#[derive(Copy, Clone, Debug)]
+pub(crate) enum TimelineCursor {
+    ByEventTime(EventPaginationCursor),
+    ByReceivedTime(ReceivedAtPaginationCursor),
+}
+
+impl TimelineCursor {
+    /// Build query parameters for the "load more" URL
+    fn to_query_params(self) -> String {
+        match self {
+            TimelineCursor::ByEventTime(c) => {
+                format!("ts={}&event_id={}", c.ts, c.event_id)
+            }
+            TimelineCursor::ByReceivedTime(c) => {
+                format!(
+                    "ts={}&reception_order={}&event_id={}",
+                    c.ts, c.reception_order, c.event_id
+                )
+            }
+        }
+    }
+}
+
 #[derive(Copy, Clone, PartialEq, Eq, Hash, Debug)]
 pub(crate) enum TimelineMode {
     Followees,
@@ -624,11 +653,8 @@ impl TimelineMode {
     async fn get_posts(
         self,
         client: &ClientRef<'_>,
-        pagination: Option<EventPaginationCursor>,
-    ) -> (
-        Vec<SocialPostRecord<SocialPost>>,
-        Option<EventPaginationCursor>,
-    ) {
+        pagination: Option<TimelineCursor>,
+    ) -> (Vec<SocialPostRecord<SocialPost>>, Option<TimelineCursor>) {
         if let Self::ProfileSingle(_author, event_id) = self {
             (
                 client
@@ -645,15 +671,25 @@ impl TimelineMode {
             // For Notifications, order by when we received posts rather than when
             // they were authored. This ensures new notifications appear at the top.
             if matches!(self, Self::Notifications) {
-                client
+                let cursor = pagination.and_then(|c| match c {
+                    TimelineCursor::ByReceivedTime(c) => Some(c),
+                    _ => None,
+                });
+                let (posts, next) = client
                     .db()
-                    .paginate_social_posts_by_received_at_rev(pagination, 20, filter_fn)
-                    .await
+                    .paginate_social_posts_by_received_at_rev(cursor, 20, filter_fn)
+                    .await;
+                (posts, next.map(TimelineCursor::ByReceivedTime))
             } else {
-                client
+                let cursor = pagination.and_then(|c| match c {
+                    TimelineCursor::ByEventTime(c) => Some(c),
+                    _ => None,
+                });
+                let (posts, next) = client
                     .db()
-                    .paginate_social_posts_rev(pagination, 20, filter_fn)
-                    .await
+                    .paginate_social_posts_rev(cursor, 20, filter_fn)
+                    .await;
+                (posts, next.map(TimelineCursor::ByEventTime))
             }
         }
     }

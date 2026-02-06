@@ -15,6 +15,11 @@ use crate::{
     social_posts_replies, tables,
 };
 
+/// Cursor for paginating events by their author timestamp.
+///
+/// Used for Followees and Network timeline tabs where posts are ordered
+/// by when they were authored, not when we received them.
+/// Key structure: `(author_timestamp, event_id)`
 #[derive(
     Encode, Decode, Serialize, Deserialize, Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord,
 )]
@@ -30,6 +35,34 @@ impl EventPaginationCursor {
     };
     pub const MAX: Self = Self {
         ts: Timestamp::MAX,
+        event_id: ShortEventId::MAX,
+    };
+}
+
+/// Cursor for paginating events by when we received them.
+///
+/// Used for Notifications tab where posts are ordered by reception time,
+/// not author timestamp. Includes a monotonic counter for strict ordering
+/// when multiple events arrive at the same timestamp.
+/// Key structure: `(received_timestamp, reception_order, event_id)`
+#[derive(
+    Encode, Decode, Serialize, Deserialize, Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord,
+)]
+pub struct ReceivedAtPaginationCursor {
+    pub ts: Timestamp,
+    pub reception_order: u64,
+    pub event_id: ShortEventId,
+}
+
+impl ReceivedAtPaginationCursor {
+    pub const ZERO: Self = Self {
+        ts: Timestamp::ZERO,
+        reception_order: 0,
+        event_id: ShortEventId::ZERO,
+    };
+    pub const MAX: Self = Self {
+        ts: Timestamp::MAX,
+        reception_order: u64::MAX,
         event_id: ShortEventId::MAX,
     };
 }
@@ -112,8 +145,10 @@ impl Database {
                 Ok(Some(social_post_record))
             })?;
 
-
-            Ok((ret, cursor.map(|(ts, event_id)| EventPaginationCursor{ ts, event_id })))
+            Ok((
+                ret,
+                cursor.map(|(ts, event_id)| EventPaginationCursor { ts, event_id }),
+            ))
         })
         .await
         .expect("Storage error")
@@ -187,8 +222,10 @@ impl Database {
                 Ok(Some(social_post_record))
             })?;
 
-
-            Ok((ret, cursor.map(|(ts, event_id)| EventPaginationCursor{ ts, event_id })))
+            Ok((
+                ret,
+                cursor.map(|(ts, event_id)| EventPaginationCursor { ts, event_id }),
+            ))
         })
         .await
         .expect("Storage error")
@@ -199,12 +236,12 @@ impl Database {
     /// Used for notification badge count calculation.
     pub async fn paginate_social_posts_by_received_at(
         &self,
-        cursor: Option<EventPaginationCursor>,
+        cursor: Option<ReceivedAtPaginationCursor>,
         limit: usize,
         filter_fn: impl Fn(&SocialPostRecord<SocialPost>) -> bool + Send + 'static,
     ) -> (
         Vec<SocialPostRecord<content_kind::SocialPost>>,
-        Option<EventPaginationCursor>,
+        Option<ReceivedAtPaginationCursor>,
     ) {
         self.read_with(|tx| {
             let events_table = tx.open_table(&events::TABLE)?;
@@ -216,9 +253,9 @@ impl Database {
 
             let (ret, cursor) = Self::paginate_table(
                 &social_posts_by_received_at_table,
-                cursor.map(|c| (c.ts, c.event_id)),
+                cursor.map(|c| (c.ts, c.reception_order, c.event_id)),
                 limit,
-                move |(ts, event_id), _| {
+                move |(ts, _reception_order, event_id), _| {
                     let Some(event) = Database::get_event_tx(event_id, &events_table)? else {
                         warn!(target: LOG_TARGET, %event_id, "Missing event for a post with social_post_record?!");
                         return Ok(None);
@@ -271,7 +308,11 @@ impl Database {
 
             Ok((
                 ret,
-                cursor.map(|(ts, event_id)| EventPaginationCursor { ts, event_id }),
+                cursor.map(|(ts, reception_order, event_id)| ReceivedAtPaginationCursor {
+                    ts,
+                    reception_order,
+                    event_id,
+                }),
             ))
         })
         .await
@@ -283,12 +324,12 @@ impl Database {
     /// Used for notification timeline display.
     pub async fn paginate_social_posts_by_received_at_rev(
         &self,
-        cursor: Option<EventPaginationCursor>,
+        cursor: Option<ReceivedAtPaginationCursor>,
         limit: usize,
         filter_fn: impl Fn(&SocialPostRecord<SocialPost>) -> bool + Send + 'static,
     ) -> (
         Vec<SocialPostRecord<content_kind::SocialPost>>,
-        Option<EventPaginationCursor>,
+        Option<ReceivedAtPaginationCursor>,
     ) {
         self.read_with(|tx| {
             let events_table = tx.open_table(&events::TABLE)?;
@@ -300,9 +341,9 @@ impl Database {
 
             let (ret, cursor) = Self::paginate_table_rev(
                 &social_posts_by_received_at_table,
-                cursor.map(|c| (c.ts, c.event_id)),
+                cursor.map(|c| (c.ts, c.reception_order, c.event_id)),
                 limit,
-                move |(ts, event_id), _| {
+                move |(ts, _reception_order, event_id), _| {
                     let Some(event) = Database::get_event_tx(event_id, &events_table)? else {
                         warn!(target: LOG_TARGET, %event_id, "Missing event for a post with social_post_record?!");
                         return Ok(None);
@@ -355,7 +396,11 @@ impl Database {
 
             Ok((
                 ret,
-                cursor.map(|(ts, event_id)| EventPaginationCursor { ts, event_id }),
+                cursor.map(|(ts, reception_order, event_id)| ReceivedAtPaginationCursor {
+                    ts,
+                    reception_order,
+                    event_id,
+                }),
             ))
         })
         .await
@@ -425,7 +470,7 @@ impl Database {
                 }))
             })?;
 
-            Ok((ret, cursor.map(|(_, ts, event_id)| EventPaginationCursor { ts, event_id})))
+            Ok((ret, cursor.map(|(_, ts, event_id)| EventPaginationCursor { ts, event_id })))
         })
         .await
         .expect("Storage error")

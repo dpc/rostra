@@ -8,7 +8,7 @@ use rostra_core::id::RostraId;
 use serde::Deserialize;
 use tower_cookies::Cookies;
 
-use super::timeline::{TimelineMode, TimelinePaginationInput};
+use super::timeline::{TimelineCursor, TimelineMode, TimelinePaginationInput};
 use super::unlock::session::{RoMode, UserSession};
 use super::{Maud, fragment};
 use crate::error::RequestResult;
@@ -25,7 +25,7 @@ pub async fn get_profile(
 ) -> RequestResult<impl IntoResponse> {
     let pagination = form.ts.and_then(|ts| {
         form.event_id
-            .map(|event_id| EventPaginationCursor { ts, event_id })
+            .map(|event_id| TimelineCursor::ByEventTime(EventPaginationCursor { ts, event_id }))
     });
 
     Ok(Maud(

@@ -318,13 +318,16 @@ def_table! {
 def_table! {
     /// Tracks when and how we received each event.
     ///
-    /// Key: (received_timestamp, event_id)
+    /// Key: (received_timestamp, reception_order, event_id)
     /// Value: Information about the reception source (push/pull, from whom, etc.)
+    ///
+    /// The `reception_order` is a monotonically increasing counter that ensures
+    /// strict ordering even when multiple events arrive at the same timestamp.
     ///
     /// This enables tracking network propagation delays (by comparing received
     /// timestamp vs event's author timestamp), debugging sync issues, and
     /// analytics about event acquisition patterns.
-    events_received_at: (Timestamp, ShortEventId) => EventReceivedRecord
+    events_received_at: (Timestamp, u64, ShortEventId) => EventReceivedRecord
 }
 
 // ============================================================================
@@ -376,11 +379,14 @@ def_table! {
 def_table! {
     /// Time-ordered index of social posts by reception time.
     ///
-    /// Key: (received_timestamp, post_event_id)
+    /// Key: (received_timestamp, reception_order, post_event_id)
     /// Used for notification queries - posts ordered by when we received them,
     /// not when they were authored. This is important for notifications where
     /// the order of reception matters more than the order of creation.
-    social_posts_by_received_at: (Timestamp, ShortEventId) => ()
+    ///
+    /// The `reception_order` is a monotonically increasing counter that ensures
+    /// strict ordering even when multiple events arrive at the same timestamp.
+    social_posts_by_received_at: (Timestamp, u64, ShortEventId) => ()
 }
 
 /// Wrapper for values where only the latest version matters.

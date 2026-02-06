@@ -153,6 +153,11 @@ pub struct Database {
     self_id: RostraId,
     iroh_secret: iroh::SecretKey,
 
+    /// Monotonically increasing counter for strict ordering of received events.
+    /// Used in `events_received_at` and `social_posts_by_received_at` tables
+    /// to ensure events received at the same timestamp are ordered correctly.
+    reception_order_counter: std::sync::atomic::AtomicU64,
+
     self_followees_updated: watch::Sender<HashMap<RostraId, IdsFolloweesRecord>>,
     self_followers_updated: watch::Sender<HashMap<RostraId, IdsFollowersRecord>>,
     self_head_updated: watch::Sender<Option<ShortEventId>>,
@@ -163,6 +168,16 @@ pub struct Database {
 
 impl Database {
     const MAX_CONTENT_LEN: u32 = 10_000_000u32;
+
+    /// Get the next reception order counter value.
+    ///
+    /// This is a monotonically increasing counter used to ensure strict
+    /// ordering of events received at the same timestamp.
+    pub fn next_reception_order(&self) -> u64 {
+        self.reception_order_counter
+            .fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+    }
+
     pub async fn mk_db_path(
         data_dir: &Path,
         self_id: RostraId,
@@ -241,6 +256,7 @@ impl Database {
             inner,
             self_id,
             iroh_secret,
+            reception_order_counter: std::sync::atomic::AtomicU64::new(0),
             self_followees_updated,
             self_followers_updated,
             self_head_updated,
