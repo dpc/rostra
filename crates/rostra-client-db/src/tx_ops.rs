@@ -152,13 +152,12 @@ impl Database {
                         )?
                         .map(|g| g.value());
 
-                    // If content was available (or claimed), look it up and decrement RC
-                    if matches!(
+                    // Content is being deleted - look it up for reverting and decrement RC.
+                    // In the new model, RC was incremented when the parent event was inserted,
+                    // so we always decrement here (unless it was already deleted/pruned).
+                    if !matches!(
                         old_state,
-                        Some(
-                            EventContentStateNew::Available
-                                | EventContentStateNew::ClaimedUnprocessed
-                        )
+                        Some(EventContentStateNew::Deleted { .. } | EventContentStateNew::Pruned)
                     ) {
                         // Look up content from content_store to return for reverting
                         if let Some(ContentStoreRecord::Present(cow)) = content_store_table
@@ -210,26 +209,21 @@ impl Database {
             Database::increment_metadata_size_tx(author, usage_table)?;
         }
 
-        // Handle content state for this event
-        // Only claim content (increment RC) if event is not deleted AND content is
-        // already in store
+        // Handle content RC for this event.
+        // In the new model, RC is always incremented when event is inserted (if not
+        // deleted). This is decremented when the event is marked as deleted.
         let content_hash = event.content_hash();
         if !is_deleted {
-            // Check if content already exists in the store
-            if content_store_table.get(&content_hash)?.is_some() {
-                // Content exists - claim it (increment RC) but mark as unprocessed.
-                // Event-specific processing (like follow table updates) will run
-                // when process_event_content is called.
-                Database::increment_content_rc_tx(content_hash, content_rc_table)?;
-                events_content_state_table
-                    .insert(&event_id, &EventContentStateNew::ClaimedUnprocessed)?;
+            // Always increment RC for the content hash
+            Database::increment_content_rc_tx(content_hash, content_rc_table)?;
 
-                // Track content size
-                if let Some(ref mut usage_table) = ids_data_usage_table {
-                    Database::increment_content_size_tx(author, event.content_len(), usage_table)?;
-                }
-            } else {
-                // Content not in store yet - mark as missing
+            // Track content size
+            if let Some(ref mut usage_table) = ids_data_usage_table {
+                Database::increment_content_size_tx(author, event.content_len(), usage_table)?;
+            }
+
+            // If content is not in store yet, mark as missing
+            if content_store_table.get(&content_hash)?.is_none() {
                 events_content_missing_table.insert(&event_id, &())?;
             }
         }
@@ -244,46 +238,42 @@ impl Database {
         .validate())
     }
 
+    /// Check if we should process content for this event.
+    ///
+    /// Returns false if the event's content is deleted or pruned.
+    /// Returns true otherwise (content should be processed).
+    ///
+    /// Note: In the new model, "already processed" is indicated by NOT being
+    /// in events_content_missing, but this function doesn't check that -
+    /// callers should check events_content_missing themselves.
     pub fn can_insert_event_content_tx(
         VerifiedEventContent { event, .. }: &VerifiedEventContent,
         events_content_state_table: &impl events_content_state::ReadableTable,
-        content_store_table: &impl content_store::ReadableTable,
     ) -> DbResult<bool> {
         let event_id = event.event_id.to_short();
 
-        // Check per-event state first
+        // Check if event's content is deleted or pruned
         if let Some(existing_state) = events_content_state_table
             .get(&event_id)?
             .map(|g| g.value())
         {
+            #[allow(deprecated)]
             match existing_state {
-                EventContentStateNew::Deleted { .. } => {
+                EventContentStateNew::Deleted { .. } | EventContentStateNew::Pruned => {
                     return Ok(false);
                 }
-                EventContentStateNew::Available => {
-                    // Content already present and processed
-                    return Ok(false);
-                }
-                EventContentStateNew::ClaimedUnprocessed => {
-                    // Content was claimed early by insert_event_tx but not yet processed.
-                    // We need to run processing, but content is already in store and RC
-                    // was already incremented, so we don't need to store again.
-                    return Ok(true);
-                }
-                EventContentStateNew::Pruned => {
-                    // Was pruned - check if content is in store (might be from another event)
-                    let content_hash = event.content_hash();
-                    if content_store_table.get(&content_hash)?.is_some() {
-                        // Content exists in store, we can reference it
-                        return Ok(true);
-                    }
-                }
+                // Legacy states - treat as "content okay"
+                EventContentStateNew::Available | EventContentStateNew::ClaimedUnprocessed => {}
             }
         }
 
         Ok(true)
     }
 
+    /// Mark an event's content as pruned.
+    ///
+    /// In the new model, RC was incremented when the event was inserted,
+    /// so we decrement it here (unless already deleted/pruned).
     pub fn prune_event_content_tx(
         event_id: impl Into<ShortEventId>,
         content_hash: ContentHash,
@@ -293,28 +283,33 @@ impl Database {
         data_usage_info: Option<(RostraId, u32, &mut ids_data_usage::Table)>,
     ) -> DbResult<bool> {
         let event_id = event_id.into();
+
+        // Check current state
         if let Some(existing_state) = events_content_state_table
             .get(&event_id)?
             .map(|g| g.value())
         {
+            #[allow(deprecated)]
             match existing_state {
                 EventContentStateNew::Deleted { .. } => {
+                    // Already deleted, can't prune
                     return Ok(false);
                 }
                 EventContentStateNew::Pruned => {
-                    // already pruned, no need to do anything
+                    // Already pruned, nothing to do
                     return Ok(true);
                 }
-                EventContentStateNew::Available | EventContentStateNew::ClaimedUnprocessed => {
-                    // Was available (or claimed) - decrement RC before marking as pruned
-                    Database::decrement_content_rc_tx(content_hash, content_rc_table)?;
-
-                    // Decrement content size for the author
-                    if let Some((author, content_len, usage_table)) = data_usage_info {
-                        Database::decrement_content_size_tx(author, content_len, usage_table)?;
-                    }
-                }
+                // Legacy states - fall through to pruning logic
+                EventContentStateNew::Available | EventContentStateNew::ClaimedUnprocessed => {}
             }
+        }
+
+        // Not yet deleted/pruned - decrement RC and mark as pruned
+        Database::decrement_content_rc_tx(content_hash, content_rc_table)?;
+
+        // Decrement content size for the author
+        if let Some((author, content_len, usage_table)) = data_usage_info {
+            Database::decrement_content_size_tx(author, content_len, usage_table)?;
         }
 
         events_content_state_table.insert(&event_id, &EventContentStateNew::Pruned)?;
@@ -385,6 +380,7 @@ impl Database {
     /// - `Some(Invalid(content))` if content was invalid
     /// - `Some(Deleted { deleted_by })` if content was deleted
     /// - `Some(Pruned)` if content was pruned
+    /// - `Some(Missing)` if content is not in store
     pub fn get_event_content_full_tx(
         event_id: impl Into<ShortEventId>,
         content_hash: ContentHash,
@@ -393,98 +389,106 @@ impl Database {
     ) -> DbResult<Option<EventContentResult>> {
         let event_id = event_id.into();
 
-        let Some(state) = events_content_state_table
+        // Check if content is deleted or pruned
+        if let Some(state) = events_content_state_table
             .get(&event_id)?
             .map(|r| r.value())
-        else {
-            return Ok(None);
-        };
-
-        Ok(Some(match state {
-            EventContentStateNew::Available | EventContentStateNew::ClaimedUnprocessed => {
-                // Look up content from content_store
-                // (ClaimedUnprocessed also has content in store, just not yet processed)
-                match content_store_table.get(&content_hash)?.map(|r| r.value()) {
-                    Some(ContentStoreRecord::Present(content)) => {
-                        EventContentResult::Present(content.into_owned())
-                    }
-                    Some(ContentStoreRecord::Invalid(content)) => {
-                        EventContentResult::Invalid(content.into_owned())
-                    }
-                    None => {
-                        // Content hash is in state but not in store - shouldn't happen
-                        // but treat as missing
-                        EventContentResult::Missing
-                    }
+        {
+            #[allow(deprecated)]
+            match state {
+                EventContentStateNew::Deleted { deleted_by } => {
+                    return Ok(Some(EventContentResult::Deleted { deleted_by }));
                 }
+                EventContentStateNew::Pruned => {
+                    return Ok(Some(EventContentResult::Pruned));
+                }
+                // Legacy states - fall through to look up content from content_store
+                EventContentStateNew::Available | EventContentStateNew::ClaimedUnprocessed => {}
             }
-            EventContentStateNew::Deleted { deleted_by } => {
-                EventContentResult::Deleted { deleted_by }
-            }
-            EventContentStateNew::Pruned => EventContentResult::Pruned,
-        }))
-    }
+        }
 
-    pub fn has_event_content_tx(
-        event: impl Into<ShortEventId>,
-        events_content_state_table: &impl events_content_state::ReadableTable,
-    ) -> DbResult<bool> {
-        let state = events_content_state_table
-            .get(&event.into())?
-            .map(|r| r.value());
-        Ok(matches!(
-            state,
-            Some(EventContentStateNew::Available | EventContentStateNew::ClaimedUnprocessed)
+        // Not deleted/pruned - look up content from content_store
+        Ok(Some(
+            match content_store_table.get(&content_hash)?.map(|r| r.value()) {
+                Some(ContentStoreRecord::Present(content)) => {
+                    EventContentResult::Present(content.into_owned())
+                }
+                Some(ContentStoreRecord::Invalid(content)) => {
+                    EventContentResult::Invalid(content.into_owned())
+                }
+                None => EventContentResult::Missing,
+            },
         ))
     }
 
-    /// Try to lazily claim content for an event that was waiting for it.
+    /// Check if content is available for an event.
     ///
-    /// This is for cases where:
-    /// - Event A was inserted but its content wasn't available yet (added to
-    ///   missing)
-    /// - Later, content arrived via event B (which has the same content hash)
-    /// - Now we want event A to "claim" that content
-    ///
-    /// This function:
-    /// 1. Checks if event has no state yet (meaning it's waiting for content)
-    /// 2. Checks if content is already in content_store (from another event)
-    /// 3. If both: increments RC, marks event as Available, removes from
-    ///    missing
-    ///
-    /// Returns `true` if content was successfully claimed, `false` otherwise.
-    pub fn try_claim_content_tx(
+    /// In the new model, content is available if:
+    /// - Event is NOT in deleted/pruned state, AND
+    /// - Content hash is in content_store
+    pub fn has_event_content_tx(
         event_id: impl Into<ShortEventId>,
         content_hash: ContentHash,
-        events_content_state_table: &mut events_content_state::Table,
+        events_content_state_table: &impl events_content_state::ReadableTable,
         content_store_table: &impl content_store::ReadableTable,
-        content_rc_table: &mut content_rc::Table,
-        events_content_missing_table: &mut events_content_missing::Table,
     ) -> DbResult<bool> {
         let event_id = event_id.into();
 
-        // Check if event already has a state
-        if events_content_state_table.get(&event_id)?.is_some() {
-            // Event already has a state (Available, Deleted, or Pruned)
-            // Nothing to claim
-            return Ok(false);
+        // Check if deleted or pruned
+        if let Some(state) = events_content_state_table
+            .get(&event_id)?
+            .map(|r| r.value())
+        {
+            #[allow(deprecated)]
+            match state {
+                EventContentStateNew::Deleted { .. } | EventContentStateNew::Pruned => {
+                    return Ok(false);
+                }
+                // Legacy states - fall through to check content_store
+                EventContentStateNew::Available | EventContentStateNew::ClaimedUnprocessed => {}
+            }
         }
 
-        // Check if content is in store (from another event)
-        if content_store_table.get(&content_hash)?.is_none() {
-            // Content not in store yet
-            return Ok(false);
+        // Check if content is in store
+        Ok(content_store_table.get(&content_hash)?.is_some())
+    }
+
+    /// Check if content is available for an event that was marked as missing.
+    ///
+    /// This is for cases where:
+    /// - Event A was inserted but its content wasn't available yet
+    /// - Later, content arrived via event B (which has the same content hash)
+    /// - Now we want to check if event A can use that content
+    ///
+    /// In the new model, RC is managed at event insertion time, so this
+    /// function doesn't touch RC. It just checks if content is available.
+    ///
+    /// Returns `true` if content is in store and event is not deleted/pruned.
+    pub fn is_content_available_for_event_tx(
+        event_id: impl Into<ShortEventId>,
+        content_hash: ContentHash,
+        events_content_state_table: &impl events_content_state::ReadableTable,
+        content_store_table: &impl content_store::ReadableTable,
+    ) -> DbResult<bool> {
+        let event_id = event_id.into();
+
+        // Check if event is deleted or pruned
+        if let Some(state) = events_content_state_table
+            .get(&event_id)?
+            .map(|r| r.value())
+        {
+            #[allow(deprecated)]
+            match state {
+                EventContentStateNew::Deleted { .. } | EventContentStateNew::Pruned => {
+                    return Ok(false);
+                }
+                // Legacy states - fall through to check content_store
+                EventContentStateNew::Available | EventContentStateNew::ClaimedUnprocessed => {}
+            }
         }
 
-        // Content exists! Claim it for this event.
-        // Increment RC
-        Database::increment_content_rc_tx(content_hash, content_rc_table)?;
-        // Mark event as Available
-        events_content_state_table.insert(&event_id, &EventContentStateNew::Available)?;
-        // Remove from missing (if present)
-        events_content_missing_table.remove(&event_id)?;
-
-        Ok(true)
+        // Check if content is in store
+        Ok(content_store_table.get(&content_hash)?.is_some())
     }
 
     pub(crate) fn insert_follow_tx(
@@ -739,13 +743,15 @@ impl Database {
         if let Some(event_record) = event {
             let content_hash = event_record.content_hash();
 
-            // Check if content was available before removing state
-            let was_available = events_content_state_table
+            // Check if the event's content was already deleted/pruned
+            // In the new model, RC was incremented at insertion time,
+            // so we decrement here unless it was already decremented (deleted/pruned)
+            let was_already_unwanted = events_content_state_table
                 .get(&event_id)?
                 .map(|g| {
                     matches!(
                         g.value(),
-                        EventContentStateNew::Available | EventContentStateNew::ClaimedUnprocessed
+                        EventContentStateNew::Deleted { .. } | EventContentStateNew::Pruned
                     )
                 })
                 .unwrap_or(false);
@@ -754,8 +760,8 @@ impl Database {
             events_content_state_table.remove(&event_id)?;
             events_content_missing_table.remove(&event_id)?;
 
-            // Decrement RC if content was available
-            if was_available {
+            // Decrement RC if content wasn't already unwanted
+            if !was_already_unwanted {
                 Database::decrement_content_rc_tx(content_hash, content_rc_table)?;
             }
 

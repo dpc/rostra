@@ -70,17 +70,22 @@ impl Database {
                 };
                 let content_hash = event.content_hash();
 
-                let Some(content_state) =
+                // Check if content is deleted or pruned
+                if let Some(content_state) =
                     Database::get_event_content_state_tx(event_id, &events_content_state_table)?
-                else {
-                    return Ok(None);
-                };
-                let (EventContentStateNew::Available | EventContentStateNew::ClaimedUnprocessed) =
-                    content_state
-                else {
-                    return Ok(None);
-                };
+                {
+                    #[allow(deprecated)]
+                    match content_state {
+                        EventContentStateNew::Deleted { .. } | EventContentStateNew::Pruned => {
+                            return Ok(None);
+                        }
+                        // Legacy states - treat as "content okay"
+                        EventContentStateNew::Available
+                        | EventContentStateNew::ClaimedUnprocessed => {}
+                    }
+                }
 
+                // Get content from store
                 let Some(store_record) =
                     content_store_table.get(&content_hash)?.map(|g| g.value())
                 else {
@@ -148,17 +153,22 @@ impl Database {
                 };
                 let content_hash = event.content_hash();
 
-                let Some(content_state) =
+                // Check if content is deleted or pruned
+                if let Some(content_state) =
                     Database::get_event_content_state_tx(event_id, &events_content_state_table)?
-                else {
-                    return Ok(None);
-                };
-                let (EventContentStateNew::Available | EventContentStateNew::ClaimedUnprocessed) =
-                    content_state
-                else {
-                    return Ok(None);
-                };
+                {
+                    #[allow(deprecated)]
+                    match content_state {
+                        EventContentStateNew::Deleted { .. } | EventContentStateNew::Pruned => {
+                            return Ok(None);
+                        }
+                        // Legacy states - treat as "content okay"
+                        EventContentStateNew::Available
+                        | EventContentStateNew::ClaimedUnprocessed => {}
+                    }
+                }
 
+                // Get content from store
                 let Some(store_record) =
                     content_store_table.get(&content_hash)?.map(|g| g.value())
                 else {
@@ -230,19 +240,25 @@ impl Database {
                 };
                 let content_hash = event.content_hash();
 
-                let Some(content_state) =
+                // Check if content is deleted or pruned
+                if let Some(content_state) =
                     Database::get_event_content_state_tx(event_id, &events_content_state_table)?
-                else {
-                    return Ok(None);
-                };
-                let (EventContentStateNew::Available | EventContentStateNew::ClaimedUnprocessed) =
-                    content_state
-                else {
-                    debug!(target: LOG_TARGET, %event_id, "Skipping comment without content present");
-                    return Ok(None);
-                };
+                {
+                    #[allow(deprecated)]
+                    match content_state {
+                        EventContentStateNew::Deleted { .. } | EventContentStateNew::Pruned => {
+                            debug!(target: LOG_TARGET, %event_id, "Skipping comment without content present");
+                            return Ok(None);
+                        }
+                        // Legacy states - treat as "content okay"
+                        EventContentStateNew::Available
+                        | EventContentStateNew::ClaimedUnprocessed => {}
+                    }
+                }
 
+                // Get content from store
                 let Some(store_record) = content_store_table.get(&content_hash)?.map(|g| g.value()) else {
+                    debug!(target: LOG_TARGET, %event_id, "Skipping comment without content present");
                     return Ok(None);
                 };
                 let ContentStoreRecord::Present(content) = store_record else {
@@ -301,19 +317,25 @@ impl Database {
                 };
                 let content_hash = event.content_hash();
 
-                let Some(content_state) =
+                // Check if content is deleted or pruned
+                if let Some(content_state) =
                     Database::get_event_content_state_tx(event_id, &events_content_state_table)?
-                else {
-                    return Ok(None);
-                };
-                let (EventContentStateNew::Available | EventContentStateNew::ClaimedUnprocessed) =
-                    content_state
-                else {
-                    debug!(target: LOG_TARGET, %event_id, "Skipping comment without content present");
-                    return Ok(None);
-                };
+                {
+                    #[allow(deprecated)]
+                    match content_state {
+                        EventContentStateNew::Deleted { .. } | EventContentStateNew::Pruned => {
+                            debug!(target: LOG_TARGET, %event_id, "Skipping reaction without content present");
+                            return Ok(None);
+                        }
+                        // Legacy states - treat as "content okay"
+                        EventContentStateNew::Available
+                        | EventContentStateNew::ClaimedUnprocessed => {}
+                    }
+                }
 
+                // Get content from store
                 let Some(store_record) = content_store_table.get(&content_hash)?.map(|g| g.value()) else {
+                    debug!(target: LOG_TARGET, %event_id, "Skipping comment without content present");
                     return Ok(None);
                 };
                 let ContentStoreRecord::Present(content) = store_record else {
@@ -484,18 +506,19 @@ impl Database {
         };
         let content_hash = event.content_hash();
 
-        // Check content state
-        let Some(content_state) =
+        // Check if content is deleted or pruned
+        if let Some(content_state) =
             Database::get_event_content_state_tx(event_id, events_content_state_table)?
-        else {
-            return Ok(None);
-        };
-
-        let (EventContentStateNew::Available | EventContentStateNew::ClaimedUnprocessed) =
-            content_state
-        else {
-            return Ok(None);
-        };
+        {
+            #[allow(deprecated)]
+            match content_state {
+                EventContentStateNew::Deleted { .. } | EventContentStateNew::Pruned => {
+                    return Ok(None);
+                }
+                // Legacy states - treat as "content okay"
+                EventContentStateNew::Available | EventContentStateNew::ClaimedUnprocessed => {}
+            }
+        }
 
         // Look up content from store
         let Some(store_record) = content_store_table.get(&content_hash)?.map(|g| g.value()) else {

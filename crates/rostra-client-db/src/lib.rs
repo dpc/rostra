@@ -489,33 +489,36 @@ impl Database {
             .expect("Storage error")
     }
 
+    /// Process event content.
+    ///
+    /// In the new model:
+    /// - RC is managed at event insertion time (already incremented)
+    /// - We store content in content_store if not already there
+    /// - We process side effects
+    /// - We remove from events_content_missing
     pub fn process_event_content_tx(
         &self,
         event_content: &VerifiedEventContent,
         tx: &WriteTransactionCtx,
     ) -> DbResult<()> {
         let events_table = tx.open_table(&events::TABLE)?;
-        let mut events_content_state_table = tx.open_table(&events_content_state::TABLE)?;
+        let events_content_state_table = tx.open_table(&events_content_state::TABLE)?;
         let mut content_store_table = tx.open_table(&content_store::TABLE)?;
-        let mut content_rc_table = tx.open_table(&content_rc::TABLE)?;
         let mut events_content_missing_table =
             tx.open_table(&tables::events_content_missing::TABLE)?;
-        let mut ids_data_usage_table = tx.open_table(&ids_data_usage::TABLE)?;
 
         debug_assert!(Database::has_event_tx(
             event_content.event.event_id,
             &events_table
         )?);
 
+        // Remove from missing list
         events_content_missing_table.remove(&event_content.event_id().to_short())?;
 
+        // Check if content is deleted/pruned or too large
         let can_insert = if u32::from(event_content.event.event.content_len) < Self::MAX_CONTENT_LEN
         {
-            Database::can_insert_event_content_tx(
-                event_content,
-                &events_content_state_table,
-                &content_store_table,
-            )?
+            Database::can_insert_event_content_tx(event_content, &events_content_state_table)?
         } else {
             false
         };
@@ -524,15 +527,7 @@ impl Database {
             if let Some(content) = event_content.content.as_ref() {
                 let content_hash = event_content.content_hash();
 
-                // Check if this event was already claimed (content deduplicated) by
-                // insert_event_tx. In that case, RC and content size were
-                // already incremented, content is already in store - we just
-                // need to run event-specific processing and update state.
-                let was_claimed_early = events_content_state_table
-                    .get(&event_content.event_id().to_short())?
-                    .map(|g| matches!(g.value(), EventContentStateNew::ClaimedUnprocessed))
-                    .unwrap_or(false);
-
+                // Process side effects
                 let is_valid = match self.process_event_content_inserted_tx(event_content, tx) {
                     Ok(()) => {
                         info!(target: LOG_TARGET,
@@ -558,39 +553,17 @@ impl Database {
                     }
                 };
 
-                // Only do content storage and RC tracking if not already claimed
-                if !was_claimed_early {
-                    // Check if content already exists in store (deduplication)
-                    let content_exists = content_store_table.get(&content_hash)?.is_some();
-
-                    if !content_exists {
-                        // Store content in content_store
-                        let store_record = if is_valid {
-                            ContentStoreRecord::Present(Cow::Owned(content.clone()))
-                        } else {
-                            ContentStoreRecord::Invalid(Cow::Owned(content.clone()))
-                        };
-                        content_store_table.insert(&content_hash, &store_record)?;
-                    }
-
-                    // Increment RC for this event claiming the content
-                    Database::increment_content_rc_tx(content_hash, &mut content_rc_table)?;
-
-                    // Track content size for the author
-                    Database::increment_content_size_tx(
-                        event_content.author(),
-                        event_content.content_len(),
-                        &mut ids_data_usage_table,
-                    )?;
+                // Store content in content_store if not already there
+                if content_store_table.get(&content_hash)?.is_none() {
+                    let store_record = if is_valid {
+                        ContentStoreRecord::Present(Cow::Owned(content.clone()))
+                    } else {
+                        ContentStoreRecord::Invalid(Cow::Owned(content.clone()))
+                    };
+                    content_store_table.insert(&content_hash, &store_record)?;
                 }
 
-                // Mark per-event state as available (this event now holds an RC)
-                events_content_state_table.insert(
-                    &event_content.event_id().to_short(),
-                    &EventContentStateNew::Available,
-                )?;
-
-                // Valid or not, we notify about new thing
+                // Notify about new content
                 tx.on_commit({
                     let new_content_tx = self.new_content_tx.clone();
                     let event_content = event_content.clone();
@@ -618,10 +591,24 @@ impl Database {
             ContentWantState::MaybeWants => {}
         }
 
+        let event_id = event_id.into();
         self.read_with(|tx| {
+            let events_table = tx.open_table(&events::TABLE)?;
             let events_content_state_table = tx.open_table(&events_content_state::TABLE)?;
+            let content_store_table = tx.open_table(&content_store::TABLE)?;
 
-            Database::has_event_content_tx(event_id.into(), &events_content_state_table)
+            // Get event to find content_hash
+            let Some(event) = Database::get_event_tx(event_id, &events_table)? else {
+                return Ok(false);
+            };
+            let content_hash = event.content_hash();
+
+            Database::has_event_content_tx(
+                event_id,
+                content_hash,
+                &events_content_state_table,
+                &content_store_table,
+            )
         })
         .await
         .expect("Storage error")

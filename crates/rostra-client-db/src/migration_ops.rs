@@ -7,13 +7,14 @@ use tracing::{debug, info};
 use crate::ids::IdsFolloweesRecordV0;
 use crate::{
     ContentStoreRecordOwned, Database, DbResult, DbVersionTooHighSnafu, EventContentStateNew,
-    IdSocialProfileRecord, IdsDataUsageRecord, IdsFolloweesRecord, LOG_TARGET, Latest,
-    SocialPostRecord, WriteTransactionCtx, content_rc, content_store, db_version, events,
-    events_by_time, events_content, events_content_missing, events_content_state, events_heads,
-    events_missing, events_self, events_singletons, events_singletons_new, ids_data_usage,
-    ids_followees, ids_followees_v0, ids_followers, ids_full, ids_personas, ids_self,
-    ids_unfollowed, social_posts, social_posts_by_time, social_posts_reactions,
-    social_posts_replies, social_posts_v0, social_profiles, social_profiles_v0,
+    EventReceivedRecord, EventReceivedSource, IdSocialProfileRecord, IdsDataUsageRecord,
+    IdsFolloweesRecord, LOG_TARGET, Latest, SocialPostRecord, WriteTransactionCtx, content_rc,
+    content_store, db_version, events, events_by_time, events_content, events_content_missing,
+    events_content_state, events_heads, events_missing, events_received_at, events_self,
+    events_singletons, events_singletons_new, ids_data_usage, ids_followees, ids_followees_v0,
+    ids_followers, ids_full, ids_personas, ids_self, ids_unfollowed, social_posts,
+    social_posts_by_time, social_posts_reactions, social_posts_replies, social_posts_v0,
+    social_profiles, social_profiles_v0,
 };
 
 impl Database {
@@ -41,6 +42,7 @@ impl Database {
         tx.open_table(&content_store::TABLE)?;
         tx.open_table(&content_rc::TABLE)?;
         tx.open_table(&events_content_state::TABLE)?;
+        tx.open_table(&events_received_at::TABLE)?;
 
         tx.open_table(&social_profiles::TABLE)?;
         tx.open_table(&social_posts::TABLE)?;
@@ -51,7 +53,7 @@ impl Database {
     }
 
     pub(crate) fn handle_db_ver_migrations(dbtx: &WriteTransactionCtx) -> DbResult<()> {
-        const DB_VER: u64 = 5;
+        const DB_VER: u64 = 6;
 
         let mut table_db_ver = dbtx.open_table(&db_version::TABLE)?;
 
@@ -78,6 +80,7 @@ impl Database {
                 2 => Self::migrate_v2(dbtx)?,
                 3 => Self::migrate_v3(dbtx)?,
                 4 => Self::migrate_v4(dbtx)?,
+                5 => Self::migrate_v5(dbtx)?,
                 DB_VER => { /* ensures we didn't forget to increment DB_VER */ }
                 x => panic!("Unexpected db ver: {x}"),
             }
@@ -374,6 +377,49 @@ impl Database {
             target: LOG_TARGET,
             "Calculated data usage for {} identities",
             count
+        );
+
+        Ok(())
+    }
+
+    /// Migration v5: Backfill events_received_at table.
+    ///
+    /// For all existing events, creates a reception record with:
+    /// - Timestamp: the event's author timestamp (best approximation)
+    /// - Source: Migration (indicating this was backfilled)
+    pub(crate) fn migrate_v5(dbtx: &WriteTransactionCtx) -> DbResult<()> {
+        use rostra_core::event::EventExt as _;
+
+        info!(target: LOG_TARGET, "Backfilling events_received_at table...");
+
+        let events_table = dbtx.open_table(&events::TABLE)?;
+        let mut received_at_table = dbtx.open_table(&events_received_at::TABLE)?;
+
+        let mut count = 0u64;
+
+        for entry in events_table.range(..)? {
+            let (event_id, record) = entry?;
+            let event_id = event_id.value();
+            let record = record.value();
+            let timestamp = record.timestamp();
+
+            received_at_table.insert(
+                &(timestamp, event_id),
+                &EventReceivedRecord {
+                    source: EventReceivedSource::Migration,
+                },
+            )?;
+
+            count += 1;
+            if count % 10000 == 0 {
+                debug!(target: LOG_TARGET, count, "Migration progress");
+            }
+        }
+
+        info!(
+            target: LOG_TARGET,
+            count,
+            "Backfilled events_received_at table"
         );
 
         Ok(())

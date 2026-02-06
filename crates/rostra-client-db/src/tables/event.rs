@@ -125,23 +125,29 @@ pub type ContentStoreRecordOwned = ContentStoreRecord<'static>;
 
 /// Per-event content state for the `events_content_state` table.
 ///
-/// This replaces the old `events_content` table. Instead of storing content
-/// inline, we store just the state. The actual content is in `content_store`,
-/// looked up via the event's content_hash.
+/// This table only tracks "unwanted" content states - reasons why we don't want
+/// to fetch or store content for an event. If an event is NOT in this table,
+/// its content is either:
+/// - Available (check content_store using event's content_hash)
+/// - Missing (check events_content_missing)
+///
+/// Reference counting (content_rc) is managed at event insertion/deletion time,
+/// not when content arrives.
+///
+/// Note: `Available` and `ClaimedUnprocessed` are legacy variants kept for
+/// migration compatibility. New code should not use them - entries with these
+/// states will be cleaned up by migration v6.
 #[derive(Debug, Encode, Decode, Clone, Copy, Serialize)]
 pub enum EventContentStateNew {
-    /// Content is available in the content_store and has been processed.
-    ///
-    /// Look up the content using the event's content_hash field.
+    /// LEGACY: Content is available. Kept for migration compatibility.
+    /// New code should not use this - entries are cleaned up by migration v6.
+    #[deprecated = "Legacy state, will be cleaned up by migration"]
     Available,
 
-    /// Content was claimed early (deduplicated) by insert_event_tx but hasn't
-    /// been processed by process_event_content_tx yet.
-    ///
-    /// This happens when an event arrives and its content already exists in
-    /// content_store (from another event with the same content hash).
-    /// The RC was incremented, but event-specific processing (like updating
-    /// follow/unfollow tables) still needs to run.
+    /// LEGACY: Content was claimed but not processed. Kept for migration
+    /// compatibility. New code should not use this - entries are cleaned up
+    /// by migration v6.
+    #[deprecated = "Legacy state, will be cleaned up by migration"]
     ClaimedUnprocessed,
 
     /// Content was deleted by the author via a deletion event.
@@ -173,8 +179,7 @@ pub enum EventContentResult {
     },
     /// Content was pruned locally
     Pruned,
-    /// Content state says available but content not found in store (shouldn't
-    /// happen)
+    /// Content is not in the store (check events_content_missing)
     Missing,
 }
 
@@ -196,4 +201,56 @@ impl EventContentResult {
     pub fn is_deleted(&self) -> bool {
         matches!(self, EventContentResult::Deleted { .. })
     }
+}
+
+// ============================================================================
+// Event Reception Tracking (V6)
+//
+// These types track when and how we received each event.
+// ============================================================================
+
+use rostra_core::event::IrohNodeId;
+use rostra_core::id::RostraId;
+
+/// How we acquired an event.
+///
+/// Tracks the source and method by which we received an event, useful for
+/// debugging sync issues, understanding network propagation, and analytics.
+#[derive(Debug, Encode, Decode, Clone, Serialize)]
+pub enum EventReceivedSource {
+    /// Event was backfilled during a database migration.
+    ///
+    /// For events that existed before we started tracking reception info.
+    Migration,
+
+    /// Event was pushed to us by a peer.
+    Pushed {
+        /// The identity that sent us this event (if known).
+        from_id: Option<RostraId>,
+        /// The iroh node that sent us this event (if known).
+        from_node: Option<IrohNodeId>,
+    },
+
+    /// We actively pulled/requested this event.
+    Pulled {
+        /// The identity we pulled from (if known).
+        from_id: Option<RostraId>,
+        /// The iroh node we pulled from (if known).
+        from_node: Option<IrohNodeId>,
+        /// Description of the task/query that triggered this pull.
+        task: Option<String>,
+    },
+
+    /// Event was created locally by this node.
+    Local,
+}
+
+/// Information about when and how we received an event.
+///
+/// Stored in the `events_received_at` table, keyed by `(Timestamp,
+/// ShortEventId)`.
+#[derive(Debug, Encode, Decode, Clone, Serialize)]
+pub struct EventReceivedRecord {
+    /// How we acquired this event.
+    pub source: EventReceivedSource,
 }

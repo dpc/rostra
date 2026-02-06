@@ -48,7 +48,8 @@ use rostra_core::{ContentHash, ShortEventId, Timestamp};
 use serde::Serialize;
 
 pub use self::event::{
-    ContentStoreRecordOwned, EventContentResult, EventContentStateNew, EventsHeadsTableRecord,
+    ContentStoreRecordOwned, EventContentResult, EventContentStateNew, EventReceivedRecord,
+    EventReceivedSource, EventsHeadsTableRecord,
 };
 pub(crate) mod event;
 pub(crate) mod id_self;
@@ -303,6 +304,18 @@ def_table! {
     /// Key: (timestamp, event_id)
     /// Used for time-based queries and pagination across all events.
     events_by_time: (Timestamp, ShortEventId) => ()
+}
+
+def_table! {
+    /// Tracks when and how we received each event.
+    ///
+    /// Key: (received_timestamp, event_id)
+    /// Value: Information about the reception source (push/pull, from whom, etc.)
+    ///
+    /// This enables tracking network propagation delays (by comparing received
+    /// timestamp vs event's author timestamp), debugging sync issues, and
+    /// analytics about event acquisition patterns.
+    events_received_at: (Timestamp, ShortEventId) => EventReceivedRecord
 }
 
 // ============================================================================
