@@ -29,10 +29,14 @@ pub type ProcessEventResult<T> = std::result::Result<T, ProcessEventError>;
 
 impl Database {
     /// After an event content was inserted process special kinds of event
-    /// content, like follows/unfollows
+    /// content, like follows/unfollows.
+    ///
+    /// The `now` parameter should be `Timestamp::now()` for normal operation,
+    /// but can be set to a specific value for testing or migration.
     pub fn process_event_content_inserted_tx(
         &self,
         event_content: &VerifiedEventContent,
+        now: Timestamp,
         tx: &WriteTransactionCtx,
     ) -> ProcessEventResult<()> {
         let author = event_content.event.event.author;
@@ -49,37 +53,35 @@ impl Database {
                     .open_table(&crate::ids_unfollowed::TABLE)
                     .map_err(DbError::from)?;
 
-                let (followee, updated) = match event_content.event.event.kind {
-                    EventKind::FOLLOW => {
-                        let content = event_content
-                            .deserialize_cbor::<content_kind::Follow>()
-                            .boxed()
-                            .context(InvalidSnafu)?;
-                        (
+                // Both FOLLOW and UNFOLLOW use the same content type.
+                // The actual follow/unfollow distinction is in the content's is_unfollow()
+                // method.
+                let content = event_content
+                    .deserialize_cbor::<content_kind::Follow>()
+                    .boxed()
+                    .context(InvalidSnafu)?;
+                let (followee, updated) = (
+                    content.followee,
+                    if content.is_unfollow() {
+                        Database::insert_unfollow_tx(
+                            author,
+                            event_content.event.event.timestamp.into(),
                             content.followee,
-                            if content.is_unfollow() {
-                                Database::insert_unfollow_tx(
-                                    author,
-                                    event_content.event.event.timestamp.into(),
-                                    content.followee,
-                                    &mut ids_followees_t,
-                                    &mut ids_followers_t,
-                                    &mut id_unfollowed_t,
-                                )?
-                            } else {
-                                Database::insert_follow_tx(
-                                    author,
-                                    event_content.event.event.timestamp.into(),
-                                    content,
-                                    &mut ids_followees_t,
-                                    &mut ids_followers_t,
-                                    &mut id_unfollowed_t,
-                                )?
-                            },
-                        )
-                    }
-                    _ => unreachable!(),
-                };
+                            &mut ids_followees_t,
+                            &mut ids_followers_t,
+                            &mut id_unfollowed_t,
+                        )?
+                    } else {
+                        Database::insert_follow_tx(
+                            author,
+                            event_content.event.event.timestamp.into(),
+                            content,
+                            &mut ids_followees_t,
+                            &mut ids_followers_t,
+                            &mut id_unfollowed_t,
+                        )?
+                    },
+                );
 
                 if updated {
                     if author == self.self_id {
@@ -176,16 +178,12 @@ impl Database {
                         .map_err(DbError::from)?;
 
                     // Also insert into received_at index for notification ordering.
-                    // Use current time as the received timestamp - this is essentially
-                    // the same value that was recorded in events_received_at moments ago.
+                    // Use the same `now` timestamp that was used for events_received_at.
                     let mut social_post_by_received_at_tbl = tx
                         .open_table(&social_posts_by_received_at::TABLE)
                         .map_err(DbError::from)?;
                     social_post_by_received_at_tbl
-                        .insert(
-                            &(Timestamp::now(), event_content.event_id().to_short()),
-                            &(),
-                        )
+                        .insert(&(now, event_content.event_id().to_short()), &())
                         .map_err(DbError::from)?;
 
                     tx.on_commit({

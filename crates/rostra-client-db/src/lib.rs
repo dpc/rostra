@@ -204,6 +204,8 @@ impl Database {
     #[instrument(skip_all)]
     async fn open_inner(inner: redb::Database, self_id: RostraId) -> DbResult<Database> {
         let inner = redb_bincode::Database::from(inner);
+
+        // Run migrations (may stash tables for total migration reprocessing)
         Self::write_with_inner(&inner, |tx| {
             Self::init_tables_tx(tx)?;
             Self::verify_self_tx(self_id, &mut tx.open_table(&ids_self::TABLE)?)?;
@@ -211,6 +213,12 @@ impl Database {
             Ok(())
         })
         .await?;
+
+        // Check if there's a pending migration stash (either from this run or a
+        // previous interrupted run). Using stash existence as the marker ensures
+        // we retry if reprocessing fails/panics.
+        let needs_reprocessing =
+            Self::write_with_inner(&inner, Self::has_pending_migration_stash).await?;
 
         let (self_head, iroh_secret, self_followees, self_followers) =
             Self::read_with_inner(&inner, |tx| {
@@ -229,7 +237,7 @@ impl Database {
         let (new_content_tx, _) = broadcast::channel(100);
         let (new_posts_tx, _) = broadcast::channel(100);
 
-        let s = Self {
+        let db = Self {
             inner,
             self_id,
             iroh_secret,
@@ -241,7 +249,14 @@ impl Database {
             ids_with_missing_events_tx: dedup_chan::Sender::new(),
         };
 
-        Ok(s)
+        // If total migration stashed events, reprocess them now using the real
+        // Database. The stash existence check ensures we retry if this
+        // fails/panics.
+        if needs_reprocessing {
+            db.write_with(|tx| db.reprocess_migration_stash(tx)).await?;
+        }
+
+        Ok(db)
     }
 
     pub async fn compact(&mut self) -> Result<bool, redb::CompactionError> {
@@ -459,7 +474,8 @@ impl Database {
         &self,
         event: &VerifiedEvent,
     ) -> (InsertEventOutcome, ProcessEventState) {
-        self.write_with(|tx| self.process_event_tx(event, tx))
+        let now = Timestamp::now();
+        self.write_with(|tx| self.process_event_tx(event, now, tx))
             .await
             .expect("Storage error")
     }
@@ -468,9 +484,10 @@ impl Database {
         &self,
         content: &VerifiedEventContent,
     ) -> (InsertEventOutcome, ProcessEventState) {
+        let now = Timestamp::now();
         self.write_with(|tx| {
-            let res = self.process_event_tx(&content.event, tx)?;
-            self.process_event_content_tx(content, tx)?;
+            let res = self.process_event_tx(&content.event, now, tx)?;
+            self.process_event_content_tx(content, now, tx)?;
             Ok(res)
         })
         .await
@@ -481,7 +498,8 @@ impl Database {
     ///
     /// Note: Must only be called for an event that was already processed
     pub async fn process_event_content(&self, event_content: &VerifiedEventContent) {
-        self.write_with(|tx| self.process_event_content_tx(event_content, tx))
+        let now = Timestamp::now();
+        self.write_with(|tx| self.process_event_content_tx(event_content, now, tx))
             .await
             .expect("Storage error")
     }
@@ -493,9 +511,13 @@ impl Database {
     /// - We store content in content_store if not already there
     /// - We process side effects
     /// - We remove from events_content_missing
+    ///
+    /// The `now` parameter should be `Timestamp::now()` for normal operation,
+    /// but can be set to a specific value for testing or migration.
     pub fn process_event_content_tx(
         &self,
         event_content: &VerifiedEventContent,
+        now: Timestamp,
         tx: &WriteTransactionCtx,
     ) -> DbResult<()> {
         let events_table = tx.open_table(&events::TABLE)?;
@@ -525,7 +547,8 @@ impl Database {
                 let content_hash = event_content.content_hash();
 
                 // Process side effects
-                let is_valid = match self.process_event_content_inserted_tx(event_content, tx) {
+                let is_valid = match self.process_event_content_inserted_tx(event_content, now, tx)
+                {
                     Ok(()) => {
                         info!(target: LOG_TARGET,
                             kind = %event_content.kind(),

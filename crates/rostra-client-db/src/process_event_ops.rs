@@ -13,9 +13,14 @@ use crate::{
 };
 
 impl Database {
+    /// Process a received event, inserting it into the database.
+    ///
+    /// The `now` parameter should be `Timestamp::now()` for normal operation,
+    /// but can be set to a specific value for testing or migration.
     pub fn process_event_tx(
         &self,
         event: &VerifiedEvent,
+        now: Timestamp,
         tx: &WriteTransactionCtx,
     ) -> DbResult<(InsertEventOutcome, ProcessEventState)> {
         let mut events_tbl = tx.open_table(&events::TABLE)?;
@@ -53,10 +58,9 @@ impl Database {
         } = insert_event_outcome
         {
             // Record when we received this event
-            let received_ts = Timestamp::now();
             let mut events_received_at_tbl = tx.open_table(&events_received_at::TABLE)?;
             events_received_at_tbl.insert(
-                &(received_ts, event.event_id.to_short()),
+                &(now, event.event_id.to_short()),
                 &EventReceivedRecord {
                     source: EventReceivedSource::Pushed {
                         from_id: None,

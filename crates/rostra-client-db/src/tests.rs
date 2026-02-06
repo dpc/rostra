@@ -2583,3 +2583,515 @@ mod proptest_follow {
         Ok(())
     }
 }
+
+/// Test social posts pagination by received_at timestamp.
+///
+/// This test verifies that:
+/// 1. Social posts are correctly inserted into social_posts_by_received_at
+///    table
+/// 2. Pagination functions return posts in the expected order
+#[test_log::test(tokio::test(flavor = "multi_thread"))]
+async fn test_social_posts_by_received_at_pagination() -> BoxedErrorResult<()> {
+    use rostra_core::event::{PersonaId, VerifiedEventContent, content_kind};
+    use rostra_core::{ExternalEventId, Timestamp};
+
+    let user_a_secret = RostraIdSecretKey::generate();
+    let user_a = user_a_secret.id();
+
+    let user_b_secret = RostraIdSecretKey::generate();
+    let user_b = user_b_secret.id();
+
+    // Database owned by user_a
+    let (_dir, db) = temp_db(user_a).await?;
+
+    // Helper to build a social post event
+    let build_social_post_event = |id_secret: RostraIdSecretKey,
+                                   parent: Option<EventId>,
+                                   djot_content: &str,
+                                   reply_to: Option<ExternalEventId>|
+     -> (VerifiedEvent, EventContentRaw) {
+        use rostra_core::event::content_kind::EventContentKind as _;
+        let content = content_kind::SocialPost {
+            persona: PersonaId(0),
+            djot_content: Some(djot_content.to_string()),
+            reply_to,
+            reaction: None,
+        };
+        let content_raw = content.serialize_cbor().unwrap();
+        let author = id_secret.id();
+        let event = Event::builder_raw_content()
+            .author(author)
+            .kind(EventKind::SOCIAL_POST)
+            .maybe_parent_prev(parent.map(Into::into))
+            .content(&content_raw)
+            .build();
+
+        let signed_event = event.signed_by(id_secret);
+        let verified = VerifiedEvent::verify_signed(author, signed_event).expect("Valid event");
+        (verified, content_raw)
+    };
+
+    // User B creates a post
+    let (post_b1, post_b1_content) =
+        build_social_post_event(user_b_secret, None, "Post by B", None);
+    let post_b1_id = post_b1.event_id;
+
+    // User A responds to user B's post
+    let reply_to_b1 = ExternalEventId::new(user_b, post_b1_id);
+    let (reply_a1, reply_a1_content) =
+        build_social_post_event(user_a_secret, None, "Reply from A to B", Some(reply_to_b1));
+    let reply_a1_id = reply_a1.event_id;
+
+    // User B creates another post
+    let (post_b2, post_b2_content) =
+        build_social_post_event(user_b_secret, Some(post_b1_id), "Second post by B", None);
+    let post_b2_id = post_b2.event_id;
+
+    // Process all events and content with explicit timestamps
+    // Insert in order: post_b1 (ts=100), reply_a1 (ts=200), post_b2 (ts=300)
+    let events_with_ts = [
+        (&post_b1, &post_b1_content, Timestamp::from(100u64)),
+        (&reply_a1, &reply_a1_content, Timestamp::from(200u64)),
+        (&post_b2, &post_b2_content, Timestamp::from(300u64)),
+    ];
+
+    for (event, content_raw, received_ts) in events_with_ts {
+        db.write_with(|tx| {
+            db.process_event_tx(event, received_ts, tx)?;
+            let verified_content =
+                VerifiedEventContent::assume_verified(*event, content_raw.clone());
+            db.process_event_content_tx(&verified_content, received_ts, tx)?;
+            Ok(())
+        })
+        .await?;
+    }
+
+    // Test paginate_social_posts_by_received_at_rev - should return posts in
+    // reverse received order
+    let (posts_rev, _cursor) = db
+        .paginate_social_posts_by_received_at_rev(None, 10, |_| true)
+        .await;
+
+    assert_eq!(posts_rev.len(), 3, "Should have 3 posts");
+    // Most recently received should be first (post_b2)
+    assert_eq!(
+        posts_rev[0].event_id,
+        post_b2_id.into(),
+        "First post should be post_b2 (most recent)"
+    );
+    assert_eq!(
+        posts_rev[1].event_id,
+        reply_a1_id.into(),
+        "Second post should be reply_a1"
+    );
+    assert_eq!(
+        posts_rev[2].event_id,
+        post_b1_id.into(),
+        "Third post should be post_b1 (oldest)"
+    );
+
+    // Test paginate_social_posts_by_received_at (forward) - should return posts in
+    // received order
+    let (posts_fwd, _cursor) = db
+        .paginate_social_posts_by_received_at(None, 10, |_| true)
+        .await;
+
+    assert_eq!(posts_fwd.len(), 3, "Should have 3 posts");
+    // Oldest received should be first (post_b1)
+    assert_eq!(
+        posts_fwd[0].event_id,
+        post_b1_id.into(),
+        "First post should be post_b1 (oldest)"
+    );
+    assert_eq!(
+        posts_fwd[1].event_id,
+        reply_a1_id.into(),
+        "Second post should be reply_a1"
+    );
+    assert_eq!(
+        posts_fwd[2].event_id,
+        post_b2_id.into(),
+        "Third post should be post_b2 (most recent)"
+    );
+
+    // Test with filter - only posts replying to user_a
+    let (notifications, _cursor) = db
+        .paginate_social_posts_by_received_at_rev(None, 10, move |post| {
+            post.author != user_a && post.reply_to.map(|ext_id| ext_id.rostra_id()) == Some(user_a)
+        })
+        .await;
+
+    // No posts should match this filter since no one replied to user_a
+    assert_eq!(
+        notifications.len(),
+        0,
+        "No notifications for user_a (no one replied to them)"
+    );
+
+    Ok(())
+}
+
+/// Test: Total migration correctly rebuilds derived state.
+///
+/// Verifies that:
+/// 1. After forcing an old db version, reopening triggers total migration
+/// 2. DB version is updated to current
+/// 3. Followees/followers are correctly re-derived
+/// 4. Social posts are in the correct index tables
+#[test_log::test(tokio::test(flavor = "multi_thread"))]
+async fn test_total_migration() -> BoxedErrorResult<()> {
+    use rostra_core::Timestamp;
+    use rostra_core::event::content_kind::PersonaSelector;
+    use rostra_core::event::{PersonaId, VerifiedEventContent, content_kind};
+
+    use crate::{db_version, ids_followees, ids_followers, social_posts_by_time};
+
+    let user_a_secret = RostraIdSecretKey::generate();
+    let user_a = user_a_secret.id();
+
+    let user_b_secret = RostraIdSecretKey::generate();
+    let user_b = user_b_secret.id();
+
+    let dir = tempfile::tempdir()?;
+    let db_path = dir.path().join("db.redb");
+
+    // Phase 1: Create database with data
+    {
+        let db = Database::open(&db_path, user_a).await.boxed()?;
+
+        // Create a follow event (user_a follows user_b)
+        // Note: selector must be Some to be a follow, None means unfollow
+        let follow_content = content_kind::Follow {
+            followee: user_b,
+            persona: None,
+            selector: Some(PersonaSelector::default()), // Follow all personas
+        };
+        let follow_content_raw = {
+            use rostra_core::event::content_kind::EventContentKind as _;
+            follow_content.serialize_cbor().unwrap()
+        };
+        let follow_event = {
+            let event = Event::builder_raw_content()
+                .author(user_a)
+                .kind(EventKind::FOLLOW)
+                .content(&follow_content_raw)
+                .build();
+            let signed = event.signed_by(user_a_secret);
+            VerifiedEvent::verify_signed(user_a, signed).expect("Valid event")
+        };
+
+        // Create a follow event (user_b follows user_a) - to test "who follows me"
+        let reverse_follow_content = content_kind::Follow {
+            followee: user_a,
+            persona: None,
+            selector: Some(PersonaSelector::default()),
+        };
+        let reverse_follow_content_raw = {
+            use rostra_core::event::content_kind::EventContentKind as _;
+            reverse_follow_content.serialize_cbor().unwrap()
+        };
+        let reverse_follow_event = {
+            let event = Event::builder_raw_content()
+                .author(user_b)
+                .kind(EventKind::FOLLOW)
+                .content(&reverse_follow_content_raw)
+                .build();
+            let signed = event.signed_by(user_b_secret);
+            VerifiedEvent::verify_signed(user_b, signed).expect("Valid event")
+        };
+
+        // Create a social post
+        let post_content = content_kind::SocialPost {
+            persona: PersonaId(0),
+            djot_content: Some("Hello world!".to_string()),
+            reply_to: None,
+            reaction: None,
+        };
+        let post_content_raw = {
+            use rostra_core::event::content_kind::EventContentKind as _;
+            post_content.serialize_cbor().unwrap()
+        };
+        let post_event = {
+            let event = Event::builder_raw_content()
+                .author(user_a)
+                .kind(EventKind::SOCIAL_POST)
+                .content(&post_content_raw)
+                .build();
+            let signed = event.signed_by(user_a_secret);
+            VerifiedEvent::verify_signed(user_a, signed).expect("Valid event")
+        };
+        let post_event_id = post_event.event_id;
+
+        // Process events
+        let now = Timestamp::now();
+        db.write_with(|tx| {
+            db.process_event_tx(&follow_event, now, tx)?;
+            let verified_follow =
+                VerifiedEventContent::assume_verified(follow_event, follow_content_raw);
+            db.process_event_content_tx(&verified_follow, now, tx)?;
+
+            db.process_event_tx(&reverse_follow_event, now, tx)?;
+            let verified_reverse_follow = VerifiedEventContent::assume_verified(
+                reverse_follow_event,
+                reverse_follow_content_raw,
+            );
+            db.process_event_content_tx(&verified_reverse_follow, now, tx)?;
+
+            db.process_event_tx(&post_event, now, tx)?;
+            let verified_post = VerifiedEventContent::assume_verified(post_event, post_content_raw);
+            db.process_event_content_tx(&verified_post, now, tx)?;
+            Ok(())
+        })
+        .await?;
+
+        // Verify data exists before migration - detailed checks
+        db.read_with(|tx| {
+            let followees = tx.open_table(&ids_followees::TABLE)?;
+
+            // Debug: list all followees entries
+            info!("Followees table contents before migration:");
+            for entry in followees.range(..)? {
+                let (key, value) = entry?;
+                info!("  {:?} -> {:?}", key.value(), value.value());
+            }
+
+            // Check followee record exists and has correct values
+            let followee_record = followees
+                .get(&(user_a, user_b))?
+                .map(|g| g.value())
+                .expect("Follow should exist before migration");
+            assert!(
+                followee_record.selector.is_some(),
+                "Selector should be Some for an active follow"
+            );
+            info!(
+                "Followee record before migration: ts={:?}, selector={:?}",
+                followee_record.ts, followee_record.selector
+            );
+
+            // Check follower record
+            let followers = tx.open_table(&ids_followers::TABLE)?;
+            info!("Followers table contents before migration:");
+            for entry in followers.range(..)? {
+                let (key, _value) = entry?;
+                info!("  {:?}", key.value());
+            }
+            assert!(
+                followers.get(&(user_b, user_a))?.is_some(),
+                "Follower record should exist before migration"
+            );
+
+            let posts_by_time = tx.open_table(&social_posts_by_time::TABLE)?;
+            let post_exists = posts_by_time.range(..)?.any(|r| {
+                r.map(|(k, _)| k.value().1 == post_event_id.into())
+                    .unwrap_or(false)
+            });
+            assert!(
+                post_exists,
+                "Post should exist in time index before migration"
+            );
+
+            Ok(())
+        })
+        .await?;
+
+        // Also verify via Database methods before migration
+        let followees_before = db.get_followees(user_a).await;
+        info!(
+            "get_followees(user_a) before migration: {:?}",
+            followees_before
+        );
+        assert_eq!(
+            followees_before.len(),
+            1,
+            "Should have 1 followee before migration"
+        );
+        assert_eq!(followees_before[0].0, user_b, "Followee should be user_b");
+
+        let followers_before = db.get_followers(user_b).await;
+        info!(
+            "get_followers(user_b) before migration: {:?}",
+            followers_before
+        );
+        assert_eq!(
+            followers_before.len(),
+            1,
+            "user_b should have 1 follower before migration"
+        );
+        assert_eq!(followers_before[0], user_a, "Follower should be user_a");
+
+        // Check who follows user_a (self) - this is what the UI shows
+        let self_followers_before = db.get_self_followers().await;
+        info!(
+            "get_self_followers() before migration: {:?}",
+            self_followers_before
+        );
+        assert_eq!(
+            self_followers_before.len(),
+            1,
+            "user_a should have 1 follower before migration"
+        );
+        assert_eq!(
+            self_followers_before[0], user_b,
+            "user_a's follower should be user_b"
+        );
+
+        let (posts_before, _) = db.paginate_social_posts_rev(None, 10, |_| true).await;
+        info!(
+            "paginate_social_posts_rev before migration: {} posts",
+            posts_before.len()
+        );
+        assert_eq!(posts_before.len(), 1, "Should have 1 post before migration");
+
+        // Database is dropped here
+    }
+
+    // Phase 2: Manually downgrade db version to trigger migration
+    {
+        let raw_db = redb_bincode::Database::from(redb::Database::open(&db_path).boxed()?);
+        let write_txn = raw_db.begin_write().boxed()?;
+        {
+            let mut table = write_txn.open_table(&db_version::TABLE).boxed()?;
+            // Set version to 1 to trigger total migration
+            let old_version: u64 = 1;
+            table.insert(&(), &old_version).boxed()?;
+        }
+        write_txn.commit().boxed()?;
+    }
+
+    // Phase 3: Reopen database - should trigger migration
+    let db = Database::open(&db_path, user_a).await.boxed()?;
+
+    // Phase 4: Verify migration worked - detailed checks
+    db.read_with(|tx| {
+        // Check db version was updated
+        let db_ver_table = tx.open_table(&db_version::TABLE)?;
+        let current_ver = db_ver_table.first()?.map(|g| g.1.value());
+        info!("DB version after migration: {:?}", current_ver);
+        // Note: We can't directly check against DB_VER since it's private,
+        // but we can check it's greater than 1
+        assert!(
+            current_ver.is_some() && current_ver.unwrap() > 1,
+            "DB version should be updated after migration"
+        );
+
+        // Check followees table in detail
+        let followees = tx.open_table(&ids_followees::TABLE)?;
+        info!("Followees table contents after migration:");
+        for entry in followees.range(..)? {
+            let (key, value) = entry?;
+            info!("  {:?} -> {:?}", key.value(), value.value());
+        }
+
+        let followee_record = followees
+            .get(&(user_a, user_b))?
+            .map(|g| g.value())
+            .expect("Follow should exist after migration");
+        assert!(
+            followee_record.selector.is_some(),
+            "Selector should be Some for an active follow after migration"
+        );
+        info!(
+            "Followee record after migration: ts={:?}, selector={:?}",
+            followee_record.ts, followee_record.selector
+        );
+
+        // Check followers table in detail
+        let followers = tx.open_table(&ids_followers::TABLE)?;
+        info!("Followers table contents after migration:");
+        for entry in followers.range(..)? {
+            let (key, _value) = entry?;
+            info!("  {:?}", key.value());
+        }
+        assert!(
+            followers.get(&(user_b, user_a))?.is_some(),
+            "Follower record should exist after migration"
+        );
+
+        // Check social posts
+        let posts_by_time = tx.open_table(&social_posts_by_time::TABLE)?;
+        let post_count = posts_by_time.range(..)?.count();
+        info!("Posts in time index after migration: {}", post_count);
+        assert!(
+            post_count > 0,
+            "Posts should exist in time index after migration"
+        );
+
+        Ok(())
+    })
+    .await?;
+
+    // Phase 5: Verify via Database methods after migration
+    info!("=== Verifying Database methods after migration ===");
+
+    let followees_after = db.get_followees(user_a).await;
+    info!(
+        "get_followees(user_a) after migration: {:?}",
+        followees_after
+    );
+    assert_eq!(
+        followees_after.len(),
+        1,
+        "Should have 1 followee after migration"
+    );
+    assert_eq!(
+        followees_after[0].0, user_b,
+        "Followee should be user_b after migration"
+    );
+
+    let followers_after = db.get_followers(user_b).await;
+    info!(
+        "get_followers(user_b) after migration: {:?}",
+        followers_after
+    );
+    assert_eq!(
+        followers_after.len(),
+        1,
+        "user_b should have 1 follower after migration"
+    );
+    assert_eq!(
+        followers_after[0], user_a,
+        "Follower should be user_a after migration"
+    );
+
+    // Also check self methods since db.self_id == user_a
+    let self_followees = db.get_self_followees().await;
+    info!("get_self_followees() after migration: {:?}", self_followees);
+    assert_eq!(
+        self_followees.len(),
+        1,
+        "Self should have 1 followee after migration"
+    );
+
+    // Check who follows user_a (self) - this is what the UI shows
+    let self_followers_after = db.get_self_followers().await;
+    info!(
+        "get_self_followers() after migration: {:?}",
+        self_followers_after
+    );
+    assert_eq!(
+        self_followers_after.len(),
+        1,
+        "user_a should have 1 follower after migration"
+    );
+    assert_eq!(
+        self_followers_after[0], user_b,
+        "user_a's follower should be user_b after migration"
+    );
+
+    let (posts_after, _) = db.paginate_social_posts_rev(None, 10, |_| true).await;
+    info!(
+        "paginate_social_posts_rev after migration: {} posts",
+        posts_after.len()
+    );
+    assert_eq!(posts_after.len(), 1, "Should have 1 post after migration");
+    assert_eq!(
+        posts_after[0].content.djot_content,
+        Some("Hello world!".to_string()),
+        "Post content should match after migration"
+    );
+
+    info!("=== All migration verifications passed ===");
+
+    Ok(())
+}
