@@ -5,7 +5,7 @@
 
 use bincode::{Decode, Encode};
 use rostra_core::Timestamp;
-use rostra_core::event::{PersonaId, PersonaSelector};
+use rostra_core::event::PersonaSelector;
 use rostra_core::id::RestRostraId;
 
 /// Record for reconstructing full RostraId from ShortRostraId.
@@ -15,13 +15,6 @@ use rostra_core::id::RestRostraId;
 pub struct IdRecord {
     /// The "rest" of the RostraId (the part not in ShortRostraId)
     pub id_rest: RestRostraId,
-}
-
-/// Legacy followees record format (V0).
-#[derive(Debug, Encode, Decode, Clone)]
-pub struct IdsFolloweesRecordV0 {
-    pub ts: Timestamp,
-    pub persona: PersonaId,
 }
 
 /// Record for the `ids_followees` table.

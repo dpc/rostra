@@ -310,8 +310,7 @@ impl EventKind {
     pub const FOLLOW: Self = EventKind::from_u16(0x10);
     /// Control: Stop following identity
     pub const UNFOLLOW: Self = EventKind::from_u16(0x11);
-    /// Control: Persona update
-    pub const PERSONA_UPDATE: Self = EventKind::from_u16(0x12);
+    // PERSONA_UPDATE (0x12) - not implemented yet
     /// Control: Node Announcement
     pub const NODE_ANNOUNCEMENT: Self = EventKind::from_u16(0x13);
 
@@ -336,7 +335,6 @@ impl fmt::Display for EventKind {
             Self::RAW => "raw",
             Self::FOLLOW => "follow",
             Self::UNFOLLOW => "unfollow",
-            Self::PERSONA_UPDATE => "persona-update",
             Self::NODE_ANNOUNCEMENT => "node-announcement",
             Self::SOCIAL_POST => "social-post",
             Self::SOCIAL_PROFILE_UPDATE => "social-profile-update",

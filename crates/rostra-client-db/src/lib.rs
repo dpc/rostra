@@ -252,9 +252,6 @@ impl Database {
         self.read_with(|tx| {
             match name {
                 "events" => Self::dump_table_dbtx(tx, &tables::events::TABLE)?,
-                "events_singletons" => {
-                    Self::dump_table_dbtx(tx, &tables::events_singletons::TABLE)?
-                }
                 "content_store" => Self::dump_table_dbtx(tx, &tables::content_store::TABLE)?,
                 "events_content_state" => {
                     Self::dump_table_dbtx(tx, &tables::events_content_state::TABLE)?
@@ -715,22 +712,6 @@ impl Database {
 
     pub async fn get_latest_singleton_event(
         &self,
-        kind: EventKind,
-        aux_key: EventAuxKey,
-    ) -> Option<ShortEventId> {
-        self.read_with(|tx| {
-            let singletons_table = tx.open_table(&events_singletons::TABLE)?;
-
-            Ok(singletons_table
-                .get(&(kind, aux_key))?
-                .map(|record| record.value().inner.event_id))
-        })
-        .await
-        .expect("Database panic")
-    }
-
-    pub async fn get_latest_singleton_event2(
-        &self,
         rostra_id: RostraId,
         kind: EventKind,
         aux_key: EventAuxKey,
@@ -741,33 +722,6 @@ impl Database {
             Ok(singletons_table
                 .get(&(rostra_id, kind, aux_key))?
                 .map(|record| record.value().inner.event_id))
-        })
-        .await
-        .expect("Database panic")
-    }
-
-    pub async fn get_all_singleton_events(
-        &self,
-        kind: EventKind,
-    ) -> HashMap<EventAuxKey, ShortEventId> {
-        self.read_with(|tx| {
-            let singletons_table = tx.open_table(&events_singletons::TABLE)?;
-
-            let mut result = HashMap::new();
-            let range_start = (kind, EventAuxKey::ZERO);
-            let range_end = (kind, EventAuxKey::MAX);
-
-            for record in singletons_table.range(range_start..range_end)? {
-                let record = record?;
-                let key = record.0.value();
-                debug_assert_eq!(key.0, kind);
-
-                let aux_key = key.1;
-                let singleton = record.1.value();
-                result.insert(aux_key, singleton.inner.event_id);
-            }
-
-            Ok(result)
         })
         .await
         .expect("Database panic")

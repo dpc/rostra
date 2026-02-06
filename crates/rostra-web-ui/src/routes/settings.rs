@@ -403,12 +403,12 @@ impl UiState {
         }
 
         // Format content state
+        // In the new model, events_content_state only contains deleted/pruned states.
+        // If None, content is either available in content_store or missing.
         let content_state_str = match content_state {
-            Some(EventContentStateNew::Available) => "Available",
-            Some(EventContentStateNew::ClaimedUnprocessed) => "Claimed",
             Some(EventContentStateNew::Deleted { .. }) => "Deleted",
             Some(EventContentStateNew::Pruned) => "Pruned",
-            None => "Unknown",
+            None => "", // Content state not tracked (check content_store for availability)
         };
 
         // Format parents

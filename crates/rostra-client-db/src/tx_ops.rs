@@ -252,19 +252,9 @@ impl Database {
     ) -> DbResult<bool> {
         let event_id = event.event_id.to_short();
 
-        // Check if event's content is deleted or pruned
-        if let Some(existing_state) = events_content_state_table
-            .get(&event_id)?
-            .map(|g| g.value())
-        {
-            #[allow(deprecated)]
-            match existing_state {
-                EventContentStateNew::Deleted { .. } | EventContentStateNew::Pruned => {
-                    return Ok(false);
-                }
-                // Legacy states - treat as "content okay"
-                EventContentStateNew::Available | EventContentStateNew::ClaimedUnprocessed => {}
-            }
+        // If event has a content state, it means content is deleted or pruned
+        if events_content_state_table.get(&event_id)?.is_some() {
+            return Ok(false);
         }
 
         Ok(true)
@@ -284,12 +274,11 @@ impl Database {
     ) -> DbResult<bool> {
         let event_id = event_id.into();
 
-        // Check current state
+        // Check current state - if already deleted or pruned, handle appropriately
         if let Some(existing_state) = events_content_state_table
             .get(&event_id)?
             .map(|g| g.value())
         {
-            #[allow(deprecated)]
             match existing_state {
                 EventContentStateNew::Deleted { .. } => {
                     // Already deleted, can't prune
@@ -299,8 +288,6 @@ impl Database {
                     // Already pruned, nothing to do
                     return Ok(true);
                 }
-                // Legacy states - fall through to pruning logic
-                EventContentStateNew::Available | EventContentStateNew::ClaimedUnprocessed => {}
             }
         }
 
@@ -390,11 +377,11 @@ impl Database {
         let event_id = event_id.into();
 
         // Check if content is deleted or pruned
+        // Check if deleted or pruned - return corresponding result
         if let Some(state) = events_content_state_table
             .get(&event_id)?
             .map(|r| r.value())
         {
-            #[allow(deprecated)]
             match state {
                 EventContentStateNew::Deleted { deleted_by } => {
                     return Ok(Some(EventContentResult::Deleted { deleted_by }));
@@ -402,8 +389,6 @@ impl Database {
                 EventContentStateNew::Pruned => {
                     return Ok(Some(EventContentResult::Pruned));
                 }
-                // Legacy states - fall through to look up content from content_store
-                EventContentStateNew::Available | EventContentStateNew::ClaimedUnprocessed => {}
             }
         }
 
@@ -434,19 +419,9 @@ impl Database {
     ) -> DbResult<bool> {
         let event_id = event_id.into();
 
-        // Check if deleted or pruned
-        if let Some(state) = events_content_state_table
-            .get(&event_id)?
-            .map(|r| r.value())
-        {
-            #[allow(deprecated)]
-            match state {
-                EventContentStateNew::Deleted { .. } | EventContentStateNew::Pruned => {
-                    return Ok(false);
-                }
-                // Legacy states - fall through to check content_store
-                EventContentStateNew::Available | EventContentStateNew::ClaimedUnprocessed => {}
-            }
+        // If event has a content state, it means content is deleted or pruned
+        if events_content_state_table.get(&event_id)?.is_some() {
+            return Ok(false);
         }
 
         // Check if content is in store
@@ -472,19 +447,9 @@ impl Database {
     ) -> DbResult<bool> {
         let event_id = event_id.into();
 
-        // Check if event is deleted or pruned
-        if let Some(state) = events_content_state_table
-            .get(&event_id)?
-            .map(|r| r.value())
-        {
-            #[allow(deprecated)]
-            match state {
-                EventContentStateNew::Deleted { .. } | EventContentStateNew::Pruned => {
-                    return Ok(false);
-                }
-                // Legacy states - fall through to check content_store
-                EventContentStateNew::Available | EventContentStateNew::ClaimedUnprocessed => {}
-            }
+        // If event has a content state, it means content is deleted or pruned
+        if events_content_state_table.get(&event_id)?.is_some() {
+            return Ok(false);
         }
 
         // Check if content is in store

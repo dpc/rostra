@@ -21,6 +21,33 @@
 //! - **Head Events**: Events with no known children - the current "tips" of the
 //!   DAG for an identity.
 //!
+//! ## Content Storage Model
+//!
+//! Content is stored separately from event metadata for deduplication and
+//! efficient pruning:
+//!
+//! - **[`content_store`]**: Stores actual content by [`ContentHash`] (blake3).
+//!   Identical content is stored only once.
+//! - **[`content_rc`]**: Reference count per content hash. Managed at event
+//!   insertion time (not when content arrives).
+//! - **[`events_content_state`]**: Tracks "unwanted" content states (Deleted,
+//!   Pruned). If an event is NOT in this table, its content is either available
+//!   in [`content_store`] or missing (see [`events_content_missing`]).
+//! - **[`events_content_missing`]**: Events whose content we want but don't
+//!   have yet.
+//!
+//! ### Content Lifecycle
+//!
+//! 1. **Event insertion**: RC is incremented for the event's content_hash
+//! 2. **Content arrival**: Content is stored in [`content_store`], event
+//!    removed from [`events_content_missing`]
+//! 3. **Content deletion**: Event added to [`events_content_state`] with
+//!    `Deleted`, RC decremented
+//! 4. **Content pruning**: Event added to [`events_content_state`] with
+//!    `Pruned`, RC decremented
+//! 5. **Garbage collection**: When RC reaches 0, content removed from
+//!    [`content_store`]
+//!
 //! ## Table Categories
 //!
 //! ### Identity Tables (`ids_*`)
@@ -33,15 +60,13 @@
 //! Store derived social data extracted from events (profiles, posts, etc.).
 //!
 //! [`Event`]: rostra_core::event::Event
+//! [`ContentHash`]: rostra_core::ContentHash
 
 use bincode::{Decode, Encode};
 pub use event::EventRecord;
 use event::EventsMissingRecord;
 use id_self::IdSelfAccountRecord;
-use ids::{
-    IdsFolloweesRecord, IdsFolloweesRecordV0, IdsFollowersRecord, IdsPersonaRecord,
-    IdsUnfollowedRecord,
-};
+use ids::{IdsFolloweesRecord, IdsFollowersRecord, IdsPersonaRecord, IdsUnfollowedRecord};
 use rostra_core::event::{EventAuxKey, EventKind, IrohNodeId, PersonaId};
 use rostra_core::id::{RestRostraId, RostraId, ShortRostraId};
 use rostra_core::{ContentHash, ShortEventId, Timestamp};
@@ -110,9 +135,6 @@ def_table! {
     ids_nodes: (RostraId, IrohNodeId) => IrohNodeRecord
 }
 
-// Legacy table, kept for migrations
-def_table!(ids_followees_v0: (RostraId, RostraId) => IdsFolloweesRecordV0);
-
 def_table! {
     /// Who each identity follows.
     ///
@@ -171,8 +193,8 @@ pub struct IdsDataUsageRecord {
 
     /// Total size of content (payloads) in bytes.
     ///
-    /// Only content in the `Available` state is counted. Pruned/Deleted content
-    /// is not included (as it doesn't consume storage).
+    /// Only content that is neither deleted nor pruned is counted. When content
+    /// is deleted or pruned, this value is decremented accordingly.
     pub content_size: u64,
 }
 
@@ -187,23 +209,12 @@ def_table! {
     events: ShortEventId => EventRecord
 }
 
-// TODO: this version is stupid, make a migration that deletes it and renames
-// `events_singletons_new` to old name
 def_table! {
-    /// Singleton events - events where only the latest matters (DEPRECATED).
-    ///
-    /// Key: (event_kind, aux_key)
-    /// For events like profile updates where we only care about the latest
-    /// version. This table doesn't distinguish by author - see
-    /// `events_singletons_new`.
-    events_singletons: (EventKind, EventAuxKey) => Latest<event::EventSingletonRecord>
-}
-
-def_table! {
-    /// Singleton events indexed by author (preferred over `events_singletons`).
+    /// Singleton events - events where only the latest matters.
     ///
     /// Key: (author, event_kind, aux_key)
-    /// Tracks the latest singleton event per author/kind/aux_key combination.
+    /// For events like profile updates where we only care about the latest
+    /// version per author/kind/aux_key combination.
     events_singletons_new: (RostraId, EventKind, EventAuxKey) => Latest<event::EventSingletonRecord>
 }
 
@@ -234,36 +245,20 @@ def_table! {
     events_self: ShortEventId => ()
 }
 
-def_table! {
-    /// Event content storage (the actual payloads).
-    ///
-    /// Stored separately from event metadata so content can be pruned while
-    /// keeping the DAG structure intact. Content can be in various states:
-    /// Present, Deleted, Pruned, or Invalid.
-    events_content: ShortEventId => event::EventContentStateOwned
-}
-
-def_table! {
-    /// Reference count for event content (DEPRECATED - use content_rc).
-    ///
-    /// Tracks how many references exist to each piece of content. When count
-    /// reaches zero, content can be garbage collected.
-    events_content_rc_count: ShortEventId => u64
-}
-
 // ============================================================================
-// CONTENT DEDUPLICATION TABLES (V1)
-// These tables store content by hash for deduplication across events.
+// CONTENT STORAGE TABLES
+// These tables implement content deduplication and state tracking.
 // ============================================================================
 
 def_table! {
     /// Content store - stores content by its hash for deduplication.
     ///
     /// Key: ContentHash (blake3 hash of the content)
-    /// Value: The actual content
+    /// Value: The actual content (Present or Invalid)
     ///
     /// This enables identical content (e.g., same image posted by multiple
-    /// users) to be stored only once.
+    /// users) to be stored only once. Content is removed when its reference
+    /// count in `content_rc` reaches zero.
     content_store: ContentHash => ContentStoreRecordOwned
 }
 
@@ -273,28 +268,42 @@ def_table! {
     /// Key: ContentHash
     /// Value: Number of events referencing this content
     ///
-    /// When count reaches zero, content can be garbage collected from
-    /// content_store.
+    /// **Important**: RC is managed at event insertion time, not when content
+    /// arrives. When an event is inserted, its content_hash RC is incremented
+    /// (unless the event is already deleted/pruned). When content is deleted
+    /// or pruned, RC is decremented. When RC reaches zero, content can be
+    /// garbage collected from `content_store`.
     content_rc: ContentHash => u64
 }
 
 def_table! {
-    /// Per-event content state (replaces events_content for new events).
+    /// Per-event content state - tracks "unwanted" content states only.
     ///
     /// Key: ShortEventId
-    /// Value: State of content for this event (Available, Deleted, Pruned)
+    /// Value: Deleted or Pruned state
     ///
-    /// Unlike events_content which stored content inline, this just tracks
-    /// state. The actual content is in content_store, looked up via the
-    /// event's content_hash field.
+    /// **Important**: This table only contains entries for events whose content
+    /// is deleted or pruned. If an event is NOT in this table, its content is
+    /// either:
+    /// - Available: content_hash exists in `content_store`
+    /// - Missing: event_id exists in `events_content_missing`
+    ///
+    /// This design means most events (those with available content) don't need
+    /// a record here, saving space.
     events_content_state: ShortEventId => EventContentStateNew
 }
 
 def_table! {
     /// Events whose content we want but don't have yet.
     ///
+    /// Key: ShortEventId
+    ///
     /// When we receive an event but not its content, we record it here.
     /// The sync protocol uses this to request missing content from peers.
+    ///
+    /// **Note**: Events in this table already have their RC counted in
+    /// `content_rc`. When content arrives, the event is removed from this
+    /// table but RC stays the same.
     events_content_missing: ShortEventId => ()
 }
 
@@ -323,9 +332,6 @@ def_table! {
 // Derived data extracted from social-related events for efficient querying.
 // ============================================================================
 
-// Legacy table, kept for migrations
-def_table!(social_profiles_v0: RostraId => Latest<IdSocialProfileRecordV0>);
-
 def_table! {
     /// User profile information (display name, bio, avatar).
     ///
@@ -333,9 +339,6 @@ def_table! {
     /// per user is stored.
     social_profiles: RostraId => Latest<IdSocialProfileRecord>
 }
-
-// Legacy table, kept for migrations
-def_table!(social_posts_v0: (ShortEventId)=> SocialPostRecordV0);
 
 def_table! {
     /// Post metadata (reply and reaction counts).
@@ -396,16 +399,6 @@ pub struct SocialPostsRepliesRecord;
 #[derive(Debug, Encode, Serialize, Decode, Clone, Copy)]
 pub struct SocialPostsReactionsRecord;
 
-/// Legacy profile record format (V0).
-#[derive(Debug, Encode, Decode, Clone)]
-pub struct IdSocialProfileRecordV0 {
-    pub event_id: ShortEventId,
-    pub display_name: String,
-    pub bio: String,
-    pub img_mime: String,
-    pub img: Vec<u8>,
-}
-
 /// User profile information extracted from SOCIAL_PROFILE_UPDATE events.
 #[derive(Debug, Encode, Decode, Clone)]
 pub struct IdSocialProfileRecord {
@@ -417,20 +410,6 @@ pub struct IdSocialProfileRecord {
     pub bio: String,
     /// Avatar image: (mime_type, image_bytes)
     pub avatar: Option<(String, Vec<u8>)>,
-}
-
-/// Legacy post record format (V0).
-#[derive(
-    Debug,
-    Encode,
-    Decode,
-    Clone,
-    // Note: needs to be default so we can track number of replies even before we get what was
-    // replied to
-    Default,
-)]
-pub struct SocialPostRecordV0 {
-    pub reply_count: u64,
 }
 
 /// Aggregate metadata for a social post.

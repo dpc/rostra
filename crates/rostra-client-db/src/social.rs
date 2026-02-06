@@ -8,7 +8,7 @@ use serde::{Deserialize, Serialize};
 use tracing::{debug, warn};
 
 use super::Database;
-use crate::event::{ContentStoreRecord, EventContentStateNew};
+use crate::event::ContentStoreRecord;
 use crate::{
     DbResult, LOG_TARGET, content_store, events, events_content_state, social_posts,
     social_posts_by_time, social_posts_reactions, social_posts_replies, tables,
@@ -70,19 +70,11 @@ impl Database {
                 };
                 let content_hash = event.content_hash();
 
-                // Check if content is deleted or pruned
-                if let Some(content_state) =
-                    Database::get_event_content_state_tx(event_id, &events_content_state_table)?
+                // If event has a content state, it means content is deleted or pruned
+                if Database::get_event_content_state_tx(event_id, &events_content_state_table)?
+                    .is_some()
                 {
-                    #[allow(deprecated)]
-                    match content_state {
-                        EventContentStateNew::Deleted { .. } | EventContentStateNew::Pruned => {
-                            return Ok(None);
-                        }
-                        // Legacy states - treat as "content okay"
-                        EventContentStateNew::Available
-                        | EventContentStateNew::ClaimedUnprocessed => {}
-                    }
+                    return Ok(None);
                 }
 
                 // Get content from store
@@ -153,19 +145,11 @@ impl Database {
                 };
                 let content_hash = event.content_hash();
 
-                // Check if content is deleted or pruned
-                if let Some(content_state) =
-                    Database::get_event_content_state_tx(event_id, &events_content_state_table)?
+                // If event has a content state, it means content is deleted or pruned
+                if Database::get_event_content_state_tx(event_id, &events_content_state_table)?
+                    .is_some()
                 {
-                    #[allow(deprecated)]
-                    match content_state {
-                        EventContentStateNew::Deleted { .. } | EventContentStateNew::Pruned => {
-                            return Ok(None);
-                        }
-                        // Legacy states - treat as "content okay"
-                        EventContentStateNew::Available
-                        | EventContentStateNew::ClaimedUnprocessed => {}
-                    }
+                    return Ok(None);
                 }
 
                 // Get content from store
@@ -240,20 +224,12 @@ impl Database {
                 };
                 let content_hash = event.content_hash();
 
-                // Check if content is deleted or pruned
-                if let Some(content_state) =
-                    Database::get_event_content_state_tx(event_id, &events_content_state_table)?
+                // If event has a content state, it means content is deleted or pruned
+                if Database::get_event_content_state_tx(event_id, &events_content_state_table)?
+                    .is_some()
                 {
-                    #[allow(deprecated)]
-                    match content_state {
-                        EventContentStateNew::Deleted { .. } | EventContentStateNew::Pruned => {
-                            debug!(target: LOG_TARGET, %event_id, "Skipping comment without content present");
-                            return Ok(None);
-                        }
-                        // Legacy states - treat as "content okay"
-                        EventContentStateNew::Available
-                        | EventContentStateNew::ClaimedUnprocessed => {}
-                    }
+                    debug!(target: LOG_TARGET, %event_id, "Skipping comment without content present");
+                    return Ok(None);
                 }
 
                 // Get content from store
@@ -317,20 +293,12 @@ impl Database {
                 };
                 let content_hash = event.content_hash();
 
-                // Check if content is deleted or pruned
-                if let Some(content_state) =
-                    Database::get_event_content_state_tx(event_id, &events_content_state_table)?
+                // If event has a content state, it means content is deleted or pruned
+                if Database::get_event_content_state_tx(event_id, &events_content_state_table)?
+                    .is_some()
                 {
-                    #[allow(deprecated)]
-                    match content_state {
-                        EventContentStateNew::Deleted { .. } | EventContentStateNew::Pruned => {
-                            debug!(target: LOG_TARGET, %event_id, "Skipping reaction without content present");
-                            return Ok(None);
-                        }
-                        // Legacy states - treat as "content okay"
-                        EventContentStateNew::Available
-                        | EventContentStateNew::ClaimedUnprocessed => {}
-                    }
+                    debug!(target: LOG_TARGET, %event_id, "Skipping reaction without content present");
+                    return Ok(None);
                 }
 
                 // Get content from store
@@ -506,18 +474,9 @@ impl Database {
         };
         let content_hash = event.content_hash();
 
-        // Check if content is deleted or pruned
-        if let Some(content_state) =
-            Database::get_event_content_state_tx(event_id, events_content_state_table)?
-        {
-            #[allow(deprecated)]
-            match content_state {
-                EventContentStateNew::Deleted { .. } | EventContentStateNew::Pruned => {
-                    return Ok(None);
-                }
-                // Legacy states - treat as "content okay"
-                EventContentStateNew::Available | EventContentStateNew::ClaimedUnprocessed => {}
-            }
+        // If event has a content state, it means content is deleted or pruned
+        if Database::get_event_content_state_tx(event_id, events_content_state_table)?.is_some() {
+            return Ok(None);
         }
 
         // Look up content from store

@@ -12,41 +12,6 @@ use rostra_core::ShortEventId;
 use rostra_core::event::{EventContentRaw, EventContentUnsized, EventExt, SignedEvent};
 use serde::Serialize;
 
-/// The state of an event's content in the database.
-///
-/// Content is stored separately from event metadata to allow pruning content
-/// while keeping the DAG structure intact. This enum tracks the various states
-/// content can be in.
-#[derive(Debug, Encode, Decode, Clone, Serialize)]
-pub enum EventContentState<'a> {
-    /// Content is present and was successfully processed.
-    Present(Cow<'a, EventContentUnsized>),
-
-    /// Content was deleted by the author (via a deletion event).
-    ///
-    /// Note: We only store one `deleted_by` ID. If multiple events requested
-    /// deletion of the same content, we arbitrarily keep one.
-    Deleted {
-        /// The event that requested this content be deleted
-        deleted_by: ShortEventId,
-    },
-
-    /// Content was pruned (removed to save space, e.g., for oversized content).
-    ///
-    /// Unlike `Deleted`, this is a local decision, not an author request.
-    Pruned,
-
-    /// Content is present but was invalid during processing.
-    ///
-    /// We keep invalid content stored so we don't try to fetch it again, but
-    /// we don't process its effects. Unlike `Present`, we won't try to revert
-    /// its effects if it's later deleted.
-    Invalid(Cow<'a, EventContentUnsized>),
-}
-
-/// Owned version of [`EventContentState`] (no borrowed data).
-pub type EventContentStateOwned = EventContentState<'static>;
-
 /// Record for the main `events` table.
 ///
 /// Contains the signed event envelope (metadata + signature). The actual
@@ -133,23 +98,8 @@ pub type ContentStoreRecordOwned = ContentStoreRecord<'static>;
 ///
 /// Reference counting (content_rc) is managed at event insertion/deletion time,
 /// not when content arrives.
-///
-/// Note: `Available` and `ClaimedUnprocessed` are legacy variants kept for
-/// migration compatibility. New code should not use them - entries with these
-/// states will be cleaned up by migration v6.
 #[derive(Debug, Encode, Decode, Clone, Copy, Serialize)]
 pub enum EventContentStateNew {
-    /// LEGACY: Content is available. Kept for migration compatibility.
-    /// New code should not use this - entries are cleaned up by migration v6.
-    #[deprecated = "Legacy state, will be cleaned up by migration"]
-    Available,
-
-    /// LEGACY: Content was claimed but not processed. Kept for migration
-    /// compatibility. New code should not use this - entries are cleaned up
-    /// by migration v6.
-    #[deprecated = "Legacy state, will be cleaned up by migration"]
-    ClaimedUnprocessed,
-
     /// Content was deleted by the author via a deletion event.
     Deleted {
         /// The event that requested this content be deleted

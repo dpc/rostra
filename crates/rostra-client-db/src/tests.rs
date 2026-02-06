@@ -1947,7 +1947,7 @@ mod proptest_rc {
     use rostra_core::{ContentHash, ShortEventId};
     use tracing::debug;
 
-    use crate::event::{ContentStoreRecord, EventContentStateNew};
+    use crate::event::ContentStoreRecord;
     use crate::{
         Database, content_rc, content_store, events, events_by_time, events_content_missing,
         events_content_state, events_heads, events_missing, ids_full,
@@ -2005,15 +2005,9 @@ mod proptest_rc {
                 Database::get_event_content_state_tx(*event_id, events_content_state_table)?;
 
             // Count events that are NOT deleted/pruned (new model: RC managed at insertion)
-            #[allow(deprecated)]
-            let has_rc = match state {
-                None => true, // Normal case: event inserted, not deleted/pruned
-                Some(EventContentStateNew::Deleted { .. }) => false,
-                Some(EventContentStateNew::Pruned) => false,
-                // Legacy states: treat as having RC
-                Some(EventContentStateNew::Available) => true,
-                Some(EventContentStateNew::ClaimedUnprocessed) => true,
-            };
+            // If there's no state record, event is normal (not deleted/pruned).
+            // If there IS a state record, it's either Deleted or Pruned.
+            let has_rc = state.is_none();
 
             if has_rc {
                 *expected_rc.entry(*content_hash).or_insert(0) += 1;
