@@ -880,7 +880,6 @@ emoji-picker {
   display: flex;
   align-items: center;
   justify-content: center;
-  flex: 1;
   position: relative;
   padding-left: 2rem;
 }
@@ -905,7 +904,6 @@ emoji-picker {
   display: flex;
   align-items: center;
   justify-content: center;
-  flex: 1;
   position: relative;
   padding-left: 2rem;
 }
@@ -932,7 +930,6 @@ emoji-picker {
   display: flex;
   align-items: center;
   justify-content: center;
-  flex: 1;
   position: relative;
   padding-left: 2rem;
 }
