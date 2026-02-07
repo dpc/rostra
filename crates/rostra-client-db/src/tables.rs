@@ -350,7 +350,7 @@ def_table! {
     /// This table stores aggregate counts for posts. The actual post content
     /// is in `events_content`. A record may exist here even before we receive
     /// the post itself (to track reply counts from replies we've seen).
-    social_posts: (ShortEventId)=> SocialPostRecord
+    social_posts: (ShortEventId) => SocialPostRecord
 }
 
 def_table! {
@@ -358,7 +358,7 @@ def_table! {
     ///
     /// Key: (parent_post_id, reply_timestamp, reply_event_id)
     /// Enables efficient retrieval of all replies to a post, ordered by time.
-    social_posts_replies: (ShortEventId, Timestamp, ShortEventId)=> SocialPostsRepliesRecord
+    social_posts_replies: (ShortEventId, Timestamp, ShortEventId) => SocialPostsRepliesRecord
 }
 
 def_table! {
@@ -366,7 +366,7 @@ def_table! {
     ///
     /// Key: (parent_post_id, reaction_timestamp, reaction_event_id)
     /// Enables efficient retrieval of all reactions to a post, ordered by time.
-    social_posts_reactions: (ShortEventId, Timestamp, ShortEventId)=> SocialPostsReactionsRecord
+    social_posts_reactions: (ShortEventId, Timestamp, ShortEventId) => SocialPostsReactionsRecord
 }
 
 def_table! {
