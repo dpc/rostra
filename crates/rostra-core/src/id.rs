@@ -165,6 +165,8 @@ impl RostraId {
 
 array_type_define_public!(struct RostraIdSecretKey, 32);
 array_type_impl_serde!(struct RostraIdSecretKey, 32);
+
+#[cfg(feature = "serde")]
 impl fmt::Display for RostraIdSecretKey {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str(
@@ -172,6 +174,17 @@ impl fmt::Display for RostraIdSecretKey {
                 .expect("Fixed len, can't fail")
                 .to_string(),
         )
+    }
+}
+
+#[cfg(not(feature = "serde"))]
+impl fmt::Display for RostraIdSecretKey {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        // Fallback to hex when bip39 is not available
+        for byte in &self.0 {
+            write!(f, "{byte:02x}")?;
+        }
+        Ok(())
     }
 }
 

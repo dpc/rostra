@@ -1,10 +1,15 @@
+#[cfg(feature = "serde")]
 use std::str::FromStr as _;
 
 use snafu::Snafu;
 use unicode_segmentation::UnicodeSegmentation as _;
 
-use super::{EventAuxKey, EventContentRaw, EventKind, PersonaId};
-use crate::id::{RostraId, ToShort as _};
+use super::PersonaId;
+#[cfg(feature = "serde")]
+use super::{EventAuxKey, EventContentRaw, EventKind};
+use crate::id::RostraId;
+#[cfg(feature = "serde")]
+use crate::id::ToShort as _;
 use crate::{
     ExternalEventId, array_type_define, array_type_impl_base32_str, array_type_impl_serde,
 };
@@ -47,11 +52,11 @@ pub trait EventContentKind: ::serde::Serialize + ::serde::de::DeserializeOwned {
 #[cfg_attr(feature = "serde", derive(::serde::Serialize, ::serde::Deserialize))]
 #[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
 pub struct Follow {
-    #[serde(rename = "i")]
+    #[cfg_attr(feature = "serde", serde(rename = "i"))]
     pub followee: RostraId,
-    #[serde(rename = "p")]
+    #[cfg_attr(feature = "serde", serde(rename = "p"))]
     pub persona: Option<PersonaId>,
-    #[serde(rename = "s")]
+    #[cfg_attr(feature = "serde", serde(rename = "s"))]
     pub selector: Option<PersonaSelector>,
 }
 
@@ -70,6 +75,7 @@ impl Follow {
         self.persona.is_none() && self.selector.is_none()
     }
 }
+#[cfg(feature = "serde")]
 impl EventContentKind for Follow {
     const KIND: EventKind = EventKind::FOLLOW;
 
@@ -98,13 +104,14 @@ impl IrohNodeId {
 #[cfg_attr(feature = "serde", derive(::serde::Serialize))]
 #[cfg_attr(feature = "serde", serde(tag = "t"))]
 pub enum NodeAnnouncement {
-    #[serde(rename = "i")]
+    #[cfg_attr(feature = "serde", serde(rename = "i"))]
     Iroh {
-        #[serde(rename = "a")]
+        #[cfg_attr(feature = "serde", serde(rename = "a"))]
         addr: IrohNodeId,
     },
 }
 
+#[cfg(feature = "serde")]
 impl EventContentKind for NodeAnnouncement {
     const KIND: EventKind = EventKind::NODE_ANNOUNCEMENT;
 }
@@ -161,14 +168,14 @@ impl<'de> ::serde::de::Deserialize<'de> for NodeAnnouncement {
 #[cfg_attr(feature = "serde", derive(::serde::Serialize, ::serde::Deserialize))]
 #[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
 pub struct SocialPost {
-    #[serde(rename = "p")]
+    #[cfg_attr(feature = "serde", serde(rename = "p"))]
     pub persona: PersonaId,
-    #[serde(rename = "c")]
+    #[cfg_attr(feature = "serde", serde(rename = "c"))]
     pub djot_content: Option<String>,
-    #[serde(rename = "r")]
+    #[cfg_attr(feature = "serde", serde(rename = "r"))]
     pub reply_to: Option<ExternalEventId>,
     // "e" for "emoji"
-    #[serde(rename = "e")]
+    #[cfg_attr(feature = "serde", serde(rename = "e"))]
     pub reaction: Option<String>,
 }
 
@@ -219,6 +226,7 @@ impl SocialPost {
     }
 }
 
+#[cfg(feature = "serde")]
 impl EventContentKind for SocialPost {
     const KIND: EventKind = EventKind::SOCIAL_POST;
 }
@@ -228,13 +236,14 @@ impl EventContentKind for SocialPost {
 #[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
 pub struct SocialMedia {
     /// Mime type for the `data`
-    #[serde(rename = "m")]
+    #[cfg_attr(feature = "serde", serde(rename = "m"))]
     pub mime: String,
     /// Binary content of the media file
-    #[serde(rename = "d")]
+    #[cfg_attr(feature = "serde", serde(rename = "d"))]
     pub data: Vec<u8>,
 }
 
+#[cfg(feature = "serde")]
 impl EventContentKind for SocialMedia {
     const KIND: EventKind = EventKind::SOCIAL_MEDIA;
 
@@ -271,14 +280,15 @@ impl EventContentKind for SocialMedia {
 #[cfg_attr(feature = "serde", derive(::serde::Serialize, ::serde::Deserialize))]
 #[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
 pub struct SocialProfileUpdate {
-    #[serde(rename = "n")]
+    #[cfg_attr(feature = "serde", serde(rename = "n"))]
     pub display_name: String,
-    #[serde(rename = "b")]
+    #[cfg_attr(feature = "serde", serde(rename = "b"))]
     pub bio: String,
-    #[serde(rename = "a")]
+    #[cfg_attr(feature = "serde", serde(rename = "a"))]
     pub avatar: Option<(String, Vec<u8>)>,
 }
 
+#[cfg(feature = "serde")]
 impl EventContentKind for SocialProfileUpdate {
     const KIND: EventKind = EventKind::SOCIAL_PROFILE_UPDATE;
 

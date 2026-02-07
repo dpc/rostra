@@ -265,6 +265,7 @@ impl SignedEventExt for SignedEvent {
     }
 }
 
+#[cfg(all(feature = "ed25519-dalek", feature = "bincode"))]
 impl From<VerifiedEvent> for SignedEvent {
     fn from(event: VerifiedEvent) -> Self {
         Self {
