@@ -1722,12 +1722,8 @@ input:checked+.slider:before {
 .o-settingsNav {
   display: flex;
   flex-direction: column;
-  gap: 0.25rem;
+  gap: 1rem;
   margin-top: 1rem;
-  padding: 0.5rem;
-  background: var(--color-timeline-bg);
-  border: 1px solid var(--color-timeline-item-border);
-  border-radius: var(--border-radius-std);
   min-width: 200px;
 }
 
@@ -1746,6 +1742,26 @@ input:checked+.slider:before {
 .o-settingsNav__item.-active {
   background: var(--color-button-bg);
   font-weight: bold;
+}
+
+.o-settingsNav__group {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  padding: 0.5rem;
+  background: var(--color-timeline-bg);
+  border: 1px solid var(--color-timeline-item-border);
+  border-radius: var(--border-radius-std);
+}
+
+.o-settingsNav__groupHeader {
+  margin: 0.25rem 0 0.5rem 0;
+  padding: 0 0.25rem;
+  font-size: 0.85rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--color-text-muted);
 }
 
 .o-settingsContent {

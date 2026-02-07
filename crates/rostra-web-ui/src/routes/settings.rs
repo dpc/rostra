@@ -204,29 +204,36 @@ impl UiState {
                 }
 
                 div ."o-settingsNav" {
-                    a ."o-settingsNav__item"
-                        ."-active"[active_category == "following"]
-                        href="/ui/settings/following"
-                    {
-                        "Followees"
+                    div ."o-settingsNav__group" {
+                        h3 ."o-settingsNav__groupHeader" { "Social" }
+                        a ."o-settingsNav__item"
+                            ."-active"[active_category == "following"]
+                            href="/ui/settings/following"
+                        {
+                            "Followees"
+                        }
+                        a ."o-settingsNav__item"
+                            ."-active"[active_category == "followers"]
+                            href="/ui/settings/followers"
+                        {
+                            "Followers"
+                        }
                     }
-                    a ."o-settingsNav__item"
-                        ."-active"[active_category == "followers"]
-                        href="/ui/settings/followers"
-                    {
-                        "Followers"
-                    }
-                    a ."o-settingsNav__item"
-                        ."-active"[active_category == "events"]
-                        href="/ui/settings/events"
-                    {
-                        "Event Explorer"
-                    }
-                    a ."o-settingsNav__item"
-                        ."-active"[active_category == "p2p"]
-                        href="/ui/settings/p2p"
-                    {
-                        "P2P Explorer"
+
+                    div ."o-settingsNav__group" {
+                        h3 ."o-settingsNav__groupHeader" { "Developer" }
+                        a ."o-settingsNav__item"
+                            ."-active"[active_category == "events"]
+                            href="/ui/settings/events"
+                        {
+                            "Event Explorer"
+                        }
+                        a ."o-settingsNav__item"
+                            ."-active"[active_category == "p2p"]
+                            href="/ui/settings/p2p"
+                        {
+                            "P2P Explorer"
+                        }
                     }
                 }
             }
