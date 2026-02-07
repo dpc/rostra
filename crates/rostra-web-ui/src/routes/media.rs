@@ -168,7 +168,7 @@ pub async fn list(
                 debug_assert_eq!(key.0, author);
                 debug_assert_eq!(key.1, kind);
 
-                events.push((value.ts, value.inner.event_id.into()));
+                events.push((value.ts, value.inner.event_id));
             }
 
             events.sort_by_key(|val: &(rostra_core::Timestamp, ShortEventId)| val.0);

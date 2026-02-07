@@ -73,10 +73,7 @@ impl Database {
                     },
                 },
             )?;
-            debug_assert!(
-                prev.is_none(),
-                "events_received_at key collision: {key:?}"
-            );
+            debug_assert!(prev.is_none(), "events_received_at key collision: {key:?}");
 
             if is_deleted {
                 info!(target: LOG_TARGET,

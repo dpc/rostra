@@ -465,8 +465,9 @@ impl UiState {
         let event_id = event_record.signed.compute_short_id();
         let event_id_str = event_id.to_string();
 
-        // Format timestamp (ts.0 is already in seconds)
-        let datetime = time::OffsetDateTime::from_unix_timestamp(ts.0 as i64)
+        // Format timestamp
+        let datetime = ts
+            .to_offset_date_time()
             .unwrap_or(time::OffsetDateTime::UNIX_EPOCH);
         let time_str = datetime
             .format(&time::format_description::well_known::Rfc3339)

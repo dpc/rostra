@@ -404,9 +404,7 @@ where
                                 }
                             } else {
                                 // Content not available yet
-                                format!(
-                                    r#"<span class="m-rostraMedia -unavailable"><span class="m-rostraMedia__unavailableIcon"></span><span class="m-rostraMedia__unavailableText">Content not available yet</span></span>"#
-                                )
+                                r#"<span class="m-rostraMedia -unavailable"><span class="m-rostraMedia__unavailableIcon"></span><span class="m-rostraMedia__unavailableText">Content not available yet</span></span>"#.to_string()
                             };
 
                             self.inner

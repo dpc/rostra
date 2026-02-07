@@ -3,7 +3,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use rostra_core::Timestamp;
 
 pub fn format_timestamp(timestamp: Timestamp) -> String {
-    let system_time: SystemTime = UNIX_EPOCH + std::time::Duration::from_secs(timestamp.0);
+    let system_time: SystemTime = UNIX_EPOCH + std::time::Duration::from_secs(timestamp.as_u64());
     let now = SystemTime::now();
     let duration_since = now.duration_since(system_time).unwrap_or_default();
 

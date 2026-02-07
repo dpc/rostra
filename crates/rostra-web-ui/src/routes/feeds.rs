@@ -133,12 +133,10 @@ fn create_title_from_content(content: &str) -> String {
 
 /// Convert a rostra Timestamp to RFC 3339 format for Atom feeds
 fn timestamp_to_rfc3339(ts: rostra_core::Timestamp) -> String {
-    // Timestamp is seconds since Unix epoch (based on the `now()` implementation)
-    let secs = ts.0 as i64;
-
-    // Use time crate which is already a dependency
-    let datetime =
-        time::OffsetDateTime::from_unix_timestamp(secs).unwrap_or(time::OffsetDateTime::UNIX_EPOCH);
+    // Use the conversion method on Timestamp
+    let datetime = ts
+        .to_offset_date_time()
+        .unwrap_or(time::OffsetDateTime::UNIX_EPOCH);
 
     // Format as RFC 3339
     let format = time::format_description::well_known::Rfc3339;

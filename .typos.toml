@@ -1,0 +1,5 @@
+[files]
+extend-exclude = [
+    # XSS test files contain intentional encoded payloads that trigger false positives
+    "crates/rostra-web-ui/src/routes/content/tests/xss_sanitization.rs",
+]

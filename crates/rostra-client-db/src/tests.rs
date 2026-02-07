@@ -2406,9 +2406,7 @@ mod proptest_follow {
                 FollowOp::Follow { variant } => {
                     // Use variant to create slightly different content
                     // by including different persona IDs in the selector
-                    let ids: Vec<_> = (0..*variant)
-                        .map(|v| rostra_core::event::PersonaId(v))
-                        .collect();
+                    let ids: Vec<_> = (0..*variant).map(rostra_core::event::PersonaId).collect();
                     Some(PersonaSelector::Except { ids })
                 }
                 FollowOp::Unfollow => None,
@@ -2516,9 +2514,8 @@ mod proptest_follow {
         }
 
         // Process any remaining content that wasn't processed due to ordering
-        for idx in 0..ops.len() {
+        for (idx, (event, content)) in events_and_content.iter().enumerate().take(ops.len()) {
             if events_inserted.contains(&idx) && !content_processed.contains(&idx) {
-                let (event, content) = &events_and_content[idx];
                 let verified_content =
                     VerifiedEventContent::assume_verified(*event, content.clone());
                 db.process_event_content(&verified_content).await;
@@ -2545,34 +2542,28 @@ mod proptest_follow {
             if expected_following {
                 assert!(
                     is_following,
-                    "Expected user_a to be following user_b (ops: {:?})",
-                    ops
+                    "Expected user_a to be following user_b (ops: {ops:?})"
                 );
                 assert!(
                     has_follower,
-                    "Expected user_b to have user_a as follower (ops: {:?})",
-                    ops
+                    "Expected user_b to have user_a as follower (ops: {ops:?})"
                 );
                 assert!(
                     !is_unfollowed,
-                    "Expected no unfollow record when following (ops: {:?})",
-                    ops
+                    "Expected no unfollow record when following (ops: {ops:?})"
                 );
             } else {
                 assert!(
                     !is_following,
-                    "Expected user_a to NOT be following user_b (ops: {:?})",
-                    ops
+                    "Expected user_a to NOT be following user_b (ops: {ops:?})"
                 );
                 assert!(
                     !has_follower,
-                    "Expected user_b to NOT have user_a as follower (ops: {:?})",
-                    ops
+                    "Expected user_b to NOT have user_a as follower (ops: {ops:?})"
                 );
                 assert!(
                     is_unfollowed,
-                    "Expected unfollow record when not following (ops: {:?})",
-                    ops
+                    "Expected unfollow record when not following (ops: {ops:?})"
                 );
             }
 
@@ -3145,7 +3136,7 @@ async fn test_self_mention_detection() -> BoxedErrorResult<()> {
     };
 
     // Post 1: User B posts mentioning user A
-    let mention_content = format!("Hello <rostra:{}>!", user_a);
+    let mention_content = format!("Hello <rostra:{user_a}>!");
     let (post_mention, post_mention_content) =
         build_social_post_event(user_b_secret, None, &mention_content, None);
     let post_mention_id = post_mention.event_id;
@@ -3165,7 +3156,7 @@ async fn test_self_mention_detection() -> BoxedErrorResult<()> {
     let post_self_id = post_self.event_id;
 
     // Post 4: User A posts mentioning themselves (self-mention, should not trigger)
-    let self_mention_content = format!("I am <rostra:{}>!", user_a);
+    let self_mention_content = format!("I am <rostra:{user_a}>!");
     let (post_self_mention, post_self_mention_content) = build_social_post_event(
         user_a_secret,
         Some(post_self_id),
@@ -3185,7 +3176,7 @@ async fn test_self_mention_detection() -> BoxedErrorResult<()> {
     let post_reply_id = post_reply.event_id;
 
     // Post 6: User B replies AND mentions user A
-    let reply_mention_content = format!("Hey <rostra:{}>, replying to you!", user_a);
+    let reply_mention_content = format!("Hey <rostra:{user_a}>, replying to you!");
     let (post_reply_mention, post_reply_mention_content) = build_social_post_event(
         user_b_secret,
         Some(post_reply_id),

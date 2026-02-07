@@ -62,7 +62,7 @@ impl MissingEventContentFetcher {
                         self.self_id,
                         author_id,
                         event_id,
-                        &connections,
+                        connections,
                         &mut followers_by_followee,
                         &db,
                     )

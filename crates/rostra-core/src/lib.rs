@@ -103,10 +103,17 @@ impl From<MsgLen> for u32 {
     }
 }
 
-/// Timestatmp encoded in fixed-sized way
+/// Timestamp encoded in fixed-sized way
 #[cfg_attr(feature = "serde", derive(::serde::Serialize, ::serde::Deserialize))]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct TimestampFixed(pub u64);
+pub struct TimestampFixed(u64);
+
+impl TimestampFixed {
+    /// Get the underlying timestamp value as seconds since Unix epoch
+    pub const fn as_u64(self) -> u64 {
+        self.0
+    }
+}
 
 impl From<u64> for TimestampFixed {
     fn from(value: u64) -> Self {
@@ -126,17 +133,29 @@ impl From<Timestamp> for TimestampFixed {
     }
 }
 
+/// Timestamp as seconds since Unix epoch
 #[derive(Copy, Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 #[cfg_attr(feature = "bincode", derive(::bincode::Encode, ::bincode::Decode))]
 #[cfg_attr(feature = "serde", derive(::serde::Serialize, ::serde::Deserialize))]
-pub struct Timestamp(pub u64);
+pub struct Timestamp(u64);
 
 impl Timestamp {
     pub const ZERO: Self = Self(0);
     pub const MAX: Self = Self(u64::MAX);
 
+    /// Create a timestamp for the current time
     pub fn now() -> Self {
         Self(time::OffsetDateTime::now_utc().unix_timestamp() as u64)
+    }
+
+    /// Get the underlying timestamp value as seconds since Unix epoch
+    pub const fn as_u64(self) -> u64 {
+        self.0
+    }
+
+    /// Convert to `time::OffsetDateTime`
+    pub fn to_offset_date_time(self) -> Option<time::OffsetDateTime> {
+        time::OffsetDateTime::from_unix_timestamp(self.0 as i64).ok()
     }
 }
 
