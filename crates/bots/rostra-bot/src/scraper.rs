@@ -7,7 +7,6 @@ use scraper::{Html, Selector};
 use snafu::{ResultExt, Snafu};
 use tracing::{debug, info, warn};
 
-use crate::Source;
 use crate::tables::{Article, HnArticle};
 
 const HN_BASE_URL: &str = "https://news.ycombinator.com/";
@@ -38,18 +37,24 @@ pub trait Scraper {
     async fn scrape_frontpage(&self) -> ScraperResult<Vec<Article>>;
 }
 
-pub fn create_scraper(
-    source: &Source,
-    atom_feed_url: Option<&str>,
-) -> Box<dyn Scraper + Send + Sync> {
-    if let Some(url) = atom_feed_url {
-        return Box::new(AtomScraper::new(url.to_string()));
+pub fn create_scrapers(
+    hn: bool,
+    lobsters: bool,
+    atom_feed_urls: &[String],
+) -> Vec<Box<dyn Scraper + Send + Sync>> {
+    let mut scrapers: Vec<Box<dyn Scraper + Send + Sync>> = Vec::new();
+
+    if hn {
+        scrapers.push(Box::new(HnScraper::new()));
+    }
+    if lobsters {
+        scrapers.push(Box::new(LobstersScraper::new()));
+    }
+    for url in atom_feed_urls {
+        scrapers.push(Box::new(AtomScraper::new(url.clone())));
     }
 
-    match source {
-        Source::HackerNews => Box::new(HnScraper::new()),
-        Source::Lobsters => Box::new(LobstersScraper::new()),
-    }
+    scrapers
 }
 
 pub struct HnScraper {
@@ -337,7 +342,8 @@ impl AtomScraper {
     fn extract_url(entry: &atom_syndication::Entry) -> Option<String> {
         let links = &entry.links;
 
-        // First, try to find a link with rel="alternate" or no rel (default is alternate)
+        // First, try to find a link with rel="alternate" or no rel (default is
+        // alternate)
         for link in links {
             match link.rel.as_deref() {
                 Some("alternate") | None => return Some(link.href.clone()),
@@ -362,11 +368,10 @@ impl AtomScraper {
 
         let content = response.text().await.context(HttpSnafu)?;
 
-        let feed = atom_syndication::Feed::from_str(&content).map_err(|e| {
-            ScraperError::AtomParse {
+        let feed =
+            atom_syndication::Feed::from_str(&content).map_err(|e| ScraperError::AtomParse {
                 details: e.to_string(),
-            }
-        })?;
+            })?;
 
         let mut articles = Vec::new();
         let scraped_at = Timestamp::from(

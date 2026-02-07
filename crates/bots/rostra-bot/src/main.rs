@@ -20,7 +20,7 @@ use tracing_subscriber::EnvFilter;
 
 use crate::database::BotDatabase;
 use crate::publisher::{Publisher, PublisherError};
-use crate::scraper::{Scraper, ScraperError, create_scraper};
+use crate::scraper::{Scraper, ScraperError, create_scrapers};
 
 pub const PROJECT_NAME: &str = "rostra-bot";
 pub const LOG_TARGET: &str = "rostra_bot::main";
@@ -44,26 +44,11 @@ pub enum BotError {
     Logging,
     #[snafu(display("Secret file is required for bot operation"))]
     MissingSecretFile,
+    #[snafu(display("At least one source is required (--hn, --lobsters, or --atom-feed-url)"))]
+    NoSourcesSpecified,
 }
 
 pub type BotResult<T> = std::result::Result<T, BotError>;
-
-#[derive(Debug, Clone, clap::ValueEnum)]
-pub enum Source {
-    #[value(name = "hn")]
-    HackerNews,
-    #[value(name = "lobsters")]
-    Lobsters,
-}
-
-impl std::fmt::Display for Source {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Source::HackerNews => write!(f, "HackerNews"),
-            Source::Lobsters => write!(f, "Lobsters"),
-        }
-    }
-}
 
 /// Rostra Bot - scrapes news sites and publishes to Rostra
 #[derive(Debug, Parser)]
@@ -84,21 +69,29 @@ pub struct Opts {
     #[arg(long, default_value = "5")]
     pub max_articles_per_run: usize,
 
-    /// Minimum score threshold for articles
-    #[arg(long, default_value = "0")]
-    pub min_score: u32,
-
     /// Data dir to store the database in
     #[arg(long)]
     pub data_dir: Option<PathBuf>,
 
-    /// Source to scrape from
-    #[arg(long, value_enum, default_value = "hn", conflicts_with = "atom_feed_url")]
-    pub source: Source,
+    /// Enable HackerNews scraping
+    #[arg(long)]
+    pub hn: bool,
 
-    /// Atom feed URL to scrape (mutually exclusive with --source)
-    #[arg(long, value_name = "URL")]
-    pub atom_feed_url: Option<String>,
+    /// Minimum score for HackerNews articles
+    #[arg(long, default_value = "0")]
+    pub hn_min_score: u32,
+
+    /// Enable Lobsters scraping
+    #[arg(long)]
+    pub lobsters: bool,
+
+    /// Minimum score for Lobsters articles
+    #[arg(long, default_value = "0")]
+    pub lobsters_min_score: u32,
+
+    /// Atom feed URLs to scrape (can specify multiple)
+    #[arg(long, value_name = "URL", action = clap::ArgAction::Append)]
+    pub atom_feed_url: Vec<String>,
 }
 
 #[derive(Debug, Parser)]
@@ -114,13 +107,17 @@ pub enum Command {
 pub enum DevCommand {
     /// Test scraping functionality
     Test {
-        /// Source to scrape from
-        #[arg(long, value_enum, default_value = "hn", conflicts_with = "atom_feed_url")]
-        source: Source,
+        /// Enable HackerNews scraping
+        #[arg(long)]
+        hn: bool,
 
-        /// Atom feed URL to scrape (mutually exclusive with --source)
-        #[arg(long, value_name = "URL")]
-        atom_feed_url: Option<String>,
+        /// Enable Lobsters scraping
+        #[arg(long)]
+        lobsters: bool,
+
+        /// Atom feed URLs to scrape (can specify multiple)
+        #[arg(long, value_name = "URL", action = clap::ArgAction::Append)]
+        atom_feed_url: Vec<String>,
     },
 }
 
@@ -145,19 +142,22 @@ async fn main() -> BotResult<()> {
 }
 
 async fn run_bot(opts: Opts, secret_file: PathBuf) -> BotResult<()> {
-    let source_desc = opts
-        .atom_feed_url
-        .as_deref()
-        .map(|url| format!("Atom feed: {url}"))
-        .unwrap_or_else(|| opts.source.to_string());
+    let scrapers = create_scrapers(opts.hn, opts.lobsters, &opts.atom_feed_url);
 
-    info!(target: LOG_TARGET, "Starting Rostra Bot for {}", source_desc);
+    if scrapers.is_empty() {
+        return Err(BotError::NoSourcesSpecified);
+    }
+
+    let source_desc = build_sources_description(&opts);
+
+    info!(target: LOG_TARGET, sources = %source_desc, "Starting Rostra Bot");
     info!(
       target: LOG_TARGET,
-      source = %source_desc,
+      sources = %source_desc,
       scrape_interval = opts.scrape_interval_minutes,
       max_articles = opts.max_articles_per_run,
-      min_score = opts.min_score,
+      hn_min_score = opts.hn_min_score,
+      lobsters_min_score = opts.lobsters_min_score,
       "Bot configuration"
     );
 
@@ -196,60 +196,67 @@ async fn run_bot(opts: Opts, secret_file: PathBuf) -> BotResult<()> {
 
     info!(target: LOG_TARGET, "Bot database initialized");
 
-    // Initialize scraper and publisher
-    let scraper = create_scraper(&opts.source, opts.atom_feed_url.as_deref());
+    // Initialize publisher
     let publisher = Publisher::new(client.clone(), secret);
 
     info!(target: LOG_TARGET, "Bot is running. Press Ctrl+C to stop.");
 
     // Main bot loop
-    run_bot_loop(&opts, &db, scraper.as_ref(), &publisher).await
+    run_bot_loop(&opts, &db, &scrapers, &publisher).await
 }
 
 async fn handle_dev_command(dev_command: DevCommand) -> BotResult<()> {
     match dev_command {
         DevCommand::Test {
-            source,
+            hn,
+            lobsters,
             atom_feed_url,
         } => {
-            let source_desc = atom_feed_url
-                .as_deref()
-                .map(|url| format!("Atom feed: {url}"))
-                .unwrap_or_else(|| source.to_string());
+            let scrapers = create_scrapers(hn, lobsters, &atom_feed_url);
 
-            info!(target: LOG_TARGET, "Testing scraper for {}", source_desc);
+            if scrapers.is_empty() {
+                return Err(BotError::NoSourcesSpecified);
+            }
 
-            let scraper = create_scraper(&source, atom_feed_url.as_deref());
+            let source_desc = build_test_sources_description(hn, lobsters, &atom_feed_url);
+            info!(target: LOG_TARGET, sources = %source_desc, "Testing scrapers");
 
-            match scraper.scrape_frontpage().await {
-                Ok(articles) => {
-                    println!(
-                        "Successfully scraped {} articles from {}:",
-                        articles.len(),
-                        source_desc
-                    );
-                    println!();
+            let mut total_articles = 0;
 
-                    for (i, article) in articles.iter().enumerate() {
-                        println!("Article {}: ", i + 1);
-                        println!("  ID: {}", article.id);
-                        println!("  Title: {}", article.title);
-                        println!("  Score: {}", article.score);
-                        println!("  Author: {}", article.author);
-                        println!("  Source: {}", article.source);
-                        println!("  URL: {}", article.url.as_deref().unwrap_or("None"));
-                        println!("  Source URL: {}", article.source_url);
-                        println!("  Scraped at: {:?}", article.scraped_at);
+            for scraper in &scrapers {
+                match scraper.scrape_frontpage().await {
+                    Ok(articles) => {
+                        println!("Scraped {} articles:", articles.len());
                         println!();
-                    }
 
-                    Ok(())
-                }
-                Err(e) => {
-                    eprintln!("Failed to scrape {source_desc}: {e}");
-                    Err(BotError::Scraper { source: e })
+                        for (i, article) in articles.iter().enumerate() {
+                            println!("Article {}: ", i + 1);
+                            println!("  ID: {}", article.id);
+                            println!("  Title: {}", article.title);
+                            println!("  Score: {}", article.score);
+                            println!("  Author: {}", article.author);
+                            println!("  Source: {}", article.source);
+                            println!("  URL: {}", article.url.as_deref().unwrap_or("None"));
+                            println!("  Source URL: {}", article.source_url);
+                            println!("  Scraped at: {:?}", article.scraped_at);
+                            println!();
+                        }
+
+                        total_articles += articles.len();
+                    }
+                    Err(e) => {
+                        eprintln!("Failed to scrape: {e}");
+                        return Err(BotError::Scraper { source: e });
+                    }
                 }
             }
+
+            println!(
+                "Total: {} articles from {} source(s)",
+                total_articles,
+                scrapers.len()
+            );
+            Ok(())
         }
     }
 }
@@ -257,44 +264,43 @@ async fn handle_dev_command(dev_command: DevCommand) -> BotResult<()> {
 async fn run_bot_loop(
     opts: &Opts,
     db: &BotDatabase,
-    scraper: &dyn Scraper,
+    scrapers: &[Box<dyn Scraper + Send + Sync>],
     publisher: &Publisher,
 ) -> BotResult<()> {
-    let source_desc = opts
-        .atom_feed_url
-        .as_deref()
-        .map(|url| format!("Atom feed: {url}"))
-        .unwrap_or_else(|| opts.source.to_string());
-
     let mut interval = interval(Duration::from_secs(opts.scrape_interval_minutes * 60));
 
     loop {
         info!(target: LOG_TARGET, "Starting scraping and publishing cycle");
 
-        // Scrape articles
-        match scraper.scrape_frontpage().await {
-            Ok(articles) => {
-                info!(target: LOG_TARGET, count = articles.len(), source = %source_desc, "Scraped articles");
+        // Scrape articles from all sources
+        let mut total_added = 0;
+        for scraper in scrapers {
+            match scraper.scrape_frontpage().await {
+                Ok(articles) => {
+                    info!(target: LOG_TARGET, count = articles.len(), "Scraped articles from source");
 
-                // Filter articles by score and add to database
-                let mut added_count = 0;
-                for article in articles {
-                    if article.score >= opts.min_score {
-                        match db.add_unpublished_article(&article).await {
-                            Ok(true) => added_count += 1,
-                            Ok(false) => {} // Already exists
-                            Err(e) => {
-                                warn!(target: LOG_TARGET, error = %e, article_id = %article.id, "Failed to add article to database")
+                    // Filter articles by per-source score and add to database
+                    let mut added_count = 0;
+                    for article in articles {
+                        let min_score = get_min_score_for_article(opts, &article);
+                        if article.score >= min_score {
+                            match db.add_unpublished_article(&article).await {
+                                Ok(true) => added_count += 1,
+                                Ok(false) => {}
+                                Err(e) => {
+                                    warn!(target: LOG_TARGET, error = %e, article_id = %article.id, "Failed to add article to database")
+                                }
                             }
                         }
                     }
+                    total_added += added_count;
                 }
-                info!(target: LOG_TARGET, added = added_count, "Added new articles to unpublished queue");
-            }
-            Err(e) => {
-                error!(target: LOG_TARGET, error = %e, source = %source_desc, "Failed to scrape frontpage");
+                Err(e) => {
+                    error!(target: LOG_TARGET, error = %e, "Failed to scrape frontpage");
+                }
             }
         }
+        info!(target: LOG_TARGET, added = total_added, "Added new articles to unpublished queue");
 
         // Publish unpublished articles
         match db.get_unpublished_articles().await {
@@ -351,6 +357,44 @@ async fn run_bot_loop(
 
         interval.tick().await;
     }
+}
+
+fn get_min_score_for_article(opts: &Opts, article: &crate::tables::Article) -> u32 {
+    if article.source == "hn" {
+        opts.hn_min_score
+    } else if article.source == "lobsters" {
+        opts.lobsters_min_score
+    } else {
+        0
+    }
+}
+
+fn build_sources_description(opts: &Opts) -> String {
+    let mut sources = Vec::new();
+    if opts.hn {
+        sources.push("HackerNews".to_string());
+    }
+    if opts.lobsters {
+        sources.push("Lobsters".to_string());
+    }
+    for url in &opts.atom_feed_url {
+        sources.push(format!("Atom:{url}"));
+    }
+    sources.join(", ")
+}
+
+fn build_test_sources_description(hn: bool, lobsters: bool, atom_feed_urls: &[String]) -> String {
+    let mut sources = Vec::new();
+    if hn {
+        sources.push("HackerNews".to_string());
+    }
+    if lobsters {
+        sources.push("Lobsters".to_string());
+    }
+    for url in atom_feed_urls {
+        sources.push(format!("Atom:{url}"));
+    }
+    sources.join(", ")
 }
 
 pub fn init_logging() -> BotResult<()> {
