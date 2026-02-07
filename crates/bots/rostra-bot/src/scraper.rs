@@ -1,3 +1,4 @@
+use std::str::FromStr;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use reqwest::Client;
@@ -26,6 +27,8 @@ pub enum ScraperError {
     IdParse { id_str: String },
     #[snafu(display("Failed to parse score from string: {score_str}"))]
     ScoreParse { score_str: String },
+    #[snafu(display("Failed to parse Atom feed: {details}"))]
+    AtomParse { details: String },
 }
 
 pub type ScraperResult<T> = std::result::Result<T, ScraperError>;
@@ -35,7 +38,14 @@ pub trait Scraper {
     async fn scrape_frontpage(&self) -> ScraperResult<Vec<Article>>;
 }
 
-pub fn create_scraper(source: &Source) -> Box<dyn Scraper + Send + Sync> {
+pub fn create_scraper(
+    source: &Source,
+    atom_feed_url: Option<&str>,
+) -> Box<dyn Scraper + Send + Sync> {
+    if let Some(url) = atom_feed_url {
+        return Box::new(AtomScraper::new(url.to_string()));
+    }
+
     match source {
         Source::HackerNews => Box::new(HnScraper::new()),
         Source::Lobsters => Box::new(LobstersScraper::new()),
@@ -286,5 +296,132 @@ impl LobstersScraper {
 impl Scraper for LobstersScraper {
     async fn scrape_frontpage(&self) -> ScraperResult<Vec<Article>> {
         self.scrape_lobsters_frontpage().await
+    }
+}
+
+pub struct AtomScraper {
+    client: Client,
+    feed_url: String,
+    /// Short hash of the feed URL for use in source identifier
+    feed_hash: String,
+}
+
+impl AtomScraper {
+    pub fn new(feed_url: String) -> Self {
+        let client = Client::builder()
+            .user_agent("rostra-bot/1.0")
+            .build()
+            .expect("Failed to create HTTP client");
+
+        // Create a short hash of the feed URL for the source identifier
+        let feed_hash = {
+            let hash = blake3::hash(feed_url.as_bytes());
+            data_encoding::HEXLOWER.encode(&hash.as_bytes()[..8])
+        };
+
+        Self {
+            client,
+            feed_url,
+            feed_hash,
+        }
+    }
+
+    /// Create a unique article ID from feed URL and entry ID
+    fn create_article_id(&self, entry_id: &str) -> String {
+        let combined = format!("{}:{}", self.feed_url, entry_id);
+        let hash = blake3::hash(combined.as_bytes());
+        data_encoding::HEXLOWER.encode(&hash.as_bytes()[..16])
+    }
+
+    /// Extract the best URL from an Atom entry's links
+    fn extract_url(entry: &atom_syndication::Entry) -> Option<String> {
+        let links = &entry.links;
+
+        // First, try to find a link with rel="alternate" or no rel (default is alternate)
+        for link in links {
+            match link.rel.as_deref() {
+                Some("alternate") | None => return Some(link.href.clone()),
+                _ => {}
+            }
+        }
+
+        // Fall back to the first link
+        links.first().map(|link| link.href.clone())
+    }
+
+    /// Scrape the Atom feed and extract articles
+    pub async fn scrape_atom_feed(&self) -> ScraperResult<Vec<Article>> {
+        info!(feed_url = %self.feed_url, "Scraping Atom feed");
+
+        let response = self
+            .client
+            .get(&self.feed_url)
+            .send()
+            .await
+            .context(HttpSnafu)?;
+
+        let content = response.text().await.context(HttpSnafu)?;
+
+        let feed = atom_syndication::Feed::from_str(&content).map_err(|e| {
+            ScraperError::AtomParse {
+                details: e.to_string(),
+            }
+        })?;
+
+        let mut articles = Vec::new();
+        let scraped_at = Timestamp::from(
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .expect("Time went backwards")
+                .as_secs(),
+        );
+
+        for entry in &feed.entries {
+            let entry_id = &entry.id;
+            let title = entry.title.clone();
+
+            let url = Self::extract_url(entry);
+
+            // Use the URL as source_url since Atom feeds don't have separate comment pages
+            let source_url = url.clone().unwrap_or_else(|| self.feed_url.clone());
+
+            let author = entry
+                .authors
+                .first()
+                .map(|p| p.name.clone())
+                .unwrap_or_else(|| "unknown".to_string());
+
+            let article = Article {
+                id: self.create_article_id(entry_id),
+                title,
+                url,
+                source_url,
+                score: 0, // Atom feeds don't have scores
+                author,
+                scraped_at,
+                source: format!("atom:{}", self.feed_hash),
+            };
+
+            debug!(
+                entry_id = %entry_id,
+                title = %article.title,
+                "Scraped Atom entry"
+            );
+            articles.push(article);
+        }
+
+        info!(
+            count = articles.len(),
+            feed_url = %self.feed_url,
+            "Scraped articles from Atom feed"
+        );
+        Ok(articles)
+    }
+}
+
+#[async_trait::async_trait]
+impl Scraper for AtomScraper {
+    async fn scrape_frontpage(&self) -> ScraperResult<Vec<Article>> {
+        self.scrape_atom_feed().await
     }
 }

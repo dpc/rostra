@@ -93,8 +93,12 @@ pub struct Opts {
     pub data_dir: Option<PathBuf>,
 
     /// Source to scrape from
-    #[arg(long, value_enum, default_value = "hn")]
+    #[arg(long, value_enum, default_value = "hn", conflicts_with = "atom_feed_url")]
     pub source: Source,
+
+    /// Atom feed URL to scrape (mutually exclusive with --source)
+    #[arg(long, value_name = "URL")]
+    pub atom_feed_url: Option<String>,
 }
 
 #[derive(Debug, Parser)]
@@ -111,8 +115,12 @@ pub enum DevCommand {
     /// Test scraping functionality
     Test {
         /// Source to scrape from
-        #[arg(long, value_enum, default_value = "hn")]
+        #[arg(long, value_enum, default_value = "hn", conflicts_with = "atom_feed_url")]
         source: Source,
+
+        /// Atom feed URL to scrape (mutually exclusive with --source)
+        #[arg(long, value_name = "URL")]
+        atom_feed_url: Option<String>,
     },
 }
 
@@ -137,10 +145,16 @@ async fn main() -> BotResult<()> {
 }
 
 async fn run_bot(opts: Opts, secret_file: PathBuf) -> BotResult<()> {
-    info!(target: LOG_TARGET, "Starting Rostra Bot for {}", opts.source);
+    let source_desc = opts
+        .atom_feed_url
+        .as_deref()
+        .map(|url| format!("Atom feed: {url}"))
+        .unwrap_or_else(|| opts.source.to_string());
+
+    info!(target: LOG_TARGET, "Starting Rostra Bot for {}", source_desc);
     info!(
       target: LOG_TARGET,
-      source = %opts.source,
+      source = %source_desc,
       scrape_interval = opts.scrape_interval_minutes,
       max_articles = opts.max_articles_per_run,
       min_score = opts.min_score,
@@ -183,7 +197,7 @@ async fn run_bot(opts: Opts, secret_file: PathBuf) -> BotResult<()> {
     info!(target: LOG_TARGET, "Bot database initialized");
 
     // Initialize scraper and publisher
-    let scraper = create_scraper(&opts.source);
+    let scraper = create_scraper(&opts.source, opts.atom_feed_url.as_deref());
     let publisher = Publisher::new(client.clone(), secret);
 
     info!(target: LOG_TARGET, "Bot is running. Press Ctrl+C to stop.");
@@ -194,17 +208,25 @@ async fn run_bot(opts: Opts, secret_file: PathBuf) -> BotResult<()> {
 
 async fn handle_dev_command(dev_command: DevCommand) -> BotResult<()> {
     match dev_command {
-        DevCommand::Test { source } => {
-            info!(target: LOG_TARGET, "Testing scraper for {}", source);
+        DevCommand::Test {
+            source,
+            atom_feed_url,
+        } => {
+            let source_desc = atom_feed_url
+                .as_deref()
+                .map(|url| format!("Atom feed: {url}"))
+                .unwrap_or_else(|| source.to_string());
 
-            let scraper = create_scraper(&source);
+            info!(target: LOG_TARGET, "Testing scraper for {}", source_desc);
+
+            let scraper = create_scraper(&source, atom_feed_url.as_deref());
 
             match scraper.scrape_frontpage().await {
                 Ok(articles) => {
                     println!(
                         "Successfully scraped {} articles from {}:",
                         articles.len(),
-                        source
+                        source_desc
                     );
                     println!();
 
@@ -224,7 +246,7 @@ async fn handle_dev_command(dev_command: DevCommand) -> BotResult<()> {
                     Ok(())
                 }
                 Err(e) => {
-                    eprintln!("Failed to scrape {source}: {e}");
+                    eprintln!("Failed to scrape {source_desc}: {e}");
                     Err(BotError::Scraper { source: e })
                 }
             }
@@ -238,6 +260,12 @@ async fn run_bot_loop(
     scraper: &dyn Scraper,
     publisher: &Publisher,
 ) -> BotResult<()> {
+    let source_desc = opts
+        .atom_feed_url
+        .as_deref()
+        .map(|url| format!("Atom feed: {url}"))
+        .unwrap_or_else(|| opts.source.to_string());
+
     let mut interval = interval(Duration::from_secs(opts.scrape_interval_minutes * 60));
 
     loop {
@@ -246,7 +274,7 @@ async fn run_bot_loop(
         // Scrape articles
         match scraper.scrape_frontpage().await {
             Ok(articles) => {
-                info!(target: LOG_TARGET, count = articles.len(), source = %opts.source, "Scraped articles");
+                info!(target: LOG_TARGET, count = articles.len(), source = %source_desc, "Scraped articles");
 
                 // Filter articles by score and add to database
                 let mut added_count = 0;
@@ -264,7 +292,7 @@ async fn run_bot_loop(
                 info!(target: LOG_TARGET, added = added_count, "Added new articles to unpublished queue");
             }
             Err(e) => {
-                error!(target: LOG_TARGET, error = %e, source = %opts.source, "Failed to scrape frontpage");
+                error!(target: LOG_TARGET, error = %e, source = %source_desc, "Failed to scrape frontpage");
             }
         }
 

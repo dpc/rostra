@@ -15,6 +15,9 @@ name = "rostra-bot"
 [dependencies]
 anyhow = { workspace = true }
 async-trait = "0.1"
+atom_syndication = { workspace = true }
+blake3 = { workspace = true }
+data-encoding = { workspace = true }
 bincode = { workspace = true }
 clap = { workspace = true }
 futures = { workspace = true }

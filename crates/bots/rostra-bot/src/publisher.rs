@@ -42,15 +42,21 @@ impl Publisher {
             post.push_str(&format!("##### {}\n\n", article.title));
         }
 
-        let source_name = match article.source.as_str() {
-            "hn" => "HN",
-            "lobsters" => "Lobsters",
-            _ => &article.source,
-        };
-        post.push_str(&format!(
-            "* [💬 {} Comments]({})\n",
-            source_name, article.source_url
-        ));
+        // Handle different sources with appropriate formatting
+        if article.source.starts_with("atom:") {
+            // Atom feeds don't have separate comment pages
+            post.push_str("* via Atom Feed\n");
+        } else {
+            let source_name = match article.source.as_str() {
+                "hn" => "HN",
+                "lobsters" => "Lobsters",
+                _ => &article.source,
+            };
+            post.push_str(&format!(
+                "* [💬 {} Comments]({})\n",
+                source_name, article.source_url
+            ));
+        }
 
         post.push('\n');
         post
