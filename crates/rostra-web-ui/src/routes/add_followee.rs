@@ -42,7 +42,7 @@ impl UiState {
         let ajax_attrs = fragment::AjaxLoadingAttrs::for_button();
         html! {
             form id="add-followee-form" ."m-addFolloweeForm"
-                action="/ui/followee"
+                action="/followee"
                 method="post"
                 x-target="add-followee-form"
                 "@ajax:before"=(ajax_attrs.before)

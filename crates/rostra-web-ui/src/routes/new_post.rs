@@ -170,7 +170,7 @@ pub async fn get_post_preview_dialog(
                 @let ajax_attrs = fragment::AjaxLoadingAttrs::for_class("o-previewDialog__submitButton");
                 div ."o-previewDialog__actions" {
                     form ."o-previewDialog__form"
-                        action="/ui/post"
+                        action="/post"
                         method="post"
                         x-target="new-post-form preview-dialog post-preview ajax-scripts"
                         "x-on:keyup.enter.ctrl.shift"="$el.requestSubmit()"
@@ -312,7 +312,7 @@ impl UiState {
         html! {
             // Hidden form for inline preview updates (must be outside main form)
             form id="inline-preview-form"
-                action="/ui/post/preview"
+                action="/post/preview"
                 method="post"
                 style="display: none;"
                 x-target="post-preview"
@@ -323,7 +323,7 @@ impl UiState {
 
             @let form_ajax = fragment::AjaxLoadingAttrs::for_class("m-newPostForm__previewButton");
             form id="new-post-form" ."m-newPostForm"
-                action="/ui/post/preview_dialog"
+                action="/post/preview_dialog"
                 method="post"
                 x-target="preview-dialog"
                 "@ajax:before"=(form_ajax.before)
@@ -469,7 +469,7 @@ impl UiState {
             @if let Some(uid) = user_id {
                 @let attach_ajax = fragment::AjaxLoadingAttrs::for_document_class("m-newPostForm__attachButton");
                 form id="media-attach-form"
-                    action=(format!("/ui/media/{}/list", uid))
+                    action=(format!("/media/{}/list", uid))
                     method="get"
                     x-target="media-list"
                     style="display: none;"
@@ -479,7 +479,7 @@ impl UiState {
 
                 @let upload_ajax = fragment::AjaxLoadingAttrs::for_document_class("m-newPostForm__uploadButton");
                 form id="media-upload-form"
-                    action="/ui/media/publish"
+                    action="/media/publish"
                     method="post"
                     enctype="multipart/form-data"
                     x-target="ajax-scripts"

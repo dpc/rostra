@@ -77,7 +77,7 @@ impl UiState {
     }
 
     pub fn avatar_url(&self, id: RostraId) -> String {
-        format!("/ui/avatar/{id}")
+        format!("/avatar/{id}")
     }
 
     pub async fn render_self_profile_summary(
@@ -118,7 +118,7 @@ impl UiState {
 
                 div ."m-profileSummary__content" {
                     a ."m-profileSummary__displayName u-displayName"
-                        href=(format!("/ui/profile/{}", self_id))
+                        href=(format!("/profile/{}", self_id))
                     {
                         (self_profile.display_name)
                     }
@@ -130,7 +130,7 @@ impl UiState {
                                 "RostraId"
                             }
                         (fragment::ajax_button(
-                            "/ui/self/edit",
+                            "/self/edit",
                             "get",
                             "self-profile-summary",
                             "m-profileSummary__editButton",
@@ -140,7 +140,7 @@ impl UiState {
                         .call())
 
                         form
-                            action="/ui/unlock/logout"
+                            action="/unlock/logout"
                             method="post"
                             style="display: inline;"
                         {
@@ -161,7 +161,7 @@ impl UiState {
         let ajax_attrs = fragment::AjaxLoadingAttrs::for_class("m-profileSummary__saveButton");
         Ok(html! {
             form id="self-profile-summary" ."m-profileSummary -edit"
-                action="/ui/self/edit"
+                action="/self/edit"
                 method="post"
                 x-target="self-profile-summary"
                 enctype="multipart/form-data"

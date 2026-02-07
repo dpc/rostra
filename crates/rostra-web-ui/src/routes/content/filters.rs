@@ -71,7 +71,7 @@ where
                     self.inner
                         .emit(Event::Start(
                             Container::Link(
-                                format!("/ui/profile/{rostra_id}").into(),
+                                format!("/profile/{rostra_id}").into(),
                                 jotup::LinkType::Span(jotup::SpanLinkType::Inline),
                             ),
                             attr,
@@ -351,7 +351,7 @@ where
                     match transform {
                         MediaTransform::RostraMedia { event_id, alt } => {
                             // Look up the content to get mime type
-                            let url = format!("/ui/media/{}/{}", self.author_id, event_id);
+                            let url = format!("/media/{}/{}", self.author_id, event_id);
                             let alt = alt.trim();
                             let display_name = if alt.is_empty() { "media" } else { alt };
 

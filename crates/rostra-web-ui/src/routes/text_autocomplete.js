@@ -61,7 +61,7 @@
       this.debounceTimer = setTimeout(async () => {
         try {
           const response = await fetch(
-            `/ui/search/profiles?q=${encodeURIComponent(this.query)}`
+            `/search/profiles?q=${encodeURIComponent(this.query)}`
           );
           this.results = await response.json();
           this.selectedIndex = 0;

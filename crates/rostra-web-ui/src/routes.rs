@@ -22,7 +22,7 @@ use axum::extract::{DefaultBodyLimit, FromRequest, Path, Request, State};
 use axum::http::header::{self, CONTENT_TYPE};
 use axum::http::{HeaderMap, HeaderValue, StatusCode};
 use axum::middleware::{self, Next};
-use axum::response::{IntoResponse, Redirect, Response};
+use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
 use axum_dpc_static_assets::handle_etag;
 use maud::Markup;
@@ -157,66 +157,65 @@ pub async fn not_found(_state: State<SharedState>, _req: Request<Body>) -> impl 
 
 pub fn route_handler(state: SharedState) -> Router<Arc<UiState>> {
     Router::new()
-        .route("/", get(root))
-        .route("/ui", get(timeline::get_followees))
-        .route("/ui/followees", get(timeline::get_followees))
-        .route("/ui/network", get(timeline::get_network))
-        .route("/ui/notifications", get(timeline::get_notifications))
-        .route("/ui/profile/{id}", get(profile::get_profile))
+        .route("/", get(timeline::get_followees))
+        .route("/followees", get(timeline::get_followees))
+        .route("/network", get(timeline::get_network))
+        .route("/notifications", get(timeline::get_notifications))
+        .route("/profile/{id}", get(profile::get_profile))
         .route(
-            "/ui/profile/{id}/atom.xml",
+            "/profile/{id}/atom.xml",
             get(feeds::get_profile_feed_atom),
         )
         .route(
-            "/ui/profile/{id}/follow",
+            "/profile/{id}/follow",
             get(profile::get_follow_dialog).post(profile::post_follow),
         )
-        .route("/ui/avatar/{id}", get(avatar::get))
-        .route("/ui/media/{author}/{event_id}", get(media::get))
-        .route("/ui/media/{author}/list", get(media::list))
+        .route("/avatar/{id}", get(avatar::get))
+        .route("/media/{author}/{event_id}", get(media::get))
+        .route("/media/{author}/list", get(media::list))
         .route(
-            "/ui/media/publish",
+            "/media/publish",
             post(media::publish).layer(DefaultBodyLimit::max(9_000_000)),
         )
-        .route("/ui/updates", get(timeline::get_updates))
-        .route("/ui/post/{author}/{event}", get(post::get_single_post))
+        .route("/updates", get(timeline::get_updates))
+        .route("/post/{author}/{event}", get(post::get_single_post))
         .route(
-            "/ui/post/{post_thread_id}/{author}/{event}/fetch",
+            "/post/{post_thread_id}/{author}/{event}/fetch",
             post(post::fetch_missing_post).get(post::fetch_missing_post),
         )
-        .route("/ui/post/{author}/{event}/delete", post(post::delete_post))
-        .route("/ui/post", post(new_post::post_new_post))
-        .route("/ui/post/preview", post(new_post::get_post_preview))
+        .route("/post/{author}/{event}/delete", post(post::delete_post))
+        .route("/post", post(new_post::post_new_post))
+        .route("/post/preview", post(new_post::get_post_preview))
         .route(
-            "/ui/post/preview_dialog",
+            "/post/preview_dialog",
             post(new_post::get_post_preview_dialog),
         )
-        .route("/ui/post/reply_to", get(new_post::get_reply_to))
-        .route("/ui/followee", post(add_followee::add_followee))
-        .route("/ui/unlock", get(unlock::get).post(unlock::post_unlock))
-        .route("/ui/unlock/logout", get(unlock::get).post(unlock::logout))
-        .route("/ui/unlock/random", get(unlock::get_random))
+        .route("/post/reply_to", get(new_post::get_reply_to))
+        .route("/followee", post(add_followee::add_followee))
+        .route("/unlock", get(unlock::get).post(unlock::post_unlock))
+        .route("/unlock/logout", get(unlock::get).post(unlock::logout))
+        .route("/unlock/random", get(unlock::get_random))
         .route(
-            "/ui/comments/{post_thread_id}/{event_id}",
+            "/comments/{post_thread_id}/{event_id}",
             get(timeline::get_post_comments),
         )
         .route(
-            "/ui/self/edit",
+            "/self/edit",
             get(profile_self::get_self_account_edit).post(profile_self::post_self_account_edit),
         )
-        .route("/ui/search/profiles", get(search::search_profiles))
-        .route("/ui/settings", get(settings::get_settings))
+        .route("/search/profiles", get(search::search_profiles))
+        .route("/settings", get(settings::get_settings))
         .route(
-            "/ui/settings/following",
+            "/settings/following",
             get(settings::get_settings_following),
         )
         .route(
-            "/ui/settings/followers",
+            "/settings/followers",
             get(settings::get_settings_followers),
         )
-        .route("/ui/settings/events", get(settings::get_settings_events))
-        .route("/ui/settings/p2p", get(settings::get_settings_p2p))
-        .route("/ui/timeline/prime", get(timeline_prime))
+        .route("/settings/events", get(settings::get_settings_events))
+        .route("/settings/p2p", get(settings::get_settings_p2p))
+        .route("/timeline/prime", get(timeline_prime))
         // .route("/a/", put(account_new))
         // .route("/t/", put(token_new))
         // .route("/m/", put(metric_new).get(metric_find))
@@ -225,10 +224,6 @@ pub fn route_handler(state: SharedState) -> Router<Arc<UiState>> {
         .fallback(not_found)
         .with_state(state)
         .layer(middleware::from_fn(cache_control))
-}
-
-async fn root() -> Redirect {
-    Redirect::permanent("/ui")
 }
 
 /// Returns empty timeline-posts div for priming alpine-ajax.

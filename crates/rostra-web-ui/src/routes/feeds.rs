@@ -71,7 +71,7 @@ pub async fn get_profile_feed_atom(
                 ..Default::default()
             }],
             links: vec![Link {
-                href: format!("/ui/post/{}/{}", post.author, post.event_id),
+                href: format!("/post/{}/{}", post.author, post.event_id),
                 rel: Some("alternate".to_string()),
                 ..Default::default()
             }],
@@ -94,7 +94,7 @@ pub async fn get_profile_feed_atom(
         updated,
         entries,
         links: vec![Link {
-            href: format!("/ui/profile/{profile_id}/atom.xml"),
+            href: format!("/profile/{profile_id}/atom.xml"),
             rel: Some("self".to_string()),
             mediatype: Some("application/atom+xml".to_string()),
             ..Default::default()

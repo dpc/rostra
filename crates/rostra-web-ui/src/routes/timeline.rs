@@ -156,7 +156,7 @@ impl UiState {
 
         Ok(html! {
             nav ."o-navBar"
-                x-data="websocket('/ui/updates')"
+                x-data="websocket('/updates')"
             {
                 (self.render_top_nav())
 
@@ -316,7 +316,7 @@ impl UiState {
                 let profile = self.get_social_profile(profile_id, &client_ref).await;
                 Some(FeedLinks {
                     title: format!("{} - Rostra Feed", profile.display_name),
-                    atom_url: format!("/ui/profile/{profile_id}/atom.xml"),
+                    atom_url: format!("/profile/{profile_id}/atom.xml"),
                 })
             }
             _ => None,
@@ -475,7 +475,7 @@ impl UiState {
         Ok(html! {
             div ."o-mainBarTimeline" "x-data"="{}" {
                 // Workaround: first alpine-ajax request scrolls to top; prime it on load
-                div style="display:none" x-init="$ajax('/ui/timeline/prime', { targets: ['timeline-posts'] })" {}
+                div style="display:none" x-init="$ajax('/timeline/prime', { targets: ['timeline-posts'] })" {}
                 div ."o-mainBarTimeline__tabs" {
                     a ."o-mainBarTimeline__back" onclick="history.back()" { "<" }
 
@@ -591,7 +591,7 @@ impl UiState {
             {
                 a
                     ."a-userNameHandle__displayName u-displayName"
-                    href={"/ui/profile/"(id)}
+                    href={"/profile/"(id)}
                 {
                     (display_name)
                 }
@@ -639,11 +639,11 @@ pub(crate) enum TimelineMode {
 impl TimelineMode {
     fn to_path(self) -> String {
         match self {
-            TimelineMode::Followees => "/ui/followees".to_string(),
-            TimelineMode::Network => "/ui/network".to_string(),
-            TimelineMode::Notifications => "/ui/notifications".to_string(),
-            TimelineMode::Profile(rostra_id) => format!("/ui/profile/{rostra_id}"),
-            TimelineMode::ProfileSingle(rostra_id, _) => format!("/ui/profile/{rostra_id}"),
+            TimelineMode::Followees => "/followees".to_string(),
+            TimelineMode::Network => "/network".to_string(),
+            TimelineMode::Notifications => "/notifications".to_string(),
+            TimelineMode::Profile(rostra_id) => format!("/profile/{rostra_id}"),
+            TimelineMode::ProfileSingle(rostra_id, _) => format!("/profile/{rostra_id}"),
         }
     }
 

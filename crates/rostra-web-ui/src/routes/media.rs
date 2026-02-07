@@ -214,13 +214,13 @@ pub async fn list(
                             {
                                 @if media.is_image {
                                     img
-                                        src=(format!("/ui/media/{}/{}", author, media.event_id))
+                                        src=(format!("/media/{}/{}", author, media.event_id))
                                         ."o-mediaList__thumbnail"
                                         loading="lazy"
                                         {}
                                 } @else if media.is_video {
                                     video
-                                        src=(format!("/ui/media/{}/{}", author, media.event_id))
+                                        src=(format!("/media/{}/{}", author, media.event_id))
                                         ."o-mediaList__videoThumbnail"
                                         autoplay
                                         muted

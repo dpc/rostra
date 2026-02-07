@@ -161,7 +161,7 @@ impl UiState {
     pub fn render_top_nav(&self) -> Markup {
         html! {
             div ."o-topNav" {
-                a ."o-topNav__item" href="/ui" {
+                a ."o-topNav__item" href="/" {
                     span ."o-topNav__icon -home" {}
                     "Home"
                 }
@@ -169,7 +169,7 @@ impl UiState {
                     span ."o-topNav__icon -support" {}
                     "Support"
                 }
-                a ."o-topNav__item" href="/ui/settings" {
+                a ."o-topNav__item" href="/settings" {
                     span ."o-topNav__icon -settings" {}
                     "Settings"
                 }

@@ -19,7 +19,7 @@ use crate::util::time::format_timestamp;
 use crate::{SharedState, UiState};
 
 pub async fn get_settings() -> impl IntoResponse {
-    Redirect::to("/ui/settings/following")
+    Redirect::to("/settings/following")
 }
 
 pub async fn get_settings_following(
@@ -208,13 +208,13 @@ impl UiState {
                         h3 ."o-settingsNav__groupHeader" { "Social" }
                         a ."o-settingsNav__item"
                             ."-active"[active_category == "following"]
-                            href="/ui/settings/following"
+                            href="/settings/following"
                         {
                             "Followees"
                         }
                         a ."o-settingsNav__item"
                             ."-active"[active_category == "followers"]
-                            href="/ui/settings/followers"
+                            href="/settings/followers"
                         {
                             "Followers"
                         }
@@ -224,13 +224,13 @@ impl UiState {
                         h3 ."o-settingsNav__groupHeader" { "Developer" }
                         a ."o-settingsNav__item"
                             ."-active"[active_category == "events"]
-                            href="/ui/settings/events"
+                            href="/settings/events"
                         {
                             "Event Explorer"
                         }
                         a ."o-settingsNav__item"
                             ."-active"[active_category == "p2p"]
-                            href="/ui/settings/p2p"
+                            href="/settings/p2p"
                         {
                             "P2P Explorer"
                         }
@@ -314,19 +314,19 @@ impl UiState {
                     h3 ."o-settingsContent__sectionHeader" { "Suggestion" }
                     div ."m-followeeList__item" {
                         img ."m-followeeList__avatar u-userImage"
-                            src="/ui/avatar/rse1okfyp4yj75i6riwbz86mpmbgna3f7qr66aj1njceqoigjabegy"
+                            src="/avatar/rse1okfyp4yj75i6riwbz86mpmbgna3f7qr66aj1njceqoigjabegy"
                             alt="Avatar"
                             width="32"
                             height="32"
                             loading="lazy"
                             {}
                         a ."m-followeeList__name"
-                            href="/ui/profile/rse1okfyp4yj75i6riwbz86mpmbgna3f7qr66aj1njceqoigjabegy"
+                            href="/profile/rse1okfyp4yj75i6riwbz86mpmbgna3f7qr66aj1njceqoigjabegy"
                         {
                             "dpc (Rostra's author)"
                         }
                         (fragment::ajax_button(
-                            "/ui/profile/rse1okfyp4yj75i6riwbz86mpmbgna3f7qr66aj1njceqoigjabegy/follow",
+                            "/profile/rse1okfyp4yj75i6riwbz86mpmbgna3f7qr66aj1njceqoigjabegy/follow",
                             "get",
                             "follow-dialog-content",
                             "m-followeeList__followButton",
@@ -348,12 +348,12 @@ impl UiState {
                                 loading="lazy"
                                 {}
                             a ."m-followeeList__name"
-                                href=(format!("/ui/profile/{}", followee_id))
+                                href=(format!("/profile/{}", followee_id))
                             {
                                 (display_name)
                             }
                             (fragment::ajax_button(
-                                &format!("/ui/profile/{followee_id}/follow"),
+                                &format!("/profile/{followee_id}/follow"),
                                 "get",
                                 "follow-dialog-content",
                                 "m-followeeList__followButton",
@@ -420,7 +420,7 @@ impl UiState {
                                 loading="lazy"
                                 {}
                             a ."m-followeeList__name"
-                                href=(format!("/ui/profile/{}", follower_id))
+                                href=(format!("/profile/{}", follower_id))
                             {
                                 (display_name)
                             }
@@ -462,7 +462,7 @@ impl UiState {
                 div ."o-settingsContent__section" {
                     h3 ."o-settingsContent__sectionHeader" { "Select Identity" }
 
-                    form ."m-eventExplorer__form" method="get" action="/ui/settings/events" {
+                    form ."m-eventExplorer__form" method="get" action="/settings/events" {
                         select ."m-eventExplorer__select" name="id" onchange="this.form.submit()" {
                             @for (id, display_name, is_self) in &id_display_names {
                                 option value=(id.to_string()) selected[*id == selected_id] {
@@ -641,7 +641,7 @@ impl UiState {
                 div ."o-settingsContent__section" {
                     h3 ."o-settingsContent__sectionHeader" { "Select Identity" }
 
-                    form ."m-eventExplorer__form" method="get" action="/ui/settings/p2p" {
+                    form ."m-eventExplorer__form" method="get" action="/settings/p2p" {
                         select ."m-eventExplorer__select" name="id" onchange="this.form.submit()" {
                             @for (id, display_name, is_self) in &id_display_names {
                                 option value=(id.to_string()) selected[*id == selected_id] {

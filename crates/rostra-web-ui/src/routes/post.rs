@@ -421,7 +421,7 @@ impl UiState {
                             }
                         }
                         @if let Some(event_id) = event_id {
-                            a ."m-postView__postAnchor" href=(format!("/ui/post/{}/{}", author, event_id)) { "#" }
+                            a ."m-postView__postAnchor" href=(format!("/post/{}/{}", author, event_id)) { "#" }
                         }
                     }
 
@@ -454,7 +454,7 @@ impl UiState {
                                     @let label = if reply_count == 1 { "1 Reply".to_string() } else { format!("{reply_count} Replies") };
                                     @let comments_target = post_comments_html_id(ctx, ext_event_id.event_id().to_short());
                                     (fragment::ajax_form(
-                                        &format!("/ui/comments/{}/{}", ctx, ext_event_id.event_id().to_short()),
+                                        &format!("/comments/{}/{}", ctx, ext_event_id.event_id().to_short()),
                                         "get",
                                         &comments_target,
                                         fragment::button("m-postView__commentsButton", &label).call(),
@@ -468,7 +468,7 @@ impl UiState {
                             @if let (Some(ctx), Some(event_id)) = (post_thread_id, event_id) {
                                 @let content_target = post_content_html_id(ctx, event_id);
                                 (fragment::ajax_button(
-                                    &format!("/ui/post/{ctx}/{author}/{event_id}/fetch"),
+                                    &format!("/post/{ctx}/{author}/{event_id}/fetch"),
                                     "post",
                                     &content_target,
                                     "m-postView__fetchButton",
@@ -480,7 +480,7 @@ impl UiState {
                             @if let (Some(ctx), Some(event_id)) = (post_thread_id, event_id) {
                                 @let post_target = post_html_id(ctx, event_id);
                                 (fragment::ajax_button(
-                                    &format!("/ui/post/{author}/{event_id}/delete"),
+                                    &format!("/post/{author}/{event_id}/delete"),
                                     "post",
                                     &post_target,
                                     "m-postView__deleteButton",
@@ -494,7 +494,7 @@ impl UiState {
                         }
 
                         (fragment::ajax_button(
-                            "/ui/post/reply_to",
+                            "/post/reply_to",
                             "get",
                             "reply-to-line",
                             "m-postView__replyToButton",

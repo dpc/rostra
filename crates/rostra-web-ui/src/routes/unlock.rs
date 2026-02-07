@@ -35,8 +35,8 @@ pub async fn get(
     // follow with a full page reload.
     if is_ajax {
         let url = match &query.redirect {
-            Some(path) => format!("/ui/unlock?redirect={}", urlencoding::encode(path)),
-            None => "/ui/unlock".to_string(),
+            Some(path) => format!("/unlock?redirect={}", urlencoding::encode(path)),
+            None => "/unlock".to_string(),
         };
         return Ok(Redirect::to(&url).into_response());
     }
@@ -104,10 +104,10 @@ pub async fn post_unlock(
                     .boxed()
                     .context(OtherSnafu)?;
                 // Use standard HTTP redirect for Alpine-ajax
-                // Redirect to the original path if provided, otherwise to /ui
+                // Redirect to the original path if provided, otherwise to root
                 let target = redirect_path
                     .filter(|p| p.starts_with('/'))
-                    .unwrap_or_else(|| "/ui".to_string());
+                    .unwrap_or_else(|| "/".to_string());
                 Redirect::to(&target).into_response()
             }
             Err(e) => Maud(
@@ -131,7 +131,7 @@ pub async fn logout(session: Session) -> RequestResult<impl IntoResponse> {
     session.delete().await.boxed().context(OtherSnafu)?;
 
     // Use standard HTTP redirect for Alpine-ajax
-    Ok(Redirect::to("/ui/unlock").into_response())
+    Ok(Redirect::to("/unlock").into_response())
 }
 
 impl UiState {
@@ -150,7 +150,7 @@ impl UiState {
             div id="unlock-screen" ."o-unlockScreen" {
 
                 form ."o-unlockScreen__form"
-                    action="/ui/unlock"
+                    action="/unlock"
                     method="post"
                     autocomplete="on"
                 {

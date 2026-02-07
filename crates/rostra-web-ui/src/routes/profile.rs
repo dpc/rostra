@@ -81,7 +81,7 @@ pub async fn get_follow_dialog(
                     (profile.display_name)
                 }
                 form ."o-followDialog__form"
-                    action=(format!("/ui/profile/{}/follow", profile_id))
+                    action=(format!("/profile/{}/follow", profile_id))
                     method="post"
                     x-target="profile-summary followee-list follow-dialog-content"
                     "@ajax:before"=(ajax_attrs.before)
@@ -262,7 +262,7 @@ impl UiState {
 
                 div ."m-profileSummary__content" {
                     a ."m-profileSummary__displayName u-displayName"
-                        href=(format!("/ui/profile/{}", profile_id))
+                        href=(format!("/profile/{}", profile_id))
                     {
                         (profile.display_name)
                     }
@@ -277,7 +277,7 @@ impl UiState {
                         @if session.id() != profile_id {
                             @let label = if following { "Following..." } else { "Follow..." };
                             (fragment::ajax_button(
-                                &format!("/ui/profile/{profile_id}/follow"),
+                                &format!("/profile/{profile_id}/follow"),
                                 "get",
                                 "follow-dialog-content",
                                 "m-profileSummary__followButton",
