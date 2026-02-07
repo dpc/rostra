@@ -30,7 +30,7 @@ use rostra_util_error::{BoxedError, FmtCompact as _};
 use snafu::{Location, ResultExt as _, Snafu};
 use tokio::sync::{broadcast, watch};
 use tokio::task::JoinError;
-use tracing::{debug, info, instrument};
+use tracing::{debug, error, info, instrument};
 
 pub use self::tables::*;
 
@@ -537,20 +537,29 @@ impl Database {
         tx: &WriteTransactionCtx,
     ) -> DbResult<()> {
         let events_table = tx.open_table(&events::TABLE)?;
-        let events_content_state_table = tx.open_table(&events_content_state::TABLE)?;
+        let mut events_content_state_table = tx.open_table(&events_content_state::TABLE)?;
         let mut content_store_table = tx.open_table(&content_store::TABLE)?;
         let mut events_content_missing_table =
             tx.open_table(&tables::events_content_missing::TABLE)?;
 
-        debug_assert!(Database::has_event_tx(
-            event_content.event.event_id,
-            &events_table
-        )?);
+        let has_event = Database::has_event_tx(event_content.event.event_id, &events_table)?;
+        if !has_event {
+            // Event doesn't exist - this shouldn't happen in normal operation.
+            // It means process_event_content_tx was called without first inserting the
+            // event.
+            debug_assert!(false, "Processing content for non-existent event");
+            error!(
+                target: LOG_TARGET,
+                event_id = %event_content.event.event_id,
+                "Processing content for non-existent event - possible bug"
+            );
+            return Ok(());
+        }
 
         // Remove from missing list
         events_content_missing_table.remove(&event_content.event_id().to_short())?;
 
-        // Check if content is deleted/pruned or too large
+        // Check if content should be processed (not deleted/pruned, is Unprocessed)
         let can_insert = if u32::from(event_content.event.event.content_len) < Self::MAX_CONTENT_LEN
         {
             Database::can_insert_event_content_tx(event_content, &events_content_state_table)?
@@ -598,6 +607,9 @@ impl Database {
                     };
                     content_store_table.insert(&content_hash, &store_record)?;
                 }
+
+                // Remove the Unprocessed marker now that content is processed
+                events_content_state_table.remove(&event_content.event_id().to_short())?;
 
                 // Notify about new content
                 tx.on_commit({
@@ -781,13 +793,13 @@ impl Database {
 
     /// Get events for an identity, sorted by timestamp (most recent first).
     ///
-    /// Returns a vector of (EventRecord, Timestamp, EventContentStateNew
+    /// Returns a vector of (EventRecord, Timestamp, EventContentState
     /// option) limited to the specified count.
     pub async fn get_events_for_id(
         &self,
         id: RostraId,
         limit: usize,
-    ) -> Vec<(event::EventRecord, Timestamp, Option<EventContentStateNew>)> {
+    ) -> Vec<(event::EventRecord, Timestamp, Option<EventContentState>)> {
         self.read_with(|tx| {
             let events_table = tx.open_table(&events::TABLE)?;
             let events_by_time_table = tx.open_table(&events_by_time::TABLE)?;

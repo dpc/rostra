@@ -6,7 +6,7 @@ use snafu::ResultExt as _;
 use tempfile::{TempDir, tempdir};
 use tracing::info;
 
-use crate::event::EventContentStateNew;
+use crate::event::EventContentState;
 use crate::{
     Database, content_rc, content_store, events, events_by_time, events_content_missing,
     events_content_state, events_heads, events_missing, ids_full,
@@ -226,7 +226,7 @@ async fn test_store_deleted_event() -> BoxedErrorResult<()> {
                         info!(event_id = %event_id, ?content_state, "State");
 
                         match content_state {
-                            Some(EventContentStateNew::Deleted { deleted_by }) => Some(deleted_by),
+                            Some(EventContentState::Deleted { deleted_by }) => Some(deleted_by),
                             Some(_) => None,
                             None => None,
                         }
@@ -335,7 +335,8 @@ async fn test_content_reference_counting() -> BoxedErrorResult<()> {
 ///
 /// Flow (new model - RC managed at event insertion):
 /// 1. Event is inserted - content not in store yet
-/// 2. Event is added to events_content_missing, RC=1 immediately, no state
+/// 2. Event is added to events_content_missing, marked as Unprocessed, RC=1
+///    immediately
 /// 3. Content is stored
 /// 4. Content becomes available (check with is_content_available_for_event_tx)
 #[test_log::test(tokio::test(flavor = "multi_thread"))]
@@ -385,10 +386,13 @@ async fn test_event_arrives_before_content() -> BoxedErrorResult<()> {
             "Event should be in events_content_missing"
         );
 
-        // Verify: No state set for event (only deleted/pruned get state)
+        // Verify: Event should be marked as Unprocessed (content not yet processed)
         assert!(
-            Database::get_event_content_state_tx(event_id, &events_content_state_table)?.is_none(),
-            "Event should have no content state"
+            matches!(
+                Database::get_event_content_state_tx(event_id, &events_content_state_table)?,
+                Some(EventContentState::Unprocessed)
+            ),
+            "Event should be marked as Unprocessed"
         );
 
         // Verify: RC should be 1 (incremented at event insertion)
@@ -428,10 +432,14 @@ async fn test_event_arrives_before_content() -> BoxedErrorResult<()> {
         let rc = Database::get_content_rc_tx(content_hash, &content_rc_table)?;
         assert_eq!(rc, 1, "RC should still be 1");
 
-        // Verify: Still no state (only deleted/pruned get state)
+        // Verify: Still Unprocessed (content stored but not processed yet)
+        // Note: Unprocessed state is only removed by process_event_content_tx
         assert!(
-            Database::get_event_content_state_tx(event_id, &events_content_state_table)?.is_none(),
-            "Event should still have no content state"
+            matches!(
+                Database::get_event_content_state_tx(event_id, &events_content_state_table)?,
+                Some(EventContentState::Unprocessed)
+            ),
+            "Event should still be Unprocessed (content not yet processed)"
         );
 
         Ok(())
@@ -502,11 +510,11 @@ async fn test_content_exists_when_event_arrives() -> BoxedErrorResult<()> {
             "Event should NOT be in events_content_missing"
         );
 
-        // Verify: No state set (only deleted/pruned get state)
+        // Verify: Event should be marked as Unprocessed (content not yet processed)
         let state = Database::get_event_content_state_tx(event_id, &events_content_state_table)?;
         assert!(
-            state.is_none(),
-            "Event should have no content state (only deleted/pruned get state)"
+            matches!(state, Some(EventContentState::Unprocessed)),
+            "Event should be Unprocessed (content available but not yet processed)"
         );
 
         // Verify: RC should be 1
@@ -637,11 +645,13 @@ async fn test_multiple_events_share_content() -> BoxedErrorResult<()> {
             events_content_missing_table.get(&event_b_id)?.is_none(),
             "B should NOT be in missing"
         );
-        // No state set (only deleted/pruned get state)
+        // B should be marked as Unprocessed (content available but not yet processed)
         assert!(
-            Database::get_event_content_state_tx(event_b_id, &events_content_state_table)?
-                .is_none(),
-            "B should have no content state"
+            matches!(
+                Database::get_event_content_state_tx(event_b_id, &events_content_state_table)?,
+                Some(EventContentState::Unprocessed)
+            ),
+            "B should be Unprocessed"
         );
 
         // Step 4: Prune A's content - RC decrements, B still has content
@@ -662,7 +672,7 @@ async fn test_multiple_events_share_content() -> BoxedErrorResult<()> {
         assert!(
             matches!(
                 Database::get_event_content_state_tx(event_a_id, &events_content_state_table)?,
-                Some(EventContentStateNew::Pruned)
+                Some(EventContentState::Pruned)
             ),
             "A should be Pruned"
         );
@@ -689,7 +699,7 @@ async fn test_multiple_events_share_content() -> BoxedErrorResult<()> {
         assert!(
             matches!(
                 Database::get_event_content_state_tx(event_b_id, &events_content_state_table)?,
-                Some(EventContentStateNew::Pruned)
+                Some(EventContentState::Pruned)
             ),
             "B should be Pruned"
         );
@@ -826,16 +836,20 @@ async fn test_multiple_events_waiting_for_content() -> BoxedErrorResult<()> {
             "Content should be available for B"
         );
 
-        // Neither should have state set (only deleted/pruned get state)
+        // Both should be marked as Unprocessed (content not yet processed)
         assert!(
-            Database::get_event_content_state_tx(event_a_id, &events_content_state_table)?
-                .is_none(),
-            "A should have no state"
+            matches!(
+                Database::get_event_content_state_tx(event_a_id, &events_content_state_table)?,
+                Some(EventContentState::Unprocessed)
+            ),
+            "A should be Unprocessed"
         );
         assert!(
-            Database::get_event_content_state_tx(event_b_id, &events_content_state_table)?
-                .is_none(),
-            "B should have no state"
+            matches!(
+                Database::get_event_content_state_tx(event_b_id, &events_content_state_table)?,
+                Some(EventContentState::Unprocessed)
+            ),
+            "B should be Unprocessed"
         );
 
         Ok(())
@@ -1949,8 +1963,8 @@ mod proptest_rc {
 
     use crate::event::ContentStoreRecord;
     use crate::{
-        Database, content_rc, content_store, events, events_by_time, events_content_missing,
-        events_content_state, events_heads, events_missing, ids_full,
+        Database, EventContentState, content_rc, content_store, events, events_by_time,
+        events_content_missing, events_content_state, events_heads, events_missing, ids_full,
     };
 
     /// Represents a content payload for testing.
@@ -2005,9 +2019,15 @@ mod proptest_rc {
                 Database::get_event_content_state_tx(*event_id, events_content_state_table)?;
 
             // Count events that are NOT deleted/pruned (new model: RC managed at insertion)
-            // If there's no state record, event is normal (not deleted/pruned).
-            // If there IS a state record, it's either Deleted or Pruned.
-            let has_rc = state.is_none();
+            // Events with no state or Unprocessed state contribute to RC.
+            // Only Deleted and Pruned events don't contribute.
+            let has_rc = match state {
+                None => true,                                 /* Content processed, contributing
+                                                                * to RC */
+                Some(EventContentState::Unprocessed) => true, /* Not yet processed, but
+                                                                * contributes to RC */
+                Some(EventContentState::Deleted { .. }) | Some(EventContentState::Pruned) => false,
+            };
 
             if has_rc {
                 *expected_rc.entry(*content_hash).or_insert(0) += 1;
@@ -3254,6 +3274,755 @@ async fn test_self_mention_detection() -> BoxedErrorResult<()> {
     );
 
     info!("=== Self-mention detection test passed ===");
+
+    Ok(())
+}
+
+/// Test that content processing is idempotent - processing the same content
+/// multiple times should not cause duplicate side effects.
+#[test_log::test(tokio::test(flavor = "multi_thread"))]
+async fn test_content_processing_idempotency() -> BoxedErrorResult<()> {
+    use rostra_core::ExternalEventId;
+    use rostra_core::event::content_kind::EventContentKind as _;
+    use rostra_core::event::{PersonaId, content_kind};
+    use rostra_core::id::ToShort as _;
+
+    let _ = tracing_subscriber::fmt::try_init();
+
+    let id_secret_a = RostraIdSecretKey::generate();
+    let user_a = id_secret_a.id();
+
+    let id_secret_b = RostraIdSecretKey::generate();
+    let user_b = id_secret_b.id();
+
+    let (_tmp, db) = temp_db(user_a).await?;
+
+    // Create a post from user A
+    let post_content = content_kind::SocialPost {
+        persona: PersonaId(0),
+        djot_content: Some("Test post".to_string()),
+        reply_to: None,
+        reaction: None,
+    };
+    let post_raw = post_content.serialize_cbor().unwrap();
+    let post_event = {
+        let event = Event::builder_raw_content()
+            .author(user_a)
+            .kind(EventKind::SOCIAL_POST)
+            .content(&post_raw)
+            .build();
+        let signed = event.signed_by(id_secret_a);
+        VerifiedEvent::verify_signed(user_a, signed).expect("Valid event")
+    };
+    let post_event_id = post_event.event_id;
+    let post_id = post_event_id.to_short();
+
+    // Create a reply from user B
+    let reply_content = content_kind::SocialPost {
+        persona: PersonaId(0),
+        djot_content: Some("Reply".to_string()),
+        reply_to: Some(ExternalEventId::new(user_a, post_event_id)),
+        reaction: None,
+    };
+    let reply_raw = reply_content.serialize_cbor().unwrap();
+    let reply_event = {
+        let event = Event::builder_raw_content()
+            .author(user_b)
+            .kind(EventKind::SOCIAL_POST)
+            .content(&reply_raw)
+            .build();
+        let signed = event.signed_by(id_secret_b);
+        VerifiedEvent::verify_signed(user_b, signed).expect("Valid event")
+    };
+
+    let reply_event_id = reply_event.event_id;
+    let reply_id = reply_event_id.to_short();
+
+    // Step 1: Process post event (without content)
+    let now = rostra_core::Timestamp::now();
+    db.write_with(|tx| {
+        db.process_event_tx(&post_event, now, tx)?;
+        Ok(())
+    })
+    .await?;
+
+    // Check: post should be marked as Unprocessed
+    db.read_with(|tx| {
+        let events_content_state_table = tx.open_table(&events_content_state::TABLE)?;
+        let state = Database::get_event_content_state_tx(post_id, &events_content_state_table)?;
+        assert!(
+            matches!(state, Some(EventContentState::Unprocessed)),
+            "Post should be Unprocessed before content arrives"
+        );
+        Ok(())
+    })
+    .await?;
+
+    // Step 2: Process post content
+    let verified_post =
+        rostra_core::event::VerifiedEventContent::assume_verified(post_event, post_raw.clone());
+    db.write_with(|tx| {
+        db.process_event_content_tx(&verified_post, now, tx)?;
+        Ok(())
+    })
+    .await?;
+
+    // Check: post should have NO state (Unprocessed removed after processing)
+    db.read_with(|tx| {
+        let events_content_state_table = tx.open_table(&events_content_state::TABLE)?;
+        let state = Database::get_event_content_state_tx(post_id, &events_content_state_table)?;
+        assert!(
+            state.is_none(),
+            "Post should have no content state after processing"
+        );
+        Ok(())
+    })
+    .await?;
+
+    // Step 3: Process reply event (without content)
+    db.write_with(|tx| {
+        db.process_event_tx(&reply_event, now, tx)?;
+        Ok(())
+    })
+    .await?;
+
+    // Check: reply should be marked as Unprocessed
+    db.read_with(|tx| {
+        let events_content_state_table = tx.open_table(&events_content_state::TABLE)?;
+        let state = Database::get_event_content_state_tx(reply_id, &events_content_state_table)?;
+        assert!(
+            matches!(state, Some(EventContentState::Unprocessed)),
+            "Reply should be Unprocessed before content arrives"
+        );
+        Ok(())
+    })
+    .await?;
+
+    // Step 4: Process reply content - this should increment reply_count on post
+    let verified_reply =
+        rostra_core::event::VerifiedEventContent::assume_verified(reply_event, reply_raw.clone());
+    db.write_with(|tx| {
+        db.process_event_content_tx(&verified_reply, now, tx)?;
+        Ok(())
+    })
+    .await?;
+
+    // Check: reply should have NO state, post should have reply_count = 1
+    db.read_with(|tx| {
+        let events_content_state_table = tx.open_table(&events_content_state::TABLE)?;
+        let social_posts_table = tx.open_table(&crate::social_posts::TABLE)?;
+
+        let reply_state =
+            Database::get_event_content_state_tx(reply_id, &events_content_state_table)?;
+        assert!(
+            reply_state.is_none(),
+            "Reply should have no content state after processing"
+        );
+
+        let post_record = social_posts_table.get(&post_id)?.map(|g| g.value());
+        assert_eq!(
+            post_record.map(|r| r.reply_count).unwrap_or(0),
+            1,
+            "Post should have reply_count = 1"
+        );
+
+        Ok(())
+    })
+    .await?;
+
+    // Step 5: Try to process reply content AGAIN - should be idempotent
+    db.write_with(|tx| {
+        db.process_event_content_tx(&verified_reply, now, tx)?;
+        Ok(())
+    })
+    .await?;
+
+    // Check: reply_count should still be 1 (not incremented again)
+    db.read_with(|tx| {
+        let social_posts_table = tx.open_table(&crate::social_posts::TABLE)?;
+
+        let post_record = social_posts_table.get(&post_id)?.map(|g| g.value());
+        assert_eq!(
+            post_record.map(|r| r.reply_count).unwrap_or(0),
+            1,
+            "Post should still have reply_count = 1 after reprocessing"
+        );
+
+        Ok(())
+    })
+    .await?;
+
+    info!("=== Content processing idempotency test passed ===");
+
+    Ok(())
+}
+
+/// Test that deleting an event while it's Unprocessed works correctly.
+///
+/// This verifies:
+/// 1. Delete changes state from Unprocessed to Deleted
+/// 2. RC is decremented when Unprocessed event is deleted
+/// 3. Content processing is skipped for deleted events
+#[test_log::test(tokio::test(flavor = "multi_thread"))]
+async fn test_delete_while_unprocessed() -> BoxedErrorResult<()> {
+    use rostra_core::event::content_kind::EventContentKind as _;
+    use rostra_core::event::{PersonaId, content_kind};
+    use rostra_core::id::ToShort as _;
+
+    let user_secret = RostraIdSecretKey::generate();
+    let user = user_secret.id();
+
+    let (_tmp, db) = temp_db(user).await?;
+
+    // Create a post
+    let post_content = content_kind::SocialPost {
+        persona: PersonaId(0),
+        djot_content: Some("Test post".to_string()),
+        reply_to: None,
+        reaction: None,
+    };
+    let post_raw = post_content.serialize_cbor().unwrap();
+    let post_event = {
+        let event = Event::builder_raw_content()
+            .author(user)
+            .kind(EventKind::SOCIAL_POST)
+            .content(&post_raw)
+            .build();
+        let signed = event.signed_by(user_secret);
+        VerifiedEvent::verify_signed(user, signed).expect("Valid event")
+    };
+    let post_event_id = post_event.event_id;
+    let post_id = post_event_id.to_short();
+    let content_hash = post_event.content_hash();
+
+    // Create a delete event targeting the post
+    let delete_event = {
+        let event = Event::builder_raw_content()
+            .author(user)
+            .kind(EventKind::SOCIAL_POST)
+            .parent_prev(post_event_id.into())
+            .delete(post_event_id.into())
+            .build();
+        let signed = event.signed_by(user_secret);
+        VerifiedEvent::verify_signed(user, signed).expect("Valid event")
+    };
+
+    let now = rostra_core::Timestamp::now();
+
+    // Step 1: Insert post event (without processing content)
+    db.write_with(|tx| {
+        db.process_event_tx(&post_event, now, tx)?;
+        Ok(())
+    })
+    .await?;
+
+    // Verify: Post is Unprocessed, RC = 1
+    db.read_with(|tx| {
+        let events_content_state_table = tx.open_table(&events_content_state::TABLE)?;
+        let content_rc_table = tx.open_table(&content_rc::TABLE)?;
+
+        let state = Database::get_event_content_state_tx(post_id, &events_content_state_table)?;
+        assert!(
+            matches!(state, Some(EventContentState::Unprocessed)),
+            "Post should be Unprocessed"
+        );
+
+        let rc = Database::get_content_rc_tx(content_hash, &content_rc_table)?;
+        assert_eq!(rc, 1, "RC should be 1 after post insertion");
+
+        Ok(())
+    })
+    .await?;
+
+    // Step 2: Insert delete event
+    db.write_with(|tx| {
+        db.process_event_tx(&delete_event, now, tx)?;
+        Ok(())
+    })
+    .await?;
+
+    // Verify: Post is now Deleted, RC = 0
+    db.read_with(|tx| {
+        let events_content_state_table = tx.open_table(&events_content_state::TABLE)?;
+        let content_rc_table = tx.open_table(&content_rc::TABLE)?;
+
+        let state = Database::get_event_content_state_tx(post_id, &events_content_state_table)?;
+        assert!(
+            matches!(state, Some(EventContentState::Deleted { .. })),
+            "Post should be Deleted after delete event, got {state:?}"
+        );
+
+        let rc = Database::get_content_rc_tx(content_hash, &content_rc_table)?;
+        assert_eq!(rc, 0, "RC should be 0 after deletion");
+
+        Ok(())
+    })
+    .await?;
+
+    // Step 3: Try to process content for the deleted post - should be skipped
+    let verified_post =
+        rostra_core::event::VerifiedEventContent::assume_verified(post_event, post_raw.clone());
+    db.write_with(|tx| {
+        db.process_event_content_tx(&verified_post, now, tx)?;
+        Ok(())
+    })
+    .await?;
+
+    // Verify: State still Deleted, no side effects applied
+    db.read_with(|tx| {
+        let events_content_state_table = tx.open_table(&events_content_state::TABLE)?;
+        let social_posts_table = tx.open_table(&crate::social_posts::TABLE)?;
+
+        // State should still be Deleted
+        let state = Database::get_event_content_state_tx(post_id, &events_content_state_table)?;
+        assert!(
+            matches!(state, Some(EventContentState::Deleted { .. })),
+            "Post should still be Deleted after attempted content processing"
+        );
+
+        // No social post record should exist (content processing was skipped)
+        let post_record = social_posts_table.get(&post_id)?;
+        assert!(
+            post_record.is_none(),
+            "No social post record should exist for deleted post"
+        );
+
+        Ok(())
+    })
+    .await?;
+
+    info!("=== Delete while Unprocessed test passed ===");
+
+    Ok(())
+}
+
+/// Test that two delete events targeting the same event don't double-decrement
+/// RC.
+#[test_log::test(tokio::test(flavor = "multi_thread"))]
+async fn test_two_deletes_same_target() -> BoxedErrorResult<()> {
+    use rostra_core::event::content_kind::EventContentKind as _;
+    use rostra_core::event::{PersonaId, content_kind};
+    use rostra_core::id::ToShort as _;
+
+    let user_secret = RostraIdSecretKey::generate();
+    let user = user_secret.id();
+
+    let (_tmp, db) = temp_db(user).await?;
+
+    // Create a post
+    let post_content = content_kind::SocialPost {
+        persona: PersonaId(0),
+        djot_content: Some("Test post".to_string()),
+        reply_to: None,
+        reaction: None,
+    };
+    let post_raw = post_content.serialize_cbor().unwrap();
+    let post_event = {
+        let event = Event::builder_raw_content()
+            .author(user)
+            .kind(EventKind::SOCIAL_POST)
+            .content(&post_raw)
+            .build();
+        let signed = event.signed_by(user_secret);
+        VerifiedEvent::verify_signed(user, signed).expect("Valid event")
+    };
+    let post_event_id = post_event.event_id;
+    let post_id = post_event_id.to_short();
+    let content_hash = post_event.content_hash();
+
+    // Create first delete event
+    let delete1_event = {
+        let event = Event::builder_raw_content()
+            .author(user)
+            .kind(EventKind::SOCIAL_POST)
+            .parent_prev(post_event_id.into())
+            .delete(post_event_id.into())
+            .build();
+        let signed = event.signed_by(user_secret);
+        VerifiedEvent::verify_signed(user, signed).expect("Valid event")
+    };
+    let delete1_id = delete1_event.event_id;
+
+    // Create second delete event (different event, same target)
+    let delete2_event = {
+        let event = Event::builder_raw_content()
+            .author(user)
+            .kind(EventKind::SOCIAL_POST)
+            .parent_prev(delete1_id.into())
+            .delete(post_event_id.into())
+            .build();
+        let signed = event.signed_by(user_secret);
+        VerifiedEvent::verify_signed(user, signed).expect("Valid event")
+    };
+
+    let now = rostra_core::Timestamp::now();
+
+    // Insert post: RC = 1
+    db.write_with(|tx| {
+        db.process_event_tx(&post_event, now, tx)?;
+        Ok(())
+    })
+    .await?;
+
+    // Insert first delete: RC = 0
+    db.write_with(|tx| {
+        db.process_event_tx(&delete1_event, now, tx)?;
+        Ok(())
+    })
+    .await?;
+
+    // Verify RC is 0
+    db.read_with(|tx| {
+        let content_rc_table = tx.open_table(&content_rc::TABLE)?;
+        let rc = Database::get_content_rc_tx(content_hash, &content_rc_table)?;
+        assert_eq!(rc, 0, "RC should be 0 after first delete");
+        Ok(())
+    })
+    .await?;
+
+    // Insert second delete: RC should still be 0 (no double decrement)
+    db.write_with(|tx| {
+        db.process_event_tx(&delete2_event, now, tx)?;
+        Ok(())
+    })
+    .await?;
+
+    // Verify RC is still 0 (not negative or wrapped)
+    db.read_with(|tx| {
+        let content_rc_table = tx.open_table(&content_rc::TABLE)?;
+        let events_content_state_table = tx.open_table(&events_content_state::TABLE)?;
+
+        let rc = Database::get_content_rc_tx(content_hash, &content_rc_table)?;
+        assert_eq!(rc, 0, "RC should still be 0 after second delete");
+
+        // State should still be Deleted
+        let state = Database::get_event_content_state_tx(post_id, &events_content_state_table)?;
+        assert!(
+            matches!(state, Some(EventContentState::Deleted { .. })),
+            "Post should still be Deleted"
+        );
+
+        Ok(())
+    })
+    .await?;
+
+    info!("=== Two deletes same target test passed ===");
+
+    Ok(())
+}
+
+/// Test pruning then deleting the same event.
+///
+/// Verifies:
+/// - Prune sets state to Pruned and decrements RC
+/// - Delete changes state to Deleted but doesn't decrement RC again
+#[test_log::test(tokio::test(flavor = "multi_thread"))]
+async fn test_prune_then_delete() -> BoxedErrorResult<()> {
+    use rostra_core::event::content_kind::EventContentKind as _;
+    use rostra_core::event::{PersonaId, content_kind};
+    use rostra_core::id::ToShort as _;
+
+    let user_secret = RostraIdSecretKey::generate();
+    let user = user_secret.id();
+
+    let (_tmp, db) = temp_db(user).await?;
+
+    // Create a post
+    let post_content = content_kind::SocialPost {
+        persona: PersonaId(0),
+        djot_content: Some("Test post".to_string()),
+        reply_to: None,
+        reaction: None,
+    };
+    let post_raw = post_content.serialize_cbor().unwrap();
+    let post_event = {
+        let event = Event::builder_raw_content()
+            .author(user)
+            .kind(EventKind::SOCIAL_POST)
+            .content(&post_raw)
+            .build();
+        let signed = event.signed_by(user_secret);
+        VerifiedEvent::verify_signed(user, signed).expect("Valid event")
+    };
+    let post_event_id = post_event.event_id;
+    let post_id = post_event_id.to_short();
+    let content_hash = post_event.content_hash();
+
+    // Create delete event
+    let delete_event = {
+        let event = Event::builder_raw_content()
+            .author(user)
+            .kind(EventKind::SOCIAL_POST)
+            .parent_prev(post_event_id.into())
+            .delete(post_event_id.into())
+            .build();
+        let signed = event.signed_by(user_secret);
+        VerifiedEvent::verify_signed(user, signed).expect("Valid event")
+    };
+
+    let now = rostra_core::Timestamp::now();
+
+    // Insert post: RC = 1, Unprocessed
+    db.write_with(|tx| {
+        db.process_event_tx(&post_event, now, tx)?;
+        Ok(())
+    })
+    .await?;
+
+    // Prune the post: RC = 0, Pruned
+    db.write_with(|tx| {
+        let mut events_content_state_table = tx.open_table(&events_content_state::TABLE)?;
+        let mut content_rc_table = tx.open_table(&content_rc::TABLE)?;
+        let mut events_content_missing_table = tx.open_table(&events_content_missing::TABLE)?;
+
+        Database::prune_event_content_tx(
+            post_id,
+            content_hash,
+            &mut events_content_state_table,
+            &mut content_rc_table,
+            &mut events_content_missing_table,
+            None,
+        )?;
+        Ok(())
+    })
+    .await?;
+
+    // Verify: Pruned, RC = 0
+    db.read_with(|tx| {
+        let events_content_state_table = tx.open_table(&events_content_state::TABLE)?;
+        let content_rc_table = tx.open_table(&content_rc::TABLE)?;
+
+        let state = Database::get_event_content_state_tx(post_id, &events_content_state_table)?;
+        assert!(
+            matches!(state, Some(EventContentState::Pruned)),
+            "Post should be Pruned, got {state:?}"
+        );
+
+        let rc = Database::get_content_rc_tx(content_hash, &content_rc_table)?;
+        assert_eq!(rc, 0, "RC should be 0 after prune");
+
+        Ok(())
+    })
+    .await?;
+
+    // Now insert delete event: state should become Deleted, RC stays 0
+    db.write_with(|tx| {
+        db.process_event_tx(&delete_event, now, tx)?;
+        Ok(())
+    })
+    .await?;
+
+    // Verify: Deleted (author intent recorded), RC still 0
+    db.read_with(|tx| {
+        let events_content_state_table = tx.open_table(&events_content_state::TABLE)?;
+        let content_rc_table = tx.open_table(&content_rc::TABLE)?;
+
+        let state = Database::get_event_content_state_tx(post_id, &events_content_state_table)?;
+        assert!(
+            matches!(state, Some(EventContentState::Deleted { .. })),
+            "Post should be Deleted after delete event, got {state:?}"
+        );
+
+        let rc = Database::get_content_rc_tx(content_hash, &content_rc_table)?;
+        assert_eq!(rc, 0, "RC should still be 0 (no double decrement)");
+
+        Ok(())
+    })
+    .await?;
+
+    info!("=== Prune then delete test passed ===");
+
+    Ok(())
+}
+
+/// Test deleting then attempting to prune the same event.
+///
+/// Verifies:
+/// - Delete sets state to Deleted and decrements RC
+/// - Prune attempt returns false (already deleted)
+#[test_log::test(tokio::test(flavor = "multi_thread"))]
+async fn test_delete_then_prune() -> BoxedErrorResult<()> {
+    use rostra_core::event::content_kind::EventContentKind as _;
+    use rostra_core::event::{PersonaId, content_kind};
+    use rostra_core::id::ToShort as _;
+
+    let user_secret = RostraIdSecretKey::generate();
+    let user = user_secret.id();
+
+    let (_tmp, db) = temp_db(user).await?;
+
+    // Create a post
+    let post_content = content_kind::SocialPost {
+        persona: PersonaId(0),
+        djot_content: Some("Test post".to_string()),
+        reply_to: None,
+        reaction: None,
+    };
+    let post_raw = post_content.serialize_cbor().unwrap();
+    let post_event = {
+        let event = Event::builder_raw_content()
+            .author(user)
+            .kind(EventKind::SOCIAL_POST)
+            .content(&post_raw)
+            .build();
+        let signed = event.signed_by(user_secret);
+        VerifiedEvent::verify_signed(user, signed).expect("Valid event")
+    };
+    let post_event_id = post_event.event_id;
+    let post_id = post_event_id.to_short();
+    let content_hash = post_event.content_hash();
+
+    // Create delete event
+    let delete_event = {
+        let event = Event::builder_raw_content()
+            .author(user)
+            .kind(EventKind::SOCIAL_POST)
+            .parent_prev(post_event_id.into())
+            .delete(post_event_id.into())
+            .build();
+        let signed = event.signed_by(user_secret);
+        VerifiedEvent::verify_signed(user, signed).expect("Valid event")
+    };
+
+    let now = rostra_core::Timestamp::now();
+
+    // Insert post and delete
+    db.write_with(|tx| {
+        db.process_event_tx(&post_event, now, tx)?;
+        db.process_event_tx(&delete_event, now, tx)?;
+        Ok(())
+    })
+    .await?;
+
+    // Verify: Deleted, RC = 0
+    db.read_with(|tx| {
+        let events_content_state_table = tx.open_table(&events_content_state::TABLE)?;
+        let content_rc_table = tx.open_table(&content_rc::TABLE)?;
+
+        let state = Database::get_event_content_state_tx(post_id, &events_content_state_table)?;
+        assert!(
+            matches!(state, Some(EventContentState::Deleted { .. })),
+            "Post should be Deleted"
+        );
+
+        let rc = Database::get_content_rc_tx(content_hash, &content_rc_table)?;
+        assert_eq!(rc, 0, "RC should be 0 after delete");
+
+        Ok(())
+    })
+    .await?;
+
+    // Attempt to prune: should return false
+    let prune_result = db
+        .write_with(|tx| {
+            let mut events_content_state_table = tx.open_table(&events_content_state::TABLE)?;
+            let mut content_rc_table = tx.open_table(&content_rc::TABLE)?;
+            let mut events_content_missing_table = tx.open_table(&events_content_missing::TABLE)?;
+
+            let result = Database::prune_event_content_tx(
+                post_id,
+                content_hash,
+                &mut events_content_state_table,
+                &mut content_rc_table,
+                &mut events_content_missing_table,
+                None,
+            )?;
+            Ok(result)
+        })
+        .await?;
+
+    assert!(!prune_result, "Prune should return false for deleted event");
+
+    // Verify: still Deleted, RC still 0
+    db.read_with(|tx| {
+        let events_content_state_table = tx.open_table(&events_content_state::TABLE)?;
+        let content_rc_table = tx.open_table(&content_rc::TABLE)?;
+
+        let state = Database::get_event_content_state_tx(post_id, &events_content_state_table)?;
+        assert!(
+            matches!(state, Some(EventContentState::Deleted { .. })),
+            "Post should still be Deleted"
+        );
+
+        let rc = Database::get_content_rc_tx(content_hash, &content_rc_table)?;
+        assert_eq!(rc, 0, "RC should still be 0");
+
+        Ok(())
+    })
+    .await?;
+
+    info!("=== Delete then prune test passed ===");
+
+    Ok(())
+}
+
+/// Test processing content for an event that was never inserted.
+///
+/// Verifies that this is handled gracefully (skipped, not crash) in release
+/// mode. In debug mode, this will panic via debug_assert - that's intentional.
+#[cfg(not(debug_assertions))]
+#[test_log::test(tokio::test(flavor = "multi_thread"))]
+async fn test_process_content_for_nonexistent_event() -> BoxedErrorResult<()> {
+    use rostra_core::event::content_kind::EventContentKind as _;
+    use rostra_core::event::{PersonaId, VerifiedEventContent, content_kind};
+    use rostra_core::id::ToShort as _;
+
+    let user_secret = RostraIdSecretKey::generate();
+    let user = user_secret.id();
+
+    let (_tmp, db) = temp_db(user).await?;
+
+    // Create a post event but DON'T insert it
+    let post_content = content_kind::SocialPost {
+        persona: PersonaId(0),
+        djot_content: Some("Test post".to_string()),
+        reply_to: None,
+        reaction: None,
+    };
+    let post_raw = post_content.serialize_cbor().unwrap();
+    let post_event = {
+        let event = Event::builder_raw_content()
+            .author(user)
+            .kind(EventKind::SOCIAL_POST)
+            .content(&post_raw)
+            .build();
+        let signed = event.signed_by(user_secret);
+        VerifiedEvent::verify_signed(user, signed).expect("Valid event")
+    };
+
+    let now = rostra_core::Timestamp::now();
+
+    // Try to process content for the non-existent event
+    // This should not panic or error - it should be silently skipped
+    let verified_post = VerifiedEventContent::assume_verified(post_event, post_raw);
+    db.write_with(|tx| {
+        db.process_event_content_tx(&verified_post, now, tx)?;
+        Ok(())
+    })
+    .await?;
+
+    // Verify: no side effects (no social post record created)
+    db.read_with(|tx| {
+        let social_posts_table = tx.open_table(&crate::social_posts::TABLE)?;
+        let events_table = tx.open_table(&events::TABLE)?;
+
+        // Event should not exist
+        assert!(
+            events_table
+                .get(&verified_post.event_id().to_short())?
+                .is_none(),
+            "Event should not exist"
+        );
+
+        // No social post record
+        let post_record = social_posts_table.get(&verified_post.event_id().to_short())?;
+        assert!(post_record.is_none(), "No social post record should exist");
+
+        Ok(())
+    })
+    .await?;
+
+    info!("=== Process content for nonexistent event test passed ===");
 
     Ok(())
 }

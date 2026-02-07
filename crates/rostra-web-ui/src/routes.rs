@@ -162,10 +162,7 @@ pub fn route_handler(state: SharedState) -> Router<Arc<UiState>> {
         .route("/network", get(timeline::get_network))
         .route("/notifications", get(timeline::get_notifications))
         .route("/profile/{id}", get(profile::get_profile))
-        .route(
-            "/profile/{id}/atom.xml",
-            get(feeds::get_profile_feed_atom),
-        )
+        .route("/profile/{id}/atom.xml", get(feeds::get_profile_feed_atom))
         .route(
             "/profile/{id}/follow",
             get(profile::get_follow_dialog).post(profile::post_follow),
@@ -205,14 +202,8 @@ pub fn route_handler(state: SharedState) -> Router<Arc<UiState>> {
         )
         .route("/search/profiles", get(search::search_profiles))
         .route("/settings", get(settings::get_settings))
-        .route(
-            "/settings/following",
-            get(settings::get_settings_following),
-        )
-        .route(
-            "/settings/followers",
-            get(settings::get_settings_followers),
-        )
+        .route("/settings/following", get(settings::get_settings_following))
+        .route("/settings/followers", get(settings::get_settings_followers))
         .route("/settings/events", get(settings::get_settings_events))
         .route("/settings/p2p", get(settings::get_settings_p2p))
         .route("/timeline/prime", get(timeline_prime))

@@ -171,9 +171,8 @@ impl Database {
             }
         };
 
-        if process_event_content_state == ProcessEventState::New {
-            events_content_missing_tbl.insert(&event.event_id.to_short(), &())?;
-        }
+        // Note: events_content_missing and events_content_state are handled in
+        // insert_event_tx
         Ok((insert_event_outcome, process_event_content_state))
     }
 }

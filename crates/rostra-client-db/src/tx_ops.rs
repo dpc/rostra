@@ -12,10 +12,10 @@ use rostra_core::id::{RostraId, ToShort as _};
 use rostra_core::{ContentHash, ShortEventId, Timestamp};
 use tables::EventRecord;
 use tables::event::{
-    ContentStoreRecord, EventContentResult, EventContentStateNew, EventsMissingRecord,
+    ContentStoreRecord, EventContentResult, EventContentState, EventsMissingRecord,
 };
 use tables::ids::IdsFolloweesRecord;
-use tracing::debug;
+use tracing::{debug, error};
 
 use super::id_self::IdSelfAccountRecord;
 use super::{
@@ -66,9 +66,28 @@ impl Database {
         Ok(())
     }
 
-    /// Insert an event and do all the accounting for it
+    /// Insert an event and perform all DAG accounting.
     ///
-    /// Return `true`
+    /// This function handles event insertion and related bookkeeping:
+    ///
+    /// 1. **Identity tracking**: Records the author's full RostraId
+    /// 2. **DAG structure**: Updates heads, handles missing parent references
+    /// 3. **Content tracking**:
+    ///    - Increments RC in `content_rc` for the event's content_hash
+    ///    - Marks the event as `Unprocessed` in `events_content_state`
+    ///    - If content is not in `content_store`, adds to
+    ///      `events_content_missing`
+    /// 4. **Deletion handling**: If event is a delete, marks target as deleted
+    ///
+    /// **Important**: This function does NOT process content side effects (like
+    /// incrementing reply counts). That happens in `process_event_content_tx`.
+    /// The `Unprocessed` marker ensures content processing is idempotent - it
+    /// can be called multiple times for the same event without duplicate
+    /// effects.
+    ///
+    /// Returns [`InsertEventOutcome`] indicating if the event was newly
+    /// inserted or already present, along with metadata about the
+    /// insertion.
     #[allow(clippy::too_many_arguments)]
     pub fn insert_event_tx(
         event: VerifiedEvent,
@@ -103,7 +122,7 @@ impl Database {
                     true,
                     if let Some(deleted_by) = prev_missing.deleted_by {
                         events_content_state_table
-                            .insert(&event_id, &EventContentStateNew::Deleted { deleted_by })?;
+                            .insert(&event_id, &EventContentState::Deleted { deleted_by })?;
                         true
                     } else {
                         false
@@ -146,7 +165,7 @@ impl Database {
                     let old_state = events_content_state_table
                         .insert(
                             &parent_id,
-                            &EventContentStateNew::Deleted {
+                            &EventContentState::Deleted {
                                 deleted_by: event_id,
                             },
                         )?
@@ -157,7 +176,7 @@ impl Database {
                     // so we always decrement here (unless it was already deleted/pruned).
                     if !matches!(
                         old_state,
-                        Some(EventContentStateNew::Deleted { .. } | EventContentStateNew::Pruned)
+                        Some(EventContentState::Deleted { .. } | EventContentState::Pruned)
                     ) {
                         // Look up content from content_store to return for reverting
                         if let Some(ContentStoreRecord::Present(cow)) = content_store_table
@@ -222,7 +241,10 @@ impl Database {
                 Database::increment_content_size_tx(author, event.content_len(), usage_table)?;
             }
 
-            // If content is not in store yet, mark as missing
+            // Mark event as Unprocessed - content processing hasn't happened yet
+            events_content_state_table.insert(&event_id, &EventContentState::Unprocessed)?;
+
+            // If content is not in store yet, also add to missing list
             if content_store_table.get(&content_hash)?.is_none() {
                 events_content_missing_table.insert(&event_id, &())?;
             }
@@ -240,24 +262,44 @@ impl Database {
 
     /// Check if we should process content for this event.
     ///
-    /// Returns false if the event's content is deleted or pruned.
-    /// Returns true otherwise (content should be processed).
+    /// This function ensures idempotent content processing by checking the
+    /// event's state in `events_content_state`:
     ///
-    /// Note: In the new model, "already processed" is indicated by NOT being
-    /// in events_content_missing, but this function doesn't check that -
-    /// callers should check events_content_missing themselves.
+    /// - **`Unprocessed`** → `true`: Event was inserted but content hasn't been
+    ///   processed yet. Side effects should be applied.
+    /// - **No entry** → `false`: Content was already processed. Returning false
+    ///   prevents duplicate side effects (e.g., incrementing reply_count
+    ///   twice).
+    /// - **`Deleted`/`Pruned`** → `false`: Content is unwanted.
+    ///
+    /// After processing content, callers should remove the `Unprocessed` marker
+    /// from `events_content_state` to indicate processing is complete.
     pub fn can_insert_event_content_tx(
         VerifiedEventContent { event, .. }: &VerifiedEventContent,
         events_content_state_table: &impl events_content_state::ReadableTable,
     ) -> DbResult<bool> {
         let event_id = event.event_id.to_short();
 
-        // If event has a content state, it means content is deleted or pruned
-        if events_content_state_table.get(&event_id)?.is_some() {
-            return Ok(false);
+        // Check content state
+        if let Some(state) = events_content_state_table
+            .get(&event_id)?
+            .map(|g| g.value())
+        {
+            match state {
+                EventContentState::Unprocessed => {
+                    // Content not yet processed, can insert
+                    return Ok(true);
+                }
+                EventContentState::Deleted { .. } | EventContentState::Pruned => {
+                    // Content deleted or pruned, cannot insert
+                    return Ok(false);
+                }
+            }
         }
 
-        Ok(true)
+        // No state means content was already processed (came with event or processed
+        // earlier) Return false to skip reprocessing
+        Ok(false)
     }
 
     /// Mark an event's content as pruned.
@@ -280,11 +322,14 @@ impl Database {
             .map(|g| g.value())
         {
             match existing_state {
-                EventContentStateNew::Deleted { .. } => {
+                EventContentState::Unprocessed => {
+                    // Content never processed, can proceed to prune
+                }
+                EventContentState::Deleted { .. } => {
                     // Already deleted, can't prune
                     return Ok(false);
                 }
-                EventContentStateNew::Pruned => {
+                EventContentState::Pruned => {
                     // Already pruned, nothing to do
                     return Ok(true);
                 }
@@ -299,7 +344,7 @@ impl Database {
             Database::decrement_content_size_tx(author, content_len, usage_table)?;
         }
 
-        events_content_state_table.insert(&event_id, &EventContentStateNew::Pruned)?;
+        events_content_state_table.insert(&event_id, &EventContentState::Pruned)?;
         events_content_missing_table.remove(&event_id)?;
 
         Ok(true)
@@ -352,7 +397,7 @@ impl Database {
     pub fn get_event_content_state_tx(
         event: impl Into<ShortEventId>,
         events_content_state_table: &impl events_content_state::ReadableTable,
-    ) -> DbResult<Option<EventContentStateNew>> {
+    ) -> DbResult<Option<EventContentState>> {
         Ok(events_content_state_table
             .get(&event.into())?
             .map(|r| r.value()))
@@ -383,10 +428,14 @@ impl Database {
             .map(|r| r.value())
         {
             match state {
-                EventContentStateNew::Deleted { deleted_by } => {
+                EventContentState::Unprocessed => {
+                    // Content not yet processed - fall through to check
+                    // content_store
+                }
+                EventContentState::Deleted { deleted_by } => {
                     return Ok(Some(EventContentResult::Deleted { deleted_by }));
                 }
-                EventContentStateNew::Pruned => {
+                EventContentState::Pruned => {
                     return Ok(Some(EventContentResult::Pruned));
                 }
             }
@@ -447,9 +496,20 @@ impl Database {
     ) -> DbResult<bool> {
         let event_id = event_id.into();
 
-        // If event has a content state, it means content is deleted or pruned
-        if events_content_state_table.get(&event_id)?.is_some() {
-            return Ok(false);
+        // Check event content state
+        if let Some(state) = events_content_state_table
+            .get(&event_id)?
+            .map(|g| g.value())
+        {
+            match state {
+                // Unprocessed means content wasn't in store at event insertion,
+                // but it might be now - check the store
+                EventContentState::Unprocessed => {}
+                // Deleted or pruned means content is not available
+                EventContentState::Deleted { .. } | EventContentState::Pruned => {
+                    return Ok(false);
+                }
+            }
         }
 
         // Check if content is in store
@@ -662,10 +722,24 @@ impl Database {
         content_hash: ContentHash,
         content_rc_table: &mut content_rc::Table,
     ) -> DbResult<u64> {
-        let current_count = content_rc_table
-            .get(&content_hash)?
-            .map(|g| g.value())
-            .unwrap_or(1); // Default to 1 if missing (assume single reference)
+        let current_count = match content_rc_table.get(&content_hash)?.map(|g| g.value()) {
+            Some(count) => count,
+            None => {
+                // RC entry missing - this shouldn't happen in normal operation.
+                // It means decrement was called without a corresponding increment.
+                debug_assert!(
+                    false,
+                    "Decrementing RC for content with no RC entry: {content_hash}"
+                );
+                error!(
+                    target: LOG_TARGET,
+                    %content_hash,
+                    "Decrementing RC for content with no RC entry - possible bug"
+                );
+                // Default to 1 to avoid underflow, will result in RC=0
+                1
+            }
+        };
 
         if current_count <= 1 {
             // Count reached 0, remove the RC entry
@@ -716,7 +790,7 @@ impl Database {
                 .map(|g| {
                     matches!(
                         g.value(),
-                        EventContentStateNew::Deleted { .. } | EventContentStateNew::Pruned
+                        EventContentState::Deleted { .. } | EventContentState::Pruned
                     )
                 })
                 .unwrap_or(false);

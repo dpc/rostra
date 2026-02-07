@@ -88,19 +88,65 @@ pub enum ContentStoreRecord<'a> {
 /// Owned version of [`ContentStoreRecord`].
 pub type ContentStoreRecordOwned = ContentStoreRecord<'static>;
 
-/// Per-event content state for the `events_content_state` table.
+/// Per-event content processing state stored in `events_content_state` table.
 ///
-/// This table only tracks "unwanted" content states - reasons why we don't want
-/// to fetch or store content for an event. If an event is NOT in this table,
-/// its content is either:
-/// - Available (check content_store using event's content_hash)
-/// - Missing (check events_content_missing)
+/// This enum tracks the content processing lifecycle for each event:
 ///
-/// Reference counting (content_rc) is managed at event insertion/deletion time,
-/// not when content arrives.
-#[derive(Debug, Encode, Decode, Clone, Copy, Serialize)]
-pub enum EventContentStateNew {
+/// ## State Transitions
+///
+/// ```text
+/// Event inserted ──► Unprocessed ──► (no entry) ──► Deleted/Pruned
+///                         │               │
+///                         │               └─ Content processed successfully
+///                         │                  (side effects applied)
+///                         │
+///                         └─ Can also go directly to Deleted/Pruned
+/// ```
+///
+/// ## Interpretation
+///
+/// - **No entry in table**: Content has been processed for this event. This is
+///   the normal state after successful content processing. Side effects (reply
+///   counts, follow updates, etc.) have been applied.
+///
+/// - **`Unprocessed`**: Event was inserted but content processing hasn't
+///   happened yet. The event's content side effects have NOT been applied.
+///
+/// - **`Deleted` / `Pruned`**: Content is unwanted. RC has been decremented.
+///
+/// ## Idempotency Guarantee
+///
+/// The `Unprocessed` state ensures content processing is idempotent:
+/// - `process_event_content_tx` checks for `Unprocessed` before processing
+/// - If `Unprocessed` → process content, then remove the marker
+/// - If no entry → skip (already processed)
+/// - If `Deleted`/`Pruned` → skip (content unwanted)
+///
+/// This prevents duplicate side effects (e.g., incrementing reply_count twice)
+/// when the same content is received multiple times for the same event.
+#[derive(Debug, Encode, Decode, Clone, Copy, Serialize, PartialEq, Eq)]
+pub enum EventContentState {
+    /// Content has not been processed yet for this event.
+    ///
+    /// This state is set when an event is inserted (in `insert_event_tx`).
+    /// Content side effects have NOT been applied yet.
+    ///
+    /// When `process_event_content_tx` runs and sees this state:
+    /// 1. It processes the content (applies side effects)
+    /// 2. Stores content in `content_store` if not already there
+    /// 3. Removes this `Unprocessed` marker (deletes entry from table)
+    ///
+    /// After processing, the event will have NO entry in
+    /// `events_content_state`, indicating content was successfully
+    /// processed.
+    Unprocessed,
+
     /// Content was deleted by the author via a deletion event.
+    ///
+    /// When a deletion event targets this event's content:
+    /// - This state is set with a reference to the deleting event
+    /// - RC is decremented in `content_rc`
+    /// - Content may be garbage collected if RC reaches 0
     Deleted {
         /// The event that requested this content be deleted
         deleted_by: ShortEventId,
@@ -109,6 +155,7 @@ pub enum EventContentStateNew {
     /// Content was pruned locally (e.g., too large to store).
     ///
     /// Unlike `Deleted`, this is a local decision, not an author request.
+    /// Used when content exceeds size limits or for storage management.
     Pruned,
 }
 

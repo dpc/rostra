@@ -6,7 +6,7 @@ use axum::response::{IntoResponse, Redirect};
 use maud::{Markup, html};
 use rostra_client::id::IdResolvedData;
 use rostra_client::{IdP2PState, NodeP2PState};
-use rostra_client_db::{EventContentStateNew, EventRecord, IrohNodeRecord};
+use rostra_client_db::{EventContentState, EventRecord, IrohNodeRecord};
 use rostra_core::Timestamp;
 use rostra_core::event::IrohNodeId;
 use rostra_core::id::RostraId;
@@ -438,7 +438,7 @@ impl UiState {
         user_id: RostraId,
         selected_id: RostraId,
         known_ids: Vec<RostraId>,
-        events: Vec<(EventRecord, Timestamp, Option<EventContentStateNew>)>,
+        events: Vec<(EventRecord, Timestamp, Option<EventContentState>)>,
     ) -> RequestResult<Markup> {
         let client = self.client(session.id()).await?;
         let client_ref = client.client_ref()?;
@@ -505,7 +505,7 @@ impl UiState {
         &self,
         event_record: &EventRecord,
         ts: Timestamp,
-        content_state: Option<&EventContentStateNew>,
+        content_state: Option<&EventContentState>,
     ) -> Markup {
         let event = &event_record.signed.event;
         let event_id = event_record.signed.compute_short_id();
@@ -529,12 +529,11 @@ impl UiState {
         }
 
         // Format content state
-        // In the new model, events_content_state only contains deleted/pruned states.
-        // If None, content is either available in content_store or missing.
         let content_state_str = match content_state {
-            Some(EventContentStateNew::Deleted { .. }) => "Deleted",
-            Some(EventContentStateNew::Pruned) => "Pruned",
-            None => "", // Content state not tracked (check content_store for availability)
+            Some(EventContentState::Unprocessed) => "Unprocessed",
+            Some(EventContentState::Deleted { .. }) => "Deleted",
+            Some(EventContentState::Pruned) => "Pruned",
+            None => "", // Content is available in content_store
         };
 
         // Format parents

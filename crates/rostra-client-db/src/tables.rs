@@ -1,5 +1,8 @@
 //! Database table definitions for the Rostra client.
 //!
+//! For detailed documentation on content lifecycle, state transitions, and
+//! edge cases, see `docs/content-lifecycle.md` in this crate.
+//!
 //! # Data Model Overview
 //!
 //! The database stores a local view of the distributed event DAG that forms the
@@ -30,23 +33,52 @@
 //!   Identical content is stored only once.
 //! - **[`content_rc`]**: Reference count per content hash. Managed at event
 //!   insertion time (not when content arrives).
-//! - **[`events_content_state`]**: Tracks "unwanted" content states (Deleted,
-//!   Pruned). If an event is NOT in this table, its content is either available
-//!   in [`content_store`] or missing (see [`events_content_missing`]).
-//! - **[`events_content_missing`]**: Events whose content we want but don't
-//!   have yet.
+//! - **[`events_content_state`]**: Tracks per-event content processing state.
+//!   See "Content Lifecycle" below for details.
+//! - **[`events_content_missing`]**: Events whose content bytes we want but
+//!   don't have yet in [`content_store`].
 //!
 //! ### Content Lifecycle
 //!
-//! 1. **Event insertion**: RC is incremented for the event's content_hash
-//! 2. **Content arrival**: Content is stored in [`content_store`], event
-//!    removed from [`events_content_missing`]
-//! 3. **Content deletion**: Event added to [`events_content_state`] with
-//!    `Deleted`, RC decremented
-//! 4. **Content pruning**: Event added to [`events_content_state`] with
-//!    `Pruned`, RC decremented
-//! 5. **Garbage collection**: When RC reaches 0, content removed from
-//!    [`content_store`]
+//! The key insight is that **event insertion** and **content processing** are
+//! separate operations. An event can be inserted before we have its content,
+//! and the same content can arrive multiple times (for different events).
+//!
+//! **Event Insertion** (via `insert_event_tx`):
+//! 1. Event is added to [`events`] table
+//! 2. RC is incremented in [`content_rc`] for the event's content_hash
+//! 3. Event is marked as [`Unprocessed`](EventContentState::Unprocessed) in
+//!    [`events_content_state`]
+//! 4. If content bytes are not in [`content_store`], event is added to
+//!    [`events_content_missing`]
+//!
+//! **Content Processing** (via `process_event_content_tx`):
+//! 1. Check if event is `Unprocessed` (if not, skip - already processed)
+//! 2. Process content side effects (e.g., increment reply counts, update
+//!    follows)
+//! 3. Store content bytes in [`content_store`] if not already there
+//! 4. Remove event from [`events_content_missing`] (if present)
+//! 5. Remove `Unprocessed` marker from [`events_content_state`]
+//!
+//! **Content Deletion** (author requests deletion):
+//! 1. Event state changes to [`Deleted`](EventContentState::Deleted) in
+//!    [`events_content_state`]
+//! 2. RC is decremented in [`content_rc`]
+//!
+//! **Content Pruning** (local decision, e.g., content too large):
+//! 1. Event state changes to [`Pruned`](EventContentState::Pruned) in
+//!    [`events_content_state`]
+//! 2. RC is decremented in [`content_rc`]
+//!
+//! **Garbage Collection**:
+//! When RC reaches 0, content is removed from [`content_store`].
+//!
+//! ### Interpreting `events_content_state`
+//!
+//! - **No entry**: Content has been processed for this event (normal state)
+//! - **`Unprocessed`**: Event inserted but content not yet processed
+//! - **`Deleted`**: Content deleted by author
+//! - **`Pruned`**: Content pruned locally
 //!
 //! ## Table Categories
 //!
@@ -73,7 +105,7 @@ use rostra_core::{ContentHash, ShortEventId, Timestamp};
 use serde::Serialize;
 
 pub use self::event::{
-    ContentStoreRecordOwned, EventContentResult, EventContentStateNew, EventReceivedRecord,
+    ContentStoreRecordOwned, EventContentResult, EventContentState, EventReceivedRecord,
     EventReceivedSource, EventsHeadsTableRecord,
 };
 pub(crate) mod event;
@@ -277,20 +309,28 @@ def_table! {
 }
 
 def_table! {
-    /// Per-event content state - tracks "unwanted" content states only.
+    /// Per-event content processing state.
     ///
     /// Key: ShortEventId
-    /// Value: Deleted or Pruned state
+    /// Value: [`EventContentState`] (Unprocessed, Deleted, or Pruned)
     ///
-    /// **Important**: This table only contains entries for events whose content
-    /// is deleted or pruned. If an event is NOT in this table, its content is
-    /// either:
-    /// - Available: content_hash exists in `content_store`
-    /// - Missing: event_id exists in `events_content_missing`
+    /// This table tracks the content processing state for each event:
     ///
-    /// This design means most events (those with available content) don't need
-    /// a record here, saving space.
-    events_content_state: ShortEventId => EventContentStateNew
+    /// - **No entry**: Content has been processed (side effects applied).
+    ///   This is the normal state after `process_event_content_tx` completes.
+    /// - **`Unprocessed`**: Event was inserted but content hasn't been processed
+    ///   yet. Content side effects (reply counts, follow updates, etc.) have not
+    ///   been applied. `process_event_content_tx` should process these events.
+    /// - **`Deleted`**: Content was deleted by the author via a deletion event.
+    /// - **`Pruned`**: Content was pruned locally (e.g., too large to store).
+    ///
+    /// **Idempotency**: The `Unprocessed` state ensures content processing is
+    /// idempotent. When `process_event_content_tx` is called, it checks for
+    /// `Unprocessed` state - if present, it processes the content and removes
+    /// the marker. If absent (or Deleted/Pruned), it skips processing. This
+    /// prevents duplicate side effects when the same content arrives multiple
+    /// times.
+    events_content_state: ShortEventId => EventContentState
 }
 
 def_table! {
