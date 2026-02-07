@@ -5,3 +5,6 @@
 
 pub mod links;
 pub mod mention;
+
+#[cfg(test)]
+mod tests;

@@ -21,32 +21,3 @@ pub fn contains_mention(djot_content: &str, target_id: RostraId) -> bool {
     }
     false
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use std::str::FromStr;
-
-    #[test]
-    fn test_contains_mention_no_mentions() {
-        // Content with no mentions
-        let content = "Hello world! This is a test post.";
-        // Use a dummy RostraId - we just need any valid one for testing
-        if let Ok(target_id) = RostraId::from_str(
-            "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-        ) {
-            assert!(!contains_mention(content, target_id));
-        }
-    }
-
-    #[test]
-    fn test_contains_mention_with_regular_link() {
-        // Content with a regular link, not a rostra: mention
-        let content = "Check out [this link](https://example.com)!";
-        if let Ok(target_id) = RostraId::from_str(
-            "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-        ) {
-            assert!(!contains_mention(content, target_id));
-        }
-    }
-}
