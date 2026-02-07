@@ -12,7 +12,7 @@ use crate::{
     Database, DbError, IdSocialProfileRecord, IrohNodeRecord, LOG_TARGET, OverflowSnafu,
     SocialPostsReactionsRecord, SocialPostsRepliesRecord, WriteTransactionCtx,
     events_singletons_new, social_posts, social_posts_by_received_at, social_posts_by_time,
-    social_posts_reactions, social_posts_replies,
+    social_posts_reactions, social_posts_replies, social_posts_self_mention,
 };
 
 #[derive(Debug, Snafu)]
@@ -203,6 +203,20 @@ impl Database {
                         }
                     });
 
+                    // Check for @mentions of self in the post content
+                    if author != self.self_id {
+                        if let Some(ref djot_content) = content.djot_content {
+                            if rostra_djot::mention::contains_mention(djot_content, self.self_id) {
+                                let mut self_mention_tbl = tx
+                                    .open_table(&social_posts_self_mention::TABLE)
+                                    .map_err(DbError::from)?;
+                                self_mention_tbl
+                                    .insert(&event_content.event_id().to_short(), &())
+                                    .map_err(DbError::from)?;
+                            }
+                        }
+                    }
+
                     if let Some(reply_to) = content.reply_to {
                         let mut social_post_tbl =
                             tx.open_table(&social_posts::TABLE).map_err(DbError::from)?;
@@ -309,6 +323,14 @@ impl Database {
                         event_content.timestamp(),
                         event_content.event_id().to_short(),
                     ))
+                    .map_err(DbError::from)?;
+
+                // Remove from self-mention table if present
+                let mut self_mention_tbl = tx
+                    .open_table(&social_posts_self_mention::TABLE)
+                    .map_err(DbError::from)?;
+                self_mention_tbl
+                    .remove(&event_content.event_id().to_short())
                     .map_err(DbError::from)?;
 
                 if let Some(reply_to) = content.reply_to {

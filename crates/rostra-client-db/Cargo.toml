@@ -33,6 +33,7 @@ rostra-core = { workspace = true, features = [
   "serde",
   "rand",
 ] }
+rostra-djot = { workspace = true }
 rostra-util-error = { workspace = true }
 rostra-util-fmt = { workspace = true }
 dedup-chan = { workspace = true }

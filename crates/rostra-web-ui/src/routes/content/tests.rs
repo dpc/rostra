@@ -10,9 +10,9 @@ mod url_sanitization;
 mod xss_sanitization;
 
 #[test]
-fn extract_rostra_id_link() {
+fn test_extract_rostra_id_link() {
     assert_eq!(
-        UiState::extra_rostra_id_link(
+        UiState::extract_rostra_id_link(
             "rostra:rse1okfyp4yj75i6riwbz86mpmbgna3f7qr66aj1njceqoigjabegy"
         ),
         Some(RostraId::from_str("rse1okfyp4yj75i6riwbz86mpmbgna3f7qr66aj1njceqoigjabegy").unwrap())
@@ -23,12 +23,12 @@ fn extract_rostra_id_link() {
 const TEST_EVENT_ID: &str = "AAAAAAAAAAAAAAAAAAAAAAAAAA";
 
 #[test]
-fn extract_rostra_media_link() {
+fn test_extract_rostra_media_link() {
     assert_eq!(
-        UiState::extra_rostra_media_link(&format!("rostra-media:{TEST_EVENT_ID}")),
+        UiState::extract_rostra_media_link(&format!("rostra-media:{TEST_EVENT_ID}")),
         Some(rostra_core::ShortEventId::from_str(TEST_EVENT_ID).unwrap())
     );
-    assert_eq!(UiState::extra_rostra_media_link("not-a-media-link"), None);
+    assert_eq!(UiState::extract_rostra_media_link("not-a-media-link"), None);
 }
 
 /// Helper to render djot content with code block filter only

@@ -25,6 +25,7 @@ maud = { workspace = true }
 listenfd = { workspace = true }
 snafu = { workspace = true }
 rostra-core = { workspace = true }
+rostra-djot = { workspace = true }
 rostra-client = { workspace = true }
 rostra-client-db = { workspace = true }
 rostra-p2p = { workspace = true, features = ["serde"] }

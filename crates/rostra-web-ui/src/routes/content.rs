@@ -1,5 +1,4 @@
 use std::borrow::Cow;
-use std::str::FromStr as _;
 
 use jotup::r#async::{AsyncRender, AsyncRenderOutputExt};
 use jotup::html::filters::AsyncSanitizeExt;
@@ -118,22 +117,14 @@ impl UiState {
         PreEscaped(String::from_utf8(out.into_inner()).expect("djot output is always valid utf8"))
     }
 
-    /// Extra rostra id from a link `s`
-    pub(crate) fn extra_rostra_id_link(s: &str) -> Option<RostraId> {
-        if let Some(s) = s.strip_prefix("rostra:") {
-            RostraId::from_str(s).ok()
-        } else {
-            None
-        }
+    /// Extract rostra id from a link `s`
+    pub(crate) fn extract_rostra_id_link(s: &str) -> Option<RostraId> {
+        rostra_djot::links::extract_rostra_id_link(s)
     }
 
-    /// Extra rostra id from a link `s`
-    pub(crate) fn extra_rostra_media_link(s: &str) -> Option<ShortEventId> {
-        if let Some(s) = s.strip_prefix("rostra-media:") {
-            ShortEventId::from_str(s).ok()
-        } else {
-            None
-        }
+    /// Extract rostra media id from a link `s`
+    pub(crate) fn extract_rostra_media_link(s: &str) -> Option<ShortEventId> {
+        rostra_djot::links::extract_rostra_media_link(s)
     }
 }
 

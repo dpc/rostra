@@ -3095,3 +3095,174 @@ async fn test_total_migration() -> BoxedErrorResult<()> {
 
     Ok(())
 }
+
+/// Test self-mention detection in social posts.
+///
+/// This test verifies that:
+/// 1. Posts mentioning the local user are recorded in social_posts_self_mention
+/// 2. Posts without mentions are not recorded
+/// 3. Self-posts (by the local user) are not recorded even if they mention self
+/// 4. The is_self_mention and get_self_mentions methods work correctly
+#[test_log::test(tokio::test(flavor = "multi_thread"))]
+async fn test_self_mention_detection() -> BoxedErrorResult<()> {
+    use rostra_core::ExternalEventId;
+    use rostra_core::event::{PersonaId, VerifiedEventContent, content_kind};
+
+    let user_a_secret = RostraIdSecretKey::generate();
+    let user_a = user_a_secret.id();
+
+    let user_b_secret = RostraIdSecretKey::generate();
+    let _user_b = user_b_secret.id();
+
+    // Database owned by user_a (user_a is "self")
+    let (_dir, db) = temp_db(user_a).await?;
+
+    // Helper to build a social post event
+    let build_social_post_event = |id_secret: RostraIdSecretKey,
+                                   parent: Option<EventId>,
+                                   djot_content: &str,
+                                   reply_to: Option<ExternalEventId>|
+     -> (VerifiedEvent, EventContentRaw) {
+        use rostra_core::event::content_kind::EventContentKind as _;
+        let content = content_kind::SocialPost {
+            persona: PersonaId(0),
+            djot_content: Some(djot_content.to_string()),
+            reply_to,
+            reaction: None,
+        };
+        let content_raw = content.serialize_cbor().unwrap();
+        let author = id_secret.id();
+        let event = Event::builder_raw_content()
+            .author(author)
+            .kind(EventKind::SOCIAL_POST)
+            .maybe_parent_prev(parent.map(Into::into))
+            .content(&content_raw)
+            .build();
+
+        let signed_event = event.signed_by(id_secret);
+        let verified = VerifiedEvent::verify_signed(author, signed_event).expect("Valid event");
+        (verified, content_raw)
+    };
+
+    // Post 1: User B posts mentioning user A
+    let mention_content = format!("Hello <rostra:{}>!", user_a);
+    let (post_mention, post_mention_content) =
+        build_social_post_event(user_b_secret, None, &mention_content, None);
+    let post_mention_id = post_mention.event_id;
+
+    // Post 2: User B posts without mentioning anyone
+    let (post_no_mention, post_no_mention_content) = build_social_post_event(
+        user_b_secret,
+        Some(post_mention_id),
+        "Just a regular post",
+        None,
+    );
+    let post_no_mention_id = post_no_mention.event_id;
+
+    // Post 3: User A posts (self-post, should not trigger notification)
+    let (post_self, post_self_content) =
+        build_social_post_event(user_a_secret, None, "My own post", None);
+    let post_self_id = post_self.event_id;
+
+    // Post 4: User A posts mentioning themselves (self-mention, should not trigger)
+    let self_mention_content = format!("I am <rostra:{}>!", user_a);
+    let (post_self_mention, post_self_mention_content) = build_social_post_event(
+        user_a_secret,
+        Some(post_self_id),
+        &self_mention_content,
+        None,
+    );
+    let post_self_mention_id = post_self_mention.event_id;
+
+    // Post 5: User B replies to user A's post (reply notification, not mention)
+    let reply_to_a = ExternalEventId::new(user_a, post_self_id);
+    let (post_reply, post_reply_content) = build_social_post_event(
+        user_b_secret,
+        Some(post_no_mention_id),
+        "Reply to A",
+        Some(reply_to_a),
+    );
+    let post_reply_id = post_reply.event_id;
+
+    // Post 6: User B replies AND mentions user A
+    let reply_mention_content = format!("Hey <rostra:{}>, replying to you!", user_a);
+    let (post_reply_mention, post_reply_mention_content) = build_social_post_event(
+        user_b_secret,
+        Some(post_reply_id),
+        &reply_mention_content,
+        Some(reply_to_a),
+    );
+    let post_reply_mention_id = post_reply_mention.event_id;
+
+    // Process all events
+    let events_with_content = [
+        (&post_mention, &post_mention_content),
+        (&post_no_mention, &post_no_mention_content),
+        (&post_self, &post_self_content),
+        (&post_self_mention, &post_self_mention_content),
+        (&post_reply, &post_reply_content),
+        (&post_reply_mention, &post_reply_mention_content),
+    ];
+
+    let now = rostra_core::Timestamp::now();
+    for (event, content_raw) in events_with_content {
+        db.write_with(|tx| {
+            db.process_event_tx(event, now, tx)?;
+            let verified_content =
+                VerifiedEventContent::assume_verified(*event, content_raw.clone());
+            db.process_event_content_tx(&verified_content, now, tx)?;
+            Ok(())
+        })
+        .await?;
+    }
+
+    // Test is_self_mention
+    assert!(
+        db.is_self_mention(post_mention_id.into()).await,
+        "Post with mention should be recorded as self-mention"
+    );
+    assert!(
+        !db.is_self_mention(post_no_mention_id.into()).await,
+        "Post without mention should NOT be recorded as self-mention"
+    );
+    assert!(
+        !db.is_self_mention(post_self_id.into()).await,
+        "Self-post should NOT be recorded as self-mention"
+    );
+    assert!(
+        !db.is_self_mention(post_self_mention_id.into()).await,
+        "Self-post mentioning self should NOT be recorded as self-mention"
+    );
+    assert!(
+        !db.is_self_mention(post_reply_id.into()).await,
+        "Reply without mention should NOT be recorded as self-mention"
+    );
+    assert!(
+        db.is_self_mention(post_reply_mention_id.into()).await,
+        "Reply with mention should be recorded as self-mention"
+    );
+
+    // Test get_self_mentions
+    let self_mentions = db.get_self_mentions().await;
+    assert_eq!(
+        self_mentions.len(),
+        2,
+        "Should have exactly 2 self-mentions (post_mention and post_reply_mention)"
+    );
+    assert!(
+        self_mentions.contains(&post_mention_id.into()),
+        "Self-mentions should contain post_mention"
+    );
+    assert!(
+        self_mentions.contains(&post_reply_mention_id.into()),
+        "Self-mentions should contain post_reply_mention"
+    );
+    assert!(
+        !self_mentions.contains(&post_no_mention_id.into()),
+        "Self-mentions should NOT contain post_no_mention"
+    );
+
+    info!("=== Self-mention detection test passed ===");
+
+    Ok(())
+}

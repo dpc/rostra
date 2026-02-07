@@ -705,4 +705,36 @@ impl Database {
             Database::get_social_post_tx(event_id, social_posts_table)?.unwrap_or_default();
         Ok(Some((social_post, event, social_post_record)))
     }
+
+    /// Check if a post is a self-mention (mentions the local user).
+    ///
+    /// Returns `true` if the post with the given event_id is recorded in
+    /// the `social_posts_self_mention` table, meaning it contains an @mention
+    /// of the local user.
+    pub async fn is_self_mention(&self, event_id: ShortEventId) -> bool {
+        self.read_with(|tx| {
+            let self_mention_table = tx.open_table(&crate::social_posts_self_mention::TABLE)?;
+            Ok(self_mention_table.get(&event_id)?.is_some())
+        })
+        .await
+        .unwrap_or(false)
+    }
+
+    /// Get the set of all event IDs that are self-mentions.
+    ///
+    /// Returns a HashSet of ShortEventIds for posts that mention the local
+    /// user. Used for efficient filtering in notification queries.
+    pub async fn get_self_mentions(&self) -> std::collections::HashSet<ShortEventId> {
+        self.read_with(|tx| {
+            let self_mention_table = tx.open_table(&crate::social_posts_self_mention::TABLE)?;
+            let mut mentions = std::collections::HashSet::new();
+            for entry in self_mention_table.range(..)? {
+                let (key, _) = entry?;
+                mentions.insert(key.value());
+            }
+            Ok(mentions)
+        })
+        .await
+        .unwrap_or_default()
+    }
 }

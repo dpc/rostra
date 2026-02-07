@@ -392,6 +392,20 @@ def_table! {
     social_posts_by_received_at: (Timestamp, u64) => ShortEventId
 }
 
+def_table! {
+    /// Posts that @mention the local user (self).
+    ///
+    /// Key: post_event_id
+    ///
+    /// This table records social posts that contain a `rostra:<self_id>` link,
+    /// which represents an @mention of the local user. Used for notifications
+    /// alongside reply detection.
+    ///
+    /// Only posts by other users are recorded here (self-mentions are not
+    /// recorded since they are not notifications).
+    social_posts_self_mention: ShortEventId => ()
+}
+
 /// Wrapper for values where only the latest version matters.
 ///
 /// Used for singleton-style data where we track timestamps to ensure

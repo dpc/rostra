@@ -59,7 +59,7 @@ where
     async fn emit(&mut self, event: Event<'s>) -> Result<(), Self::Error> {
         match event {
             Event::Start(Container::Link(s, jotup::LinkType::AutoLink), attr) => {
-                if let Some(rostra_id) = UiState::extra_rostra_id_link(&s) {
+                if let Some(rostra_id) = UiState::extract_rostra_id_link(&s) {
                     let display_name = self
                         .client
                         .db()
@@ -194,7 +194,7 @@ where
     async fn emit(&mut self, event: Event<'s>) -> Result<(), Self::Error> {
         match event {
             Event::Start(Container::Image(s, link_type), _attr) => {
-                if let Some(event_id) = UiState::extra_rostra_media_link(&s) {
+                if let Some(event_id) = UiState::extract_rostra_media_link(&s) {
                     // Store event_id to look up content later
                     self.container_stack.push(Some(MediaTransform::RostraMedia {
                         event_id,

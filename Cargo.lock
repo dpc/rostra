@@ -3778,6 +3778,7 @@ dependencies = [
  "redb",
  "redb-bincode",
  "rostra-core",
+ "rostra-djot",
  "rostra-p2p",
  "rostra-p2p-api",
  "rostra-util",
@@ -3820,6 +3821,14 @@ dependencies = [
  "tracing",
  "unicode-segmentation",
  "z32",
+]
+
+[[package]]
+name = "rostra-djot"
+version = "0.1.0"
+dependencies = [
+ "jotup",
+ "rostra-core",
 ]
 
 [[package]]
@@ -3911,6 +3920,7 @@ dependencies = [
  "rostra-client",
  "rostra-client-db",
  "rostra-core",
+ "rostra-djot",
  "rostra-p2p",
  "rostra-p2p-api",
  "rostra-util",

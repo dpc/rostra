@@ -715,10 +715,14 @@ impl TimelineMode {
                 // TODO: actually verify against extended followees
                 move |post| post.author != self_id,
             ),
-            TimelineMode::Notifications => Box::new(move |post| {
-                post.author != self_id
-                    && post.reply_to.map(|ext_id| ext_id.rostra_id()) == Some(self_id)
-            }),
+            TimelineMode::Notifications => {
+                let self_mentions = client.db().get_self_mentions().await;
+                Box::new(move |post| {
+                    post.author != self_id
+                        && (post.reply_to.map(|ext_id| ext_id.rostra_id()) == Some(self_id)
+                            || self_mentions.contains(&post.event_id))
+                })
+            }
             TimelineMode::Profile(rostra_id) => Box::new(move |post| post.author == rostra_id),
             TimelineMode::ProfileSingle(_, _) => {
                 warn!(target: LOG_TARGET, "Should not be here");
