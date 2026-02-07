@@ -60,15 +60,19 @@ impl Database {
             // Record when we received this event
             let mut events_received_at_tbl = tx.open_table(&events_received_at::TABLE)?;
             let reception_order = self.next_reception_order();
-            events_received_at_tbl.insert(
-                &(now, reception_order, event.event_id.to_short()),
+            let key = (now, reception_order);
+            // Assert key uniqueness - reception_order is monotonic so this should never fail
+            let prev = events_received_at_tbl.insert(
+                &key,
                 &EventReceivedRecord {
+                    event_id: event.event_id.to_short(),
                     source: EventReceivedSource::Pushed {
                         from_id: None,
                         from_node: None,
                     },
                 },
             )?;
+            debug_assert!(prev.is_none(), "events_received_at key collision: {:?}", key);
 
             if is_deleted {
                 info!(target: LOG_TARGET,

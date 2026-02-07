@@ -183,12 +183,15 @@ impl Database {
                         .open_table(&social_posts_by_received_at::TABLE)
                         .map_err(DbError::from)?;
                     let reception_order = self.next_reception_order();
-                    social_post_by_received_at_tbl
-                        .insert(
-                            &(now, reception_order, event_content.event_id().to_short()),
-                            &(),
-                        )
+                    let key = (now, reception_order);
+                    // Assert key uniqueness - reception_order is monotonic so this should never fail
+                    let prev = social_post_by_received_at_tbl
+                        .insert(&key, &event_content.event_id().to_short())
                         .map_err(DbError::from)?;
+                    debug_assert!(
+                        prev.is_none(),
+                        "social_posts_by_received_at key collision: {key:?}"
+                    );
 
                     tx.on_commit({
                         let event_content = event_content.clone();

@@ -53,13 +53,13 @@ pub type LegacyEventContentStateOwned = LegacyEventContentState<'static>;
 /// Current schema version.
 ///
 /// Increment this when making schema changes that require migration.
-const DB_VER: u64 = 12;
+const DB_VER: u64 = 13;
 
 /// Versions older than this require a total migration.
 ///
 /// This should be set to the version where we last did a major schema
 /// overhaul. Older databases get rebuilt from scratch.
-const DB_VER_REQUIRES_TOTAL_MIGRATION: u64 = 12;
+const DB_VER_REQUIRES_TOTAL_MIGRATION: u64 = 13;
 
 /// Prefix used for temporary tables during total migration.
 const MIGRATION_TEMP_PREFIX: &str = "_total_migration_";

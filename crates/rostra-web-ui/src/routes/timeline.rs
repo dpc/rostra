@@ -94,12 +94,8 @@ pub async fn get_notifications(
     Form(form): Form<TimelinePaginationInput>,
 ) -> RequestResult<impl IntoResponse> {
     let pagination = form.ts.and_then(|ts| {
-        form.event_id.map(|event_id| {
-            TimelineCursor::ByReceivedTime(ReceivedAtPaginationCursor {
-                ts,
-                reception_order: form.reception_order.unwrap_or(0),
-                event_id,
-            })
+        form.reception_order.map(|reception_order| {
+            TimelineCursor::ByReceivedTime(ReceivedAtPaginationCursor { ts, reception_order })
         })
     });
     let navbar = state.timeline_common_navbar(&session).await?;
@@ -608,10 +604,7 @@ impl TimelineCursor {
                 format!("ts={}&event_id={}", c.ts, c.event_id)
             }
             TimelineCursor::ByReceivedTime(c) => {
-                format!(
-                    "ts={}&reception_order={}&event_id={}",
-                    c.ts, c.reception_order, c.event_id
-                )
+                format!("ts={}&reception_order={}", c.ts, c.reception_order)
             }
         }
     }
