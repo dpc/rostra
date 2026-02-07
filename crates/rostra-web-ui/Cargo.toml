@@ -10,6 +10,7 @@ version = { workspace = true }
 workspace = true
 
 [dependencies]
+atom_syndication = { workspace = true }
 async-stream = { workspace = true }
 async-trait = { workspace = true }
 axum = { workspace = true, features = ["ws", "multipart"] }

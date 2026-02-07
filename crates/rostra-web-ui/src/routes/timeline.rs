@@ -24,6 +24,7 @@ use super::Maud;
 use super::cookies::CookiesExt as _;
 use super::unlock::session::UserSession;
 use crate::html_utils::re_typeset_mathjax;
+use crate::layout::FeedLinks;
 use crate::util::extractors::AjaxRequest;
 use crate::{LOG_TARGET, SharedState, UiState};
 
@@ -309,7 +310,20 @@ impl UiState {
 
         };
 
-        self.render_html_page("Rostra", content).await
+        // Build feed links for profile pages
+        let feed_links = match mode {
+            TimelineMode::Profile(profile_id) => {
+                let profile = self.get_social_profile(profile_id, &client_ref).await;
+                Some(FeedLinks {
+                    title: format!("{} - Rostra Feed", profile.display_name),
+                    atom_url: format!("/ui/profile/{profile_id}/atom.xml"),
+                })
+            }
+            _ => None,
+        };
+
+        self.render_html_page("Rostra", content, feed_links.as_ref())
+            .await
     }
 
     pub(crate) async fn handle_notification_cookies(

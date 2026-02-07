@@ -37,6 +37,7 @@ edition = "2021"
 license = "MIT"
 
 [workspace.dependencies]
+atom_syndication = "0.4"
 async-stream = "0.3.6"
 async-trait = "0.1"
 anyhow = "1.0.95"

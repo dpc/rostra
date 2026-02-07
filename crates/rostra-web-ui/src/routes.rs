@@ -2,6 +2,7 @@ mod add_followee;
 mod avatar;
 mod content;
 mod cookies;
+mod feeds;
 pub mod fragment;
 mod media;
 mod new_post;
@@ -162,6 +163,10 @@ pub fn route_handler(state: SharedState) -> Router<Arc<UiState>> {
         .route("/ui/network", get(timeline::get_network))
         .route("/ui/notifications", get(timeline::get_notifications))
         .route("/ui/profile/{id}", get(profile::get_profile))
+        .route(
+            "/ui/profile/{id}/atom.xml",
+            get(feeds::get_profile_feed_atom),
+        )
         .route(
             "/ui/profile/{id}/follow",
             get(profile::get_follow_dialog).post(profile::post_follow),

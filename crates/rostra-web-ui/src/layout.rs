@@ -3,9 +3,19 @@ use maud::{DOCTYPE, Markup, PreEscaped, html};
 use crate::UiState;
 use crate::error::RequestResult;
 
+/// Feed discovery links for inclusion in HTML head
+pub struct FeedLinks {
+    pub title: String,
+    pub atom_url: String,
+}
+
 impl UiState {
     /// Html page header
-    pub(crate) fn render_html_head(&self, page_title: &str) -> Markup {
+    pub(crate) fn render_html_head(
+        &self,
+        page_title: &str,
+        feed_links: Option<&FeedLinks>,
+    ) -> Markup {
         html! {
             (DOCTYPE)
             html lang="en";
@@ -20,6 +30,11 @@ impl UiState {
                 link rel="stylesheet" type="text/css" href="/assets/libs/prismjs/prism-toolbar.min.css";
                 link rel="icon" type="image/png" href="/assets/favicon.png";
                 title { (page_title) }
+                // Feed discovery links
+                @if let Some(links) = feed_links {
+                    link rel="alternate" type="application/atom+xml"
+                         title=(links.title) href=(links.atom_url);
+                }
                 // Hide elements with x-cloak until Alpine initializes
                 style { "[x-cloak] { display: none !important; }" }
                 // Load Alpine.js right away so it's immediately available, use defer to make it
@@ -54,9 +69,14 @@ impl UiState {
         }
     }
 
-    pub async fn render_html_page(&self, title: &str, content: Markup) -> RequestResult<Markup> {
+    pub async fn render_html_page(
+        &self,
+        title: &str,
+        content: Markup,
+        feed_links: Option<&FeedLinks>,
+    ) -> RequestResult<Markup> {
         Ok(html! {
-            (self.render_html_head(title))
+            (self.render_html_head(title, feed_links))
             body ."o-body"
                 x-data=r#"{
                     notifications: [],

@@ -185,7 +185,7 @@ impl UiState {
         navbar: Markup,
         content: Markup,
     ) -> RequestResult<Markup> {
-        self.render_html_page("Settings", self.render_page_layout(navbar, content))
+        self.render_html_page("Settings", self.render_page_layout(navbar, content), None)
             .await
     }
 
