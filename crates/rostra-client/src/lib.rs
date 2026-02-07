@@ -25,6 +25,7 @@ const RRECORD_HEAD_KEY: &str = "rostra-head";
 const LOG_TARGET: &str = "rostra";
 
 mod client;
+mod net;
 pub use crate::client::*;
 
 fn get_rrecord_typed<T>(

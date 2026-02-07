@@ -12,10 +12,11 @@ use crate::connection_cache::ConnectionCache;
 
 #[derive(Clone)]
 pub struct MissingEventFetcher {
-    // Notablye, we want to shutdown when db disconnects, so let's not keep references to it here
+    // Notably, we want to shutdown when db disconnects, so let's not keep references to it here
     client: crate::client::ClientHandle,
     self_id: RostraId,
     ids_with_missing_events_rx: dedup_chan::Receiver<RostraId>,
+    connections: ConnectionCache,
 }
 
 impl MissingEventFetcher {
@@ -25,6 +26,7 @@ impl MissingEventFetcher {
             client: client.handle(),
             self_id: client.rostra_id(),
             ids_with_missing_events_rx: client.ids_with_missing_events_subscribe(100),
+            connections: client.connection_cache().clone(),
         }
     }
 
@@ -74,7 +76,7 @@ impl MissingEventFetcher {
                 continue;
             }
 
-            let connections = ConnectionCache::new();
+            let connections = &self.connections;
 
             for follower_id in followers.iter().chain([self.self_id].iter()) {
                 let Ok(client) = self.client.client_ref().boxed() else {

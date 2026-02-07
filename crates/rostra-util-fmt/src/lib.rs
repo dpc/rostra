@@ -30,6 +30,38 @@ where
     }
 }
 
+pub struct FmtResult<'r, T, E>(pub Result<&'r T, &'r E>);
+
+impl<T, E> fmt::Display for FmtResult<'_, T, E>
+where
+    T: fmt::Display,
+    E: fmt::Display,
+{
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match &self.0 {
+            Ok(t) => write!(f, "Ok({t})"),
+            Err(e) => write!(f, "Err({e})"),
+        }
+    }
+}
+
+pub trait AsFmtResult {
+    type Fmt: fmt::Display;
+    fn fmt_result(&self) -> Self::Fmt;
+}
+
+impl<'e, T, E> AsFmtResult for &'e Result<T, E>
+where
+    T: fmt::Display,
+    E: fmt::Display,
+{
+    type Fmt = FmtResult<'e, T, E>;
+
+    fn fmt_result(&self) -> Self::Fmt {
+        FmtResult(self.as_ref())
+    }
+}
+
 /// Format a byte count as human-readable string (e.g., "1.5 KB", "3.2 MB").
 pub fn format_bytes(bytes: u64) -> String {
     const KB: u64 = 1024;

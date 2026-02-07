@@ -2,6 +2,7 @@ use core::{fmt, str};
 
 use iroh_base::{EndpointAddr, EndpointId};
 use rostra_core::ShortEventId;
+use rostra_core::event::IrohNodeId;
 use rostra_util_error::BoxedError;
 use serde::{Deserialize, Serialize};
 
@@ -9,9 +10,9 @@ use serde::{Deserialize, Serialize};
 pub struct CompactTicket(pub EndpointId);
 
 impl CompactTicket {
-    /// Returns the endpoint ID in z32 encoding (standard Iroh/Pkarr format).
-    pub fn to_z32(&self) -> String {
-        z32::encode(self.0.as_bytes())
+    /// Returns the endpoint ID as an IrohNodeId.
+    pub fn to_iroh_node_id(&self) -> IrohNodeId {
+        IrohNodeId::from_bytes(*self.0.as_bytes())
     }
 }
 

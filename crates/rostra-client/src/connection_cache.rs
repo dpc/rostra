@@ -52,7 +52,7 @@ impl ConnectionCache {
         let result = entry_arc
             .get_or_init(|| async {
                 trace!(target: LOG_TARGET, %id, "Creating new connection");
-                match client.connect(id).await {
+                match client.connect_uncached(id).await {
                     Ok(conn) => {
                         trace!(target: LOG_TARGET, %id, "Connection successful");
                         Some(conn)

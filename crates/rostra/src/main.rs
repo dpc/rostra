@@ -117,7 +117,7 @@ async fn handle_cmd(opts: Opts) -> CliResult<serde_json::Value> {
                     if let Some(connection) = connection {
                         connection.ping(seq).await.context(RpcSnafu)
                     } else {
-                        let connection = client.connect(id).await.context(ConnectSnafu)?;
+                        let connection = client.connect_uncached(id).await.context(ConnectSnafu)?;
                         connection.ping(seq).await.context(RpcSnafu)
                     }
                 }
@@ -127,7 +127,7 @@ async fn handle_cmd(opts: Opts) -> CliResult<serde_json::Value> {
                     .await
                     .context(InitSnafu)?;
                 let connection = if connect_once {
-                    Some(client.connect(id).await.context(ConnectSnafu)?)
+                    Some(client.connect_uncached(id).await.context(ConnectSnafu)?)
                 } else {
                     None
                 };

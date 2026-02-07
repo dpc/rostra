@@ -151,7 +151,7 @@ pub async fn get_settings_p2p(
 
     // Get our local Iroh ID if viewing our own identity
     let local_iroh_id = if selected_id == user_id {
-        Some(client_ref.local_iroh_id_z32())
+        Some(client_ref.local_iroh_id())
     } else {
         None
     };
@@ -570,7 +570,7 @@ impl UiState {
         known_nodes: BTreeMap<(Timestamp, IrohNodeId), IrohNodeRecord>,
         node_states: std::collections::HashMap<IrohNodeId, NodeP2PState>,
         pkarr_data: Option<IdResolvedData>,
-        local_iroh_id: Option<String>,
+        local_iroh_id: Option<IrohNodeId>,
     ) -> RequestResult<Markup> {
         let client = self.client(session.id()).await?;
         let client_ref = client.client_ref()?;
@@ -618,13 +618,19 @@ impl UiState {
                         div ."m-p2pExplorer__statusGrid" {
                             span ."m-p2pExplorer__statusLabel" { "Iroh Node ID (z32):" }
                             span ."m-p2pExplorer__statusValue" {
-                                code ."m-p2pExplorer__ticket" { (iroh_id) }
+                                @let z32_id = iroh_id.to_z32();
+                                code ."m-p2pExplorer__ticket" { (&z32_id) }
                                 details ."m-p2pExplorer__dnsHint" {
                                     summary { "DNS lookup command" }
                                     code ."m-p2pExplorer__dnsCommand" {
-                                        "dig TXT _iroh." (iroh_id) ".dns.iroh.link"
+                                        "dig TXT _iroh." (&z32_id) ".dns.iroh.link"
                                     }
                                 }
+                            }
+
+                            span ."m-p2pExplorer__statusLabel" { "Iroh Node ID (base32):" }
+                            span ."m-p2pExplorer__statusValue" {
+                                code ."m-p2pExplorer__ticket" { (iroh_id) }
                             }
                         }
                     }
@@ -639,7 +645,8 @@ impl UiState {
                             span ."m-p2pExplorer__statusLabel" { "Iroh Node ID (z32):" }
                             span ."m-p2pExplorer__statusValue" {
                                 @if let Some(ref ticket) = data.published.ticket {
-                                    @let z32_id = ticket.to_z32();
+                                    @let node_id = ticket.to_iroh_node_id();
+                                    @let z32_id = node_id.to_z32();
                                     code ."m-p2pExplorer__ticket" { (&z32_id) }
                                     details ."m-p2pExplorer__dnsHint" {
                                         summary { "DNS lookup command" }
@@ -652,10 +659,11 @@ impl UiState {
                                 }
                             }
 
-                            span ."m-p2pExplorer__statusLabel" { "Ticket (compact):" }
+                            span ."m-p2pExplorer__statusLabel" { "Iroh Node ID (base32):" }
                             span ."m-p2pExplorer__statusValue" {
                                 @if let Some(ref ticket) = data.published.ticket {
-                                    code ."m-p2pExplorer__ticket" { (ticket.to_string()) }
+                                    @let node_id = ticket.to_iroh_node_id();
+                                    code ."m-p2pExplorer__ticket" { (node_id) }
                                 } @else {
                                     span ."m-p2pExplorer__statusNone" { "not published" }
                                 }
@@ -783,40 +791,45 @@ impl UiState {
                             @for ((announce_ts, node_id), record) in &known_nodes {
                                 @let node_state = node_states.get(node_id);
                                 div ."m-p2pExplorer__nodeRow" {
-                                    div ."m-p2pExplorer__nodeHeader" {
-                                        code ."m-p2pExplorer__nodeId" { (node_id) }
-                                        span ."m-p2pExplorer__nodeAnnounce" {
-                                            "announced " (format_timestamp(*announce_ts))
-                                        }
-                                    }
-                                    div ."m-p2pExplorer__nodeConnStatus" {
-                                        span ."m-p2pExplorer__nodeConnLabel" { "Attempt:" }
-                                        span ."m-p2pExplorer__nodeConnValue" {
+                                    div ."m-p2pExplorer__nodeGrid" {
+                                        span ."m-p2pExplorer__nodeLabel" { "ID (base32):" }
+                                        code ."m-p2pExplorer__nodeValue" { (node_id) }
+
+                                        span ."m-p2pExplorer__nodeLabel" { "ID (z32):" }
+                                        code ."m-p2pExplorer__nodeValue" { (node_id.to_z32()) }
+
+                                        span ."m-p2pExplorer__nodeLabel" { "Announced:" }
+                                        span ."m-p2pExplorer__nodeValue" { (format_timestamp(*announce_ts)) }
+
+                                        span ."m-p2pExplorer__nodeLabel" { "Record ts:" }
+                                        span ."m-p2pExplorer__nodeValue" { (format_timestamp(record.announcement_ts)) }
+
+                                        span ."m-p2pExplorer__nodeLabel" { "Attempt:" }
+                                        span ."m-p2pExplorer__nodeValue" {
                                             @if let Some(ts) = node_state.and_then(|s| s.last_attempt) {
                                                 (format_timestamp(ts))
                                             } @else {
                                                 span ."m-p2pExplorer__statusNone" { "never" }
                                             }
                                         }
-                                        span ."m-p2pExplorer__nodeConnLabel" { "Success:" }
-                                        span ."m-p2pExplorer__nodeConnValue.-success" {
+
+                                        span ."m-p2pExplorer__nodeLabel" { "Success:" }
+                                        span ."m-p2pExplorer__nodeValue.-success" {
                                             @if let Some(ts) = node_state.and_then(|s| s.last_success) {
                                                 (format_timestamp(ts))
                                             } @else {
                                                 span ."m-p2pExplorer__statusNone" { "never" }
                                             }
                                         }
-                                        span ."m-p2pExplorer__nodeConnLabel" { "Failure:" }
-                                        span ."m-p2pExplorer__nodeConnValue.-failure" {
+
+                                        span ."m-p2pExplorer__nodeLabel" { "Failure:" }
+                                        span ."m-p2pExplorer__nodeValue.-failure" {
                                             @if let Some(ts) = node_state.and_then(|s| s.last_failure) {
                                                 (format_timestamp(ts))
                                             } @else {
                                                 span ."m-p2pExplorer__statusNone" { "never" }
                                             }
                                         }
-                                    }
-                                    div ."m-p2pExplorer__nodeStats" {
-                                        span { "Record ts: " (format_timestamp(record.announcement_ts)) }
                                     }
                                 }
                             }
@@ -844,29 +857,33 @@ impl UiState {
                         div ."m-p2pExplorer__nodeList" {
                             @for (node_id, node_state) in &pkarr_only_nodes {
                                 div ."m-p2pExplorer__nodeRow" {
-                                    div ."m-p2pExplorer__nodeHeader" {
-                                        code ."m-p2pExplorer__nodeId" { (node_id) }
-                                        span ."m-p2pExplorer__nodeSource" { "(from pkarr)" }
-                                    }
-                                    div ."m-p2pExplorer__nodeConnStatus" {
-                                        span ."m-p2pExplorer__nodeConnLabel" { "Attempt:" }
-                                        span ."m-p2pExplorer__nodeConnValue" {
+                                    div ."m-p2pExplorer__nodeGrid" {
+                                        span ."m-p2pExplorer__nodeLabel" { "ID (base32):" }
+                                        code ."m-p2pExplorer__nodeValue" { (node_id) }
+
+                                        span ."m-p2pExplorer__nodeLabel" { "ID (z32):" }
+                                        code ."m-p2pExplorer__nodeValue" { (node_id.to_z32()) }
+
+                                        span ."m-p2pExplorer__nodeLabel" { "Attempt:" }
+                                        span ."m-p2pExplorer__nodeValue" {
                                             @if let Some(ts) = node_state.last_attempt {
                                                 (format_timestamp(ts))
                                             } @else {
                                                 span ."m-p2pExplorer__statusNone" { "never" }
                                             }
                                         }
-                                        span ."m-p2pExplorer__nodeConnLabel" { "Success:" }
-                                        span ."m-p2pExplorer__nodeConnValue.-success" {
+
+                                        span ."m-p2pExplorer__nodeLabel" { "Success:" }
+                                        span ."m-p2pExplorer__nodeValue.-success" {
                                             @if let Some(ts) = node_state.last_success {
                                                 (format_timestamp(ts))
                                             } @else {
                                                 span ."m-p2pExplorer__statusNone" { "never" }
                                             }
                                         }
-                                        span ."m-p2pExplorer__nodeConnLabel" { "Failure:" }
-                                        span ."m-p2pExplorer__nodeConnValue.-failure" {
+
+                                        span ."m-p2pExplorer__nodeLabel" { "Failure:" }
+                                        span ."m-p2pExplorer__nodeValue.-failure" {
                                             @if let Some(ts) = node_state.last_failure {
                                                 (format_timestamp(ts))
                                             } @else {

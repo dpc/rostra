@@ -87,6 +87,13 @@ array_type_define!(
 array_type_impl_serde!(struct IrohNodeId, 32);
 array_type_impl_base32_str!(IrohNodeId);
 
+impl IrohNodeId {
+    /// Returns the node ID in z32 encoding (standard Iroh/Pkarr format).
+    pub fn to_z32(&self) -> String {
+        z32::encode(self.as_slice())
+    }
+}
+
 #[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
 #[cfg_attr(feature = "serde", derive(::serde::Serialize))]
 #[cfg_attr(feature = "serde", serde(tag = "t"))]

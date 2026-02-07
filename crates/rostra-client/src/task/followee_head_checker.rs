@@ -9,7 +9,7 @@ use rostra_p2p::Connection;
 use rostra_util::is_rostra_dev_mode_set;
 use rostra_util_error::{BoxedErrorResult, FmtCompact, WhateverResult};
 use snafu::ResultExt as _;
-use tokio::sync::watch;
+use tokio::sync::{Mutex, watch};
 use tracing::{debug, info, instrument, trace};
 
 use crate::ClientRef;
@@ -17,12 +17,16 @@ use crate::client::Client;
 use crate::connection_cache::ConnectionCache;
 const LOG_TARGET: &str = "rostra::head_checker";
 
+/// Shared follower cache for concurrent head checking
+type SharedFollowerCache = Arc<Mutex<BTreeMap<RostraId, Vec<RostraId>>>>;
+
 pub struct FolloweeHeadChecker {
     client: crate::client::ClientHandle,
     db: Arc<Database>,
     self_id: RostraId,
     followee_updated: watch::Receiver<HashMap<RostraId, IdsFolloweesRecord>>,
     check_for_updates_rx: watch::Receiver<()>,
+    connections: ConnectionCache,
 }
 
 impl FolloweeHeadChecker {
@@ -34,6 +38,7 @@ impl FolloweeHeadChecker {
             self_id: client.rostra_id(),
             followee_updated: client.self_followees_subscribe(),
             check_for_updates_rx: client.check_for_updates_tx_subscribe(),
+            connections: client.connection_cache().clone(),
         }
     }
 
@@ -68,8 +73,8 @@ impl FolloweeHeadChecker {
                 break;
             };
 
-            let mut connections = ConnectionCache::new();
-            let mut followers_by_followee = BTreeMap::new();
+            let connections = &self.connections;
+            let followers_cache: SharedFollowerCache = Arc::new(Mutex::new(BTreeMap::new()));
 
             let (followees_direct, followees_ext) =
                 storage.get_followees_extended(self.self_id).await;
@@ -85,35 +90,64 @@ impl FolloweeHeadChecker {
                     break;
                 };
 
-                let (head_pkarr, head_iroh) = tokio::join!(
-                    self.check_for_new_head_pkarr(&client, id),
-                    self.check_for_new_head_iroh(&client, id),
+                trace!(target: LOG_TARGET, %id, "Checking id");
+
+                let followers_cache = followers_cache.clone();
+
+                tokio::join!(
+                    async {
+                        let res = self.check_for_new_head_pkarr(&client, id).await;
+                        trace!(target: LOG_TARGET, %id, ?res, "pkarr check finished");
+                        self.process_head_check_result(
+                            "pkarr",
+                            id,
+                            res,
+                            connections,
+                            &followers_cache,
+                        )
+                        .await;
+                    },
+                    async {
+                        let res = self.check_for_new_head_iroh(&client, id, connections).await;
+                        trace!(target: LOG_TARGET, %id, ?res, "iroh check finished");
+                        self.process_head_check_result(
+                            "iroh",
+                            id,
+                            res,
+                            connections,
+                            &followers_cache,
+                        )
+                        .await;
+                    },
                 );
 
-                for (source, res) in [("pkarr", head_pkarr), ("iroh", head_iroh)] {
-                    match res {
-                        Err(err) => {
-                            info!(target: LOG_TARGET, err = %err, id = %id.to_short(), %source, "Failed to check for updates");
-                        }
-                        Ok(None) => {
-                            info!(target: LOG_TARGET, id = %id.to_short(), %source, "No updates");
-                            continue;
-                        }
-                        Ok(Some(head)) => {
-                            info!(target: LOG_TARGET, id = %id.to_short(), %source, "Has updates");
-                            if let Err(err) = self
-                                .download_new_data(
-                                    id,
-                                    head,
-                                    &mut connections,
-                                    &mut followers_by_followee,
-                                )
-                                .await
-                            {
-                                info!(target: LOG_TARGET, err = %(&*err).fmt_compact(), id = %id.to_short(), "Failed to download new data");
-                            }
-                        }
-                    }
+                trace!(target: LOG_TARGET, %id, "Checking id - done");
+            }
+        }
+    }
+
+    async fn process_head_check_result(
+        &self,
+        source: &'static str,
+        id: RostraId,
+        res: BoxedErrorResult<Option<ShortEventId>>,
+        connections: &ConnectionCache,
+        followers_cache: &SharedFollowerCache,
+    ) {
+        match res {
+            Err(err) => {
+                info!(target: LOG_TARGET, err = %err, id = %id.to_short(), %source, "Failed to check for updates");
+            }
+            Ok(None) => {
+                info!(target: LOG_TARGET, id = %id.to_short(), %source, "No updates");
+            }
+            Ok(Some(head)) => {
+                info!(target: LOG_TARGET, id = %id.to_short(), %source, "Has updates");
+                if let Err(err) = self
+                    .download_new_data(id, head, connections, followers_cache)
+                    .await
+                {
+                    info!(target: LOG_TARGET, err = %(&*err).fmt_compact(), id = %id.to_short(), "Failed to download new data");
                 }
             }
         }
@@ -123,8 +157,11 @@ impl FolloweeHeadChecker {
         &self,
         client: &ClientRef<'_>,
         id: RostraId,
+        connections: &ConnectionCache,
     ) -> BoxedErrorResult<Option<ShortEventId>> {
-        let conn = client.connect(id).await?;
+        let Some(conn) = connections.get_or_connect(client, id).await else {
+            return Ok(None);
+        };
 
         let head = conn.get_head(id).await.boxed()?;
         let now = Timestamp::now();
@@ -178,26 +215,29 @@ impl FolloweeHeadChecker {
         &self,
         rostra_id: RostraId,
         head: ShortEventId,
-        connections: &mut ConnectionCache,
-        followers_by_followee: &mut BTreeMap<RostraId, Vec<RostraId>>,
+        connections: &ConnectionCache,
+        followers_cache: &SharedFollowerCache,
     ) -> BoxedErrorResult<()> {
-        let followers = if let Some(followers) = followers_by_followee.get(&rostra_id) {
-            followers
-        } else {
-            let client = self.client.client_ref().boxed()?;
-            let storage = client.db();
-            let followers = storage.get_followers(rostra_id).await;
-            followers_by_followee.insert(rostra_id, followers);
-
-            followers_by_followee
-                .get(&rostra_id)
-                .expect("Just inserted")
+        // Get or fetch followers, locking only briefly
+        let followers: Vec<RostraId> = {
+            let mut cache = followers_cache.lock().await;
+            if let Some(followers) = cache.get(&rostra_id) {
+                followers.clone()
+            } else {
+                let client = self.client.client_ref().boxed()?;
+                let storage = client.db();
+                let followers = storage.get_followers(rostra_id).await;
+                cache.insert(rostra_id, followers.clone());
+                followers
+            }
         };
 
         for follower_id in followers.iter().chain([rostra_id, self.self_id].iter()) {
             let Ok(client) = self.client.client_ref().boxed() else {
                 break;
             };
+
+            // ConnectionCache handles its own interior mutability
             let Some(conn) = connections.get_or_connect(&client, *follower_id).await else {
                 continue;
             };
@@ -230,6 +270,7 @@ impl FolloweeHeadChecker {
         }
         Ok(())
     }
+
     async fn download_new_data_from(
         &self,
         client: &ClientRef<'_>,

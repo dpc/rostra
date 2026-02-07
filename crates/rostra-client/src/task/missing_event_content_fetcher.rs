@@ -13,9 +13,10 @@ use crate::util::rpc::get_event_content_from_followers;
 
 #[derive(Clone)]
 pub struct MissingEventContentFetcher {
-    // Notablye, we want to shutdown when db disconnects, so let's not keep references to it here
+    // Notably, we want to shutdown when db disconnects, so let's not keep references to it here
     client: crate::client::ClientHandle,
     self_id: RostraId,
+    connections: ConnectionCache,
 }
 
 impl MissingEventContentFetcher {
@@ -24,6 +25,7 @@ impl MissingEventContentFetcher {
         Self {
             client: client.handle(),
             self_id: client.rostra_id(),
+            connections: client.connection_cache().clone(),
         }
     }
 
@@ -48,7 +50,7 @@ impl MissingEventContentFetcher {
 
             let mut cursor: Option<ShortEventId> = None;
 
-            let connections = ConnectionCache::new();
+            let connections = &self.connections;
             let mut followers_by_followee = BTreeMap::new();
 
             loop {
