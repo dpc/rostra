@@ -310,6 +310,33 @@ impl UiState {
                     p ."o-settingsContent__empty" {
                         "You are not following anyone yet."
                     }
+
+                    h3 ."o-settingsContent__sectionHeader" { "Suggestion" }
+                    div ."m-followeeList__item" {
+                        img ."m-followeeList__avatar u-userImage"
+                            src="/ui/avatar/rse1okfyp4yj75i6riwbz86mpmbgna3f7qr66aj1njceqoigjabegy"
+                            alt="Avatar"
+                            width="32"
+                            height="32"
+                            loading="lazy"
+                            {}
+                        a ."m-followeeList__name"
+                            href="/ui/profile/rse1okfyp4yj75i6riwbz86mpmbgna3f7qr66aj1njceqoigjabegy"
+                        {
+                            "dpc (Rostra's author)"
+                        }
+                        (fragment::ajax_button(
+                            "/ui/profile/rse1okfyp4yj75i6riwbz86mpmbgna3f7qr66aj1njceqoigjabegy/follow",
+                            "get",
+                            "follow-dialog-content",
+                            "m-followeeList__followButton",
+                            "Follow...",
+                        )
+                        .disabled(session.ro_mode().to_disabled())
+                        .hidden_inputs(html! { input type="hidden" name="following" value="false" {} })
+                        .form_class("m-followeeList__actions")
+                        .call())
+                    }
                 } @else {
                     @for (followee_id, display_name) in &followee_items {
                         div ."m-followeeList__item" {
@@ -369,6 +396,18 @@ impl UiState {
                 @if follower_items.is_empty() {
                     p ."o-settingsContent__empty" {
                         "No one is following you yet (that you know of)."
+                    }
+
+                    div ."o-settingsContent__note" {
+                        p {
+                            "In Rostra, your posts are only visible to people who follow you and the people who follow people who follow you. "
+                            "To help others discover you, consider sharing your Rostra ID in the "
+                            a href="https://github.com/dpc/rostra/discussions/categories/introductions"
+                                target="_blank"
+                                rel="noopener"
+                            { "Introductions" }
+                            " section on GitHub."
+                        }
                     }
                 } @else {
                     @for (follower_id, display_name) in &follower_items {

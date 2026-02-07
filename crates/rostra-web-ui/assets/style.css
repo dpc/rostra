@@ -1795,6 +1795,31 @@ input:checked+.slider:before {
   font-style: italic;
 }
 
+.o-settingsContent__suggestion,
+.o-settingsContent__note {
+  margin-top: 1rem;
+  padding: 0.75rem 1rem;
+  background: var(--color-post-bg);
+  border: 1px solid var(--color-button-border);
+  border-radius: var(--border-radius-std);
+}
+
+.o-settingsContent__suggestionHeader {
+  margin: 0 0 0.5rem 0;
+  font-size: 0.9rem;
+  color: var(--color-text-muted);
+}
+
+.o-settingsContent__suggestionText,
+.o-settingsContent__note p {
+  margin: 0;
+  line-height: 1.5;
+}
+
+.o-settingsContent__note a {
+  color: var(--color-link);
+}
+
 .m-followeeList {
   display: flex;
   flex-direction: column;
