@@ -44,6 +44,7 @@ serde = { workspace = true }
 snafu = { workspace = true }
 rand = { workspace = true }
 url = { workspace = true }
+z32 = { workspace = true }
 tokio = { workspace = true }
 tracing = { workspace = true }
 tracing-subscriber = { workspace = true }

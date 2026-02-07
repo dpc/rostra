@@ -8,6 +8,13 @@ use serde::{Deserialize, Serialize};
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct CompactTicket(pub EndpointId);
 
+impl CompactTicket {
+    /// Returns the endpoint ID in z32 encoding (standard Iroh/Pkarr format).
+    pub fn to_z32(&self) -> String {
+        z32::encode(self.0.as_bytes())
+    }
+}
+
 impl fmt::Display for CompactTicket {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         data_encoding::BASE64URL_NOPAD.encode_write(self.0.as_bytes(), f)

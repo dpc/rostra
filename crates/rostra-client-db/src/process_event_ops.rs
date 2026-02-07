@@ -61,7 +61,8 @@ impl Database {
             let mut events_received_at_tbl = tx.open_table(&events_received_at::TABLE)?;
             let reception_order = self.next_reception_order();
             let key = (now, reception_order);
-            // Assert key uniqueness - reception_order is monotonic so this should never fail
+            // Assert key uniqueness - reception_order is monotonic so this should never
+            // fail
             let prev = events_received_at_tbl.insert(
                 &key,
                 &EventReceivedRecord {
@@ -72,7 +73,10 @@ impl Database {
                     },
                 },
             )?;
-            debug_assert!(prev.is_none(), "events_received_at key collision: {:?}", key);
+            debug_assert!(
+                prev.is_none(),
+                "events_received_at key collision: {key:?}"
+            );
 
             if is_deleted {
                 info!(target: LOG_TARGET,

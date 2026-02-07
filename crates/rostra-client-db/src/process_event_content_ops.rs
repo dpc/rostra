@@ -184,7 +184,8 @@ impl Database {
                         .map_err(DbError::from)?;
                     let reception_order = self.next_reception_order();
                     let key = (now, reception_order);
-                    // Assert key uniqueness - reception_order is monotonic so this should never fail
+                    // Assert key uniqueness - reception_order is monotonic so this should never
+                    // fail
                     let prev = social_post_by_received_at_tbl
                         .insert(&key, &event_content.event_id().to_short())
                         .map_err(DbError::from)?;

@@ -1978,3 +1978,130 @@ input:checked+.slider:before {
 .m-eventExplorer__parentNone {
   opacity: 0.5;
 }
+
+/* P2P Explorer */
+.m-p2pExplorer__statusGrid {
+  display: grid;
+  grid-template-columns: 20% 80%;
+  gap: 0.5rem 1rem;
+}
+
+.m-p2pExplorer__statusLabel {
+  color: var(--color-text-muted);
+  font-weight: 500;
+}
+
+.m-p2pExplorer__statusValue {
+  font-family: var(--font-mono);
+}
+
+.m-p2pExplorer__statusValue.-success {
+  color: var(--color-success, #4caf50);
+}
+
+.m-p2pExplorer__statusValue.-failure {
+  color: var(--color-error, #f44336);
+}
+
+.m-p2pExplorer__statusNone {
+  opacity: 0.5;
+  font-style: italic;
+}
+
+.m-p2pExplorer__ticket {
+  word-break: break-all;
+  font-size: 0.85rem;
+}
+
+.m-p2pExplorer__dnsHint {
+  margin-top: 0.5rem;
+  font-size: 0.85rem;
+}
+
+.m-p2pExplorer__dnsHint summary {
+  cursor: pointer;
+  color: var(--color-link);
+  font-family: var(--font-sans);
+}
+
+.m-p2pExplorer__dnsHint summary:hover {
+  color: var(--color-link-hover);
+}
+
+.m-p2pExplorer__dnsCommand {
+  display: block;
+  margin-top: 0.25rem;
+  padding: 0.5rem;
+  background: var(--color-bg-secondary);
+  border-radius: 4px;
+  white-space: nowrap;
+  overflow-x: auto;
+  user-select: all;
+}
+
+.m-p2pExplorer__nodeList {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.m-p2pExplorer__nodeRow {
+  background: var(--color-bg-secondary);
+  border: 1px solid var(--color-border);
+  border-radius: 4px;
+  padding: 0.75rem;
+}
+
+.m-p2pExplorer__nodeHeader {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0.5rem 1rem;
+  margin-bottom: 0.5rem;
+}
+
+.m-p2pExplorer__nodeId {
+  font-family: var(--font-mono);
+  font-size: 0.85rem;
+  word-break: break-all;
+}
+
+.m-p2pExplorer__nodeAnnounce {
+  font-size: 0.85rem;
+  color: var(--color-text-muted);
+}
+
+.m-p2pExplorer__nodeSource {
+  font-size: 0.85rem;
+  color: var(--color-text-muted);
+  font-style: italic;
+}
+
+.m-p2pExplorer__nodeConnStatus {
+  display: grid;
+  grid-template-columns: auto 1fr auto 1fr auto 1fr;
+  gap: 0.25rem 0.5rem;
+  font-size: 0.85rem;
+  margin: 0.5rem 0;
+}
+
+.m-p2pExplorer__nodeConnLabel {
+  color: var(--color-text-muted);
+}
+
+.m-p2pExplorer__nodeConnValue {
+  font-family: var(--font-mono);
+}
+
+.m-p2pExplorer__nodeConnValue.-success {
+  color: var(--color-success, #4caf50);
+}
+
+.m-p2pExplorer__nodeConnValue.-failure {
+  color: var(--color-error, #f44336);
+}
+
+.m-p2pExplorer__nodeStats {
+  font-size: 0.85rem;
+  color: var(--color-text-muted);
+}

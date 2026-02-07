@@ -3,8 +3,8 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use rostra_client_db::{Database, IdsFolloweesRecord, InsertEventOutcome};
-use rostra_core::ShortEventId;
 use rostra_core::id::{RostraId, ToShort as _};
+use rostra_core::{ShortEventId, Timestamp};
 use rostra_p2p::Connection;
 use rostra_util::is_rostra_dev_mode_set;
 use rostra_util_error::{BoxedErrorResult, FmtCompact, WhateverResult};
@@ -127,6 +127,15 @@ impl FolloweeHeadChecker {
         let conn = client.connect(id).await?;
 
         let head = conn.get_head(id).await.boxed()?;
+        let now = Timestamp::now();
+        client
+            .p2p_state()
+            .update(id, |state| {
+                state.last_head_check = Some(now);
+                state.last_checked_head = head;
+            })
+            .await;
+
         if let Some(head) = head {
             if self.db.has_event(head).await {
                 return Ok(None);
@@ -144,6 +153,15 @@ impl FolloweeHeadChecker {
         id: RostraId,
     ) -> BoxedErrorResult<Option<ShortEventId>> {
         let data = client.resolve_id_data(id).await.boxed()?;
+
+        let now = Timestamp::now();
+        client
+            .p2p_state()
+            .update(id, |state| {
+                state.last_pkarr_resolve = Some(now);
+                state.last_pkarr_head = data.published.head;
+            })
+            .await;
 
         if let Some(head) = data.published.head {
             if self.db.has_event(head).await {
