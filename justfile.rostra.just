@@ -47,4 +47,5 @@ dev PORT="2345":
             --listen [::1]:{{PORT}} \
             --skip-xdg-open \
             --reuseport \
+            --default-profile rs64xtoy61x4grdcd4d75pazf8dcwrjrm4krqfcfz7oxhmm33ci74o \
           "
