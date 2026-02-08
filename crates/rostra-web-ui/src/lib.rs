@@ -43,8 +43,6 @@ use tower_sessions::{Expiry, SessionManagerLayer};
 use tower_sessions_redb_store::{RedbSessionStore, SessionStoreError};
 use tracing::info;
 
-pub const UI_ROOT_PATH: &str = "/ui";
-
 const LOG_TARGET: &str = "rostra::web_ui";
 
 fn default_rostra_assets_dir() -> PathBuf {

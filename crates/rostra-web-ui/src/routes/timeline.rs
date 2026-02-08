@@ -436,7 +436,7 @@ impl UiState {
             // (alpine-ajax doesn't support x-swap-oob)
             a ."o-mainBar__newPostsAlert"
                 ."-hidden"[!visible]
-                 href="/ui"
+                 href="/home"
             {
                 (if count == 0 {
                     "No new posts available".to_string()
