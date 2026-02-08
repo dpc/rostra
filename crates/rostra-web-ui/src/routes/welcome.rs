@@ -85,6 +85,7 @@ fn render_welcome_page(has_default_profile: bool) -> Markup {
                         div ."o-welcomePage__actions" {
                             @if has_default_profile {
                                 a ."o-welcomePage__button" ."-primary" href="/home" { "Explore" }
+                                a ."o-welcomePage__button" ."-secondary" href="/unlock" { "Sign in" }
                             } @else {
                                 a ."o-welcomePage__button" ."-primary" href="/home" { "Sign in" }
                             }
