@@ -190,15 +190,11 @@ impl UiState {
                 continue;
             }
             count += 1;
-            let _ = ws
-                .send(
-                    html! {
-                        (self.render_new_posts_alert(true, count))
-                    }
-                    .into_string()
-                    .into(),
-                )
-                .await;
+            let alert_html = html! {
+                (self.render_new_posts_alert(true, count))
+            }
+            .into_string();
+            let _ = ws.send(alert_html.into()).await;
             tokio::time::sleep(Duration::from_millis(100)).await;
         }
         Ok(())
@@ -432,11 +428,11 @@ impl UiState {
 
     pub fn render_new_posts_alert(&self, visible: bool, count: u64) -> Markup {
         html! {
-            // TODO: Update new posts alert - need Alpine.js event or different approach
-            // (alpine-ajax doesn't support x-swap-oob)
-            a ."o-mainBar__newPostsAlert"
+            a id="new-posts-alert"
+                ."o-mainBar__newPostsAlert"
                 ."-hidden"[!visible]
-                 href="/home"
+                href="/home"
+                x-swap-oob="outerHTML:#new-posts-alert"
             {
                 (if count == 0 {
                     "No new posts available".to_string()
