@@ -55,6 +55,7 @@ pub struct Opts {
     pub data_dir: PathBuf,
     pub default_profile: Option<RostraId>,
     pub max_clients: usize,
+    pub welcome_redirect: Option<String>,
 }
 
 impl Opts {
@@ -67,6 +68,7 @@ impl Opts {
         data_dir: PathBuf,
         default_profile: Option<RostraId>,
         max_clients: usize,
+        welcome_redirect: Option<String>,
     ) -> Self {
         Self {
             listen,
@@ -76,6 +78,7 @@ impl Opts {
             data_dir,
             default_profile,
             max_clients,
+            welcome_redirect,
         }
     }
 }
@@ -100,6 +103,7 @@ pub struct UiState {
     clients: MultiClient,
     assets: Option<Arc<StaticAssets>>,
     default_profile: Option<RostraId>,
+    welcome_redirect: Option<String>,
 }
 
 impl UiState {
@@ -216,6 +220,7 @@ pub async fn run_ui(opts: Opts, clients: MultiClient) -> ServerResult<()> {
         clients,
         assets: assets.clone(),
         default_profile: opts.default_profile,
+        welcome_redirect: opts.welcome_redirect.clone(),
     });
 
     match &opts.listen {

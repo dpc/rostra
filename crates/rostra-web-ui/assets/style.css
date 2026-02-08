@@ -1131,24 +1131,37 @@ emoji-picker {
   align-items: center;
   height: 100dvh;
   padding: 1rem;
+  background: var(--color-bg-default);
 }
 
 .o-unlockScreen__form {
-  padding: clamp(0px, 2.5vw, 2rem) clamp(0px, 5vw, 4rem);
+  padding: clamp(1rem, 2.5vw, 2rem) clamp(1rem, 5vw, 4rem);
   border: solid 1px var(--color-timeline-item-border);
-  border-radius: var(--border-radius-std);
+  border-radius: 6px;
 
   display: flex;
   flex-direction: column;
   gap: .5rem;
 
   background: var(--color-timeline-bg);
-  box-shadow: 0 8px 25px var(--shadow-color-strong), 0 2px 10px var(--shadow-color);
+  box-shadow: 0 4px 12px var(--shadow-color), 0 1px 4px var(--shadow-color);
+  animation: welcomeFadeIn 0.4s ease-out;
 }
 
-.o-unlockScreen__header>* {
-  padding-top: 4pt;
-  padding-bottom: 4pt;
+.o-unlockScreen__header {
+  margin-bottom: 0.5rem;
+}
+
+.o-unlockScreen__header h4 {
+  margin-top: 0;
+  margin-bottom: 0.75rem;
+  color: var(--color-link);
+}
+
+.o-unlockScreen__header p {
+  margin: 0.25rem 0;
+  font-size: 0.9rem;
+  opacity: 0.8;
 }
 
 .o-unlockScreen__fakeUsername {
@@ -2202,4 +2215,141 @@ input:checked+.slider:before {
 
 .m-p2pExplorer__nodeValue.-failure {
   color: var(--color-error, #f44336);
+}
+
+/* Welcome Page */
+.o-welcomePage {
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 2rem;
+  background: var(--color-bg-default);
+}
+
+.o-welcomePage__content {
+  max-width: 850px;
+  text-align: center;
+  animation: welcomeFadeIn 0.4s ease-out;
+}
+
+@keyframes welcomeFadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.o-welcomePage__title {
+  font-size: 3.5rem;
+  margin-bottom: 0.5rem;
+  margin-top: 0;
+  background: linear-gradient(135deg, var(--color-link) 0%, var(--color-link-hover) 100%);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+  letter-spacing: -0.02em;
+}
+
+.o-welcomePage__tagline {
+  font-size: 1.3rem;
+  opacity: 0.75;
+  margin-bottom: 2.5rem;
+  font-weight: 300;
+}
+
+.o-welcomePage__features {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 1.25rem;
+  margin-bottom: 2.5rem;
+  text-align: left;
+}
+
+.o-welcomePage__feature {
+  padding: 1.25rem 1.5rem;
+  background: var(--color-timeline-bg);
+  border: 1px solid var(--color-timeline-item-border);
+  border-radius: 6px;
+  box-shadow: 0 4px 12px var(--shadow-color), 0 1px 4px var(--shadow-color);
+  transition: transform 0.2s ease, box-shadow 0.2s ease;
+}
+
+.o-welcomePage__feature:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 8px 20px var(--shadow-color-strong), 0 2px 8px var(--shadow-color);
+}
+
+.o-welcomePage__feature h3 {
+  margin-top: 0;
+  margin-bottom: 0.5rem;
+  font-size: 1.1rem;
+  color: var(--color-link);
+}
+
+.o-welcomePage__feature p {
+  margin: 0;
+  opacity: 0.8;
+  font-size: 0.9rem;
+  line-height: 1.5;
+}
+
+.o-welcomePage__actions {
+  display: flex;
+  gap: 1rem;
+  justify-content: center;
+  flex-wrap: wrap;
+  margin-bottom: 2rem;
+}
+
+.o-welcomePage__button {
+  padding: 0.875rem 2.5rem;
+  border-radius: 6px;
+  text-decoration: none;
+  font-weight: 600;
+  font-size: 1.1rem;
+  transition: background 0.2s, transform 0.15s, box-shadow 0.2s;
+}
+
+.o-welcomePage__button:hover {
+  transform: translateY(-1px);
+}
+
+.o-welcomePage__button.-primary {
+  background: var(--color-link);
+  color: white;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.15);
+}
+
+.o-welcomePage__button.-primary:hover {
+  background: var(--color-link-hover);
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.2);
+}
+
+.o-welcomePage__button.-secondary {
+  background: var(--color-button-bg);
+  color: var(--color-text-default);
+  border: 1px solid var(--color-button-border);
+}
+
+.o-welcomePage__button.-secondary:hover {
+  background: var(--color-button-bg-hover);
+}
+
+.o-welcomePage__button::after {
+  display: none;  /* Remove link underline animation */
+}
+
+.o-welcomePage__footer {
+  opacity: 0.5;
+  font-size: 0.85rem;
+  margin-bottom: 0;
+}
+
+.o-welcomePage__footer a {
+  opacity: 0.9;
 }

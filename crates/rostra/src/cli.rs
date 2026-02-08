@@ -120,6 +120,11 @@ pub struct WebUiOpts {
     /// Root directory of the assets dir
     #[arg(long, env = "ROSTRA_ASSETS_DIR")]
     pub assets_dir: Option<PathBuf>,
+
+    /// Custom URL to redirect unauthenticated users from "/" instead of showing
+    /// welcome page
+    #[arg(long, env = "ROSTRA_WELCOME_REDIRECT")]
+    pub welcome_redirect: Option<String>,
 }
 
 pub fn make_web_opts(data_dir: &Path, opts: &WebUiOpts) -> rostra_web_ui::Opts {
@@ -131,6 +136,7 @@ pub fn make_web_opts(data_dir: &Path, opts: &WebUiOpts) -> rostra_web_ui::Opts {
         data_dir.to_owned(),
         opts.default_profile,
         opts.max_clients,
+        opts.welcome_redirect.clone(),
     )
 }
 

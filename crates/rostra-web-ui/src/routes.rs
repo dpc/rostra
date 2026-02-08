@@ -14,6 +14,7 @@ mod search;
 mod settings;
 mod timeline;
 mod unlock;
+mod welcome;
 
 use std::sync::Arc;
 
@@ -158,7 +159,8 @@ pub async fn not_found(_state: State<SharedState>, _req: Request<Body>) -> impl 
 
 pub fn route_handler(state: SharedState) -> Router<Arc<UiState>> {
     Router::new()
-        .route("/", get(timeline::get_followees))
+        .route("/", get(welcome::get_landing))
+        .route("/home", get(welcome::get_home))
         .route("/followees", get(timeline::get_followees))
         .route("/network", get(timeline::get_network))
         .route("/notifications", get(timeline::get_notifications))

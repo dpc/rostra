@@ -142,3 +142,56 @@ impl FromRequestParts<Arc<UiState>> for UserSession {
         }
     }
 }
+
+/// Optional user session - returns None instead of redirecting if not
+/// authenticated. Use this for routes that need to behave differently for auth
+/// vs non-auth users.
+pub struct OptionalUserSession(pub Option<UserSession>);
+
+impl FromRequestParts<Arc<UiState>> for OptionalUserSession {
+    type Rejection = RequestError;
+
+    async fn from_request_parts(
+        req: &mut request::Parts,
+        state: &Arc<UiState>,
+    ) -> Result<Self, Self::Rejection> {
+        let session = Session::from_request_parts(req, state)
+            .await
+            .map_err(|(_, msg)| InternalServerSnafu { msg }.build())?;
+
+        let user_result: Result<Option<UserSession>, _> =
+            session.get(SESSION_KEY).await.map_err(|_| {
+                InternalServerSnafu {
+                    msg: "session store error",
+                }
+                .build()
+            });
+
+        match user_result {
+            Ok(Some(user)) => Ok(OptionalUserSession(Some(user))),
+            Ok(None) => {
+                // Check for default profile
+                if let Some(default_id) = state.default_profile {
+                    state.unlock(default_id, None).await.map_err(|_e| {
+                        InternalServerSnafu {
+                            msg: "Failed to load default profile",
+                        }
+                        .build()
+                    })?;
+                    let user = UserSession::new(default_id, None);
+                    session.insert(SESSION_KEY, &user).await.map_err(|_| {
+                        InternalServerSnafu {
+                            msg: "failed to insert session",
+                        }
+                        .build()
+                    })?;
+                    Ok(OptionalUserSession(Some(user)))
+                } else {
+                    // Not authenticated, no redirect
+                    Ok(OptionalUserSession(None))
+                }
+            }
+            Err(e) => Err(e),
+        }
+    }
+}
