@@ -266,36 +266,24 @@ textarea:-moz-autofill {
 a {
   color: var(--color-link);
   text-decoration: none;
-  position: relative;
-  transition: color 0.2s;
-}
-
-a::after {
-  content: '';
-  position: absolute;
-  width: 100%;
-  height: 1px;
-  bottom: -2px;
-  left: 0;
-  background-color: currentColor;
-  transform: scaleX(0);
-  transition: transform 0.2s;
+  transition: color 0.2s, background-size 0.2s;
+  background-image: linear-gradient(currentColor, currentColor);
+  background-position: 0% 100%;
+  background-repeat: no-repeat;
+  background-size: 0% 1px;
+  -webkit-box-decoration-break: clone;
+  box-decoration-break: clone;
 }
 
 a:hover {
   color: var(--color-link-hover);
-  /* Darker blue */
-}
-
-a:hover::after {
-  transform: scaleX(1);
+  background-size: 100% 1px;
 }
 
 
 /* Active/clicked state */
 a:active {
-  color: red;
-  /* Very dark blue */
+  color: var(--color-link-hover);
 }
 
 img {
@@ -743,7 +731,7 @@ emoji-picker {
 }
 
 .m-rostraMedia__download:hover {
-  /* Underline handled by global a::after */
+  /* Underline handled by global link styles */
 }
 
 .m-rostraMedia__downloadIcon {
@@ -869,8 +857,8 @@ emoji-picker {
   background: var(--color-button-bg-hover);
 }
 
-.m-postView__actionMenuItem::after {
-  display: none;
+.m-postView__actionMenuItem {
+  background-image: none;
 }
 
 /* Style forms inside dropdown to not add extra space */
@@ -1952,7 +1940,7 @@ input:checked+.slider:before {
 }
 
 .m-followeeList__name:hover {
-  /* Underline handled by global a::after */
+  /* Underline handled by global link styles */
 }
 
 .m-followeeList__actions {
@@ -2112,7 +2100,7 @@ input:checked+.slider:before {
 }
 
 .m-eventExplorer__parentLink:hover {
-  /* Underline handled by global a::after */
+  /* Underline handled by global link styles */
   color: var(--color-link-hover);
 }
 
@@ -2340,8 +2328,8 @@ input:checked+.slider:before {
   background: var(--color-button-bg-hover);
 }
 
-.o-welcomePage__button::after {
-  display: none;  /* Remove link underline animation */
+.o-welcomePage__button {
+  background-image: none;  /* Remove link underline animation */
 }
 
 .o-welcomePage__footer {
