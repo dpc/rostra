@@ -44,24 +44,47 @@ impl EventPaginationCursor {
 /// Used for Notifications tab where posts are ordered by reception time,
 /// not author timestamp. Includes a monotonic counter for strict ordering
 /// when multiple events arrive at the same timestamp.
-/// Key structure: `(received_timestamp, reception_order)`
+/// Key structure: `(received_timestamp, seq)`
 #[derive(
     Encode, Decode, Serialize, Deserialize, Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord,
 )]
 pub struct ReceivedAtPaginationCursor {
     pub ts: Timestamp,
-    pub reception_order: u64,
+    /// Monotonic sequence number for ordering events at the same timestamp.
+    /// Alias for backwards compatibility with cookies saved as
+    /// "reception_order".
+    #[serde(alias = "reception_order")]
+    pub seq: u64,
 }
 
 impl ReceivedAtPaginationCursor {
     pub const ZERO: Self = Self {
         ts: Timestamp::ZERO,
-        reception_order: 0,
+        seq: 0,
     };
     pub const MAX: Self = Self {
         ts: Timestamp::MAX,
-        reception_order: u64::MAX,
+        seq: u64::MAX,
     };
+
+    /// Returns the next cursor position (exclusive start for forward
+    /// iteration).
+    ///
+    /// Used when we want to iterate starting AFTER this cursor position.
+    pub fn next(self) -> Self {
+        if self.seq < u64::MAX {
+            Self {
+                ts: self.ts,
+                seq: self.seq + 1,
+            }
+        } else {
+            // seq overflow, increment timestamp
+            Self {
+                ts: Timestamp::from(u64::from(self.ts).saturating_add(1)),
+                seq: 0,
+            }
+        }
+    }
 }
 #[derive(Clone, Debug)]
 pub struct SocialPostRecord<C> {
@@ -228,6 +251,28 @@ impl Database {
         .expect("Storage error")
     }
 
+    /// Get the cursor of the most recently received social post.
+    ///
+    /// Used for tracking "last seen" notification position.
+    pub async fn get_latest_social_post_received_at_cursor(
+        &self,
+    ) -> Option<ReceivedAtPaginationCursor> {
+        self.read_with(|tx| {
+            let social_posts_by_received_at_table =
+                tx.open_table(&social_posts_by_received_at::TABLE)?;
+
+            // Get the last (most recent) entry in the table
+            if let Some(entry) = social_posts_by_received_at_table.last()? {
+                let (ts, seq) = entry.0.value();
+                Ok(Some(ReceivedAtPaginationCursor { ts, seq }))
+            } else {
+                Ok(None)
+            }
+        })
+        .await
+        .expect("Storage error")
+    }
+
     /// Paginate social posts ordered by when we received them (forward).
     ///
     /// Used for notification badge count calculation.
@@ -250,9 +295,9 @@ impl Database {
 
             let (ret, cursor) = Self::paginate_table(
                 &social_posts_by_received_at_table,
-                cursor.map(|c| (c.ts, c.reception_order)),
+                cursor.map(|c| (c.ts, c.seq)),
                 limit,
-                move |(ts, _reception_order), event_id| {
+                move |(ts, _seq), event_id| {
                     let Some(event) = Database::get_event_tx(event_id, &events_table)? else {
                         warn!(target: LOG_TARGET, %event_id, "Missing event for a post with social_post_record?!");
                         return Ok(None);
@@ -305,9 +350,9 @@ impl Database {
 
             Ok((
                 ret,
-                cursor.map(|(ts, reception_order)| ReceivedAtPaginationCursor {
+                cursor.map(|(ts, seq)| ReceivedAtPaginationCursor {
                     ts,
-                    reception_order,
+                    seq,
                 }),
             ))
         })
@@ -337,9 +382,9 @@ impl Database {
 
             let (ret, cursor) = Self::paginate_table_rev(
                 &social_posts_by_received_at_table,
-                cursor.map(|c| (c.ts, c.reception_order)),
+                cursor.map(|c| (c.ts, c.seq)),
                 limit,
-                move |(ts, _reception_order), event_id| {
+                move |(ts, _seq), event_id| {
                     let Some(event) = Database::get_event_tx(event_id, &events_table)? else {
                         warn!(target: LOG_TARGET, %event_id, "Missing event for a post with social_post_record?!");
                         return Ok(None);
@@ -392,9 +437,9 @@ impl Database {
 
             Ok((
                 ret,
-                cursor.map(|(ts, reception_order)| ReceivedAtPaginationCursor {
+                cursor.map(|(ts, seq)| ReceivedAtPaginationCursor {
                     ts,
-                    reception_order,
+                    seq,
                 }),
             ))
         })

@@ -31,7 +31,7 @@ use crate::{LOG_TARGET, SharedState, UiState};
 #[derive(Deserialize)]
 pub struct TimelinePaginationInput {
     pub ts: Option<Timestamp>,
-    pub reception_order: Option<u64>,
+    pub seq: Option<u64>,
     pub event_id: Option<ShortEventId>,
 }
 
@@ -95,12 +95,8 @@ pub async fn get_notifications(
     Form(form): Form<TimelinePaginationInput>,
 ) -> RequestResult<impl IntoResponse> {
     let pagination = form.ts.and_then(|ts| {
-        form.reception_order.map(|reception_order| {
-            TimelineCursor::ByReceivedTime(ReceivedAtPaginationCursor {
-                ts,
-                reception_order,
-            })
-        })
+        form.seq
+            .map(|seq| TimelineCursor::ByReceivedTime(ReceivedAtPaginationCursor { ts, seq }))
     });
     let navbar = state.timeline_common_navbar(&session).await?;
     Ok(Maud(
@@ -218,7 +214,7 @@ impl UiState {
     ) -> RequestResult<Markup> {
         let client = self.client(session.id()).await?;
         let client_ref = client.client_ref()?;
-        let pending_notifications = self
+        let (pending_notifications, debug_info) = self
             .handle_notification_cookies(&client_ref, pagination.is_some(), cookies, mode)
             .await?;
 
@@ -226,6 +222,7 @@ impl UiState {
             .render_main_bar_timeline(session, mode)
             .maybe_pagination(pagination)
             .maybe_pending_notifications(pending_notifications)
+            .debug_info(debug_info)
             .call()
             .await?;
 
@@ -332,43 +329,59 @@ impl UiState {
         is_paginated: bool,
         cookies: &mut Cookies,
         mode: TimelineMode,
-    ) -> RequestResult<Option<usize>> {
+    ) -> RequestResult<(Option<usize>, super::debug::NotificationDebugInfo)> {
+        use super::debug::NotificationDebugInfo;
+
         // If this is a non-first page, we don't need to do anything
         if is_paginated {
-            return Ok(None);
+            return Ok((None, NotificationDebugInfo::default()));
         }
 
         match mode {
             TimelineMode::Profile(_) | TimelineMode::ProfileSingle(_, _) => {
                 // We're not displaying notifications on profile timelines
-                Ok(None)
+                Ok((None, NotificationDebugInfo::default()))
             }
             TimelineMode::Notifications => {
-                // Use received_at ordering for notifications - save the most recently
-                // received post as the last seen marker
-                let (_, cursor) = client
+                // Save the cursor of the most recently received post as the last seen marker
+                let latest_cursor = client
                     .db()
-                    .paginate_social_posts_by_received_at_rev(None, 1, |_| true)
+                    .get_latest_social_post_received_at_cursor()
                     .await;
-                if let Some(cursor) = cursor {
+                if let Some(cursor) = latest_cursor {
                     cookies.save_last_seen(client.rostra_id(), cursor);
                 }
-                Ok(None)
+                Ok((None, NotificationDebugInfo::for_save(mode, latest_cursor)))
             }
             TimelineMode::Followees | TimelineMode::Network => {
                 // Count pending notifications using received_at ordering
-                let pending_len = client
+                // Start AFTER the last seen cursor (exclusive) using cursor.next()
+                let cookie_cursor = cookies.get_last_seen(client.rostra_id());
+                let start_cursor = cookie_cursor.map(|c| c.next());
+                let latest_cursor = client
+                    .db()
+                    .get_latest_social_post_received_at_cursor()
+                    .await;
+                let (posts, _) = client
                     .db()
                     .paginate_social_posts_by_received_at(
-                        cookies.get_last_seen(client.rostra_id()),
+                        start_cursor,
                         10,
                         TimelineMode::Notifications.to_filter_fn(client).await,
                     )
-                    .await
-                    .0
-                    .len();
+                    .await;
+                let pending_len = posts.len();
 
-                Ok(Some(pending_len))
+                Ok((
+                    Some(pending_len),
+                    NotificationDebugInfo::for_count(
+                        mode,
+                        cookie_cursor,
+                        start_cursor,
+                        latest_cursor,
+                        pending_len,
+                    ),
+                ))
             }
         }
     }
@@ -442,8 +455,10 @@ impl UiState {
         #[builder(start_fn)] mode: TimelineMode,
         pagination: Option<TimelineCursor>,
         pending_notifications: Option<usize>,
+        debug_info: Option<super::debug::NotificationDebugInfo>,
     ) -> RequestResult<Markup> {
         let pending_notifications = pending_notifications.unwrap_or_default();
+        let debug_info = debug_info.unwrap_or_default();
         let client = self.client(session.id()).await?;
         let client_ref = client.client_ref()?;
 
@@ -509,6 +524,8 @@ impl UiState {
                         }
                     }
                 }
+                // DEBUG: notification counting info (enable with ROSTRA_DEBUG_NOTIFICATIONS=1)
+                (debug_info.render())
                 div ."o-mainBarTimeline__switches" {
 
                     label ."o-mainBarTimeline__repliesLabel" for="show-replies" { "Replies" }
@@ -621,7 +638,7 @@ impl TimelineCursor {
                 format!("ts={}&event_id={}", c.ts, c.event_id)
             }
             TimelineCursor::ByReceivedTime(c) => {
-                format!("ts={}&reception_order={}", c.ts, c.reception_order)
+                format!("ts={}&seq={}", c.ts, c.seq)
             }
         }
     }

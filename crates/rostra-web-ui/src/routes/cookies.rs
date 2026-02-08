@@ -55,7 +55,7 @@ impl CookiesExt for Cookies {
             format!("{self_id}-{NOTIFICATIONS_LAST_SEEN_COOKIE_NAME}"),
             serde_json::to_string(&pagination).expect("can't fail"),
         );
-        cookie.set_path("/ui");
+        cookie.set_path("/");
         cookie.set_max_age(time::Duration::weeks(50));
         self.add(cookie);
     }
@@ -79,7 +79,7 @@ impl CookiesExt for Cookies {
             format!("{self_id}-{PERSONA_COOKIE_NAME}"),
             persona_id.to_string(),
         );
-        cookie.set_path("/ui");
+        cookie.set_path("/");
         cookie.set_max_age(time::Duration::weeks(50));
         self.add(cookie);
     }

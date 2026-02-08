@@ -2,6 +2,7 @@ mod add_followee;
 mod avatar;
 mod content;
 mod cookies;
+mod debug;
 mod feeds;
 pub mod fragment;
 mod media;
