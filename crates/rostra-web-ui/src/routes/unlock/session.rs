@@ -146,6 +146,9 @@ impl FromRequestParts<Arc<UiState>> for UserSession {
 /// Optional user session - returns None instead of redirecting if not
 /// authenticated. Use this for routes that need to behave differently for auth
 /// vs non-auth users.
+///
+/// Unlike `UserSession`, this does NOT auto-load the default profile.
+/// It only returns `Some` if the user has an existing session.
 pub struct OptionalUserSession(pub Option<UserSession>);
 
 impl FromRequestParts<Arc<UiState>> for OptionalUserSession {
@@ -169,28 +172,7 @@ impl FromRequestParts<Arc<UiState>> for OptionalUserSession {
 
         match user_result {
             Ok(Some(user)) => Ok(OptionalUserSession(Some(user))),
-            Ok(None) => {
-                // Check for default profile
-                if let Some(default_id) = state.default_profile {
-                    state.unlock(default_id, None).await.map_err(|_e| {
-                        InternalServerSnafu {
-                            msg: "Failed to load default profile",
-                        }
-                        .build()
-                    })?;
-                    let user = UserSession::new(default_id, None);
-                    session.insert(SESSION_KEY, &user).await.map_err(|_| {
-                        InternalServerSnafu {
-                            msg: "failed to insert session",
-                        }
-                        .build()
-                    })?;
-                    Ok(OptionalUserSession(Some(user)))
-                } else {
-                    // Not authenticated, no redirect
-                    Ok(OptionalUserSession(None))
-                }
-            }
+            Ok(None) => Ok(OptionalUserSession(None)),
             Err(e) => Err(e),
         }
     }
