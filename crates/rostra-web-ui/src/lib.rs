@@ -306,7 +306,7 @@ pub async fn run_ui(opts: Opts, clients: MultiClient) -> ServerResult<()> {
 
     let session_layer = SessionManagerLayer::new(session_store)
         .with_name("rostra_session")
-        .with_expiry(Expiry::OnInactivity(time::Duration::minutes(2 * 24 * 60)));
+        .with_expiry(Expiry::OnInactivity(time::Duration::days(30)));
 
     match &opts.listen {
         BindAddr::Tcp(addr) => {
