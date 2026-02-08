@@ -512,7 +512,6 @@ impl UiState {
                         )
                         .disabled(ro.to_disabled())
                         .hidden_inputs(html! { input type="hidden" name="reply_to" value=(ext_event_id) {} })
-                        .autofocus(true)
                         .call())
                     }
                 }
