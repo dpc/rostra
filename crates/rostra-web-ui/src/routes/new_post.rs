@@ -9,7 +9,7 @@ use serde::Deserialize;
 use tower_cookies::Cookies;
 
 use super::super::SharedState;
-use super::super::error::RequestResult;
+use super::super::error::{ReadOnlyModeSnafu, RequestResult};
 use super::cookies::CookiesExt as _;
 use super::unlock::session::{RoMode, UserSession};
 use super::{Maud, fragment};
@@ -67,6 +67,10 @@ pub async fn post_new_post(
     mut cookies: Cookies,
     Form(form): Form<PostInput>,
 ) -> RequestResult<impl IntoResponse> {
+    let id_secret = state
+        .id_secret(session.session_token())
+        .ok_or_else(|| ReadOnlyModeSnafu.build())?;
+
     let client_handle = state.client(session.id()).await?;
     let client_ref = client_handle.client_ref()?;
 
@@ -77,7 +81,7 @@ pub async fn post_new_post(
 
     let _event = client_ref
         .social_post(
-            session.id_secret()?,
+            id_secret,
             form.content.clone(),
             form.reply_to,
             PersonaId(form.persona.unwrap_or_default()),
@@ -85,7 +89,11 @@ pub async fn post_new_post(
         .await?;
 
     // Clear the form content after posting
-    let clean_form = state.new_post_form(None, session.ro_mode(), Some(client_ref.rostra_id()));
+    let clean_form = state.new_post_form(
+        None,
+        state.ro_mode(session.session_token()),
+        Some(client_ref.rostra_id()),
+    );
     let reply_to = if let Some(reply_to) = form.reply_to {
         Some((
             reply_to.rostra_id(),
@@ -162,7 +170,7 @@ pub async fn get_post_preview_dialog(
                         )
                         .content(&form.content)
                         .timestamp(rostra_core::Timestamp::now())
-                        .ro(session.ro_mode())
+                        .ro(state.ro_mode(session.session_token()))
                         .call().await?
                     )
                 }
@@ -235,7 +243,7 @@ pub async fn get_post_preview(
                     )
                     .content(&form.content)
                     .timestamp(rostra_core::Timestamp::now())
-                    .ro(session.ro_mode())
+                    .ro(state.ro_mode(session.session_token()))
                     .call().await?
                 )
                 (scroll_preview_into_view())

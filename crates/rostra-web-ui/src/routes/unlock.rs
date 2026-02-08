@@ -6,17 +6,15 @@ use axum::response::{IntoResponse, Redirect, Response};
 use maud::{Markup, html};
 use rostra_core::id::{RostraId, RostraIdSecretKey};
 use serde::Deserialize;
-use session::{SESSION_KEY, UserSession};
+use session::{OptionalUserSession, SESSION_KEY, UserSessionData};
 use snafu::ResultExt as _;
 use tower_sessions::Session;
 
 use super::Maud;
-use crate::error::{
-    LoginRequiredSnafu, OtherSnafu, PublicKeyMissingSnafu, RequestResult, UnlockResult, UnlockSnafu,
-};
+use crate::error::{OtherSnafu, PublicKeyMissingSnafu, RequestResult, UnlockResult, UnlockSnafu};
 use crate::serde_util::empty_string_as_none;
 use crate::util::extractors::AjaxRequest;
-use crate::{SharedState, UiState};
+use crate::{SessionToken, SharedState, UiState};
 
 #[derive(Deserialize)]
 pub struct RedirectQuery {
@@ -25,6 +23,7 @@ pub struct RedirectQuery {
 
 pub async fn get(
     state: State<SharedState>,
+    OptionalUserSession(existing_session): OptionalUserSession,
     AjaxRequest(is_ajax): AjaxRequest,
     Query(query): Query<RedirectQuery>,
 ) -> RequestResult<impl IntoResponse> {
@@ -41,7 +40,15 @@ pub async fn get(
         return Ok(Redirect::to(&url).into_response());
     }
 
-    Ok(Maud(state.unlock_page(None, None, None, query.redirect).await?).into_response())
+    // Pre-populate the RostraId field if we have existing session data
+    let existing_id = existing_session.map(|s| s.id());
+
+    Ok(Maud(
+        state
+            .unlock_page(existing_id, None, None, query.redirect)
+            .await?,
+    )
+    .into_response())
 }
 
 pub async fn get_random(
@@ -88,29 +95,13 @@ pub async fn post_unlock(
     Form(form): Form<Input>,
 ) -> RequestResult<Response> {
     let redirect_path = form.redirect.clone();
-    Ok(
-        match state
-            .unlock(form.rostra_id().context(UnlockSnafu)?, form.mnemonic)
-            .await
-        {
-            Ok(secret_key_opt) => {
-                let rostra_id = secret_key_opt
-                    .map(|secret| secret.id())
-                    .or(form.rostra_id)
-                    .ok_or_else(|| LoginRequiredSnafu { redirect: None }.build())?;
-                session
-                    .insert(SESSION_KEY, &UserSession::new(rostra_id, secret_key_opt))
-                    .await
-                    .boxed()
-                    .context(OtherSnafu)?;
-                // Use standard HTTP redirect for Alpine-ajax
-                // Redirect to the original path if provided, otherwise to root
-                let target = redirect_path
-                    .filter(|p| p.starts_with('/'))
-                    .unwrap_or_else(|| "/".to_string());
-                Redirect::to(&target).into_response()
-            }
-            Err(e) => Maud(
+    let rostra_id = form.rostra_id().context(UnlockSnafu)?;
+
+    // 1. Load the client and unlock if secret provided
+    let secret_key_opt = match state.unlock(rostra_id, form.mnemonic).await {
+        Ok(secret) => secret,
+        Err(e) => {
+            return Ok(Maud(
                 state
                     .unlock_page(
                         form.rostra_id,
@@ -122,9 +113,28 @@ pub async fn post_unlock(
                     )
                     .await?,
             )
-            .into_response(),
-        },
-    )
+            .into_response());
+        }
+    };
+
+    // 2. Insert session data into store (this creates/updates the session)
+    session
+        .insert(SESSION_KEY, &UserSessionData::new(rostra_id))
+        .await
+        .boxed()
+        .context(OtherSnafu)?;
+
+    // 3. Get session ID (now available after insert) and store secret
+    // The session ID is available after the session has been modified.
+    if let Some(session_token) = SessionToken::from_session(&session) {
+        state.set_session_secret(session_token, secret_key_opt);
+    }
+
+    // 4. Redirect to the original path if provided, otherwise to root
+    let target = redirect_path
+        .filter(|p| p.starts_with('/'))
+        .unwrap_or_else(|| "/".to_string());
+    Ok(Redirect::to(&target).into_response())
 }
 
 pub async fn logout(session: Session) -> RequestResult<impl IntoResponse> {

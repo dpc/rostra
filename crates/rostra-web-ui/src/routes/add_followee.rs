@@ -8,7 +8,7 @@ use serde::Deserialize;
 
 use super::unlock::session::UserSession;
 use super::{Maud, fragment};
-use crate::error::RequestResult;
+use crate::error::{ReadOnlyModeSnafu, RequestResult};
 use crate::{SharedState, UiState};
 
 #[derive(Deserialize)]
@@ -21,12 +21,15 @@ pub async fn add_followee(
     session: UserSession,
     Form(form): Form<Input>,
 ) -> RequestResult<impl IntoResponse> {
+    let id_secret = state
+        .id_secret(session.session_token())
+        .ok_or_else(|| ReadOnlyModeSnafu.build())?;
     state
         .client(session.id())
         .await?
         .client_ref()?
         .follow(
-            session.id_secret()?,
+            id_secret,
             form.rostra_id,
             PersonaSelector::Except { ids: vec![] },
         )

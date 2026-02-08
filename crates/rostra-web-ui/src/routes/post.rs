@@ -18,7 +18,7 @@ use tower_cookies::Cookies;
 use super::timeline::TimelineMode;
 use super::unlock::session::{RoMode, UserSession};
 use super::{Maud, fragment};
-use crate::error::{OtherSnafu, RequestResult};
+use crate::error::{OtherSnafu, ReadOnlyModeSnafu, RequestResult};
 use crate::util::extractors::AjaxRequest;
 use crate::util::time::format_timestamp;
 use crate::{SharedState, UiState};
@@ -73,7 +73,7 @@ pub async fn get_single_post(
                     .post_thread_id(event_id)
                     .maybe_content(post_record.content.djot_content.as_deref())
                     .timestamp(post_record.ts)
-                    .ro(session.ro_mode())
+                    .ro(state.ro_mode(session.session_token()))
                     .call()
                     .await?,
             ));
@@ -120,11 +120,15 @@ pub async fn delete_post(
         }));
     }
 
+    let id_secret = state
+        .id_secret(session.session_token())
+        .ok_or_else(|| ReadOnlyModeSnafu.build())?;
+
     // Create and publish a delete event with DELETE_PARENT_AUX_CONTENT_FLAG set
     // and parent_aux pointing to the post we want to delete
     client
         .publish_event(
-            session.id_secret()?,
+            id_secret,
             rostra_core::event::SocialPost {
                 djot_content: None,
                 persona: rostra_core::event::PersonaId(0),

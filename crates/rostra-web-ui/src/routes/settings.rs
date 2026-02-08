@@ -332,7 +332,7 @@ impl UiState {
                             "m-followeeList__followButton",
                             "Follow...",
                         )
-                        .disabled(session.ro_mode().to_disabled())
+                        .disabled(self.ro_mode(session.session_token()).to_disabled())
                         .hidden_inputs(html! { input type="hidden" name="following" value="false" {} })
                         .form_class("m-followeeList__actions")
                         .call())
@@ -359,7 +359,7 @@ impl UiState {
                                 "m-followeeList__followButton",
                                 "Following...",
                             )
-                            .disabled(session.ro_mode().to_disabled())
+                            .disabled(self.ro_mode(session.session_token()).to_disabled())
                             .hidden_inputs(html! { input type="hidden" name="following" value="true" {} })
                             .form_class("m-followeeList__actions")
                             .call())

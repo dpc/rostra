@@ -10,7 +10,7 @@ use rostra_core::id::{RostraId, ToShort as _};
 
 use super::unlock::session::{RoMode, UserSession};
 use super::{Maud, fragment};
-use crate::error::RequestResult;
+use crate::error::{ReadOnlyModeSnafu, RequestResult};
 use crate::{SharedState, UiState};
 
 pub async fn get_self_account_edit(
@@ -25,6 +25,10 @@ pub async fn post_self_account_edit(
     session: UserSession,
     form: extractor::InputForm,
 ) -> RequestResult<impl IntoResponse> {
+    let id_secret = state
+        .id_secret(session.session_token())
+        .ok_or_else(|| ReadOnlyModeSnafu.build())?;
+
     let existing = state
         .client(session.id())
         .await?
@@ -38,7 +42,7 @@ pub async fn post_self_account_edit(
         .await?
         .client_ref()?
         .post_social_profile_update(
-            session.id_secret()?,
+            id_secret,
             form.name,
             form.bio,
             form.avatar.or_else(|| existing.and_then(|e| e.avatar)),
@@ -47,7 +51,7 @@ pub async fn post_self_account_edit(
 
     Ok(Maud(
         state
-            .render_self_profile_summary(&session, session.ro_mode())
+            .render_self_profile_summary(&session, state.ro_mode(session.session_token()))
             .await?,
     ))
 }

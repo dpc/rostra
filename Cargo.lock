@@ -3936,6 +3936,7 @@ dependencies = [
  "jotup",
  "listenfd",
  "maud",
+ "rand 0.9.2",
  "redb",
  "redb-bincode",
  "rostra-client",

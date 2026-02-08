@@ -13,7 +13,7 @@ mod profile_self;
 mod search;
 mod settings;
 mod timeline;
-mod unlock;
+pub(crate) mod unlock;
 mod welcome;
 
 use std::sync::Arc;

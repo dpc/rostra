@@ -2,6 +2,10 @@ mod error;
 pub mod html_utils;
 mod layout;
 mod routes;
+mod secrets;
+mod session_token;
+
+pub(crate) use session_token::SessionToken;
 // TODO: move to own crate
 mod serde_util;
 pub mod util;
@@ -27,7 +31,6 @@ use rostra_util_bind_addr::BindAddr;
 use rostra_util_error::WhateverResult;
 use routes::cache_control;
 use snafu::{ResultExt as _, Snafu, Whatever, ensure};
-use tower_sessions_redb_store::{RedbSessionStore, SessionStoreError};
 use tokio::net::{TcpListener, TcpSocket, UnixListener};
 use tokio::signal;
 use tower_cookies::CookieManagerLayer;
@@ -37,6 +40,7 @@ use tower_http::compression::predicate::SizeAbove;
 use tower_http::cors::CorsLayer;
 use tower_http::services::ServeDir;
 use tower_sessions::{Expiry, SessionManagerLayer};
+use tower_sessions_redb_store::{RedbSessionStore, SessionStoreError};
 use tracing::info;
 
 pub const UI_ROOT_PATH: &str = "/ui";
@@ -105,6 +109,9 @@ pub struct UiState {
     assets: Option<Arc<StaticAssets>>,
     default_profile: Option<RostraId>,
     welcome_redirect: Option<String>,
+    /// In-memory storage for secret keys.
+    /// See [`secrets::SecretStore`] for details on the security design.
+    secrets: secrets::SecretStore,
 }
 
 impl UiState {
@@ -115,22 +122,65 @@ impl UiState {
         }
     }
 
+    /// Get the secret key for a session from in-memory storage.
+    ///
+    /// Takes the [`SessionToken`] as the key (derived from tower-sessions ID).
+    /// Returns `None` if the user is in read-only mode (no secret key stored).
+    pub fn id_secret(&self, session_token: SessionToken) -> Option<RostraIdSecretKey> {
+        self.secrets.get(session_token)
+    }
+
+    /// Get the read-only mode status for a session.
+    pub fn ro_mode(&self, session_token: SessionToken) -> routes::unlock::session::RoMode {
+        if self.secrets.has_secret(session_token) {
+            routes::unlock::session::RoMode::Rw
+        } else {
+            routes::unlock::session::RoMode::Ro
+        }
+    }
+
+    /// Store or remove a secret key for a session.
+    ///
+    /// Call this after the session has been saved to the store, so that
+    /// `session.id()` is available to create the `SessionToken`.
+    pub fn set_session_secret(
+        &self,
+        session_token: SessionToken,
+        secret: Option<RostraIdSecretKey>,
+    ) {
+        match secret {
+            Some(s) => self.secrets.insert(session_token, s),
+            None => self.secrets.remove(session_token),
+        }
+    }
+
+    /// Load a client for read-only access (no secret key).
+    ///
+    /// Use this for default_profile or read-only unlock.
+    pub async fn load_client(&self, rostra_id: RostraId) -> UnlockResult<()> {
+        self.clients.load(rostra_id).await?;
+        Ok(())
+    }
+
+    /// Unlock a client with optional secret key.
+    ///
+    /// This loads the client and unlocks it if a secret is provided.
+    /// The caller is responsible for storing the secret in the session
+    /// after the session has been saved (so session.id() is available).
     pub async fn unlock(
         &self,
         rostra_id: RostraId,
         secret_id: Option<RostraIdSecretKey>,
     ) -> UnlockResult<Option<RostraIdSecretKey>> {
-        let res = if let Some(secret_id) = secret_id {
+        if let Some(secret_id) = secret_id {
             ensure!(secret_id.id() == rostra_id, IdMismatchSnafu);
             let client = self.clients.load(secret_id.id()).await?;
             client.unlock_active(secret_id).await?;
-
-            Some(secret_id)
+            Ok(Some(secret_id))
         } else {
             self.clients.load(rostra_id).await?;
-            None
-        };
-        Ok(res)
+            Ok(None)
+        }
     }
 }
 
@@ -226,6 +276,7 @@ pub async fn run_ui(opts: Opts, clients: MultiClient) -> ServerResult<()> {
         assets: assets.clone(),
         default_profile: opts.default_profile,
         welcome_redirect: opts.welcome_redirect.clone(),
+        secrets: secrets::SecretStore::new(),
     });
 
     // Create persistent session store with shared redb database
@@ -237,12 +288,12 @@ pub async fn run_ui(opts: Opts, clients: MultiClient) -> ServerResult<()> {
     })
     .await
     .expect("spawn_blocking panicked")
-    .map_err(|e| SessionStoreError::from(e))
+    .map_err(SessionStoreError::from)
     .context(SessionStoreSnafu)?;
 
-    let session_store =
-        RedbSessionStore::new(session_db.clone()).context(SessionStoreSnafu)?;
+    let session_store = RedbSessionStore::new(session_db.clone()).context(SessionStoreSnafu)?;
     let session_layer = SessionManagerLayer::new(session_store)
+        .with_name("rostra_session")
         .with_expiry(Expiry::OnInactivity(time::Duration::minutes(2 * 24 * 60)));
 
     match &opts.listen {

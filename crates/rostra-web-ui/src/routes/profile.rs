@@ -11,7 +11,7 @@ use tower_cookies::Cookies;
 use super::timeline::{TimelineCursor, TimelineMode, TimelinePaginationInput};
 use super::unlock::session::{RoMode, UserSession};
 use super::{Maud, fragment};
-use crate::error::RequestResult;
+use crate::error::{ReadOnlyModeSnafu, RequestResult};
 use crate::util::extractors::AjaxRequest;
 use crate::{SharedState, UiState};
 
@@ -156,20 +156,22 @@ pub async fn post_follow(
     Path(profile_id): Path<RostraId>,
     axum_extra::extract::Form(form): axum_extra::extract::Form<FollowFormData>,
 ) -> RequestResult<impl IntoResponse> {
+    let id_secret = state
+        .id_secret(session.session_token())
+        .ok_or_else(|| ReadOnlyModeSnafu.build())?;
+
     let client = state.client(session.id()).await?;
     let client_ref = client.client_ref()?;
 
     match form.follow_type.as_str() {
         "unfollow" => {
-            client_ref
-                .unfollow(session.id_secret()?, profile_id)
-                .await?;
+            client_ref.unfollow(id_secret, profile_id).await?;
         }
         "follow_all" | "follow_only" => {
             let ids = form.personas;
             client_ref
                 .follow(
-                    session.id_secret()?,
+                    id_secret,
                     profile_id,
                     match form.follow_type.as_str() {
                         "follow_all" => rostra_core::event::PersonaSelector::Except { ids },
@@ -188,7 +190,7 @@ pub async fn post_follow(
     Ok(Maud(html! {
         // Update the profile summary (for profile page)
         (state
-            .render_profile_summary(profile_id, &session, session.ro_mode())
+            .render_profile_summary(profile_id, &session, state.ro_mode(session.session_token()))
             .await?)
 
         // Update the followee list (for settings page)
@@ -205,15 +207,16 @@ impl UiState {
         profile_id: RostraId,
         session: &UserSession,
     ) -> RequestResult<Markup> {
+        let ro_mode = self.ro_mode(session.session_token());
         Ok(html! {
                 nav ."o-navBar" {
                     (self.render_top_nav())
 
                     div ."o-navBar__userAccount" {
-                        (self.render_profile_summary(profile_id, session, session.ro_mode()).await?)
+                        (self.render_profile_summary(profile_id, session, ro_mode).await?)
                     }
 
-                    (self.new_post_form(None, session.ro_mode(), None))
+                    (self.new_post_form(None, ro_mode, None))
                 }
         })
     }

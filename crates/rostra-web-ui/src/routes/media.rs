@@ -13,7 +13,7 @@ use snafu::ResultExt as _;
 use super::unlock::session::UserSession;
 use super::{Maud, fragment};
 use crate::SharedState;
-use crate::error::{OtherSnafu, RequestResult};
+use crate::error::{OtherSnafu, ReadOnlyModeSnafu, RequestResult};
 
 pub async fn get(
     state: State<SharedState>,
@@ -87,6 +87,10 @@ pub async fn publish(
                     }));
                 }
 
+                let id_secret = state
+                    .id_secret(session.session_token())
+                    .ok_or_else(|| ReadOnlyModeSnafu.build())?;
+
                 // Create and publish SocialMedia event
                 let media_event = content_kind::SocialMedia {
                     mime: content_type,
@@ -94,7 +98,7 @@ pub async fn publish(
                 };
 
                 let event = client_ref
-                    .publish_event(session.id_secret()?, media_event)
+                    .publish_event(id_secret, media_event)
                     .call()
                     .await?;
 

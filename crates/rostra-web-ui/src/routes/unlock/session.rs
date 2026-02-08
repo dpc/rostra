@@ -2,19 +2,43 @@ use std::sync::Arc;
 
 use axum::extract::FromRequestParts;
 use axum::http::request;
-use rostra_core::id::{RostraId, RostraIdSecretKey};
+use rostra_core::id::RostraId;
 use serde::{Deserialize, Serialize};
 use tower_sessions::Session;
 
-use crate::UiState;
-use crate::error::{
-    InternalServerSnafu, LoginRequiredSnafu, ReadOnlyModeSnafu, RequestError, RequestResult,
-};
+use crate::error::{InternalServerSnafu, LoginRequiredSnafu, RequestError};
+use crate::{SessionToken, UiState};
 
+/// Data stored in the persistent session store (redb).
+///
+/// Note: We intentionally only store the RostraId here, NOT the secret key.
+/// Secrets are kept in-memory only (in `UiState::secrets`) to avoid persisting
+/// them to disk where they could leak.
+///
+/// The session token is NOT stored here - it's derived from the tower-sessions
+/// session ID when the session is extracted.
 #[derive(Clone, Deserialize, Serialize)]
+pub struct UserSessionData {
+    id: RostraId,
+}
+
+impl UserSessionData {
+    pub fn new(rostra_id: RostraId) -> Self {
+        Self { id: rostra_id }
+    }
+}
+
+/// User session with both the RostraId and session token.
+///
+/// This is created by the extractor by combining `UserSessionData` (from the
+/// session store) with the tower-sessions session ID. Since the session was
+/// already saved when the user logged in, the session ID is always available.
+#[derive(Clone)]
 pub struct UserSession {
     id: RostraId,
-    id_secret: Option<RostraIdSecretKey>,
+    /// The session token, derived from the tower-sessions session ID.
+    /// Used to key the in-memory secret storage.
+    session_token: SessionToken,
 }
 
 impl UserSession {
@@ -22,22 +46,9 @@ impl UserSession {
         self.id
     }
 
-    pub(crate) fn id_secret(&self) -> RequestResult<RostraIdSecretKey> {
-        self.id_secret.ok_or_else(|| ReadOnlyModeSnafu.build())
-    }
-
-    pub(crate) fn new(rostra_id: RostraId, secret_key: Option<RostraIdSecretKey>) -> Self {
-        Self {
-            id: rostra_id,
-            id_secret: secret_key,
-        }
-    }
-    pub(crate) fn ro_mode(&self) -> RoMode {
-        if self.id_secret.is_some() {
-            RoMode::Rw
-        } else {
-            RoMode::Ro
-        }
+    /// Returns the session token used to key secret storage.
+    pub(crate) fn session_token(&self) -> SessionToken {
+        self.session_token
     }
 }
 
@@ -59,33 +70,6 @@ impl RoMode {
         self == Self::Ro
     }
 }
-// impl Guest {
-//     const GUEST_DATA_KEY: &'static str = "guest_data";
-
-//     fn first_seen(&self) -> OffsetDateTime {
-//         self.guest_data.first_seen
-//     }
-
-//     fn last_seen(&self) -> OffsetDateTime {
-//         self.guest_data.last_seen
-//     }
-
-//     fn pageviews(&self) -> usize {
-//         self.guest_data.pageviews
-//     }
-
-//     async fn mark_pageview(&mut self) {
-//         self.guest_data.pageviews += 1;
-//         Self::update_session(&self.session, &self.guest_data).await
-//     }
-
-//     async fn update_session(session: &Session, guest_data:
-// &AuthenticatedUser) {         session
-//             .insert(Self::GUEST_DATA_KEY, guest_data.clone())
-//             .await
-//             .unwrap()
-//     }
-// }
 
 pub const SESSION_KEY: &str = "rostra_id";
 
@@ -100,8 +84,8 @@ impl FromRequestParts<Arc<UiState>> for UserSession {
             .await
             .map_err(|(_, msg)| InternalServerSnafu { msg }.build())?;
 
-        // Try to get the user session from the session store
-        let user_result: Result<Option<UserSession>, _> =
+        // Try to get the user session data from the session store.
+        let data_result: Result<Option<UserSessionData>, _> =
             session.get(SESSION_KEY).await.map_err(|_| {
                 InternalServerSnafu {
                     msg: "session store error",
@@ -109,28 +93,55 @@ impl FromRequestParts<Arc<UiState>> for UserSession {
                 .build()
             });
 
-        match user_result {
-            Ok(Some(user)) => Ok(user),
+        match data_result {
+            Ok(Some(data)) => {
+                // Session exists - get the session token from tower-sessions ID.
+                // This should always be available since the session was saved when user logged
+                // in.
+                let session_token = SessionToken::from_session(&session).ok_or_else(|| {
+                    InternalServerSnafu {
+                        msg: "session has no ID",
+                    }
+                    .build()
+                })?;
+
+                Ok(UserSession {
+                    id: data.id,
+                    session_token,
+                })
+            }
             Ok(None) => {
                 if let Some(default_id) = state.default_profile {
-                    // Load the client for the default profile in read-only mode
-                    state.unlock(default_id, None).await.map_err(|_e| {
+                    // Load the client for the default profile in read-only mode.
+                    // No secret is stored since this is read-only.
+                    state.load_client(default_id).await.map_err(|_e| {
                         InternalServerSnafu {
                             msg: "Failed to load default profile",
                         }
                         .build()
                     })?;
 
-                    let user = UserSession::new(default_id, None);
-
-                    session.insert(SESSION_KEY, &user).await.map_err(|_| {
+                    // Insert session data first
+                    let data = UserSessionData::new(default_id);
+                    session.insert(SESSION_KEY, &data).await.map_err(|_| {
                         InternalServerSnafu {
                             msg: "failed to insert session",
                         }
                         .build()
                     })?;
 
-                    Ok(user)
+                    // Now get the session token (available after insert)
+                    let session_token = SessionToken::from_session(&session).ok_or_else(|| {
+                        InternalServerSnafu {
+                            msg: "session has no ID after insert",
+                        }
+                        .build()
+                    })?;
+
+                    Ok(UserSession {
+                        id: default_id,
+                        session_token,
+                    })
                 } else {
                     // No default profile, require login
                     // Capture the original path for redirect after login
@@ -162,7 +173,7 @@ impl FromRequestParts<Arc<UiState>> for OptionalUserSession {
             .await
             .map_err(|(_, msg)| InternalServerSnafu { msg }.build())?;
 
-        let user_result: Result<Option<UserSession>, _> =
+        let data_result: Result<Option<UserSessionData>, _> =
             session.get(SESSION_KEY).await.map_err(|_| {
                 InternalServerSnafu {
                     msg: "session store error",
@@ -170,8 +181,18 @@ impl FromRequestParts<Arc<UiState>> for OptionalUserSession {
                 .build()
             });
 
-        match user_result {
-            Ok(Some(user)) => Ok(OptionalUserSession(Some(user))),
+        match data_result {
+            Ok(Some(data)) => {
+                // Try to get session token - if not available, treat as no session
+                let session_token = SessionToken::from_session(&session);
+                match session_token {
+                    Some(token) => Ok(OptionalUserSession(Some(UserSession {
+                        id: data.id,
+                        session_token: token,
+                    }))),
+                    None => Ok(OptionalUserSession(None)),
+                }
+            }
             Ok(None) => Ok(OptionalUserSession(None)),
             Err(e) => Err(e),
         }

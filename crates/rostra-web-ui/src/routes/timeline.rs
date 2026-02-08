@@ -150,6 +150,7 @@ impl UiState {
         let client_ref = client.client_ref()?;
         let user_id = client_ref.rostra_id();
 
+        let ro_mode = self.ro_mode(session.session_token());
         Ok(html! {
             nav ."o-navBar"
                 x-data="websocket('/updates')"
@@ -157,10 +158,10 @@ impl UiState {
                 (self.render_top_nav())
 
                 div ."o-navBar__profileSummary" {
-                    (self.render_self_profile_summary(session, session.ro_mode()).await?)
+                    (self.render_self_profile_summary(session, ro_mode).await?)
                 }
 
-                (self.new_post_form(None, session.ro_mode(), Some(user_id)))
+                (self.new_post_form(None, ro_mode, Some(user_id)))
             }
         })
     }
@@ -418,7 +419,7 @@ impl UiState {
                                 .content(djot_content)
                                 .reply_count(comment.reply_count)
                                 .timestamp(comment.ts)
-                                .ro(session.ro_mode())
+                                .ro(self.ro_mode(session.session_token()))
                                 .call().await?)
                         }
                     }
@@ -566,7 +567,7 @@ impl UiState {
                                         .content(djot_content)
                                         .reply_count(post.reply_count)
                                         .timestamp(post.ts)
-                                        .ro(session.ro_mode())
+                                        .ro(self.ro_mode(session.session_token()))
                                         .call()
                                         .await?
                                 )

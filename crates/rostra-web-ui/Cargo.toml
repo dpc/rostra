@@ -51,3 +51,4 @@ serde_json = { workspace = true }
 serde = { workspace = true }
 url = { workspace = true }
 urlencoding = { workspace = true }
+rand = { workspace = true }
