@@ -27,6 +27,7 @@ use rostra_util_bind_addr::BindAddr;
 use rostra_util_error::WhateverResult;
 use routes::cache_control;
 use snafu::{ResultExt as _, Snafu, Whatever, ensure};
+use tower_sessions_redb_store::{RedbSessionStore, SessionStoreError};
 use tokio::net::{TcpListener, TcpSocket, UnixListener};
 use tokio::signal;
 use tower_cookies::CookieManagerLayer;
@@ -35,7 +36,7 @@ use tower_http::compression::CompressionLayer;
 use tower_http::compression::predicate::SizeAbove;
 use tower_http::cors::CorsLayer;
 use tower_http::services::ServeDir;
-use tower_sessions::{Expiry, MemoryStore, SessionManagerLayer};
+use tower_sessions::{Expiry, SessionManagerLayer};
 use tracing::info;
 
 pub const UI_ROOT_PATH: &str = "/ui";
@@ -166,6 +167,10 @@ pub enum WebUiServerError {
     ClientRef {
         source: ClientRefError,
     },
+
+    SessionStore {
+        source: SessionStoreError,
+    },
 }
 
 pub type ServerResult<T> = std::result::Result<T, WebUiServerError>;
@@ -223,6 +228,23 @@ pub async fn run_ui(opts: Opts, clients: MultiClient) -> ServerResult<()> {
         welcome_redirect: opts.welcome_redirect.clone(),
     });
 
+    // Create persistent session store with shared redb database
+    let session_db_path = opts.data_dir.join("webui.redb");
+    let session_db = tokio::task::spawn_blocking(move || {
+        redb::Database::create(session_db_path)
+            .map(redb_bincode::Database::from)
+            .map(Arc::new)
+    })
+    .await
+    .expect("spawn_blocking panicked")
+    .map_err(|e| SessionStoreError::from(e))
+    .context(SessionStoreSnafu)?;
+
+    let session_store =
+        RedbSessionStore::new(session_db.clone()).context(SessionStoreSnafu)?;
+    let session_layer = SessionManagerLayer::new(session_store)
+        .with_expiry(Expiry::OnInactivity(time::Duration::minutes(2 * 24 * 60)));
+
     match &opts.listen {
         BindAddr::Tcp(addr) => {
             let listener = get_tcp_listener(*addr, opts.reuseport).await?;
@@ -244,17 +266,13 @@ pub async fn run_ui(opts: Opts, clients: MultiClient) -> ServerResult<()> {
                 ),
             };
 
-            let session_store = MemoryStore::default();
-            let session_layer = SessionManagerLayer::new(session_store)
-                .with_expiry(Expiry::OnInactivity(time::Duration::minutes(2 * 24 * 60)));
-
             axum::serve(
                 listener,
                 router
                     .with_state(state)
                     .layer(CookieManagerLayer::new())
                     .layer(middleware::from_fn(cache_control))
-                    .layer(session_layer)
+                    .layer(session_layer.clone())
                     .layer(cors_layer(&opts, local_addr)?)
                     .layer(compression_layer())
                     .into_make_service_with_connect_info::<SocketAddr>(),
@@ -279,10 +297,6 @@ pub async fn run_ui(opts: Opts, clients: MultiClient) -> ServerResult<()> {
                     ServeDir::new(format!("{}/assets", env!("CARGO_MANIFEST_DIR"))),
                 ),
             };
-
-            let session_store = MemoryStore::default();
-            let session_layer = SessionManagerLayer::new(session_store)
-                .with_expiry(Expiry::OnInactivity(time::Duration::minutes(2 * 24 * 60)));
 
             axum::serve(
                 listener,

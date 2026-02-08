@@ -14,6 +14,7 @@ members = [
   "crates/rostra-web-ui",
   "crates/rostra-djot",
   "crates/axum-dpc-static-assets",
+  "crates/tower-sessions-redb-store",
   "crates/bots/rostra-bot",
 ]
 resolver = "2"
@@ -106,6 +107,8 @@ tower = "*"
 tower-cookies = "*"
 tower-http = "0.5"
 tower-sessions = "0.14.0"
+tower-sessions-core = "0.14.0"
+tower-sessions-redb-store = { path = "crates/tower-sessions-redb-store" }
 tower-service = "0.3.3"
 tracing = "0.1.41"
 tracing-subscriber = { version = "0.3.19", features = ["env-filter"] }

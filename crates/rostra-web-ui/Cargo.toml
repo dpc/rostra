@@ -24,6 +24,8 @@ futures-util = { workspace = true }
 jotup = { workspace = true }
 maud = { workspace = true }
 listenfd = { workspace = true }
+redb = { workspace = true }
+redb-bincode = { workspace = true }
 snafu = { workspace = true }
 rostra-core = { workspace = true }
 rostra-djot = { workspace = true }
@@ -42,6 +44,7 @@ tower-cookies = { workspace = true }
 tower-service = { workspace = true }
 tower-http = { workspace = true, features = ["cors", "compression-br", "fs"] }
 tower-sessions = { workspace = true }
+tower-sessions-redb-store = { workspace = true }
 tracing = { workspace = true }
 time = { workspace = true }
 serde_json = { workspace = true }

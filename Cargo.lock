@@ -3936,6 +3936,8 @@ dependencies = [
  "jotup",
  "listenfd",
  "maud",
+ "redb",
+ "redb-bincode",
  "rostra-client",
  "rostra-client-db",
  "rostra-core",
@@ -3957,6 +3959,7 @@ dependencies = [
  "tower-http 0.5.2",
  "tower-service",
  "tower-sessions",
+ "tower-sessions-redb-store",
  "tracing",
  "url",
  "urlencoding",
@@ -5001,6 +5004,20 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "fb05909f2e1420135a831dd5df9f5596d69196d0a64c3499ca474c4bd3d33242"
 dependencies = [
  "async-trait",
+ "time",
+ "tokio",
+ "tower-sessions-core",
+]
+
+[[package]]
+name = "tower-sessions-redb-store"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "bincode",
+ "redb",
+ "redb-bincode",
+ "serde_json",
  "time",
  "tokio",
  "tower-sessions-core",

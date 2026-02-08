@@ -1,0 +1,19 @@
+[package]
+name = "tower-sessions-redb-store"
+description = "Redb session store backend for tower-sessions"
+edition = { workspace = true }
+license = { workspace = true }
+version = { workspace = true }
+
+[lints]
+workspace = true
+
+[dependencies]
+async-trait = { workspace = true }
+bincode = { workspace = true }
+redb = { workspace = true }
+redb-bincode = { workspace = true }
+serde_json = { workspace = true }
+time = { workspace = true }
+tokio = { workspace = true }
+tower-sessions-core = { workspace = true }
