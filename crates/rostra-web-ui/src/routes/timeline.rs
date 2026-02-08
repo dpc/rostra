@@ -128,14 +128,14 @@ pub async fn get_updates(
     })
 }
 
-pub async fn get_post_comments(
+pub async fn get_post_replies(
     state: State<SharedState>,
     session: UserSession,
     Path((post_thread_id, event_id)): Path<(ShortEventId, ShortEventId)>,
 ) -> RequestResult<impl IntoResponse> {
     Ok(Maud(
         state
-            .render_post_comments(post_thread_id, event_id, &session)
+            .render_post_replies(post_thread_id, event_id, &session)
             .await?,
     ))
 }
@@ -239,7 +239,7 @@ impl UiState {
             (page_layout)
 
             // Dialog containers for timeline interactions
-            div id="preview-dialog" ."o-previewDialog" x-sync {}
+            div id="post-preview-dialog" ."o-previewDialog" x-sync {}
             div id="media-list" ."o-mediaList" x-sync {}
             div id="ajax-scripts" style="display: none;" {}
             div id="follow-dialog-content" {}
@@ -383,7 +383,7 @@ impl UiState {
         }
     }
 
-    pub async fn render_post_comments(
+    pub async fn render_post_replies(
         &self,
         post_thread_id: ShortEventId,
         post_id: ShortEventId,
@@ -401,12 +401,19 @@ impl UiState {
             .await;
 
         Ok(html! {
-            div ."m-postView__comments"
-                id=(super::post::post_comments_html_id(post_thread_id, post_id))
+            // Replies container with placeholders inside
+            div ."m-postView__replies"
+                id=(super::post::post_replies_html_id(post_thread_id, post_id))
             {
+                // Placeholders for inline reply (form, preview, added)
+                div id=(super::post::post_inline_reply_form_html_id(post_thread_id, post_id)) {}
+                div id=(super::post::post_inline_reply_preview_html_id(post_thread_id, post_id)) {}
+                div id=(super::post::post_inline_reply_added_html_id(post_thread_id, post_id)) x-merge="after" {}
+
+                // Existing replies
                 @for comment in comments {
                     @if let Some(djot_content) = comment.content.djot_content.as_ref() {
-                        div ."o-postOverview__commentsItem" {
+                        div ."o-postOverview__repliesItem" {
                             (self.render_post_context(
                                 &client_ref,
                                 comment.author
@@ -535,7 +542,8 @@ impl UiState {
                         span class="slider round" { }
                     }
                 }
-                div id="post-preview" ."o-mainBarTimeline__item -preview -empty" x-sync { }
+                div id="new-post-preview" ."o-mainBarTimeline__item -preview -empty" x-sync { }
+                div id="new-post-added" x-merge="after" {}
                 div id="timeline-posts" x-merge="append" {
                     @for post in &filtered_posts {
                         @if let Some(djot_content) = post.content.djot_content.as_ref() {

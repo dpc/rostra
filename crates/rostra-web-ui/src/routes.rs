@@ -185,19 +185,30 @@ pub fn route_handler(state: SharedState) -> Router<Arc<UiState>> {
         )
         .route("/post/{author}/{event}/delete", post(post::delete_post))
         .route("/post", post(new_post::post_new_post))
-        .route("/post/preview", post(new_post::get_post_preview))
+        .route(
+            "/post/new_post_preview",
+            post(new_post::get_new_post_preview),
+        )
         .route(
             "/post/preview_dialog",
             post(new_post::get_post_preview_dialog),
         )
-        .route("/post/reply_to", get(new_post::get_reply_to))
+        .route("/post/inline_reply", get(new_post::get_inline_reply))
+        .route(
+            "/post/inline_reply_cancel",
+            get(new_post::get_inline_reply_cancel),
+        )
+        .route(
+            "/post/inline_reply_preview",
+            post(new_post::post_inline_reply_preview),
+        )
         .route("/followee", post(add_followee::add_followee))
         .route("/unlock", get(unlock::get).post(unlock::post_unlock))
         .route("/unlock/logout", get(unlock::get).post(unlock::logout))
         .route("/unlock/random", get(unlock::get_random))
         .route(
-            "/comments/{post_thread_id}/{event_id}",
-            get(timeline::get_post_comments),
+            "/replies/{post_thread_id}/{event_id}",
+            get(timeline::get_post_replies),
         )
         .route(
             "/self/edit",

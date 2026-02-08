@@ -32,14 +32,38 @@ pub fn post_content_html_id(post_thread_id: ShortEventId, event_id: ShortEventId
     format!("post-content-{post_thread_id}-{event_id}")
 }
 
-/// Generate HTML ID for post comments container.
-pub fn post_comments_html_id(post_thread_id: ShortEventId, event_id: ShortEventId) -> String {
-    format!("post-comments-{post_thread_id}-{event_id}")
+/// Generate HTML ID for post replies container.
+pub fn post_replies_html_id(post_thread_id: ShortEventId, event_id: ShortEventId) -> String {
+    format!("post-replies-{post_thread_id}-{event_id}")
 }
 
 /// Generate HTML ID for the whole post element (used for delete target).
 pub fn post_html_id(post_thread_id: ShortEventId, event_id: ShortEventId) -> String {
     format!("post-{post_thread_id}-{event_id}")
+}
+
+/// Generate HTML ID for inline reply form container.
+pub fn post_inline_reply_form_html_id(
+    post_thread_id: ShortEventId,
+    event_id: ShortEventId,
+) -> String {
+    format!("post-inline-reply-form-{post_thread_id}-{event_id}")
+}
+
+/// Generate HTML ID for inline reply preview container.
+pub fn post_inline_reply_preview_html_id(
+    post_thread_id: ShortEventId,
+    event_id: ShortEventId,
+) -> String {
+    format!("post-inline-reply-preview-{post_thread_id}-{event_id}")
+}
+
+/// Generate HTML ID for inline reply added placeholder (for x-merge="after").
+pub fn post_inline_reply_added_html_id(
+    post_thread_id: ShortEventId,
+    event_id: ShortEventId,
+) -> String {
+    format!("post-inline-reply-added-{post_thread_id}-{event_id}")
 }
 
 #[derive(Deserialize)]
@@ -262,12 +286,12 @@ impl UiState {
         // Use post_thread_id if provided, otherwise default to event_id
         let post_thread_id = post_thread_id.or(event_id);
 
-        let post_id = format!(
-            "post-{}",
-            event_id
-                .map(|e| e.to_string())
-                .unwrap_or_else(|| "preview".to_string()),
-        );
+        // Generate unique ID for the article element (matches m-postContext class)
+        let post_context_id = match (post_thread_id, event_id) {
+            (Some(ctx), Some(id)) => format!("post-context-{ctx}-{id}"),
+            (None, Some(id)) => format!("post-context-{id}"),
+            _ => "post-context-preview".to_string(),
+        };
         let post_view = self
             .render_post_view(client, author)
             .maybe_persona_display_name(persona_display_name)
@@ -282,7 +306,7 @@ impl UiState {
 
         Ok(html! {
 
-            article #(post_id)
+            article #(post_context_id)
                 ."m-postContext"
              {
                 @if let Some((reply_to_author, reply_to_event_id, reply_to_post)) = reply_to {
@@ -479,12 +503,12 @@ impl UiState {
                             @if reply_count > 0 {
                                 @if let Some(ctx) = post_thread_id {
                                     @let label = if reply_count == 1 { "1 Reply".to_string() } else { format!("{reply_count} Replies") };
-                                    @let comments_target = post_comments_html_id(ctx, ext_event_id.event_id().to_short());
+                                    @let replies_target = post_replies_html_id(ctx, ext_event_id.event_id().to_short());
                                     (fragment::ajax_form(
-                                        &format!("/comments/{}/{}", ctx, ext_event_id.event_id().to_short()),
+                                        &format!("/replies/{}/{}", ctx, ext_event_id.event_id().to_short()),
                                         "get",
-                                        &comments_target,
-                                        fragment::button("m-postView__commentsButton", &label).call(),
+                                        &replies_target,
+                                        fragment::button("m-postView__repliesButton", &label).call(),
                                     )
                                     .after_js("$el.querySelector('button').classList.add('u-hidden')")
                                     .call())
@@ -503,16 +527,25 @@ impl UiState {
                                 ).call())
                             }
                         }
-                        (fragment::ajax_button(
-                            "/post/reply_to",
-                            "get",
-                            "reply-to-line",
-                            "m-postView__replyToButton",
-                            "Reply",
-                        )
-                        .disabled(ro.to_disabled())
-                        .hidden_inputs(html! { input type="hidden" name="reply_to" value=(ext_event_id) {} })
-                        .call())
+                        // Reply button only available when we have a thread context
+                        @if let Some(ctx) = post_thread_id {
+                            // Target the replies container (placeholders are rendered inside when expanded)
+                            @let reply_to_id = ext_event_id.event_id().to_short();
+                            @let replies_target = post_replies_html_id(ctx, reply_to_id);
+                            (fragment::ajax_button(
+                                "/post/inline_reply",
+                                "get",
+                                &replies_target,
+                                "m-postView__replyToButton",
+                                "Reply",
+                            )
+                            .disabled(ro.to_disabled())
+                            .hidden_inputs(html! {
+                                input type="hidden" name="reply_to" value=(ext_event_id) {}
+                                input type="hidden" name="post_thread_id" value=(ctx) {}
+                            })
+                            .call())
+                        }
                     }
                 }
             }
@@ -527,8 +560,9 @@ impl UiState {
 
                 (button_bar)
 
-                div ."m-postView__comments"
-                    id=[post_thread_id.zip(event_id).map(|(ctx, id)| post_comments_html_id(ctx, id))]
+                // Initially empty replies container - placeholders rendered inside when Reply/Replies clicked
+                div ."m-postView__replies"
+                    id=[post_thread_id.zip(event_id).map(|(ctx, id)| post_replies_html_id(ctx, id))]
                 {}
             }
         })
