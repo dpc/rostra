@@ -421,7 +421,30 @@ impl UiState {
                             }
                         }
                         @if let Some(event_id) = event_id {
-                            a ."m-postView__postAnchor" href=(format!("/post/{}/{}", author, event_id)) { "#" }
+                            details ."m-postView__actionMenu" {
+                                summary ."m-postView__actionMenuTrigger" { "\u{22EE}" }
+                                div ."m-postView__actionMenuDropdown" {
+                                    a ."m-postView__actionMenuItem" href=(format!("/post/{}/{}", author, event_id)) {
+                                        "Share..."
+                                    }
+                                    @if author == client.rostra_id() {
+                                        @if let Some(ctx) = post_thread_id {
+                                            @let post_target = post_html_id(ctx, event_id);
+                                            (fragment::ajax_button(
+                                                &format!("/post/{author}/{event_id}/delete"),
+                                                "post",
+                                                &post_target,
+                                                "m-postView__deleteMenuItem",
+                                                "Delete",
+                                            )
+                                            .disabled(ro.to_disabled())
+                                            .variant("--danger")
+                                            .before_js("if (!confirm('Are you sure you want to delete this post?')) { $event.preventDefault(); return; }")
+                                            .call())
+                                        }
+                                    }
+                                }
+                            }
                         }
                     }
 
@@ -476,23 +499,6 @@ impl UiState {
                                 ).call())
                             }
                         }
-                        @if author == client.rostra_id() {
-                            @if let (Some(ctx), Some(event_id)) = (post_thread_id, event_id) {
-                                @let post_target = post_html_id(ctx, event_id);
-                                (fragment::ajax_button(
-                                    &format!("/post/{author}/{event_id}/delete"),
-                                    "post",
-                                    &post_target,
-                                    "m-postView__deleteButton",
-                                    "Delete",
-                                )
-                                .disabled(ro.to_disabled())
-                                .variant("--danger")
-                                .before_js("if (!confirm('Are you sure you want to delete this post?')) { $event.preventDefault(); return; }")
-                                .call())
-                            }
-                        }
-
                         (fragment::ajax_button(
                             "/post/reply_to",
                             "get",

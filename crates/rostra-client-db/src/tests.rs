@@ -2022,10 +2022,10 @@ mod proptest_rc {
             // Events with no state or Unprocessed state contribute to RC.
             // Only Deleted and Pruned events don't contribute.
             let has_rc = match state {
-                None => true,                                 /* Content processed, contributing
-                                                                * to RC */
-                Some(EventContentState::Unprocessed) => true, /* Not yet processed, but
-                                                                * contributes to RC */
+                None => true, /* Content processed, contributing */
+                // to RC
+                Some(EventContentState::Unprocessed) => true, /* Not yet processed, but */
+                // contributes to RC
                 Some(EventContentState::Deleted { .. }) | Some(EventContentState::Pruned) => false,
             };
 
