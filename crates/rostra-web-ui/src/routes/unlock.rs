@@ -128,9 +128,12 @@ pub async fn post_unlock(
     // The session ID is available after the session has been modified.
     if let Some(session_token) = SessionToken::from_session(&session) {
         state.set_session_secret(session_token, secret_key_opt);
+
+        // 4. Opportunistically clean up secrets for expired sessions (neighbors only)
+        state.gc_secrets(session_token).await;
     }
 
-    // 4. Redirect to the original path if provided, otherwise to root
+    // 5. Redirect to the original path if provided, otherwise to root
     let target = redirect_path
         .filter(|p| p.starts_with('/'))
         .unwrap_or_else(|| "/".to_string());

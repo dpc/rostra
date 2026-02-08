@@ -3960,6 +3960,7 @@ dependencies = [
  "tower-http 0.5.2",
  "tower-service",
  "tower-sessions",
+ "tower-sessions-core",
  "tower-sessions-redb-store",
  "tracing",
  "url",

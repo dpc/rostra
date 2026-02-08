@@ -112,6 +112,8 @@ pub struct UiState {
     /// In-memory storage for secret keys.
     /// See [`secrets::SecretStore`] for details on the security design.
     secrets: secrets::SecretStore,
+    /// Session store for checking session validity during GC.
+    session_store: RedbSessionStore,
 }
 
 impl UiState {
@@ -152,6 +154,14 @@ impl UiState {
             Some(s) => self.secrets.insert(session_token, s),
             None => self.secrets.remove(session_token),
         }
+    }
+
+    /// Remove secrets for sessions that no longer exist.
+    ///
+    /// Called opportunistically during login. Only checks neighbors of
+    /// the given session token for efficient incremental cleanup.
+    pub async fn gc_secrets(&self, session_token: SessionToken) {
+        self.secrets.gc(session_token, &self.session_store).await;
     }
 
     /// Load a client for read-only access (no secret key).
@@ -271,14 +281,6 @@ pub async fn run_ui(opts: Opts, clients: MultiClient) -> ServerResult<()> {
         ))
     };
 
-    let state = Arc::new(UiState {
-        clients,
-        assets: assets.clone(),
-        default_profile: opts.default_profile,
-        welcome_redirect: opts.welcome_redirect.clone(),
-        secrets: secrets::SecretStore::new(),
-    });
-
     // Create persistent session store with shared redb database
     let session_db_path = opts.data_dir.join("webui.redb");
     let session_db = tokio::task::spawn_blocking(move || {
@@ -292,6 +294,16 @@ pub async fn run_ui(opts: Opts, clients: MultiClient) -> ServerResult<()> {
     .context(SessionStoreSnafu)?;
 
     let session_store = RedbSessionStore::new(session_db.clone()).context(SessionStoreSnafu)?;
+
+    let state = Arc::new(UiState {
+        clients,
+        assets: assets.clone(),
+        default_profile: opts.default_profile,
+        welcome_redirect: opts.welcome_redirect.clone(),
+        secrets: secrets::SecretStore::new(),
+        session_store: session_store.clone(),
+    });
+
     let session_layer = SessionManagerLayer::new(session_store)
         .with_name("rostra_session")
         .with_expiry(Expiry::OnInactivity(time::Duration::minutes(2 * 24 * 60)));
