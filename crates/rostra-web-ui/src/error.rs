@@ -9,7 +9,7 @@ use rostra_client_db::DbError;
 use rostra_util_error::{BoxedError, FmtCompact as _};
 use serde::Serialize;
 use snafu::Snafu;
-use tracing::info;
+use tracing::{debug, warn};
 
 use super::routes::AppJson;
 use crate::{LOG_TARGET, UiStateClientError};
@@ -78,6 +78,7 @@ pub enum RequestError {
     #[snafu(visibility(pub(crate)))]
     Other { source: BoxedError },
     #[snafu(visibility(pub(crate)))]
+    #[snafu(display("InternalServerError: {msg}"))]
     InternalServerError { msg: &'static str },
     #[snafu(visibility(pub(crate)))]
     LoginRequired { redirect: Option<String> },
@@ -92,10 +93,9 @@ pub type RequestResult<T> = std::result::Result<T, RequestError>;
 
 impl IntoResponse for RequestError {
     fn into_response(self) -> Response {
-        info!(
+        debug!(
             target: LOG_TARGET,
-
-            err=%self.fmt_compact(),
+            err = %self.fmt_compact(),
             "Request Error"
         );
 
@@ -118,10 +118,17 @@ impl IntoResponse for RequestError {
                         };
                         return Redirect::to(&url).into_response();
                     }
-                    _ => (
-                        StatusCode::INTERNAL_SERVER_ERROR,
-                        "Internal Service Error".to_owned(),
-                    ),
+                    err => {
+                        warn!(
+                            target: LOG_TARGET,
+                            err = %err.fmt_compact(),
+                            "Unexpected Request Error"
+                        );
+                        (
+                            StatusCode::INTERNAL_SERVER_ERROR,
+                            "Internal Service Error".to_owned(),
+                        )
+                    }
                 }
             }
         };

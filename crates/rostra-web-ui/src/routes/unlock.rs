@@ -117,15 +117,15 @@ pub async fn post_unlock(
         }
     };
 
-    // 2. Insert session data into store (this creates/updates the session)
+    // 2. Insert session data and save to store
     session
         .insert(SESSION_KEY, &UserSessionData::new(rostra_id))
         .await
         .boxed()
         .context(OtherSnafu)?;
+    session.save().await.boxed().context(OtherSnafu)?;
 
-    // 3. Get session ID (now available after insert) and store secret
-    // The session ID is available after the session has been modified.
+    // 3. Get session ID (now available after save) and store secret
     if let Some(session_token) = SessionToken::from_session(&session) {
         state.set_session_secret(session_token, secret_key_opt);
 

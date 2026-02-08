@@ -121,7 +121,7 @@ impl FromRequestParts<Arc<UiState>> for UserSession {
                         .build()
                     })?;
 
-                    // Insert session data first
+                    // Insert session data and save to store
                     let data = UserSessionData::new(default_id);
                     session.insert(SESSION_KEY, &data).await.map_err(|_| {
                         InternalServerSnafu {
@@ -129,11 +129,17 @@ impl FromRequestParts<Arc<UiState>> for UserSession {
                         }
                         .build()
                     })?;
+                    session.save().await.map_err(|_| {
+                        InternalServerSnafu {
+                            msg: "failed to save session",
+                        }
+                        .build()
+                    })?;
 
-                    // Now get the session token (available after insert)
+                    // Now get the session token (available after save)
                     let session_token = SessionToken::from_session(&session).ok_or_else(|| {
                         InternalServerSnafu {
-                            msg: "session has no ID after insert",
+                            msg: "session has no ID after save",
                         }
                         .build()
                     })?;

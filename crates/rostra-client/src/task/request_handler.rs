@@ -113,10 +113,10 @@ impl RequestHandler {
             match err {
                 // normal, mostly ignore
                 IncomingConnectionError::Connection { source: _, .. } => {
-                    trace!(target: LOG_TARGET, err=%err.fmt_compact(), %peer_addr, "Client disconnected");
+                    trace!(target: LOG_TARGET, err = %err.fmt_compact(), %peer_addr, "Client disconnected");
                 }
                 _ => {
-                    debug!(target: LOG_TARGET, err=%err.fmt_compact(), %peer_addr, "Error handling incoming connection");
+                    debug!(target: LOG_TARGET, err = %err.fmt_compact(), %peer_addr, "Error handling incoming connection");
                 }
             }
         }
