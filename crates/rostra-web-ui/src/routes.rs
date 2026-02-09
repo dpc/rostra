@@ -64,13 +64,19 @@ where
 }
 
 pub async fn cache_control(request: Request, next: Next) -> Response {
+    // Check if this is a static asset request (always cacheable)
+    let is_static_asset = request.uri().path().starts_with("/assets/");
+
     let mut response = next.run(request).await;
 
     if let Some(content_type) = response.headers().get(CONTENT_TYPE) {
-        const NON_CACHEABLE_CONTENT_TYPES: &[&str] = &["text/html"];
+        const NON_CACHEABLE_CONTENT_TYPES: &[&str] = &["text/html", "application/json"];
         const SHORT_CACHE_CONTENT_TYPES: &[&str] = &["text/css"];
 
-        let cache_duration_secs = if SHORT_CACHE_CONTENT_TYPES
+        let cache_duration_secs = if is_static_asset {
+            // Static assets are always cacheable
+            Some(60 * 60)
+        } else if SHORT_CACHE_CONTENT_TYPES
             .iter()
             .any(|&ct| content_type.as_bytes().starts_with(ct.as_bytes()))
         {
