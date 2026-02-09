@@ -122,6 +122,11 @@ impl UiState {
         }
     }
 
+    /// Check if a client is loaded in memory without returning it.
+    pub async fn is_client_loaded(&self, id: RostraId) -> bool {
+        self.clients.get(id).await.is_some()
+    }
+
     /// Get the secret key for a session from in-memory storage.
     ///
     /// Takes the [`SessionToken`] as the key (derived from tower-sessions ID).

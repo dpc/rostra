@@ -71,8 +71,11 @@ pub type UnlockResult<T> = std::result::Result<T, UnlockError>;
 pub enum RequestError {
     #[snafu(transparent)]
     Client { source: ClientRefError },
-    #[snafu(transparent)]
-    StateClient { source: UiStateClientError },
+    #[snafu(visibility(pub(crate)))]
+    StateClient {
+        source: UiStateClientError,
+        redirect: Option<String>,
+    },
     #[snafu(transparent)]
     PostError { source: PostError },
     #[snafu(visibility(pub(crate)))]
@@ -91,6 +94,16 @@ pub enum RequestError {
 }
 pub type RequestResult<T> = std::result::Result<T, RequestError>;
 
+/// Default From implementation for backwards compatibility (no redirect)
+impl From<UiStateClientError> for RequestError {
+    fn from(source: UiStateClientError) -> Self {
+        RequestError::StateClient {
+            source,
+            redirect: None,
+        }
+    }
+}
+
 impl IntoResponse for RequestError {
     fn into_response(self) -> Response {
         debug!(
@@ -105,10 +118,8 @@ impl IntoResponse for RequestError {
             }
             _ => {
                 match self {
-                    RequestError::StateClient { .. } => {
-                        return Redirect::temporary("/unlock").into_response();
-                    }
-                    RequestError::LoginRequired { redirect } => {
+                    RequestError::StateClient { redirect, .. }
+                    | RequestError::LoginRequired { redirect } => {
                         // Use standard HTTP redirect for Alpine-ajax
                         let url = match redirect {
                             Some(ref path) => {

@@ -93,9 +93,21 @@ impl FromRequestParts<Arc<UiState>> for UserSession {
                 .build()
             });
 
+        // Capture request path for potential redirect after login
+        let request_path = req.uri.path_and_query().map(|pq| pq.to_string());
+
         match data_result {
             Ok(Some(data)) => {
-                // Session exists - get the session token from tower-sessions ID.
+                // Session exists - check if client is loaded in memory.
+                // If not, redirect to unlock page with the original path.
+                if !state.is_client_loaded(data.id).await {
+                    return Err(LoginRequiredSnafu {
+                        redirect: request_path,
+                    }
+                    .build());
+                }
+
+                // Get the session token from tower-sessions ID.
                 // This should always be available since the session was saved when user logged
                 // in.
                 let session_token = SessionToken::from_session(&session).ok_or_else(|| {
@@ -150,9 +162,10 @@ impl FromRequestParts<Arc<UiState>> for UserSession {
                     })
                 } else {
                     // No default profile, require login
-                    // Capture the original path for redirect after login
-                    let redirect = req.uri.path_and_query().map(|pq| pq.to_string());
-                    Err(LoginRequiredSnafu { redirect }.build())
+                    Err(LoginRequiredSnafu {
+                        redirect: request_path,
+                    }
+                    .build())
                 }
             }
             Err(e) => Err(e),
