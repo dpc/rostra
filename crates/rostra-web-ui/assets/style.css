@@ -1126,6 +1126,7 @@ emoji-picker {
   padding: clamp(1rem, 2.5vw, 2rem) clamp(1rem, 5vw, 4rem);
   border: solid 1px var(--color-timeline-item-border);
   border-radius: 6px;
+  max-width: 700px;
 
   display: flex;
   flex-direction: column;
@@ -1184,6 +1185,15 @@ emoji-picker {
 .o-unlockScreen__unlockLine {
   display: flex;
   gap: 5pt;
+}
+
+.o-unlockScreen__generateButton {
+  white-space: nowrap;
+  max-width: unset;
+}
+
+.o-unlockScreen__generateButton .u-buttonIcon {
+  flex-shrink: 0;
 }
 
 .o-unlockScreen__unlockButtonIcon {

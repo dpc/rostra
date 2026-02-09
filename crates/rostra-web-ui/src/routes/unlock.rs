@@ -174,10 +174,12 @@ impl UiState {
                         (n)
                     }
                     div ."o-unlockScreen__header"  {
-                        h4 { "Unlock Rostra account" }
-                        p { "Provide existing RostraId, secret passphrase or both to unlock your identity."}
-                        p { "Use Random button to generate new identity."}
-                        p { "Make sure to save your identity information."}
+                        h4 { "Login to Rostra" }
+                        p { "Provide existing RostraID (public key) only to log in in read-only mode," }
+                        p { "or Rostra secret passphrase to log in normally." }
+                        p {
+                            "Create Account to generate new RostraId/account. Saved it in the password manager."
+                        }
                     }
                     div."o-unlockScreen__idLine" {
                         input ."o-unlockScreen__id"
@@ -192,7 +194,7 @@ impl UiState {
                             type="submit"
                         {
                                 span ."o-unlockScreen__unlockButtonIcon u-buttonIcon" width="1rem" height="1rem" {}
-                                "Unlock"
+                                "Login"
                             }
                     }
                     div."o-unlockScreen__mnemonicLine" {
@@ -212,10 +214,10 @@ impl UiState {
                                     document.querySelector('.o-unlockScreen__mnemonic').value = '';
                                 "#
                             )
-                            title="Clear the mnemonic to unlock in a read-only mode"
+                            title="Clear the mnemonic to login in read-only mode"
                             {
                                 span ."o-unlockScreen__roButtonIcon u-buttonIcon" width="1rem" height="1rem" {}
-                                "Read-only"
+                                "Clear secret"
                             }
                     }
                     div."o-unlockScreen__unlockLine" {
@@ -228,10 +230,10 @@ impl UiState {
                                     document.querySelector('.o-unlockScreen__mnemonic').value = '{}';
                                 "#, random_rostra_id, random_mnemonic)
                             )
-                            title="Generate a random account."
+                            title="Create a new Rostra account. Make sure to save the generated secret passphrase."
                             {
                                 span ."o-unlockScreen__generateButtonIcon u-buttonIcon" width="1rem" height="1rem" {}
-                                "Random"
+                                "Create Account"
                             }
                     }
                 }
