@@ -1,7 +1,6 @@
 use axum::Json;
 use axum::extract::{Query, State};
 use axum::response::IntoResponse;
-use rostra_core::id::RostraId;
 use serde::{Deserialize, Serialize};
 
 use super::unlock::session::UserSession;
@@ -32,23 +31,35 @@ pub async fn search_profiles(
     // Get extended followers (direct + followers of followers)
     let (direct, extended) = db.get_followees_extended(session.id()).await;
 
-    // Collect all IDs to search (direct followees + extended)
-    let all_ids: Vec<RostraId> = direct.keys().copied().chain(extended.into_iter()).collect();
-
-    // Filter by display name prefix
+    // Filter by display name or rostra_id prefix (self + direct followees +
+    // extended)
     let mut results = Vec::new();
-    for id in all_ids {
+    for id in std::iter::once(session.id())
+        .chain(direct.keys().copied())
+        .chain(extended)
+    {
         if results.len() >= 10 {
             break;
         }
 
-        if let Some(profile) = db.get_social_profile(id).await {
-            if profile.display_name.to_lowercase().starts_with(&query) {
-                results.push(ProfileSearchResult {
-                    rostra_id: id.to_string(),
-                    display_name: profile.display_name,
-                });
-            }
+        let id_str = id.to_string();
+        let id_str_lower = id_str.to_lowercase();
+
+        // Get display name from profile, or use truncated rostra_id as fallback
+        let display_name = db
+            .get_social_profile(id)
+            .await
+            .map(|p| p.display_name)
+            .unwrap_or_else(|| format!("{}...", &id_str[..8.min(id_str.len())]));
+
+        let display_name_lower = display_name.to_lowercase();
+
+        // Match against display name or rostra_id prefix
+        if display_name_lower.starts_with(&query) || id_str_lower.starts_with(&query) {
+            results.push(ProfileSearchResult {
+                rostra_id: id_str,
+                display_name,
+            });
         }
     }
 
