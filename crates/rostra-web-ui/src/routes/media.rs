@@ -1,5 +1,5 @@
 use axum::body::Body;
-use axum::extract::{Multipart, Path, State};
+use axum::extract::{Multipart, Path, Query, State};
 use axum::http::{HeaderMap, HeaderValue, StatusCode, header};
 use axum::response::{IntoResponse, Response};
 use axum_dpc_static_assets::handle_etag;
@@ -8,6 +8,7 @@ use rostra_client_db::events_singletons_new;
 use rostra_core::ShortEventId;
 use rostra_core::event::content_kind;
 use rostra_core::id::{RostraId, ToShort as _};
+use serde::Deserialize;
 use snafu::ResultExt as _;
 
 use super::unlock::session::UserSession;
@@ -141,11 +142,19 @@ struct MediaInfo {
     is_video: bool,
 }
 
+#[derive(Deserialize)]
+pub struct ListQuery {
+    /// CSS selector for the textarea to insert media into
+    target: String,
+}
+
 pub async fn list(
     state: State<SharedState>,
     session: UserSession,
     Path(author): Path<RostraId>,
+    Query(query): Query<ListQuery>,
 ) -> RequestResult<impl IntoResponse> {
+    let target_selector = query.target;
     let client_handle = state.client(session.id()).await?;
     let client_ref = client_handle.client_ref()?;
 
@@ -217,7 +226,7 @@ pub async fn list(
                     } @else {
                         @for media in &media_items {
                             div ."o-mediaList__item"
-                                onclick=(format!("insertMediaSyntax('{}'); document.getElementById('media-list').classList.remove('-active')", media.event_id))
+                                onclick=(format!("insertMediaSyntax('{}', '{}'); document.getElementById('media-list').classList.remove('-active')", media.event_id, target_selector))
                             {
                                 @if media.is_image {
                                     img

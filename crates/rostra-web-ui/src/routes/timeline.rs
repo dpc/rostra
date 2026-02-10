@@ -263,7 +263,7 @@ impl UiState {
                             textarea = document.querySelector(container.dataset.textareaSelector);
                         } else {
                             // Main form picker - use default selector
-                            textarea = document.querySelector('.m-newPostForm__content');
+                            textarea = document.getElementById('new-post-content');
                         }
                         if (textarea) {
                             textFieldEdit.insert(textarea, e.detail.unicode);
@@ -280,8 +280,8 @@ impl UiState {
             // Initialize insertMediaSyntax function once
             script {
                 (PreEscaped(r#"
-                    window.insertMediaSyntax = function(eventId) {
-                        const textarea = document.querySelector('.m-newPostForm__content');
+                    window.insertMediaSyntax = function(eventId, targetSelector) {
+                        const textarea = document.querySelector(targetSelector);
                         const syntax = '![media](rostra-media:' + eventId + ')';
 
                         if (textarea) {

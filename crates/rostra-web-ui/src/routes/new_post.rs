@@ -35,7 +35,7 @@ fn focus_on_new_post_content_input() -> Markup {
             // focus on new post content input
             (PreEscaped(r#"
                 (function() {
-                    const content = document.querySelector('.m-newPostForm__content');
+                    const content = document.getElementById('new-post-content');
                     if (content != null) {
                         content.focus();
                         // on small devices, we want to keep the input in view,
@@ -455,17 +455,14 @@ pub async fn post_inline_reply_preview(
     }))
 }
 
-fn focus_on_inline_reply_content(form_id: &str) -> Markup {
+fn focus_on_inline_reply_content(textarea_id: &str) -> Markup {
     html! {
         script {
             (PreEscaped(format!(r#"
                 (function() {{
-                    const container = document.getElementById('{form_id}');
-                    if (container != null) {{
-                        const content = container.querySelector('.m-inlineReply__content');
-                        if (content != null) {{
-                            content.focus();
-                        }}
+                    const content = document.getElementById('{textarea_id}');
+                    if (content != null) {{
+                        content.focus();
                     }}
                 }})()
             "#)))
@@ -526,7 +523,9 @@ impl UiState {
                             contentInput.value = $el.value;
                             previewForm.requestSubmit();
                         "#);
+                        @let textarea_id = format!("inline-reply-content-{id_suffix}");
                         textarea
+                            id=(textarea_id)
                             ."m-inlineReply__content"
                             placeholder="Write your reply..."
                             dir="auto"
@@ -579,7 +578,7 @@ impl UiState {
                     div ."m-inlineReply__footer" {
                         @let cancel_form_id = format!("inline-reply-cancel-form-{id_suffix}");
                         @let cancel_onclick = format!(r#"
-                            const textarea = document.querySelector('#{form_id} .m-inlineReply__content');
+                            const textarea = document.getElementById('inline-reply-content-{id_suffix}');
                             if (textarea && textarea.value.trim() !== '') {{
                                 if (!confirm('Discard your reply?')) {{
                                     event.preventDefault();
@@ -656,6 +655,7 @@ impl UiState {
 
                 // Attach form (outside main form to avoid nesting)
                 @let attach_ajax = fragment::AjaxLoadingAttrs::for_document_class("m-inlineReply__attachButton");
+                @let textarea_selector = format!("#inline-reply-content-{id_suffix}");
                 form id=(attach_form_id)
                     action=(format!("/media/{}/list", self_id))
                     method="get"
@@ -663,11 +663,13 @@ impl UiState {
                     style="display: none;"
                     "@ajax:before"=(attach_ajax.before)
                     "@ajax:after"=(attach_ajax.after)
-                {}
+                {
+                    input type="hidden" name="target" value=(textarea_selector) {}
+                }
 
                 // Emoji picker for this inline reply
                 div id=(emoji_picker_id) ."m-inlineReply__emojiBar -hidden"
-                    data-textarea-selector=(format!("#{form_id} .m-inlineReply__content"))
+                    data-textarea-selector=(format!("#inline-reply-content-{id_suffix}"))
                 {
                     emoji-picker
                         data-source="/assets/libs/emoji-picker-element/data.json"
@@ -676,7 +678,7 @@ impl UiState {
 
                 // Note: preview container is added by caller as a sibling, not here
 
-                (focus_on_inline_reply_content(&form_id))
+                (focus_on_inline_reply_content(&textarea_id))
             }
         }
     }
@@ -712,6 +714,7 @@ impl UiState {
                     style="position: relative;"
                 {
                     textarea
+                        id="new-post-content"
                         ."m-newPostForm__content"
                         placeholder=(
                             if ro.to_disabled() {
@@ -841,7 +844,9 @@ impl UiState {
                     style="display: none;"
                     "@ajax:before"=(attach_ajax.before)
                     "@ajax:after"=(attach_ajax.after)
-                {}
+                {
+                    input type="hidden" name="target" value="#new-post-content" {}
+                }
 
                 @let upload_ajax = fragment::AjaxLoadingAttrs::for_document_class("m-newPostForm__uploadButton");
                 form id="media-upload-form"
