@@ -580,12 +580,14 @@ impl UiState {
                     }
                 }
                 @if let Some(cursor) = cursor {
+                    // Infinite scroll: load more posts when approaching bottom
+                    // See: https://stackoverflow.com/q/58622664/134409
+                    // for why plain `x-intersect` can't be used.
                     @let href = format!("{}?{}", mode.to_path(), cursor.to_query_params());
                     a
                         id="load-more-posts" ."o-mainBarTimeline__rest -empty"
                         "href"=(href)
-                        x-init
-                        "x-intersect.once"="$ajax($el.href, { targets: ['load-more-posts', 'timeline-posts'] })"
+                        x-init="new IntersectionObserver((entries, obs) => { if (entries[0].isIntersecting) { obs.disconnect(); $ajax($el.href, { targets: ['load-more-posts', 'timeline-posts'] }); } }, { root: document.body, rootMargin: '0px 0px 500% 0px' }).observe($el)"
                     { "More posts" }
                 } @else {
                     div id="load-more-posts" ."o-mainBarTimeline__rest -empty" {}
