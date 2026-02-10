@@ -146,11 +146,12 @@ pub async fn post_new_post(
     }
 
     // Standard new post handling
-    // Clear the form content after posting
-    let clean_form = state.new_post_form(
-        None,
+    // Clear the form content after posting (clear_content = true clears persisted
+    // draft)
+    let clean_form = state.new_post_form_inner(
         state.ro_mode(session.session_token()),
         Some(client_ref.rostra_id()),
+        true,
     );
 
     let self_id = client_ref.rostra_id();
@@ -689,6 +690,15 @@ impl UiState {
         ro: RoMode,
         user_id: Option<RostraId>,
     ) -> Markup {
+        self.new_post_form_inner(ro, user_id, false)
+    }
+
+    fn new_post_form_inner(
+        &self,
+        ro: RoMode,
+        user_id: Option<RostraId>,
+        clear_content: bool,
+    ) -> Markup {
         html! {
             // Hidden form for new post preview updates (must be outside main form)
             form id="new-post-preview-form"
@@ -706,6 +716,8 @@ impl UiState {
                 action="/post/preview_dialog"
                 method="post"
                 x-target="post-preview-dialog"
+                x-data="{ content: $persist('').as('new-post-content') }"
+                x-init=[clear_content.then_some("content = ''")]
                 "@ajax:before"=(form_ajax.before)
                 "@ajax:after"=(form_ajax.after)
             {
@@ -724,6 +736,7 @@ impl UiState {
                             })
                         dir="auto"
                         name="content"
+                        x-model="content"
                         "@input"=r#"
                             handleInput($event);
                             // Also handle new post preview update

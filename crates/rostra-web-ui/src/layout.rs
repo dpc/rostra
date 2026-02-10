@@ -39,6 +39,7 @@ impl UiState {
                 style { "[x-cloak] { display: none !important; }" }
                 // Load Alpine.js right away so it's immediately available, use defer to make it
                 // non-blocking. ALL plugins must load BEFORE Alpine core.
+                script defer src="/assets/libs/alpinejs-persist@3.14.3.js" {}
                 script defer src="/assets/libs/alpinejs-intersect@3.14.3.js" {}
                 script defer src="/assets/libs/alpine-ajax@0.12.6.js" {}
                 script defer src="/assets/libs/alpinejs@3.14.3.js" {}
