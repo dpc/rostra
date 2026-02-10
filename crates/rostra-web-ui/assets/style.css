@@ -1627,6 +1627,7 @@ input:checked+.slider:before {
 .o-mediaList__item {
   cursor: pointer;
   aspect-ratio: 1;
+  min-height: 120px;
   overflow: hidden;
   border-radius: var(--border-radius-std);
   transition: opacity 0.2s;
