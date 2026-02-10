@@ -1494,10 +1494,8 @@ emoji-picker {
 
 .o-previewDialog__title {
   margin-top: 0;
-  margin-bottom: 16px;
-  font-size: 1.5rem;
-  font-weight: bold;
-  text-align: center;
+  margin-bottom: 0.75rem;
+  color: var(--color-link);
 }
 
 .o-previewDialog__post {
@@ -1670,9 +1668,9 @@ input:checked+.slider:before {
 }
 
 .o-mediaList__title {
-  margin: 0 0 12px 0;
-  font-size: 1.1rem;
-  font-weight: bold;
+  margin-top: 0;
+  margin-bottom: 0.75rem;
+  color: var(--color-link);
 }
 
 .o-mediaList__closeButton {

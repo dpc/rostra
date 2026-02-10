@@ -224,6 +224,7 @@ pub async fn get_post_preview_dialog(
         div id="post-preview-dialog" ."o-previewDialog -active" {
             (fragment::dialog_escape_handler("post-preview-dialog"))
             div ."o-previewDialog__content" {
+                h4 ."o-previewDialog__title" { "Post Preview" }
                 div ."o-previewDialog__post" {
                     (state.render_post_context(
                         &client.client_ref()?,
