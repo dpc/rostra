@@ -652,9 +652,45 @@ img.u-userImage[loading="lazy"][src][width][height] {
   padding-left: 1rem;
 }
 
-.m-newPostForm__emojiButton {
-  padding-left: 1rem;
-  padding-right: 1rem;
+.m-newPostForm__emojiButton,
+.m-newPostForm__attachButton,
+.m-newPostForm__helpButton {
+  padding-left: 0.5rem;
+  padding-right: 0.5rem;
+  background: none;
+  border: none;
+  cursor: pointer;
+  font-size: inherit;
+  display: inline-flex;
+  align-items: center;
+}
+
+.m-newPostForm__emojiButton:hover,
+.m-newPostForm__attachButton:hover,
+.m-newPostForm__helpButton:hover {
+  background: var(--color-button-bg-hover);
+  border-radius: var(--border-radius-std);
+}
+
+.m-newPostForm__attachButton:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.m-newPostForm__attachButtonIcon,
+.m-newPostForm__helpButtonIcon {
+  display: inline-block;
+  width: 1rem;
+  height: 1rem;
+  filter: invert(var(--invert));
+}
+
+.m-newPostForm__attachButtonIcon {
+  background: url('/assets/icons/paperclip.svg') center/contain no-repeat;
+}
+
+.m-newPostForm__helpButtonIcon {
+  background: url('/assets/icons/circle-question.svg') center/contain no-repeat;
 }
 
 .m-newPostForm__emojiBar {
@@ -1646,6 +1682,10 @@ input:checked+.slider:before {
   background: url('/assets/icons/xmark.svg') center/contain no-repeat;
 }
 
+.o-mediaList__uploadButtonIcon {
+  background: url('/assets/icons/cloud-arrow-up.svg') center/contain no-repeat;
+}
+
 .o-mediaList__fileInfo {
   display: flex;
   flex-direction: column;
@@ -1662,6 +1702,7 @@ input:checked+.slider:before {
   width: 32px;
   height: 32px;
   background: url('/assets/icons/file.svg') center/contain no-repeat;
+  filter: invert(var(--invert));
   opacity: 0.7;
   margin-bottom: 8px;
 }
@@ -2395,8 +2436,67 @@ input:checked+.slider:before {
 
 .m-inlineReply__footerLeft {
   display: flex;
+  gap: 5pt;
+}
+
+.m-inlineReply__helpButton,
+.m-inlineReply__emojiButton,
+.m-inlineReply__attachButton,
+.m-inlineReply__cancelButton {
+  display: inline-flex;
   align-items: center;
-  gap: 0.5rem;
+  background: none;
+  border: none;
+  cursor: pointer;
+  font-size: inherit;
+  padding-left: 0.5rem;
+  padding-right: 0.5rem;
+}
+
+.m-inlineReply__helpButton:hover,
+.m-inlineReply__emojiButton:hover,
+.m-inlineReply__attachButton:hover,
+.m-inlineReply__cancelButton:hover {
+  background: var(--color-button-bg-hover);
+  border-radius: var(--border-radius-std);
+}
+
+.m-inlineReply__attachButton:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.m-inlineReply__helpButtonIcon,
+.m-inlineReply__attachButtonIcon,
+.m-inlineReply__cancelButtonIcon {
+  display: inline-block;
+  width: 1rem;
+  height: 1rem;
+  filter: invert(var(--invert));
+}
+
+.m-inlineReply__helpButtonIcon {
+  background: url('/assets/icons/circle-question.svg') center/contain no-repeat;
+}
+
+.m-inlineReply__attachButtonIcon {
+  background: url('/assets/icons/paperclip.svg') center/contain no-repeat;
+}
+
+.m-inlineReply__cancelButtonIcon {
+  background: url('/assets/icons/xmark.svg') center/contain no-repeat;
+}
+
+.m-inlineReply__emojiBar {
+  background: var(--color-post-bg);
+  border: 1px solid var(--color-button-border);
+  border-radius: var(--border-radius-std);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+  margin-top: 0.5rem;
+}
+
+.m-inlineReply__emojiBar.-hidden {
+  display: none;
 }
 
 .m-inlineReply__previewButton {
@@ -2409,25 +2509,6 @@ input:checked+.slider:before {
   background: url('/assets/icons/arrow-right.svg') center/contain no-repeat;
 }
 
-.m-inlineReply__attachButton {
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
-}
-
-.m-inlineReply__attachButtonIcon {
-  background: url('/assets/icons/paperclip.svg') center/contain no-repeat;
-}
-
-.m-inlineReply__cancelButton {
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
-}
-
-.m-inlineReply__cancelButtonIcon {
-  background: url('/assets/icons/xmark.svg') center/contain no-repeat;
-}
 
 .m-inlineReply__preview {
   /* Empty by default */

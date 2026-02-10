@@ -587,16 +587,52 @@ impl UiState {
                                 }}
                             }}
                         "#);
+                        @let emoji_picker_id = format!("emoji-picker-{id_suffix}");
+                        @let emoji_onclick = format!(r#"
+                            event.preventDefault();
+                            const picker = document.getElementById('{emoji_picker_id}');
+                            if (picker) {{
+                                picker.classList.toggle('-hidden');
+                                if (!picker.classList.contains('-hidden')) {{
+                                    const ep = picker.querySelector('emoji-picker');
+                                    if (ep && ep.shadowRoot) {{
+                                        const searchInput = ep.shadowRoot.querySelector('#search');
+                                        if (searchInput) searchInput.focus();
+                                    }}
+                                }}
+                            }}
+                        "#);
                         div ."m-inlineReply__footerLeft" {
-                            a href="https://htmlpreview.github.io/?https://github.com/jgm/djot/blob/master/doc/syntax.html" target="_blank" { "Formatting" }
-                            (fragment::button("m-inlineReply__attachButton", "Attach")
-                                .disabled_class(ro.to_disabled())
-                                .form(&attach_form_id)
-                                .call())
-                            (fragment::button("m-inlineReply__cancelButton", "Cancel")
-                                .form(&cancel_form_id)
-                                .onclick(&cancel_onclick)
-                                .call())
+                            a ."m-inlineReply__helpButton"
+                                href="https://htmlpreview.github.io/?https://github.com/jgm/djot/blob/master/doc/syntax.html"
+                                target="_blank"
+                                title="Formatting help"
+                            {
+                                span ."m-inlineReply__helpButtonIcon" {}
+                            }
+                            a ."m-inlineReply__emojiButton"
+                                href="#"
+                                title="Insert emoji"
+                                onclick=(emoji_onclick)
+                            { "😀" }
+                            button
+                                ."m-inlineReply__attachButton"
+                                type="submit"
+                                form=(attach_form_id)
+                                title="Attach media"
+                                disabled[ro.to_disabled()]
+                            {
+                                span ."m-inlineReply__attachButtonIcon" {}
+                            }
+                            button
+                                ."m-inlineReply__cancelButton"
+                                type="submit"
+                                form=(cancel_form_id)
+                                title="Cancel"
+                                onclick=(cancel_onclick)
+                            {
+                                span ."m-inlineReply__cancelButtonIcon" {}
+                            }
                         }
                         (fragment::button("m-inlineReply__previewButton", "Preview")
                             .disabled(ro.to_disabled())
@@ -628,6 +664,15 @@ impl UiState {
                     "@ajax:before"=(attach_ajax.before)
                     "@ajax:after"=(attach_ajax.after)
                 {}
+
+                // Emoji picker for this inline reply
+                div id=(emoji_picker_id) ."m-inlineReply__emojiBar -hidden"
+                    data-textarea-selector=(format!("#{form_id} .m-inlineReply__content"))
+                {
+                    emoji-picker
+                        data-source="/assets/libs/emoji-picker-element/data.json"
+                    {}
+                }
 
                 // Note: preview container is added by caller as a sibling, not here
 
@@ -734,7 +779,13 @@ impl UiState {
 
                 div ."m-newPostForm__footer" {
                     div ."m-newPostForm__footerRow m-newPostForm__footerRow--main" {
-                        a href="https://htmlpreview.github.io/?https://github.com/jgm/djot/blob/master/doc/syntax.html" target="_blank" { "Formatting" }
+                        a ."m-newPostForm__helpButton"
+                            href="https://htmlpreview.github.io/?https://github.com/jgm/djot/blob/master/doc/syntax.html"
+                            target="_blank"
+                            title="Formatting help"
+                        {
+                            span ."m-newPostForm__helpButtonIcon" {}
+                        }
                         a
                             ."m-newPostForm__emojiButton"
                             href="#"
@@ -753,34 +804,29 @@ impl UiState {
                                 }
                             "#
                         { "😀" }
+                        @if user_id.is_some() {
+                            button
+                                ."m-newPostForm__attachButton"
+                                type="submit"
+                                form="media-attach-form"
+                                title="Attach media"
+                                disabled[ro.to_disabled()]
+                            {
+                                span ."m-newPostForm__attachButtonIcon" {}
+                            }
+                        } @else {
+                            button
+                                ."m-newPostForm__attachButton"
+                                type="button"
+                                title="Attach media"
+                                disabled
+                            {
+                                span ."m-newPostForm__attachButtonIcon" {}
+                            }
+                        }
                         (fragment::button("m-newPostForm__previewButton", "Preview")
                             .disabled(ro.to_disabled())
                             .call())
-                    }
-                    div ."m-newPostForm__footerRow m-newPostForm__footerRow--media" {
-                        @if user_id.is_some() {
-                            (fragment::button("m-newPostForm__uploadButton", "Upload")
-                                .button_type("button")
-                                .disabled(ro.to_disabled())
-                                .onclick("document.getElementById('media-file-input').click()")
-                                .call())
-                        } @else {
-                            (fragment::button("m-newPostForm__uploadButton", "Upload")
-                                .button_type("button")
-                                .disabled(true)
-                                .call())
-                        }
-                        @if user_id.is_some() {
-                            (fragment::button("m-newPostForm__attachButton", "Attach")
-                                .disabled_class(ro.to_disabled())
-                                .form("media-attach-form")
-                                .call())
-                        } @else {
-                            (fragment::button("m-newPostForm__attachButton", "Attach")
-                                .button_type("button")
-                                .disabled(true)
-                                .call())
-                        }
                     }
                 }
             }

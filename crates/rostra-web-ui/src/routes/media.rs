@@ -175,7 +175,10 @@ pub async fn list(
                 events.push((value.ts, value.inner.event_id));
             }
 
-            events.sort_by_key(|val: &(rostra_core::Timestamp, ShortEventId)| val.0);
+            // Sort by timestamp, newest first
+            events.sort_by_key(|val: &(rostra_core::Timestamp, ShortEventId)| {
+                std::cmp::Reverse(val.0)
+            });
 
             Ok(events.into_iter().map(|(_, id)| id).collect())
         })
@@ -245,6 +248,10 @@ pub async fn list(
                     }
                 }
                 div ."o-mediaList__actionButtons" {
+                    (fragment::button("o-mediaList__uploadButton", "Upload")
+                        .button_type("button")
+                        .onclick("document.getElementById('media-file-input').click()")
+                        .call())
                     (fragment::button("o-mediaList__closeButton", "Close")
                         .button_type("button")
                         .onclick("document.getElementById('media-list').classList.remove('-active')")
