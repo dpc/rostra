@@ -51,18 +51,18 @@ impl Publisher {
             if let Some(published_at) = article.published_at {
                 if let Some(dt) = published_at.to_offset_date_time() {
                     let (year, month, day) = (dt.year(), dt.month() as u8, dt.day());
-                    post.push_str(&format!(" on {}-{:02}-{:02}", year, month, day));
+                    post.push_str(&format!(" on {year}-{month:02}-{day:02}"));
                 }
             }
             if let Some(ref feed_title) = article.feed_title {
                 post.push_str(" from ");
                 if let Some(ref feed_link) = article.feed_link {
-                    post.push_str(&format!("[{}]({})", feed_title, feed_link));
+                    post.push_str(&format!("[{feed_title}]({feed_link})"));
                 } else {
                     post.push_str(feed_title);
                 }
                 if let Some(ref subtitle) = article.feed_subtitle {
-                    post.push_str(&format!(" ({})", subtitle));
+                    post.push_str(&format!(" ({subtitle})"));
                 }
             }
             post.push('\n');

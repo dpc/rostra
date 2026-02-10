@@ -1,6 +1,6 @@
 use rostra_core::EventId;
 use rostra_core::event::{Event, EventContentRaw, EventExt as _, EventKind, VerifiedEvent};
-use rostra_core::id::{RostraId, RostraIdSecretKey};
+use rostra_core::id::{RostraId, RostraIdSecretKey, ToShort as _};
 use rostra_util_error::BoxedErrorResult;
 use snafu::ResultExt as _;
 use tempfile::{TempDir, tempdir};
@@ -4023,6 +4023,185 @@ async fn test_process_content_for_nonexistent_event() -> BoxedErrorResult<()> {
     .await?;
 
     info!("=== Process content for nonexistent event test passed ===");
+
+    Ok(())
+}
+
+/// Test that `wants_content` returns correct values based on content state
+#[test_log::test(tokio::test(flavor = "multi_thread"))]
+async fn test_wants_content_basic() -> BoxedErrorResult<()> {
+    use rostra_core::event::VerifiedEventContent;
+
+    use crate::ProcessEventState;
+
+    info!("=== Testing wants_content behavior ===");
+
+    let id_secret = RostraIdSecretKey::generate();
+    let user = id_secret.id();
+    let (_dir, db) = temp_db(user).await?;
+
+    // Create a test event with content
+    let content = EventContentRaw::new(vec![1, 2, 3, 4]);
+    let event = {
+        let event = Event::builder_raw_content()
+            .author(user)
+            .kind(EventKind::SOCIAL_POST)
+            .content(&content)
+            .build();
+        let signed = event.signed_by(id_secret);
+        VerifiedEvent::verify_signed(user, signed).expect("Valid event")
+    };
+    let event_id = event.event_id.to_short();
+
+    // Step 1: Process event (without content yet)
+    let (_, process_state) = db.process_event(&event).await;
+    info!(?process_state, "Event processed");
+
+    // For a new event, wants_content should return true (ProcessEventState::New ->
+    // Wants)
+    assert!(
+        db.wants_content(event_id, ProcessEventState::New).await,
+        "wants_content should return true for ProcessEventState::New"
+    );
+
+    // For existing event without content, wants_content should return true
+    // (ProcessEventState::Existing -> MaybeWants, then checks DB and finds no
+    // content)
+    assert!(
+        db.wants_content(event_id, ProcessEventState::Existing)
+            .await,
+        "wants_content should return true when content is NOT in store"
+    );
+
+    // Step 2: Process event content (store it)
+    let verified_content = VerifiedEventContent::assume_verified(event, content);
+    db.process_event_content(&verified_content).await;
+
+    // After storing content, wants_content with Existing should return false
+    // (content IS in store now)
+    assert!(
+        !db.wants_content(event_id, ProcessEventState::Existing)
+            .await,
+        "wants_content should return false when content IS in store"
+    );
+
+    // ProcessEventState::Deleted should always return false
+    assert!(
+        !db.wants_content(event_id, ProcessEventState::Deleted).await,
+        "wants_content should return false for ProcessEventState::Deleted"
+    );
+
+    // ProcessEventState::Pruned should always return false
+    assert!(
+        !db.wants_content(event_id, ProcessEventState::Pruned).await,
+        "wants_content should return false for ProcessEventState::Pruned"
+    );
+
+    // ProcessEventState::NoContent should always return false
+    assert!(
+        !db.wants_content(event_id, ProcessEventState::NoContent)
+            .await,
+        "wants_content should return false for ProcessEventState::NoContent"
+    );
+
+    info!("=== wants_content basic test passed ===");
+
+    Ok(())
+}
+
+/// Test that `wants_content` correctly identifies missing content for repeated
+/// checks This tests the bug fix where content that exists was incorrectly
+/// marked as "wanted"
+#[test_log::test(tokio::test(flavor = "multi_thread"))]
+async fn test_wants_content_no_repeated_downloads() -> BoxedErrorResult<()> {
+    use rostra_core::event::VerifiedEventContent;
+
+    use crate::ProcessEventState;
+
+    info!("=== Testing wants_content doesn't cause repeated downloads ===");
+
+    let id_secret = RostraIdSecretKey::generate();
+    let user = id_secret.id();
+    let (_dir, db) = temp_db(user).await?;
+
+    // Create a test event
+    let content = EventContentRaw::new(vec![5, 6, 7, 8]);
+    let event = {
+        let event = Event::builder_raw_content()
+            .author(user)
+            .kind(EventKind::SOCIAL_POST)
+            .content(&content)
+            .build();
+        let signed = event.signed_by(id_secret);
+        VerifiedEvent::verify_signed(user, signed).expect("Valid event")
+    };
+    let event_id = event.event_id.to_short();
+
+    // Process event and content
+    db.process_event(&event).await;
+    let verified_content = VerifiedEventContent::assume_verified(event, content);
+    db.process_event_content(&verified_content).await;
+
+    // Simulate multiple checks (like what happens in the head checker loop)
+    // All should return false since we already have the content
+    for i in 0..5 {
+        let wants = db
+            .wants_content(event_id, ProcessEventState::Existing)
+            .await;
+        assert!(
+            !wants,
+            "Iteration {}: wants_content should return false for existing content",
+            i
+        );
+    }
+
+    info!("=== wants_content repeated check test passed ===");
+
+    Ok(())
+}
+
+/// Test that `wants_content` returns true for events where content is genuinely
+/// missing
+#[test_log::test(tokio::test(flavor = "multi_thread"))]
+async fn test_wants_content_for_missing_content() -> BoxedErrorResult<()> {
+    use crate::ProcessEventState;
+
+    info!("=== Testing wants_content for genuinely missing content ===");
+
+    let id_secret = RostraIdSecretKey::generate();
+    let user = id_secret.id();
+    let (_dir, db) = temp_db(user).await?;
+
+    // Create a test event
+    let content = EventContentRaw::new(vec![9, 10, 11, 12]);
+    let event = {
+        let event = Event::builder_raw_content()
+            .author(user)
+            .kind(EventKind::SOCIAL_POST)
+            .content(&content)
+            .build();
+        let signed = event.signed_by(id_secret);
+        VerifiedEvent::verify_signed(user, signed).expect("Valid event")
+    };
+    let event_id = event.event_id.to_short();
+
+    // Process event only (not content) - simulating receiving event header but not
+    // content
+    db.process_event(&event).await;
+
+    // Multiple checks should all return true since content is still missing
+    for i in 0..5 {
+        let wants = db
+            .wants_content(event_id, ProcessEventState::Existing)
+            .await;
+        assert!(
+            wants,
+            "Iteration {}: wants_content should return true for missing content",
+            i
+        );
+    }
+
+    info!("=== wants_content missing content test passed ===");
 
     Ok(())
 }

@@ -651,12 +651,13 @@ impl Database {
             };
             let content_hash = event.content_hash();
 
-            Database::has_event_content_tx(
+            // We want content if we DON'T have it yet
+            Ok(!Database::has_event_content_tx(
                 event_id,
                 content_hash,
                 &events_content_state_table,
                 &content_store_table,
-            )
+            )?)
         })
         .await
         .expect("Storage error")
