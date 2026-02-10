@@ -677,6 +677,11 @@ emoji-picker {
   word-break: break-word;
 }
 
+.m-postView__content ol,
+.m-postView__content ul {
+  padding-left: 1.5em;
+}
+
 .m-postView__content .lazyload-wrapper:not(.-expanded) img,
 .m-postView__content .lazyload-wrapper:not(.-expanded) iframe {
   display: none;
