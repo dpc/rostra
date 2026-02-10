@@ -130,7 +130,7 @@ impl UiState {
                         button
                             ."m-profileSummary__copyButton u-button"
                             data-value=(self_id) onclick="copyIdToClipboard(event)"  {
-                                span ."m-profileSummary__copyButtonIcon u-buttonIcon" width="1rem" height="1rem" {}
+                                span ."m-profileSummary__copyButtonIcon u-buttonIcon" {}
                                 "RostraId"
                             }
                         (fragment::ajax_button(

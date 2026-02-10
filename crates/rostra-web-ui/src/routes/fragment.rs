@@ -39,7 +39,7 @@ pub fn button(
             disabled[disabled]
             onclick=[onclick]
         {
-            span .(icon_class) ."u-buttonIcon" width="1rem" height="1rem" {}
+            span .(icon_class) ."u-buttonIcon" {}
             (label)
         }
     }

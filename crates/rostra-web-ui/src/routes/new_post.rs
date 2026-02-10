@@ -584,7 +584,7 @@ impl UiState {
                                 type="submit"
                                 form=(attach_form_id)
                             {
-                                span ."m-inlineReply__attachButtonIcon u-buttonIcon" width="1rem" height="1rem" {}
+                                span ."m-inlineReply__attachButtonIcon u-buttonIcon" {}
                                 "Attach"
                             }
                             @let cancel_form_id = format!("inline-reply-cancel-form-{id_suffix}");
@@ -602,7 +602,7 @@ impl UiState {
                                 form=(cancel_form_id)
                                 onclick=(cancel_onclick)
                             {
-                                span ."m-inlineReply__cancelButtonIcon u-buttonIcon" width="1rem" height="1rem" {}
+                                span ."m-inlineReply__cancelButtonIcon u-buttonIcon" {}
                                 "Cancel"
                             }
                         }
@@ -772,7 +772,7 @@ impl UiState {
                                 type="button"
                                 onclick="document.getElementById('media-file-input').click()"
                             {
-                                span ."m-newPostForm__uploadButtonIcon u-buttonIcon" width="1rem" height="1rem" {}
+                                span ."m-newPostForm__uploadButtonIcon u-buttonIcon" {}
                                 "Upload"
                             }
                         } @else {
@@ -780,7 +780,7 @@ impl UiState {
                                 disabled
                                 type="button"
                             {
-                                span ."m-newPostForm__uploadButtonIcon u-buttonIcon" width="1rem" height="1rem" {}
+                                span ."m-newPostForm__uploadButtonIcon u-buttonIcon" {}
                                 "Upload"
                             }
                         }
@@ -790,7 +790,7 @@ impl UiState {
                                 type="submit"
                                 form="media-attach-form"
                             {
-                                span ."m-newPostForm__attachButtonIcon u-buttonIcon" width="1rem" height="1rem" {}
+                                span ."m-newPostForm__attachButtonIcon u-buttonIcon" {}
                                 "Attach"
                             }
                         } @else {
@@ -798,7 +798,7 @@ impl UiState {
                                 disabled
                                 type="button"
                             {
-                                span ."m-newPostForm__attachButtonIcon u-buttonIcon" width="1rem" height="1rem" {}
+                                span ."m-newPostForm__attachButtonIcon u-buttonIcon" {}
                                 "Attach"
                             }
                         }

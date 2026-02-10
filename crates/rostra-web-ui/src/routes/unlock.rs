@@ -193,7 +193,7 @@ impl UiState {
                         button ."o-unlockScreen__unlockButton u-button"
                             type="submit"
                         {
-                                span ."o-unlockScreen__unlockButtonIcon u-buttonIcon" width="1rem" height="1rem" {}
+                                span ."o-unlockScreen__unlockButtonIcon u-buttonIcon" {}
                                 "Login"
                             }
                     }
@@ -216,7 +216,7 @@ impl UiState {
                             )
                             title="Clear the mnemonic to login in read-only mode"
                             {
-                                span ."o-unlockScreen__roButtonIcon u-buttonIcon" width="1rem" height="1rem" {}
+                                span ."o-unlockScreen__roButtonIcon u-buttonIcon" {}
                                 "Clear secret"
                             }
                     }
@@ -232,7 +232,7 @@ impl UiState {
                             )
                             title="Create a new Rostra account. Make sure to save the generated secret passphrase."
                             {
-                                span ."o-unlockScreen__generateButtonIcon u-buttonIcon" width="1rem" height="1rem" {}
+                                span ."o-unlockScreen__generateButtonIcon u-buttonIcon" {}
                                 "Create Account"
                             }
                     }

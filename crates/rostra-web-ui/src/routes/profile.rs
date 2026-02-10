@@ -274,7 +274,7 @@ impl UiState {
                             ."m-profileSummary__copyButton u-button"
                             data-value=(profile_id) onclick="copyIdToClipboard(event)"
                         {
-                            span ."m-profileSummary__copyButtonIcon u-buttonIcon" width="1rem" height="1rem" {}
+                            span ."m-profileSummary__copyButtonIcon u-buttonIcon" {}
                             "RostraId"
                         }
                         @if session.id() != profile_id {
