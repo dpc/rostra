@@ -577,34 +577,26 @@ impl UiState {
                     }
 
                     div ."m-inlineReply__footer" {
+                        @let cancel_form_id = format!("inline-reply-cancel-form-{id_suffix}");
+                        @let cancel_onclick = format!(r#"
+                            const textarea = document.querySelector('#{form_id} .m-inlineReply__content');
+                            if (textarea && textarea.value.trim() !== '') {{
+                                if (!confirm('Discard your reply?')) {{
+                                    event.preventDefault();
+                                    return false;
+                                }}
+                            }}
+                        "#);
                         div ."m-inlineReply__footerLeft" {
                             a href="https://htmlpreview.github.io/?https://github.com/jgm/djot/blob/master/doc/syntax.html" target="_blank" { "Formatting" }
-                            button ."m-inlineReply__attachButton u-button"
-                                ."-disabled"[ro.to_disabled()]
-                                type="submit"
-                                form=(attach_form_id)
-                            {
-                                span ."m-inlineReply__attachButtonIcon u-buttonIcon" {}
-                                "Attach"
-                            }
-                            @let cancel_form_id = format!("inline-reply-cancel-form-{id_suffix}");
-                            @let cancel_onclick = format!(r#"
-                                const textarea = document.querySelector('#{form_id} .m-inlineReply__content');
-                                if (textarea && textarea.value.trim() !== '') {{
-                                    if (!confirm('Discard your reply?')) {{
-                                        event.preventDefault();
-                                        return false;
-                                    }}
-                                }}
-                            "#);
-                            button ."m-inlineReply__cancelButton u-button"
-                                type="submit"
-                                form=(cancel_form_id)
-                                onclick=(cancel_onclick)
-                            {
-                                span ."m-inlineReply__cancelButtonIcon u-buttonIcon" {}
-                                "Cancel"
-                            }
+                            (fragment::button("m-inlineReply__attachButton", "Attach")
+                                .disabled_class(ro.to_disabled())
+                                .form(&attach_form_id)
+                                .call())
+                            (fragment::button("m-inlineReply__cancelButton", "Cancel")
+                                .form(&cancel_form_id)
+                                .onclick(&cancel_onclick)
+                                .call())
                         }
                         (fragment::button("m-inlineReply__previewButton", "Preview")
                             .disabled(ro.to_disabled())
@@ -767,40 +759,27 @@ impl UiState {
                     }
                     div ."m-newPostForm__footerRow m-newPostForm__footerRow--media" {
                         @if user_id.is_some() {
-                            button ."m-newPostForm__uploadButton u-button"
-                                disabled[ro.to_disabled()]
-                                type="button"
-                                onclick="document.getElementById('media-file-input').click()"
-                            {
-                                span ."m-newPostForm__uploadButtonIcon u-buttonIcon" {}
-                                "Upload"
-                            }
+                            (fragment::button("m-newPostForm__uploadButton", "Upload")
+                                .button_type("button")
+                                .disabled(ro.to_disabled())
+                                .onclick("document.getElementById('media-file-input').click()")
+                                .call())
                         } @else {
-                            button ."m-newPostForm__uploadButton u-button"
-                                disabled
-                                type="button"
-                            {
-                                span ."m-newPostForm__uploadButtonIcon u-buttonIcon" {}
-                                "Upload"
-                            }
+                            (fragment::button("m-newPostForm__uploadButton", "Upload")
+                                .button_type("button")
+                                .disabled(true)
+                                .call())
                         }
                         @if user_id.is_some() {
-                            button ."m-newPostForm__attachButton u-button"
-                                ."-disabled"[ro.to_disabled()]
-                                type="submit"
-                                form="media-attach-form"
-                            {
-                                span ."m-newPostForm__attachButtonIcon u-buttonIcon" {}
-                                "Attach"
-                            }
+                            (fragment::button("m-newPostForm__attachButton", "Attach")
+                                .disabled_class(ro.to_disabled())
+                                .form("media-attach-form")
+                                .call())
                         } @else {
-                            button ."m-newPostForm__attachButton u-button"
-                                disabled
-                                type="button"
-                            {
-                                span ."m-newPostForm__attachButtonIcon u-buttonIcon" {}
-                                "Attach"
-                            }
+                            (fragment::button("m-newPostForm__attachButton", "Attach")
+                                .button_type("button")
+                                .disabled(true)
+                                .call())
                         }
                     }
                 }

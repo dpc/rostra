@@ -10,7 +10,7 @@ use session::{OptionalUserSession, SESSION_KEY, UserSessionData};
 use snafu::ResultExt as _;
 use tower_sessions::Session;
 
-use super::Maud;
+use super::{Maud, fragment};
 use crate::error::{OtherSnafu, PublicKeyMissingSnafu, RequestResult, UnlockResult, UnlockSnafu};
 use crate::serde_util::empty_string_as_none;
 use crate::util::extractors::AjaxRequest;
@@ -190,12 +190,7 @@ impl UiState {
                             title="Id is a single, long string of characters encoding your public identifier"
                             value=(current_rostra_id.map(|id| id.to_string()).unwrap_or_default())
                             {}
-                        button ."o-unlockScreen__unlockButton u-button"
-                            type="submit"
-                        {
-                                span ."o-unlockScreen__unlockButtonIcon u-buttonIcon" {}
-                                "Login"
-                            }
+                        (fragment::button("o-unlockScreen__unlockButton", "Login").call())
                     }
                     div."o-unlockScreen__mnemonicLine" {
                         input ."o-unlockScreen__mnemonic"
@@ -206,35 +201,21 @@ impl UiState {
                             title="Mnemonic is 12 words passphrase encoding secret key of your identity"
                             value=(current_secret_key.as_ref().map(ToString::to_string).unwrap_or_default())
                             { }
-                        button
-                            type="button" // do not submit the form!
-                            ."o-unlockScreen__roButton u-button"
-                            onclick=(
-                                r#"
-                                    document.querySelector('.o-unlockScreen__mnemonic').value = '';
-                                "#
-                            )
-                            title="Clear the mnemonic to login in read-only mode"
-                            {
-                                span ."o-unlockScreen__roButtonIcon u-buttonIcon" {}
-                                "Clear secret"
-                            }
+                        (fragment::button("o-unlockScreen__roButton", "Clear secret")
+                            .button_type("button")
+                            .onclick("document.querySelector('.o-unlockScreen__mnemonic').value = '';")
+                            .title("Clear the mnemonic to login in read-only mode")
+                            .call())
                     }
+                    @let generate_onclick = format!(
+                        "document.querySelector('.o-unlockScreen__id').value = '{random_rostra_id}'; document.querySelector('.o-unlockScreen__mnemonic').value = '{random_mnemonic}';"
+                    );
                     div."o-unlockScreen__unlockLine" {
-                        button
-                            type="button" // do not submit the form!
-                            ."o-unlockScreen__generateButton u-button"
-                            onclick=(
-                                format!(r#"
-                                    document.querySelector('.o-unlockScreen__id').value = '{}';
-                                    document.querySelector('.o-unlockScreen__mnemonic').value = '{}';
-                                "#, random_rostra_id, random_mnemonic)
-                            )
-                            title="Create a new Rostra account. Make sure to save the generated secret passphrase."
-                            {
-                                span ."o-unlockScreen__generateButtonIcon u-buttonIcon" {}
-                                "Create Account"
-                            }
+                        (fragment::button("o-unlockScreen__generateButton", "Create Account")
+                            .button_type("button")
+                            .onclick(&generate_onclick)
+                            .title("Create a new Rostra account. Make sure to save the generated secret passphrase.")
+                            .call())
                     }
                 }
             }

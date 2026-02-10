@@ -15,16 +15,25 @@ pub fn button(
     /// Button label text
     #[builder(start_fn)]
     label: &str,
-    /// Whether the button is disabled
+    /// Whether the button is disabled (uses disabled attribute)
     disabled: Option<bool>,
+    /// Whether to use -disabled class instead of disabled attribute
+    disabled_class: Option<bool>,
     /// Button type attribute (defaults to "submit")
     button_type: Option<&str>,
     /// Optional variant modifier (e.g., "--danger")
     variant: Option<&str>,
     /// Optional onclick handler for non-ajax buttons
     onclick: Option<&str>,
+    /// Optional form ID for buttons that submit external forms
+    form: Option<&str>,
+    /// Optional data-value attribute
+    data_value: Option<&str>,
+    /// Optional title/tooltip
+    title: Option<&str>,
 ) -> Markup {
     let disabled = disabled.unwrap_or(false);
+    let disabled_class = disabled_class.unwrap_or(false);
     let button_type = button_type.unwrap_or("submit");
     let icon_class = format!("{class}Icon");
 
@@ -35,9 +44,13 @@ pub fn button(
             .(class)
             ."u-button"
             .(variant_class)
+            ."-disabled"[disabled_class]
             type=(button_type)
             disabled[disabled]
             onclick=[onclick]
+            form=[form]
+            data-value=[data_value]
+            title=[title]
         {
             span .(icon_class) ."u-buttonIcon" {}
             (label)

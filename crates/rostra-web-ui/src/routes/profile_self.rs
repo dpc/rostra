@@ -127,12 +127,11 @@ impl UiState {
                         (self_profile.display_name)
                     }
                     div ."m-profileSummary__buttons" {
-                        button
-                            ."m-profileSummary__copyButton u-button"
-                            data-value=(self_id) onclick="copyIdToClipboard(event)"  {
-                                span ."m-profileSummary__copyButtonIcon u-buttonIcon" {}
-                                "RostraId"
-                            }
+                        (fragment::button("m-profileSummary__copyButton", "RostraId")
+                            .button_type("button")
+                            .data_value(&self_id.to_string())
+                            .onclick("copyIdToClipboard(event)")
+                            .call())
                         (fragment::ajax_button(
                             "/self/edit",
                             "get",

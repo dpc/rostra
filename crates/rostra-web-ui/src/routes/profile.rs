@@ -270,13 +270,11 @@ impl UiState {
                         (profile.display_name)
                     }
                     div ."m-profileSummary__buttons" {
-                        button
-                            ."m-profileSummary__copyButton u-button"
-                            data-value=(profile_id) onclick="copyIdToClipboard(event)"
-                        {
-                            span ."m-profileSummary__copyButtonIcon u-buttonIcon" {}
-                            "RostraId"
-                        }
+                        (fragment::button("m-profileSummary__copyButton", "RostraId")
+                            .button_type("button")
+                            .data_value(&profile_id.to_string())
+                            .onclick("copyIdToClipboard(event)")
+                            .call())
                         @if session.id() != profile_id {
                             @let label = if following { "Following..." } else { "Follow..." };
                             (fragment::ajax_button(
