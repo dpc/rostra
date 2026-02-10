@@ -1581,7 +1581,7 @@ input:checked+.slider:before {
 .o-mediaList__items {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
-  gap: 4px;
+  gap: 12px;
   margin-bottom: 16px;
   overflow-y: auto;
   flex-grow: 1;

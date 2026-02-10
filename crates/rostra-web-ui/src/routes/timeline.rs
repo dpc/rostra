@@ -587,7 +587,7 @@ impl UiState {
                     a
                         id="load-more-posts" ."o-mainBarTimeline__rest -empty"
                         "href"=(href)
-                        x-init="new IntersectionObserver((entries, obs) => { if (entries[0].isIntersecting) { obs.disconnect(); $ajax($el.href, { targets: ['load-more-posts', 'timeline-posts'] }); } }, { root: document.body, rootMargin: '0px 0px 500% 0px' }).observe($el)"
+                        x-init="new IntersectionObserver((entries, obs) => { if (entries[0].isIntersecting) { obs.disconnect(); $ajax($el.href, { targets: ['load-more-posts', 'timeline-posts'] }); } }, { root: document.body, rootMargin: '0px 0px 250% 0px' }).observe($el)"
                     { "More posts" }
                 } @else {
                     div id="load-more-posts" ."o-mainBarTimeline__rest -empty" {}
