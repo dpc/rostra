@@ -160,7 +160,7 @@ impl FolloweeHeadChecker {
         id: RostraId,
         connections: &ConnectionCache,
     ) -> BoxedErrorResult<Option<ShortEventId>> {
-        let Some(conn) = connections.get_or_connect(client, id).await else {
+        let Ok(conn) = connections.get_or_connect(client, id).await else {
             return Ok(None);
         };
 
@@ -239,8 +239,19 @@ impl FolloweeHeadChecker {
             };
 
             // ConnectionCache handles its own interior mutability
-            let Some(conn) = connections.get_or_connect(&client, *follower_id).await else {
-                continue;
+            let conn = match connections.get_or_connect(&client, *follower_id).await {
+                Ok(conn) => conn,
+                Err(err) => {
+                    debug!(target: LOG_TARGET,
+                        rostra_id = %rostra_id,
+                        head = %head,
+                        follower_id = %follower_id,
+                        err = %err.fmt_compact(),
+                        "Could not connect to fetch updates"
+                    );
+
+                    continue;
+                }
             };
 
             debug!(target: LOG_TARGET,

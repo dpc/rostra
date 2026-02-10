@@ -7,10 +7,11 @@ use tokio::sync::{Mutex, OnceCell};
 use tracing::trace;
 
 use crate::ClientRef;
+use crate::error::ConnectResult;
 
 const LOG_TARGET: &str = "rostra-client::connection-cache";
 
-type LazySharedConnection = Arc<OnceCell<Option<Connection>>>;
+type LazySharedConnection = Arc<OnceCell<Connection>>;
 
 #[derive(Clone)]
 pub struct ConnectionCache {
@@ -30,14 +31,18 @@ impl ConnectionCache {
         }
     }
 
-    pub async fn get_or_connect(&self, client: &ClientRef<'_>, id: RostraId) -> Option<Connection> {
+    pub async fn get_or_connect(
+        &self,
+        client: &ClientRef<'_>,
+        id: RostraId,
+    ) -> ConnectResult<Connection> {
         let mut pool_lock = self.connections.lock().await;
 
         let entry_arc = pool_lock
             .entry(id)
             .and_modify(|entry_arc| {
                 // Check if existing connection is disconnected and remove it
-                if let Some(Some(existing_conn)) = entry_arc.get()
+                if let Some(existing_conn) = entry_arc.get()
                     && existing_conn.is_closed() {
                         trace!(target: LOG_TARGET, %id, "Existing connection is disconnected, removing from pool");
                         *entry_arc = Arc::new(OnceCell::new());
@@ -50,21 +55,21 @@ impl ConnectionCache {
         drop(pool_lock);
 
         let result = entry_arc
-            .get_or_init(|| async {
+            .get_or_try_init(|| async {
                 trace!(target: LOG_TARGET, %id, "Creating new connection");
                 match client.connect_uncached(id).await {
                     Ok(conn) => {
                         trace!(target: LOG_TARGET, %id, "Connection successful");
-                        Some(conn)
+                        Ok(conn)
                     }
                     Err(err) => {
                         trace!(target: LOG_TARGET, %id, err = %err, "Connection failed");
-                        None
+                        Err(err)
                     }
                 }
             })
             .await;
 
-        result.clone()
+        result.cloned()
     }
 }

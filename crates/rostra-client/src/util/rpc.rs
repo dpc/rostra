@@ -51,7 +51,8 @@ pub async fn get_event_content_from_followers(
 
                     let conn = (connections_cache
                         .get_or_connect(&client_ref, follower_id)
-                        .await)?;
+                        .await)
+                        .ok()?;
 
                     debug!(target: LOG_TARGET,
                         author_id = %author_id.to_short(),

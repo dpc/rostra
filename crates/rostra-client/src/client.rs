@@ -34,9 +34,9 @@ use tracing::{debug, info, trace, warn};
 use super::{RRECORD_HEAD_KEY, RRECORD_P2P_KEY, get_rrecord_typed};
 use crate::LOG_TARGET;
 use crate::error::{
-    ActivateResult, ActivateSnafu, IdResolveError, IdResolveResult, IdSecretReadResult,
-    InitIrohClientSnafu, InitPkarrClientSnafu, InitResult, InvalidIdSnafu, IoSnafu,
-    MissingTicketSnafu, ParsingSnafu, PkarrResolveSnafu, PostResult, RRecordSnafu,
+    ActivateResult, ActivateSnafu, ConnectResult, IdResolveError, IdResolveResult,
+    IdSecretReadResult, InitIrohClientSnafu, InitPkarrClientSnafu, InitResult, InvalidIdSnafu,
+    IoSnafu, MissingTicketSnafu, ParsingSnafu, PkarrResolveSnafu, PostResult, RRecordSnafu,
     SecretMismatchSnafu,
 };
 use crate::id::{CompactTicket, IdPublishedData, IdResolvedData};
@@ -227,7 +227,7 @@ impl ClientRef<'_> {
     /// Returns a cached connection if available, otherwise creates a new one.
     /// This is more efficient than `connect_uncached` when making repeated
     /// connections to the same peer.
-    pub async fn connect_cached(&self, id: RostraId) -> Option<Connection> {
+    pub async fn connect_cached(&self, id: RostraId) -> ConnectResult<Connection> {
         self.connection_cache.get_or_connect(self, id).await
     }
 }

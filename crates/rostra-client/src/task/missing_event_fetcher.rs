@@ -88,7 +88,7 @@ impl MissingEventFetcher {
                     follower_id = %follower_id,
                     "Looking for a missing events from"
                 );
-                let Some(conn) = connections.get_or_connect(&client, *follower_id).await else {
+                let Ok(conn) = connections.get_or_connect(&client, *follower_id).await else {
                     debug!(
                         target:  LOG_TARGET,
                         author_id = %author_id,
