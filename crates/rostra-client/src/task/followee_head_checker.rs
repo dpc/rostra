@@ -2,7 +2,8 @@ use std::collections::{BTreeMap, BinaryHeap, HashMap};
 use std::sync::Arc;
 use std::time::Duration;
 
-use rostra_client_db::{Database, IdsFolloweesRecord, InsertEventOutcome};
+use rostra_client_db::{Database, IdsFolloweesRecord, InsertEventOutcome, ProcessEventState};
+use rostra_core::event::{EventExt as _, VerifiedEvent};
 use rostra_core::id::{RostraId, ToShort as _};
 use rostra_core::{ShortEventId, Timestamp};
 use rostra_p2p::Connection;
@@ -286,42 +287,64 @@ impl FolloweeHeadChecker {
         let peer_id = conn.remote_id();
 
         while let Some((depth, event_id)) = events.pop() {
-            debug!(
-               target: LOG_TARGET,
-                %depth,
-                node_id = %peer_id,
-                %rostra_id,
-                %event_id,
-                "Querrying for event"
-            );
-            let Some(event) = conn
-                .get_event(rostra_id, event_id)
-                .await
-                .whatever_context("Failed to query peer")?
-            else {
-                debug!(
-                    target: LOG_TARGET,
-                    %depth,
-                    node_id = %peer_id,
-                    %rostra_id,
-                    %event_id,
-                    "Event not found"
-                );
-                continue;
-            };
-            downloaded_anything = true;
-            let (insert_outcome, process_state) = storage.process_event(&event).await;
+            // Check if we already have this event locally
+            let (event, _insert_outcome, process_state) =
+                if let Some(local_event) = storage.get_event(event_id).await {
+                    trace!(
+                        target: LOG_TARGET,
+                        %depth,
+                        %rostra_id,
+                        %event_id,
+                        "Event already exists locally"
+                    );
+                    let event = VerifiedEvent::assume_verified_from_signed(local_event.signed);
+                    (
+                        event,
+                        InsertEventOutcome::AlreadyPresent,
+                        ProcessEventState::Existing,
+                    )
+                } else {
+                    debug!(
+                       target: LOG_TARGET,
+                        %depth,
+                        node_id = %peer_id,
+                        %rostra_id,
+                        %event_id,
+                        "Querying for event"
+                    );
+                    let Some(new_event) = conn
+                        .get_event(rostra_id, event_id)
+                        .await
+                        .whatever_context("Failed to query peer")?
+                    else {
+                        debug!(
+                            target: LOG_TARGET,
+                            %depth,
+                            node_id = %peer_id,
+                            %rostra_id,
+                            %event_id,
+                            "Event not found"
+                        );
+                        continue;
+                    };
+                    downloaded_anything = true;
+                    let (insert_outcome, process_state) = storage.process_event(&new_event).await;
 
-            if let InsertEventOutcome::Inserted {
-                missing_parents, ..
-            } = insert_outcome
-            {
-                for missing in missing_parents {
-                    events.push((depth + 1, missing));
-                }
+                    (new_event, insert_outcome, process_state)
+                };
+
+            // Always add aux parent, as it allows us to explore the history fast and
+            // somewhat randomly
+            if let Some(parent) = event.parent_aux() {
+                events.push((depth + 1, parent));
             }
 
             if storage.wants_content(event_id, process_state).await {
+                // If we wanted content of the event, we might need content of the previous
+                // closest parent as well
+                if let Some(parent) = event.parent_prev() {
+                    events.push((depth + 1, parent));
+                }
                 let content = conn
                     .get_event_content(event)
                     .await
