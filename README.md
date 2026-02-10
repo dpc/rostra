@@ -29,7 +29,7 @@ social-graph-based data model.
 
 ## Screenshot
 
-![Screenshot of Rostra's p2p social network web UI](https://i.imgur.com/qYaL8QA.png)
+![Screenshot of Rostra's p2p social network web UI](https://i.imgur.com/7hGZrP4.png)
 
 ## Using
 
@@ -130,3 +130,7 @@ The code vendors source code for 3rd party projects:
 * [emoji-picker-element](https://github.com/nolanlawson/emoji-picker-element) - Apache 2.0
 * [text-field-edit](https://github.com/fregante/text-field-edit) - MIT
 * [mathjax](https://github.com/mathjax/MathJax-src/) - Apache 2.0
+
+## AI usage disclosure
+
+[✨ I use LLMs when working on my projects. ✨](https://dpc.pw/posts/personal-ai-usage-disclosure/)
