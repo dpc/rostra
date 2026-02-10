@@ -3719,6 +3719,7 @@ dependencies = [
  "clap",
  "data-encoding",
  "futures",
+ "jotup",
  "redb-bincode",
  "reqwest",
  "rostra-client",
