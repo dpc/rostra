@@ -283,6 +283,10 @@ impl LobstersScraper {
                 author,
                 scraped_at,
                 source: "lobsters".to_string(),
+                feed_title: None,
+                feed_link: None,
+                feed_subtitle: None,
+                published_at: None,
             };
 
             debug!(story_id = %story_id, title = %article.title, score = score, "Scraped article");
@@ -311,6 +315,10 @@ pub struct AtomScraper {
     feed_hash: String,
 }
 
+fn is_leap_year(year: i32) -> bool {
+    time::util::is_leap_year(year)
+}
+
 impl AtomScraper {
     pub fn new(feed_url: String) -> Self {
         let client = Client::builder()
@@ -336,6 +344,47 @@ impl AtomScraper {
         let combined = format!("{}:{}", self.feed_url, entry_id);
         let hash = blake3::hash(combined.as_bytes());
         data_encoding::HEXLOWER.encode(&hash.as_bytes()[..16])
+    }
+
+    /// Parse an RFC 3339 / ISO 8601 date string to a Timestamp
+    /// Example formats: "2024-01-15T10:30:00Z", "2024-01-15T10:30:00+00:00"
+    fn parse_rfc3339_date(date_str: &str) -> Option<Timestamp> {
+        // Extract date components from the beginning of the string
+        // Format: YYYY-MM-DDTHH:MM:SS...
+        if date_str.len() < 19 {
+            return None;
+        }
+
+        let year: i32 = date_str.get(0..4)?.parse().ok()?;
+        let month: u32 = date_str.get(5..7)?.parse().ok()?;
+        let day: u32 = date_str.get(8..10)?.parse().ok()?;
+        let hour: u32 = date_str.get(11..13)?.parse().ok()?;
+        let minute: u32 = date_str.get(14..16)?.parse().ok()?;
+        let second: u32 = date_str.get(17..19)?.parse().ok()?;
+
+        // Calculate Unix timestamp (simplified, assumes UTC)
+        // Days from year 1970 to year Y
+        let days_since_epoch = {
+            let mut days: i64 = 0;
+            for y in 1970..year {
+                days += if is_leap_year(y) { 366 } else { 365 };
+            }
+            // Days in current year up to this month
+            let days_in_months = [31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
+            for m in 1..month {
+                days += days_in_months[(m - 1) as usize] as i64;
+                if m == 2 && is_leap_year(year) {
+                    days += 1;
+                }
+            }
+            days += (day - 1) as i64;
+            days
+        };
+
+        let timestamp =
+            days_since_epoch * 86400 + (hour as i64) * 3600 + (minute as i64) * 60 + second as i64;
+
+        Some(Timestamp::from(timestamp as u64))
     }
 
     /// Extract the best URL from an Atom entry's links
@@ -381,6 +430,16 @@ impl AtomScraper {
                 .as_secs(),
         );
 
+        // Extract feed metadata
+        let feed_title = Some(feed.title.to_string());
+        let feed_link = feed
+            .links
+            .iter()
+            .find(|l| l.rel.as_deref() == Some("alternate") || l.rel.is_none())
+            .or_else(|| feed.links.first())
+            .map(|l| l.href.clone());
+        let feed_subtitle = feed.subtitle.as_ref().map(|s| s.to_string());
+
         for entry in &feed.entries {
             let entry_id = &entry.id;
             let title = entry.title.clone();
@@ -396,6 +455,14 @@ impl AtomScraper {
                 .map(|p| p.name.clone())
                 .unwrap_or_else(|| "unknown".to_string());
 
+            // Extract publication date (prefer published, fall back to updated)
+            // Atom dates are ISO 8601 / RFC 3339 format, e.g. "2024-01-15T10:30:00Z"
+            let published_at = entry
+                .published
+                .as_ref()
+                .or(Some(&entry.updated))
+                .and_then(|date_str| Self::parse_rfc3339_date(date_str));
+
             let article = Article {
                 id: self.create_article_id(entry_id),
                 title,
@@ -405,6 +472,10 @@ impl AtomScraper {
                 author,
                 scraped_at,
                 source: format!("atom:{}", self.feed_hash),
+                feed_title: feed_title.clone(),
+                feed_link: feed_link.clone(),
+                feed_subtitle: feed_subtitle.clone(),
+                published_at,
             };
 
             debug!(

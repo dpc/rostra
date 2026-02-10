@@ -14,6 +14,14 @@ pub struct Article {
     pub author: String,
     pub scraped_at: Timestamp,
     pub source: String,
+    /// Feed title (for Atom/RSS feeds)
+    pub feed_title: Option<String>,
+    /// Feed link/homepage URL (for Atom/RSS feeds)
+    pub feed_link: Option<String>,
+    /// Feed subtitle/description (for Atom/RSS feeds)
+    pub feed_subtitle: Option<String>,
+    /// Publication date of the article
+    pub published_at: Option<Timestamp>,
 }
 
 // Legacy HnArticle for compatibility
@@ -39,6 +47,10 @@ impl From<HnArticle> for Article {
             author: hn_article.author,
             scraped_at: hn_article.scraped_at,
             source: "hn".to_string(),
+            feed_title: None,
+            feed_link: None,
+            feed_subtitle: None,
+            published_at: None,
         }
     }
 }

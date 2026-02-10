@@ -36,17 +36,44 @@ impl Publisher {
     fn format_article_post(&self, article: &Article) -> String {
         let mut post = String::new();
 
-        if let Some(ref url) = article.url {
-            post.push_str(&format!("##### [{}]({})\n\n", article.title, url));
-        } else {
-            post.push_str(&format!("##### {}\n\n", article.title));
-        }
-
         // Handle different sources with appropriate formatting
         if article.source.starts_with("atom:") {
-            // Atom feeds don't have separate comment pages
-            post.push_str("* via Atom Feed\n");
+            // Atom feed format: title on top, then "by {author} from {feed_title}
+            // ({subtitle})"
+            if let Some(ref url) = article.url {
+                post.push_str(&format!("##### [{}]({})\n\n", article.title, url));
+            } else {
+                post.push_str(&format!("##### {}\n\n", article.title));
+            }
+
+            // Build the "Posted by ... on ... from ..." line
+            post.push_str(&format!("Posted by {}", article.author));
+            if let Some(published_at) = article.published_at {
+                if let Some(dt) = published_at.to_offset_date_time() {
+                    let (year, month, day) = (dt.year(), dt.month() as u8, dt.day());
+                    post.push_str(&format!(" on {}-{:02}-{:02}", year, month, day));
+                }
+            }
+            if let Some(ref feed_title) = article.feed_title {
+                post.push_str(" from ");
+                if let Some(ref feed_link) = article.feed_link {
+                    post.push_str(&format!("[{}]({})", feed_title, feed_link));
+                } else {
+                    post.push_str(feed_title);
+                }
+                if let Some(ref subtitle) = article.feed_subtitle {
+                    post.push_str(&format!(" ({})", subtitle));
+                }
+            }
+            post.push('\n');
         } else {
+            // HN/Lobsters format: title with comments link
+            if let Some(ref url) = article.url {
+                post.push_str(&format!("##### [{}]({})\n\n", article.title, url));
+            } else {
+                post.push_str(&format!("##### {}\n\n", article.title));
+            }
+
             let source_name = match article.source.as_str() {
                 "hn" => "HN",
                 "lobsters" => "Lobsters",
