@@ -52,25 +52,13 @@ fn render_welcome_page(has_default_profile: bool) -> Markup {
                     div ."o-welcomePage__content" {
                         h1 ."o-welcomePage__title" { "Rostra" }
                         p ."o-welcomePage__tagline" {
-                            "A censorship-resistant, peer-to-peer social network"
+                            "A peer-to-peer social network"
                         }
 
                         div ."o-welcomePage__features" {
                             div ."o-welcomePage__feature" {
-                                h3 { "Sovereign" }
-                                p { "No centralized accounts, no censorship. Generate your own cryptographic identity that you fully control." }
-                            }
-                            div ."o-welcomePage__feature" {
                                 h3 { "Authentic" }
-                                p { "P2P but without abuse. Content is discovered through people you trust. Spam and attention farming are near impossible." }
-                            }
-                            div ."o-welcomePage__feature" {
-                                h3 { "Private" }
-                                p { "Relay-only mode by default keeps your IP hidden. Optional direct connections for faster sync." }
-                            }
-                            div ."o-welcomePage__feature" {
-                                h3 { "Multi-Device" }
-                                p { "Use same account on multiple devices. Your content synchronizes automatically between your devices and your followers." }
+                                p { "P2P but without abuse. Content is discovered through people you already know. Spam and attention farming are impossible." }
                             }
                             div ."o-welcomePage__feature" {
                                 h3 { "Wholesome" }
@@ -79,6 +67,18 @@ fn render_welcome_page(has_default_profile: bool) -> Markup {
                             div ."o-welcomePage__feature" {
                                 h3 { "Media-Rich" }
                                 p { "Share images and videos P2P. No external hosting required." }
+                            }
+                            div ."o-welcomePage__feature" {
+                                h3 { "Sovereign" }
+                                p { "No centralized accounts, no censorship. Generate your own cryptographic identity that you fully control." }
+                            }
+                            div ."o-welcomePage__feature" {
+                                h3 { "Private" }
+                                p { "Relay-only mode by default keeps your IP hidden. Optional direct connections for faster sync." }
+                            }
+                            div ."o-welcomePage__feature" {
+                                h3 { "Multi-Device" }
+                                p { "Use same account on multiple devices. Your content synchronizes automatically between your devices and your followers." }
                             }
                         }
 

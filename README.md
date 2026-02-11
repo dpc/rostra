@@ -4,10 +4,6 @@ Rostra is a p2p (or rather f2f) social network.
 
 ## Overview
 
-Rostra is a p2p, censorship-resistant social platform.
-There are no centralized user accounts, only self-generated,
-sovereign identities.
-
 In Rostra users "follow" (subscribe) to other identities like in
 many conventional social network systems. Followers track, download
 and help share data of users they follow.
