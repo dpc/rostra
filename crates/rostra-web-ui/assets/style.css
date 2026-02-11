@@ -490,6 +490,10 @@ img.u-userImage[loading="lazy"][src][width][height] {
   padding: .5rem .1rem;
 }
 
+.o-mainBarTimeline__newCount {
+  padding: .5rem .1rem;
+}
+
 .o-mainBarTimeline.-hideReplies .o-mainBarTimeline__item.-reply {
   display: none;
 }

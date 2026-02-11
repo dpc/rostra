@@ -113,14 +113,21 @@ pub async fn get_notifications(
     ))
 }
 
+#[derive(Deserialize)]
+pub struct UpdatesQuery {
+    pub notifications: Option<usize>,
+}
+
 pub async fn get_updates(
     state: State<SharedState>,
     ws: WebSocketUpgrade,
     session: UserSession,
+    Form(query): Form<UpdatesQuery>,
 ) -> impl IntoResponse {
-    ws.on_upgrade(|ws| async move {
+    let pending_notifications = query.notifications.unwrap_or(0);
+    ws.on_upgrade(move |ws| async move {
         let _ = state
-            .handle_get_updates(ws, &session)
+            .handle_get_updates(ws, &session, pending_notifications)
             .await
             .inspect_err(|err| {
                 debug!(target: LOG_TARGET, err=%err.fmt_compact(), "WS handler failed");
@@ -152,9 +159,7 @@ impl UiState {
 
         let ro_mode = self.ro_mode(session.session_token());
         Ok(html! {
-            nav ."o-navBar"
-                x-data="websocket('/updates')"
-            {
+            nav ."o-navBar" {
                 (self.render_top_nav())
 
                 div ."o-navBar__profileSummary" {
@@ -166,15 +171,30 @@ impl UiState {
         })
     }
 
-    async fn handle_get_updates(&self, mut ws: WebSocket, user: &UserSession) -> RequestResult<()> {
+    async fn handle_get_updates(
+        &self,
+        mut ws: WebSocket,
+        user: &UserSession,
+        initial_pending_notifications: usize,
+    ) -> RequestResult<()> {
         let client = self.client(user.id()).await?;
-        let self_id = client.client_ref()?.rostra_id();
-        let mut new_posts = client.client_ref()?.new_posts_subscribe();
+        let client_ref = client.client_ref()?;
+        let self_id = client_ref.rostra_id();
+        let mut new_posts = client_ref.new_posts_subscribe();
 
-        let mut count = 0;
+        let followees: HashMap<RostraId, PersonaSelector> = client_ref
+            .db()
+            .get_followees(self_id)
+            .await
+            .into_iter()
+            .collect();
+
+        let mut followees_count: u64 = 0;
+        let mut network_count: u64 = 0;
+        let mut notifications_count: u64 = initial_pending_notifications as u64;
 
         loop {
-            let (event_content, _social_post) = match new_posts.recv().await {
+            let (event_content, social_post) = match new_posts.recv().await {
                 Ok(event_content) => event_content,
                 Err(tokio::sync::broadcast::error::RecvError::Closed) => {
                     break;
@@ -186,18 +206,63 @@ impl UiState {
             if event_content.event.event.kind != EventKind::SOCIAL_POST {
                 continue;
             }
-            if event_content.event.event.author == self_id {
+            let author = event_content.event.event.author;
+            if author == self_id {
                 continue;
             }
-            count += 1;
-            let alert_html = html! {
-                (self.render_new_posts_alert(true, count))
+
+            network_count += 1;
+
+            if followees
+                .get(&author)
+                .is_some_and(|selector| selector.matches(social_post.persona))
+            {
+                followees_count += 1;
             }
-            .into_string();
-            let _ = ws.send(alert_html.into()).await;
+
+            let is_reply_to_self =
+                social_post.reply_to.map(|ext_id| ext_id.rostra_id()) == Some(self_id);
+            let is_self_mention = client_ref
+                .db()
+                .is_self_mention(event_content.event.event_id.to_short())
+                .await;
+            if is_reply_to_self || is_self_mention {
+                notifications_count += 1;
+            }
+
+            let badge_html = self
+                .render_tab_badges(followees_count, network_count, notifications_count)
+                .into_string();
+            let _ = ws.send(badge_html.into()).await;
             tokio::time::sleep(Duration::from_millis(100)).await;
         }
         Ok(())
+    }
+
+    fn render_tab_badges(&self, followees: u64, network: u64, notifications: u64) -> Markup {
+        html! {
+            span id="followees-new-count"
+                ."o-mainBarTimeline__newCount"
+                x-swap-oob="outerHTML:#followees-new-count"
+            {
+                @if 9 < followees { " (9+)" }
+                @else if 0 < followees { " (" (followees) ")" }
+            }
+            span id="network-new-count"
+                ."o-mainBarTimeline__newCount"
+                x-swap-oob="outerHTML:#network-new-count"
+            {
+                @if 9 < network { " (9+)" }
+                @else if 0 < network { " (" (network) ")" }
+            }
+            span id="notifications-new-count"
+                ."o-mainBarTimeline__pendingNotifications"
+                x-swap-oob="outerHTML:#notifications-new-count"
+            {
+                @if 9 < notifications { " (9+)" }
+                @else if 0 < notifications { " (" (notifications) ")" }
+            }
+        }
     }
 
     pub(crate) async fn render_timeline_page(
@@ -227,13 +292,7 @@ impl UiState {
             return Ok(timeline);
         }
         // Otherwise return the full page
-        let page_layout = self.render_page_layout(
-            navbar,
-            html! {
-                (self.render_new_posts_alert(false, 0))
-                (timeline)
-            },
-        );
+        let page_layout = self.render_page_layout(navbar, timeline);
 
         let content = html! {
             (page_layout)
@@ -440,25 +499,6 @@ impl UiState {
         })
     }
 
-    pub fn render_new_posts_alert(&self, visible: bool, count: u64) -> Markup {
-        html! {
-            a id="new-posts-alert"
-                ."o-mainBar__newPostsAlert"
-                ."-hidden"[!visible]
-                href="/home"
-                x-swap-oob="outerHTML:#new-posts-alert"
-            {
-                (if count == 0 {
-                    "No new posts available".to_string()
-                } else if count == 1 {
-                    "New post available".to_string()
-                } else {
-                    format!("{count} new posts available.")
-                })
-            }
-        }
-    }
-
     #[builder]
     pub(crate) async fn render_main_bar_timeline(
         &self,
@@ -499,7 +539,7 @@ impl UiState {
         let author_personas = client.db()?.get_personas(author_personas.into_iter()).await;
 
         Ok(html! {
-            div ."o-mainBarTimeline" "x-data"="{}" {
+            div ."o-mainBarTimeline" x-data=(format!("websocket('/updates?notifications={}')", pending_notifications)) {
                 // Workaround: first alpine-ajax request scrolls to top; prime it on load
                 div style="display:none" x-init="$ajax('/timeline/prime', { targets: ['timeline-posts'] })" {}
                 div ."o-mainBarTimeline__tabs" {
@@ -516,21 +556,29 @@ impl UiState {
                         a ."o-mainBarTimeline__followees"
                             ."-active"[mode.is_followees()]
                             href=(TimelineMode::Followees.to_path())
-                        { "Followees" }
-                        a  ."o-mainBarTimeline__network"
+                        {
+                            "Followees"
+                            span id="followees-new-count" ."o-mainBarTimeline__newCount" {}
+                        }
+                        a ."o-mainBarTimeline__network"
                             ."-active"[mode.is_network()]
                             href=(TimelineMode::Network.to_path())
-                        { "Network" }
+                        {
+                            "Network"
+                            span id="network-new-count" ."o-mainBarTimeline__newCount" {}
+                        }
                         a ."o-mainBarTimeline__notifications"
                             ."-active"[mode.is_notifications()]
                             href=(TimelineMode::Notifications.to_path())
                             ."-pending"[0 < pending_notifications]
                         {
                             "Notifications"
-                            @if 9 < pending_notifications {
-                                span ."o-mainBarTimeline__pendingNotifications" { "(9+)" }
-                            } @else if 0 < pending_notifications {
-                                span ."o-mainBarTimeline__pendingNotifications" { "("(pending_notifications) ")" }
+                            span id="notifications-new-count" ."o-mainBarTimeline__pendingNotifications" {
+                                @if 9 < pending_notifications {
+                                    "(9+)"
+                                } @else if 0 < pending_notifications {
+                                    "("(pending_notifications)")"
+                                }
                             }
                         }
                     }

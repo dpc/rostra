@@ -18,7 +18,7 @@ Rostra is a p2p (friend-to-friend) social network built in Rust. It uses a light
 ## Project Structure
 
 - `crates/rostra-core` - Core domain types used across the project
-- `crates/rostra-client-db` - Database for tracking all events  
+- `crates/rostra-client-db` - Database for tracking all events
 - `crates/rostra-web-ui` - Default web-based UI (Axum + htmx)
 - `crates/rostra-client` - Client implementation (includes shared RPC utilities in `util::rpc`)
 - `crates/rostra-p2p` - P2P networking layer
@@ -29,13 +29,14 @@ Rostra is a p2p (friend-to-friend) social network built in Rust. It uses a light
 ## Development Commands
 
 ### Building and Testing
+
 ```bash
 # Build the project
 cargo build
 # or: just build
 
-# Run tests  
-cargo test
+# Run tests
+cargo nextest run
 # or: just test
 
 # Check code (faster than build)
@@ -62,6 +63,7 @@ just clippy-fix
 ```
 
 ### Running the Application
+
 ```bash
 # Run web UI in production mode
 cargo run --release web-ui
@@ -74,6 +76,7 @@ just dev 3000
 ```
 
 ### Testing Individual Components
+
 ```bash
 # Test specific crate
 cargo test -p rostra-core
@@ -89,7 +92,7 @@ cargo test test_name
 
 The web UI (`crates/rostra-web-ui`) uses:
 - **Axum** for the web server framework
-- **Maud** for HTML templating 
+- **Maud** for HTML templating
 - **htmx** for dynamic frontend interactions
 - **Tower** middleware for sessions, cookies, compression
 - Server-side rendering with htmx for interactivity
@@ -105,5 +108,4 @@ Key web UI files:
 - Workspace-based multi-crate structure
 - Structured logging with `tracing`
 - No inline `mod`s - use standalone modules
-- Event-driven architecture with cryptographic verification
 - Supports multi-device sync through event DAG merging
