@@ -329,7 +329,9 @@ img.u-userImage[loading="lazy"][src][width][height] {
 
 /* Loading spinner for buttons */
 @keyframes u-spin {
-  to { transform: rotate(360deg); }
+  to {
+    transform: rotate(360deg);
+  }
 }
 
 .u-button.-loading {
@@ -519,12 +521,8 @@ img.u-userImage[loading="lazy"][src][width][height] {
   display: none;
 }
 
-@media (min-width: 768px
-  /* var's dont work here */
-) {
-  .o-mainBarTimeline__item {
-    padding: 1rem 1.5rem;
-  }
+.o-mainBarTimeline__item {
+  padding: clamp(0.1rem, 1vw, 1rem) clamp(0.1rem, 1.5vw, 1.5rem)
 }
 
 .o-mainBarTimeline__item {
@@ -813,9 +811,10 @@ emoji-picker {
   display: flex;
   justify-content: space-between;
   gap: 5pt;
-  margin-bottom: 1rem;
+  margin-bottom: 0.5rem;
+  margin-right: 1rem;
+  margin-top: 0.5rem;
 }
-
 
 .m-postView__reactions {
   display: flex;
@@ -2273,6 +2272,7 @@ input:checked+.slider:before {
     opacity: 0;
     transform: translateY(10px);
   }
+
   to {
     opacity: 1;
     transform: translateY(0);
@@ -2376,7 +2376,8 @@ input:checked+.slider:before {
 }
 
 .o-welcomePage__button {
-  background-image: none;  /* Remove link underline animation */
+  background-image: none;
+  /* Remove link underline animation */
 }
 
 .o-welcomePage__footer {
