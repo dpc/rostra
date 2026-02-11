@@ -161,7 +161,6 @@ blockquote {
   margin: 1.0rem 0;
   padding: 0.5rem 0.5rem 0.5rem 1rem;
   background-color: var(--color-blockquote-bg);
-  color: #4b5563;
 }
 
 code {
