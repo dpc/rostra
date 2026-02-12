@@ -37,46 +37,16 @@ pub fn notifications_debug_enabled() -> bool {
 pub struct NotificationDebugInfo {
     /// The current timeline mode.
     pub mode: Option<TimelineMode>,
-    /// The cursor read from the cookie (last seen position).
-    pub cookie_cursor: Option<ReceivedAtPaginationCursor>,
-    /// The cursor used for counting (after calling `.next()` for exclusive
-    /// range).
-    pub start_cursor: Option<ReceivedAtPaginationCursor>,
     /// The cursor of the most recent post in the database.
     pub latest_cursor: Option<ReceivedAtPaginationCursor>,
-    /// The number of pending notifications counted.
-    pub pending_count: Option<usize>,
-    /// Whether this is a "save" operation (on Notifications tab).
-    pub is_save: bool,
 }
 
 impl NotificationDebugInfo {
-    /// Create debug info for when saving the last-seen cursor (Notifications
-    /// tab).
+    /// Create debug info for when saving the last-seen cursor.
     pub fn for_save(mode: TimelineMode, latest_cursor: Option<ReceivedAtPaginationCursor>) -> Self {
         Self {
             mode: Some(mode),
             latest_cursor,
-            is_save: true,
-            ..Default::default()
-        }
-    }
-
-    /// Create debug info for when counting pending notifications.
-    pub fn for_count(
-        mode: TimelineMode,
-        cookie_cursor: Option<ReceivedAtPaginationCursor>,
-        start_cursor: Option<ReceivedAtPaginationCursor>,
-        latest_cursor: Option<ReceivedAtPaginationCursor>,
-        pending_count: usize,
-    ) -> Self {
-        Self {
-            mode: Some(mode),
-            cookie_cursor,
-            start_cursor,
-            latest_cursor,
-            pending_count: Some(pending_count),
-            is_save: false,
         }
     }
 
@@ -88,22 +58,11 @@ impl NotificationDebugInfo {
             return html! {};
         }
 
-        let content = if self.is_save {
-            format!(
-                "MODE={:?}, latest_cursor={:?}, saving to cookie",
-                self.mode.unwrap(),
-                self.latest_cursor
-            )
-        } else {
-            format!(
-                "MODE={:?}, cookie_cursor={:?}, start_cursor(after .next())={:?}, latest_cursor={:?}, pending_len={}",
-                self.mode.unwrap(),
-                self.cookie_cursor,
-                self.start_cursor,
-                self.latest_cursor,
-                self.pending_count.unwrap_or(0)
-            )
-        };
+        let content = format!(
+            "MODE={:?}, latest_cursor={:?}, saving to cookie",
+            self.mode.unwrap(),
+            self.latest_cursor
+        );
 
         html! {
             div

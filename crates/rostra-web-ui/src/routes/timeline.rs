@@ -28,6 +28,13 @@ use crate::layout::FeedLinks;
 use crate::util::extractors::AjaxRequest;
 use crate::{LOG_TARGET, SharedState, UiState};
 
+#[derive(Default, Clone, Copy)]
+pub struct PendingCounts {
+    pub followees: usize,
+    pub network: usize,
+    pub notifications: usize,
+}
+
 #[derive(Deserialize)]
 pub struct TimelinePaginationInput {
     pub ts: Option<Timestamp>,
@@ -113,8 +120,10 @@ pub async fn get_notifications(
     ))
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, Default)]
 pub struct UpdatesQuery {
+    pub followees: Option<usize>,
+    pub network: Option<usize>,
     pub notifications: Option<usize>,
 }
 
@@ -124,10 +133,14 @@ pub async fn get_updates(
     session: UserSession,
     Form(query): Form<UpdatesQuery>,
 ) -> impl IntoResponse {
-    let pending_notifications = query.notifications.unwrap_or(0);
+    let pending = PendingCounts {
+        followees: query.followees.unwrap_or(0),
+        network: query.network.unwrap_or(0),
+        notifications: query.notifications.unwrap_or(0),
+    };
     ws.on_upgrade(move |ws| async move {
         let _ = state
-            .handle_get_updates(ws, &session, pending_notifications)
+            .handle_get_updates(ws, &session, pending)
             .await
             .inspect_err(|err| {
                 debug!(target: LOG_TARGET, err=%err.fmt_compact(), "WS handler failed");
@@ -175,7 +188,7 @@ impl UiState {
         &self,
         mut ws: WebSocket,
         user: &UserSession,
-        initial_pending_notifications: usize,
+        initial_pending: PendingCounts,
     ) -> RequestResult<()> {
         let client = self.client(user.id()).await?;
         let client_ref = client.client_ref()?;
@@ -189,9 +202,9 @@ impl UiState {
             .into_iter()
             .collect();
 
-        let mut followees_count: u64 = 0;
-        let mut network_count: u64 = 0;
-        let mut notifications_count: u64 = initial_pending_notifications as u64;
+        let mut followees_count = initial_pending.followees as u64;
+        let mut network_count = initial_pending.network as u64;
+        let mut notifications_count = initial_pending.notifications as u64;
 
         loop {
             let (event_content, social_post) = match new_posts.recv().await {
@@ -276,14 +289,14 @@ impl UiState {
     ) -> RequestResult<Markup> {
         let client = self.client(session.id()).await?;
         let client_ref = client.client_ref()?;
-        let (pending_notifications, debug_info) = self
+        let (pending_counts, debug_info) = self
             .handle_notification_cookies(&client_ref, pagination.is_some(), cookies, mode)
             .await?;
 
         let timeline = self
             .render_main_bar_timeline(session, mode)
             .maybe_pagination(pagination)
-            .maybe_pending_notifications(pending_notifications)
+            .pending_counts(pending_counts)
             .debug_info(debug_info)
             .call()
             .await?;
@@ -392,61 +405,110 @@ impl UiState {
         is_paginated: bool,
         cookies: &mut Cookies,
         mode: TimelineMode,
-    ) -> RequestResult<(Option<usize>, super::debug::NotificationDebugInfo)> {
+    ) -> RequestResult<(PendingCounts, super::debug::NotificationDebugInfo)> {
         use super::debug::NotificationDebugInfo;
 
         // If this is a non-first page, we don't need to do anything
         if is_paginated {
-            return Ok((None, NotificationDebugInfo::default()));
+            return Ok((PendingCounts::default(), NotificationDebugInfo::default()));
         }
 
         match mode {
             TimelineMode::Profile(_) | TimelineMode::ProfileSingle(_, _) => {
-                // We're not displaying notifications on profile timelines
-                Ok((None, NotificationDebugInfo::default()))
+                Ok((PendingCounts::default(), NotificationDebugInfo::default()))
             }
-            TimelineMode::Notifications => {
-                // Save the cursor of the most recently received post as the last seen marker
+            TimelineMode::Followees | TimelineMode::Network | TimelineMode::Notifications => {
+                let rostra_id = client.rostra_id();
                 let latest_cursor = client
                     .db()
                     .get_latest_social_post_received_at_cursor()
                     .await;
+
+                // Save the cursor for the current tab
                 if let Some(cursor) = latest_cursor {
-                    cookies.save_last_seen(client.rostra_id(), cursor);
+                    match mode {
+                        TimelineMode::Followees => {
+                            cookies.save_followees_last_seen(rostra_id, cursor)
+                        }
+                        TimelineMode::Network => cookies.save_network_last_seen(rostra_id, cursor),
+                        TimelineMode::Notifications => {
+                            cookies.save_notifications_last_seen(rostra_id, cursor)
+                        }
+                        _ => {}
+                    }
                 }
-                Ok((None, NotificationDebugInfo::for_save(mode, latest_cursor)))
-            }
-            TimelineMode::Followees | TimelineMode::Network => {
-                // Count pending notifications using received_at ordering
-                // Start AFTER the last seen cursor (exclusive) using cursor.next()
-                let cookie_cursor = cookies.get_last_seen(client.rostra_id());
-                let start_cursor = cookie_cursor.map(|c| c.next());
-                let latest_cursor = client
-                    .db()
-                    .get_latest_social_post_received_at_cursor()
-                    .await;
-                let (posts, _) = client
-                    .db()
-                    .paginate_social_posts_by_received_at(
-                        start_cursor,
-                        10,
-                        TimelineMode::Notifications.to_filter_fn(client).await,
-                    )
-                    .await;
-                let pending_len = posts.len();
+
+                // Count pending for all tabs (except the current one which is now 0)
+                let pending = self.count_pending_for_tabs(client, cookies, mode).await;
 
                 Ok((
-                    Some(pending_len),
-                    NotificationDebugInfo::for_count(
-                        mode,
-                        cookie_cursor,
-                        start_cursor,
-                        latest_cursor,
-                        pending_len,
-                    ),
+                    pending,
+                    NotificationDebugInfo::for_save(mode, latest_cursor),
                 ))
             }
         }
+    }
+
+    async fn count_pending_for_tabs(
+        &self,
+        client: &ClientRef<'_>,
+        cookies: &Cookies,
+        current_mode: TimelineMode,
+    ) -> PendingCounts {
+        let rostra_id = client.rostra_id();
+
+        let followees_count = if current_mode == TimelineMode::Followees {
+            0
+        } else {
+            self.count_pending_for_tab(
+                client,
+                cookies.get_followees_last_seen(rostra_id),
+                TimelineMode::Followees,
+            )
+            .await
+        };
+
+        let network_count = if current_mode == TimelineMode::Network {
+            0
+        } else {
+            self.count_pending_for_tab(
+                client,
+                cookies.get_network_last_seen(rostra_id),
+                TimelineMode::Network,
+            )
+            .await
+        };
+
+        let notifications_count = if current_mode == TimelineMode::Notifications {
+            0
+        } else {
+            self.count_pending_for_tab(
+                client,
+                cookies.get_notifications_last_seen(rostra_id),
+                TimelineMode::Notifications,
+            )
+            .await
+        };
+
+        PendingCounts {
+            followees: followees_count,
+            network: network_count,
+            notifications: notifications_count,
+        }
+    }
+
+    async fn count_pending_for_tab(
+        &self,
+        client: &ClientRef<'_>,
+        cookie_cursor: Option<ReceivedAtPaginationCursor>,
+        mode: TimelineMode,
+    ) -> usize {
+        let start_cursor = cookie_cursor.map(|c| c.next());
+        let (posts, _) = client
+            .db()
+            .paginate_social_posts_by_received_at(start_cursor, 10, mode.to_filter_fn(client).await)
+            .await;
+        posts.len()
     }
 
     pub async fn render_post_replies(
@@ -505,10 +567,9 @@ impl UiState {
         #[builder(start_fn)] session: &UserSession,
         #[builder(start_fn)] mode: TimelineMode,
         pagination: Option<TimelineCursor>,
-        pending_notifications: Option<usize>,
+        pending_counts: PendingCounts,
         debug_info: Option<super::debug::NotificationDebugInfo>,
     ) -> RequestResult<Markup> {
-        let pending_notifications = pending_notifications.unwrap_or_default();
         let debug_info = debug_info.unwrap_or_default();
         let client = self.client(session.id()).await?;
         let client_ref = client.client_ref()?;
@@ -538,8 +599,13 @@ impl UiState {
 
         let author_personas = client.db()?.get_personas(author_personas.into_iter()).await;
 
+        let ws_url = format!(
+            "websocket('/updates?followees={}&network={}&notifications={}')",
+            pending_counts.followees, pending_counts.network, pending_counts.notifications
+        );
+
         Ok(html! {
-            div ."o-mainBarTimeline" x-data=(format!("websocket('/updates?notifications={}')", pending_notifications)) {
+            div ."o-mainBarTimeline" x-data=(ws_url) {
                 // Workaround: first alpine-ajax request scrolls to top; prime it on load
                 div style="display:none" x-init="$ajax('/timeline/prime', { targets: ['timeline-posts'] })" {}
                 div ."o-mainBarTimeline__tabs" {
@@ -558,27 +624,30 @@ impl UiState {
                             href=(TimelineMode::Followees.to_path())
                         {
                             "Followees"
-                            span id="followees-new-count" ."o-mainBarTimeline__newCount" {}
+                            span id="followees-new-count" ."o-mainBarTimeline__newCount" {
+                                @if 9 < pending_counts.followees { " (9+)" }
+                                @else if 0 < pending_counts.followees { " (" (pending_counts.followees) ")" }
+                            }
                         }
                         a ."o-mainBarTimeline__network"
                             ."-active"[mode.is_network()]
                             href=(TimelineMode::Network.to_path())
                         {
                             "Network"
-                            span id="network-new-count" ."o-mainBarTimeline__newCount" {}
+                            span id="network-new-count" ."o-mainBarTimeline__newCount" {
+                                @if 9 < pending_counts.network { " (9+)" }
+                                @else if 0 < pending_counts.network { " (" (pending_counts.network) ")" }
+                            }
                         }
                         a ."o-mainBarTimeline__notifications"
                             ."-active"[mode.is_notifications()]
                             href=(TimelineMode::Notifications.to_path())
-                            ."-pending"[0 < pending_notifications]
+                            ."-pending"[0 < pending_counts.notifications]
                         {
                             "Notifications"
                             span id="notifications-new-count" ."o-mainBarTimeline__pendingNotifications" {
-                                @if 9 < pending_notifications {
-                                    "(9+)"
-                                } @else if 0 < pending_notifications {
-                                    "("(pending_notifications)")"
-                                }
+                                @if 9 < pending_counts.notifications { " (9+)" }
+                                @else if 0 < pending_counts.notifications { " (" (pending_counts.notifications) ")" }
                             }
                         }
                     }
