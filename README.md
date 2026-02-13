@@ -118,11 +118,15 @@ Rostra code is licensed under any of your choosing:
 
 The code vendors source code for 3rd party projects:
 
-* [alpine](https://alpinejs.dev/) - MIT
-* [alpine-ajax](https://alpine-ajax.js.org/) - MIT
-* [emoji-picker-element](https://github.com/nolanlawson/emoji-picker-element) - Apache 2.0
-* [text-field-edit](https://github.com/fregante/text-field-edit) - MIT
-* [mathjax](https://github.com/mathjax/MathJax-src/) - Apache 2.0
+* [Alpine.js](https://alpinejs.dev/) 3.14.3 - MIT - UI interactivity
+  * [Persist plugin](https://alpinejs.dev/plugins/persist) - MIT - UI state persistence
+  * [Intersect plugin](https://alpinejs.dev/plugins/intersect) - MIT - infinite scroll
+  * [Morph plugin](https://alpinejs.dev/plugins/morph) - MIT - DOM diffing for WebSocket updates
+* [alpine-ajax](https://alpine-ajax.js.org/) 0.12.6 - MIT - declarative AJAX
+* [emoji-picker-element](https://github.com/nolanlawson/emoji-picker-element) - Apache 2.0 - emoji picker
+* [text-field-edit](https://github.com/fregante/text-field-edit) - MIT - textarea cursor manipulation
+* [MathJax](https://github.com/mathjax/MathJax-src/) 3.2.2 - Apache 2.0 - LaTeX rendering in posts
+* [Prism.js](https://prismjs.com/) - MIT - syntax highlighting in code blocks
 
 
 ## AI usage disclosure
