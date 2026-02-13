@@ -253,28 +253,12 @@ impl UiState {
     }
 
     fn render_tab_badges(&self, followees: u64, network: u64, notifications: u64) -> Markup {
+        let dispatch = format!(
+            "$dispatch('badges:updated', {{ followees: {}, network: {}, notifications: {} }})",
+            followees, network, notifications
+        );
         html! {
-            span id="followees-new-count"
-                ."o-mainBarTimeline__newCount"
-                x-swap-oob="outerHTML:#followees-new-count"
-            {
-                @if 9 < followees { " (9+)" }
-                @else if 0 < followees { " (" (followees) ")" }
-            }
-            span id="network-new-count"
-                ."o-mainBarTimeline__newCount"
-                x-swap-oob="outerHTML:#network-new-count"
-            {
-                @if 9 < network { " (9+)" }
-                @else if 0 < network { " (" (network) ")" }
-            }
-            span id="notifications-new-count"
-                ."o-mainBarTimeline__pendingNotifications"
-                x-swap-oob="outerHTML:#notifications-new-count"
-            {
-                @if 9 < notifications { " (9+)" }
-                @else if 0 < notifications { " (" (notifications) ")" }
-            }
+            div x-init=(dispatch) {}
         }
     }
 
@@ -600,13 +584,24 @@ impl UiState {
         let author_personas = client.db()?.get_personas(author_personas.into_iter()).await;
 
         let ws_url = format!(
-            "websocket('/updates?followees={}&network={}&notifications={}')",
+            "websocket('/updates?followees={f}&network={n}&notifications={no}')",
+            f = pending_counts.followees,
+            n = pending_counts.network,
+            no = pending_counts.notifications
+        );
+        let badge_counts = format!(
+            "badgeCounts({}, {}, {})",
             pending_counts.followees, pending_counts.network, pending_counts.notifications
         );
 
         Ok(html! {
-            div ."o-mainBarTimeline" x-data=(ws_url) {
-                div ."o-mainBarTimeline__tabs" {
+            div ."o-mainBarTimeline"
+                x-data=(ws_url)
+            {
+                div ."o-mainBarTimeline__tabs"
+                    x-data=(badge_counts)
+                    "@badges:updated.window"="onUpdate($event.detail)"
+                {
                     a ."o-mainBarTimeline__back" onclick="history.back()" { "<" }
 
                     @if let TimelineMode::Profile(_) = mode {
@@ -622,31 +617,22 @@ impl UiState {
                             href=(TimelineMode::Followees.to_path())
                         {
                             "Following"
-                            span id="followees-new-count" ."o-mainBarTimeline__newCount" {
-                                @if 9 < pending_counts.followees { " (9+)" }
-                                @else if 0 < pending_counts.followees { " (" (pending_counts.followees) ")" }
-                            }
+                            span ."o-mainBarTimeline__newCount" x-text="formatCount(followees)" {}
                         }
                         a ."o-mainBarTimeline__network"
                             ."-active"[mode.is_network()]
                             href=(TimelineMode::Network.to_path())
                         {
                             "Network"
-                            span id="network-new-count" ."o-mainBarTimeline__newCount" {
-                                @if 9 < pending_counts.network { " (9+)" }
-                                @else if 0 < pending_counts.network { " (" (pending_counts.network) ")" }
-                            }
+                            span ."o-mainBarTimeline__newCount" x-text="formatCount(network)" {}
                         }
                         a ."o-mainBarTimeline__notifications"
                             ."-active"[mode.is_notifications()]
                             href=(TimelineMode::Notifications.to_path())
-                            ."-pending"[0 < pending_counts.notifications]
+                            ":class"="{ '-pending': notifications > 0 }"
                         {
                             "Notifications"
-                            span id="notifications-new-count" ."o-mainBarTimeline__pendingNotifications" {
-                                @if 9 < pending_counts.notifications { " (9+)" }
-                                @else if 0 < pending_counts.notifications { " (" (pending_counts.notifications) ")" }
-                            }
+                            span ."o-mainBarTimeline__pendingNotifications" x-text="formatCount(notifications)" {}
                         }
                     }
                 }

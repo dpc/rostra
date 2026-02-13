@@ -41,6 +41,7 @@ impl UiState {
                 // non-blocking. ALL plugins must load BEFORE Alpine core.
                 script defer src="/assets/libs/alpinejs-persist@3.14.3.js" {}
                 script defer src="/assets/libs/alpinejs-intersect@3.14.3.js" {}
+                script defer src="/assets/libs/alpinejs-morph@3.14.3.js" {}
                 script defer src="/assets/libs/alpine-ajax@0.12.6.js" {}
                 script defer src="/assets/libs/alpinejs@3.14.3.js" {}
                 // Disable Prism.js automatic highlighting - we'll do it manually
@@ -265,7 +266,7 @@ pub(crate) fn render_html_footer() -> Markup {
         script {
             (PreEscaped(r#"
                 document.addEventListener("alpine:init", () => {
-                  // WebSocket handler for real-time updates
+                  // Generic WebSocket handler - just handles connection and HTML morphing
                   Alpine.data("websocket", (url) => ({
                     ws: null,
                     init() {
@@ -282,29 +283,22 @@ pub(crate) fn render_html_footer() -> Markup {
                       };
 
                       this.ws.onmessage = (event) => {
-                        const parser = new DOMParser();
-                        const doc = parser.parseFromString(event.data, "text/html");
+                        const tpl = document.createElement('template');
+                        tpl.innerHTML = event.data;
 
-                        // Process out-of-band swaps (x-swap-oob)
-                        const oobElements = doc.querySelectorAll("[x-swap-oob]");
-                        oobElements.forEach((element) => {
-                          const oobValue = element.getAttribute("x-swap-oob");
-                          const [swapType, selector] = oobValue.split(":");
-
-                          if (selector) {
-                            const target = document.querySelector(selector.trim());
-                            if (target) {
-                              if (swapType.includes("outerHTML")) {
-                                target.outerHTML = element.outerHTML;
-                              } else if (swapType.includes("innerHTML")) {
-                                target.innerHTML = element.innerHTML;
-                              } else if (swapType.includes("afterend")) {
-                                target.insertAdjacentHTML("afterend", element.outerHTML);
-                              } else if (swapType.includes("beforebegin")) {
-                                target.insertAdjacentHTML("beforebegin", element.outerHTML);
-                              }
-                            }
+                        // Morph each element in the fragment into the DOM
+                        tpl.content.querySelectorAll('[id]').forEach((element) => {
+                          const target = document.getElementById(element.id);
+                          if (target && Alpine.morph) {
+                            Alpine.morph(target, element);
                           }
+                        });
+
+                        // Initialize any new elements (for x-init to fire $dispatch)
+                        tpl.content.querySelectorAll('[x-init]').forEach((element) => {
+                          document.body.appendChild(element);
+                          Alpine.initTree(element);
+                          element.remove();
                         });
                       };
 
@@ -321,6 +315,29 @@ pub(crate) fn render_html_footer() -> Markup {
                       if (this.ws) {
                         this.ws.close();
                       }
+                    }
+                  }));
+
+                  // Badge counts component - reactive state for tab badges
+                  Alpine.data("badgeCounts", (initialFollowees, initialNetwork, initialNotifications) => ({
+                    followees: initialFollowees || 0,
+                    network: initialNetwork || 0,
+                    notifications: initialNotifications || 0,
+                    init() {
+                      // Set up reactive title updates based on notifications
+                      this.$watch('notifications', (count) => {
+                        document.title = count > 9 ? 'Rostra (9+)' : count > 0 ? `Rostra (${count})` : 'Rostra';
+                      });
+                      // Set initial title
+                      document.title = this.notifications > 9 ? 'Rostra (9+)' : this.notifications > 0 ? `Rostra (${this.notifications})` : 'Rostra';
+                    },
+                    onUpdate(detail) {
+                      this.followees = detail.followees || 0;
+                      this.network = detail.network || 0;
+                      this.notifications = detail.notifications || 0;
+                    },
+                    formatCount(count) {
+                      return count > 9 ? ' (9+)' : count > 0 ? ` (${count})` : '';
                     }
                   }));
                 });
