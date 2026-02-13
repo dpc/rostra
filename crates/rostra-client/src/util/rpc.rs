@@ -6,8 +6,12 @@ use rostra_core::event::VerifiedEvent;
 use rostra_core::id::{RostraId, ToShort as _};
 use rostra_p2p::Connection;
 use rostra_util_error::{BoxedErrorResult, FmtCompact as _, WhateverResult};
-use snafu::{OptionExt as _, ResultExt as _};
+use snafu::{OptionExt as _, ResultExt as _, Snafu};
 use tracing::debug;
+
+#[derive(Debug, Snafu)]
+#[snafu(display("Event content not found from any peer"))]
+pub struct ContentNotFoundError;
 
 use crate::LOG_TARGET;
 use crate::connection_cache::ConnectionCache;
@@ -39,7 +43,14 @@ pub async fn get_event_content_from_followers(
         .chain([author_id, self_id])
         .collect();
 
-    let _result = futures_lite::StreamExt::find_map(
+    debug!(target: LOG_TARGET,
+        author_id = %author_id.to_short(),
+        event_id = %event_id.to_short(),
+        num_peers = all_peers.len(),
+        "Attempting to fetch event content from peers"
+    );
+
+    let found = futures_lite::StreamExt::find_map(
         &mut stream::iter(all_peers)
             .map(|follower_id| {
                 let client = client.clone();
@@ -49,28 +60,48 @@ pub async fn get_event_content_from_followers(
                         return None;
                     };
 
-                    let conn = (connections_cache
+                    let conn = match connections_cache
                         .get_or_connect(&client_ref, follower_id)
-                        .await)
-                        .ok()?;
+                        .await
+                    {
+                        Ok(conn) => conn,
+                        Err(err) => {
+                            debug!(target: LOG_TARGET,
+                                author_id = %author_id.to_short(),
+                                event_id = %event_id.to_short(),
+                                peer_id = %follower_id.to_short(),
+                                err = %err.fmt_compact(),
+                                "Failed to connect to peer"
+                            );
+                            return None;
+                        }
+                    };
 
                     debug!(target: LOG_TARGET,
                         author_id = %author_id.to_short(),
                         event_id = %event_id.to_short(),
-                        follower_id = %follower_id.to_short(),
+                        peer_id = %follower_id.to_short(),
                         "Getting event content from a peer"
                     );
 
                     match fetch_event_content_only(event_id, &conn, db).await {
                         Ok(true) => Some(()),
-                        Ok(false) => None,
+                        Ok(false) => {
+                            debug!(target: LOG_TARGET,
+                                author_id = %author_id.to_short(),
+                                event_id = %event_id.to_short(),
+                                peer_id = %follower_id.to_short(),
+                                "Peer does not have the content"
+                            );
+                            None
+                        }
                         Err(err) => {
                             debug!(target: LOG_TARGET,
                                 author_id = %author_id.to_short(),
                                 event_id = %event_id.to_short(),
-                                follower_id = %follower_id.to_short(),
+                                peer_id = %follower_id.to_short(),
                                 err = %err.fmt_compact(),
-                                "Error getting event from a peer"
+                                "Error getting event content from peer"
                             );
                             None
                         }
@@ -81,6 +112,15 @@ pub async fn get_event_content_from_followers(
         |result| result,
     )
     .await;
+
+    if found.is_none() {
+        debug!(target: LOG_TARGET,
+            author_id = %author_id.to_short(),
+            event_id = %event_id.to_short(),
+            "No peer had the event content"
+        );
+        return Err(ContentNotFoundError.into());
+    }
 
     Ok(())
 }

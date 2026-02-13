@@ -4,7 +4,6 @@ use axum::extract::{Path, Query, State};
 use axum::response::IntoResponse;
 use maud::{Markup, html};
 use rostra_client::ClientRef;
-use rostra_client::connection_cache::ConnectionCache;
 use rostra_client::util::rpc::get_event_content_from_followers;
 use rostra_client_db::IdSocialProfileRecord;
 use rostra_client_db::social::SocialPostRecord;
@@ -12,13 +11,12 @@ use rostra_core::event::SocialPost;
 use rostra_core::id::{RostraId, ToShort as _};
 use rostra_core::{ExternalEventId, ShortEventId, Timestamp};
 use serde::Deserialize;
-use snafu::ResultExt as _;
 use tower_cookies::Cookies;
 
 use super::timeline::TimelineMode;
 use super::unlock::session::{RoMode, UserSession};
 use super::{Maud, fragment};
-use crate::error::{OtherSnafu, ReadOnlyModeSnafu, RequestResult};
+use crate::error::{ReadOnlyModeSnafu, RequestResult};
 use crate::util::extractors::AjaxRequest;
 use crate::util::time::format_timestamp;
 use crate::{SharedState, UiState};
@@ -182,41 +180,39 @@ pub async fn fetch_missing_post(
     let client_handle = state.client(session.id()).await?;
     let client = client_handle.client_ref()?;
 
-    let connections_cache = ConnectionCache::new();
     let mut followers_cache = std::collections::BTreeMap::new();
 
-    get_event_content_from_followers(
+    let content_id = post_content_html_id(post_thread_id, event_id);
+
+    if get_event_content_from_followers(
         client.handle(),
         client.rostra_id(),
         author_id,
         event_id,
-        &connections_cache,
+        client.connection_cache(),
         &mut followers_cache,
         client.db(),
     )
     .await
-    .context(OtherSnafu)?;
-
-    // Post was fetched successfully, render the updated content
-    let db = client.db();
-    let post_record = db.get_social_post(event_id).await;
-
-    let content_id = post_content_html_id(post_thread_id, event_id);
-
-    if let Some(post_record) = post_record {
-        if let Some(djot_content) = post_record.content.djot_content.as_ref() {
-            let post_content_rendered = state
-                .render_content(&client, post_record.author, djot_content)
-                .await;
-            return Ok(Maud(html! {
-                div #(content_id) ."m-postView__content -present" {
-                    (post_content_rendered)
-                }
-            }));
+    .is_ok()
+    {
+        // Post was fetched successfully, render the updated content
+        let db = client.db();
+        if let Some(post_record) = db.get_social_post(event_id).await {
+            if let Some(djot_content) = post_record.content.djot_content.as_ref() {
+                let post_content_rendered = state
+                    .render_content(&client, post_record.author, djot_content)
+                    .await;
+                return Ok(Maud(html! {
+                    div #(content_id) ."m-postView__content -present" {
+                        (post_content_rendered)
+                    }
+                }));
+            }
         }
     }
 
-    // Fetch attempt completed but post still not available
+    // Fetch failed or post still not available
     Ok(Maud(html! {
         div #(content_id) ."m-postView__content -missing" {
             p {
