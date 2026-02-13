@@ -621,7 +621,7 @@ impl UiState {
                             ."-active"[mode.is_followees()]
                             href=(TimelineMode::Followees.to_path())
                         {
-                            "Followees"
+                            "Following"
                             span id="followees-new-count" ."o-mainBarTimeline__newCount" {
                                 @if 9 < pending_counts.followees { " (9+)" }
                                 @else if 0 < pending_counts.followees { " (" (pending_counts.followees) ")" }
