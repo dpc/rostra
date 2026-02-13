@@ -364,6 +364,26 @@ impl Database {
         .expect("Database panic")
     }
 
+    pub async fn get_heads_events_for_id(&self, id: RostraId) -> Vec<ShortEventId> {
+        self.read_with(|tx| {
+            let events_heads_tbl = tx.open_table(&events_heads::TABLE)?;
+            Ok(Database::get_heads_events_tx(id, &events_heads_tbl)?
+                .into_iter()
+                .collect())
+        })
+        .await
+        .expect("Database panic")
+    }
+
+    pub async fn get_data_usage(&self, id: RostraId) -> IdsDataUsageRecord {
+        self.read_with(|tx| {
+            let ids_data_usage_tbl = tx.open_table(&ids_data_usage::TABLE)?;
+            Database::get_data_usage_tx(id, &ids_data_usage_tbl)
+        })
+        .await
+        .expect("Database panic")
+    }
+
     pub async fn get_self_followees(&self) -> Vec<(RostraId, PersonaSelector)> {
         self.get_followees(self.self_id).await
     }

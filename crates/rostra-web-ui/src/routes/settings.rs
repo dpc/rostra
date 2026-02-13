@@ -6,7 +6,7 @@ use axum::response::{IntoResponse, Redirect};
 use maud::{Markup, html};
 use rostra_client::id::IdResolvedData;
 use rostra_client::{IdP2PState, NodeP2PState};
-use rostra_client_db::{EventContentState, EventRecord, IrohNodeRecord};
+use rostra_client_db::{EventContentState, EventRecord, IdsDataUsageRecord, IrohNodeRecord};
 use rostra_core::Timestamp;
 use rostra_core::event::IrohNodeId;
 use rostra_core::id::RostraId;
@@ -102,9 +102,31 @@ pub async fn get_settings_events(
     // Get events for the selected identity (limit to 100)
     let events = client_ref.db().get_events_for_id(selected_id, 100).await;
 
+    // Get stats for the selected identity
+    let data_usage = client_ref.db().get_data_usage(selected_id).await;
+    let missing_events_count = client_ref
+        .db()
+        .get_missing_events_for_id(selected_id)
+        .await
+        .len();
+    let heads_count = client_ref
+        .db()
+        .get_heads_events_for_id(selected_id)
+        .await
+        .len();
+
     let navbar = state.render_settings_navbar(&session, "events").await?;
     let content = state
-        .render_event_explorer_settings(&session, user_id, selected_id, known_ids, events)
+        .render_event_explorer_settings(
+            &session,
+            user_id,
+            selected_id,
+            known_ids,
+            events,
+            data_usage,
+            missing_events_count,
+            heads_count,
+        )
         .await?;
 
     Ok(Maud(
@@ -439,6 +461,9 @@ impl UiState {
         selected_id: RostraId,
         known_ids: Vec<RostraId>,
         events: Vec<(EventRecord, Timestamp, Option<EventContentState>)>,
+        data_usage: IdsDataUsageRecord,
+        missing_events_count: usize,
+        heads_count: usize,
     ) -> RequestResult<Markup> {
         let client = self.client(session.id()).await?;
         let client_ref = client.client_ref()?;
@@ -476,6 +501,29 @@ impl UiState {
                         }
                         noscript {
                             button type="submit" { "Load" }
+                        }
+                    }
+                }
+
+                div ."o-settingsContent__section" {
+                    h3 ."o-settingsContent__sectionHeader" { "Stats" }
+
+                    div ."m-eventExplorer__stats" {
+                        div ."m-eventExplorer__statItem" {
+                            span ."m-eventExplorer__statLabel" { "Data usage: " }
+                            span ."m-eventExplorer__statValue" {
+                                (rostra_util_fmt::format_bytes(data_usage.metadata_size + data_usage.content_size))
+                                " (metadata: " (rostra_util_fmt::format_bytes(data_usage.metadata_size))
+                                ", content: " (rostra_util_fmt::format_bytes(data_usage.content_size)) ")"
+                            }
+                        }
+                        div ."m-eventExplorer__statItem" {
+                            span ."m-eventExplorer__statLabel" { "Missing events: " }
+                            span ."m-eventExplorer__statValue" { (missing_events_count) }
+                        }
+                        div ."m-eventExplorer__statItem" {
+                            span ."m-eventExplorer__statLabel" { "Head events: " }
+                            span ."m-eventExplorer__statValue" { (heads_count) }
                         }
                     }
                 }
