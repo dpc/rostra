@@ -108,10 +108,7 @@ pub async fn get_settings_events(
         .db()
         .count_missing_events_for_id(selected_id)
         .await;
-    let heads_count = client_ref
-        .db()
-        .count_heads_events_for_id(selected_id)
-        .await;
+    let heads_count = client_ref.db().count_heads_events_for_id(selected_id).await;
 
     let navbar = state.render_settings_navbar(&session, "events").await?;
     let content = state

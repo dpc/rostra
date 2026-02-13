@@ -12,6 +12,13 @@ use crate::tables::{Article, HnArticle};
 const HN_BASE_URL: &str = "https://news.ycombinator.com/";
 const LOBSTERS_BASE_URL: &str = "https://lobste.rs/";
 
+/// Extract text content from an HTML element, properly decoding HTML entities.
+/// Uses the element's text iterator which handles entity decoding,
+/// then normalizes non-breaking spaces to regular spaces.
+fn extract_text(element: &scraper::ElementRef) -> String {
+    element.text().collect::<String>().replace('\u{00a0}', " ")
+}
+
 #[derive(Debug, Snafu)]
 pub enum ScraperError {
     #[snafu(display("HTTP request failed: {source}"))]
@@ -145,7 +152,7 @@ impl HnScraper {
                 }
             };
 
-            let title = title_link.inner_html();
+            let title = extract_text(&title_link);
             let url = title_link.value().attr("href").map(|s| {
                 // Handle relative URLs
                 if s.starts_with("item?id=") {
@@ -248,7 +255,7 @@ impl LobstersScraper {
                 }
             };
 
-            let title = title_link.inner_html();
+            let title = extract_text(&title_link);
             let url = title_link.value().attr("href").map(|s| s.to_string());
 
             // Extract score from voting element - correct selector for Lobsters
@@ -442,7 +449,8 @@ impl AtomScraper {
 
         for entry in &feed.entries {
             let entry_id = &entry.id;
-            let title = entry.title.clone();
+            // Atom titles may contain non-breaking spaces
+            let title = entry.title.replace('\u{00a0}', " ");
 
             let url = Self::extract_url(entry);
 
@@ -499,5 +507,103 @@ impl AtomScraper {
 impl Scraper for AtomScraper {
     async fn scrape_frontpage(&self) -> ScraperResult<Vec<Article>> {
         self.scrape_atom_feed().await
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use scraper::{Html, Selector};
+
+    use super::*;
+
+    /// Helper to extract text from an HTML fragment.
+    /// Wraps content in a div to ensure we always have an element to select.
+    fn text_from_html(html: &str) -> String {
+        let wrapped = format!("<div>{html}</div>");
+        let fragment = Html::parse_fragment(&wrapped);
+        let selector = Selector::parse("div").unwrap();
+        let el = fragment.select(&selector).next().expect("div must exist");
+        extract_text(&el)
+    }
+
+    #[test]
+    fn extract_text_plain() {
+        assert_eq!(text_from_html("<span>Hello World</span>"), "Hello World");
+    }
+
+    #[test]
+    fn extract_text_strips_bold() {
+        assert_eq!(
+            text_from_html("<span>Hello <b>World</b></span>"),
+            "Hello World"
+        );
+    }
+
+    #[test]
+    fn extract_text_strips_nested_tags() {
+        assert_eq!(
+            text_from_html("<span>A <b>B <i>C</i> D</b> E</span>"),
+            "A B C D E"
+        );
+    }
+
+    #[test]
+    fn extract_text_converts_nbsp_entity() {
+        assert_eq!(
+            text_from_html("<span>Hello&nbsp;World</span>"),
+            "Hello World"
+        );
+    }
+
+    #[test]
+    fn extract_text_converts_nbsp_unicode() {
+        // U+00A0 non-breaking space
+        assert_eq!(
+            text_from_html("<span>Hello\u{00a0}World</span>"),
+            "Hello World"
+        );
+    }
+
+    #[test]
+    fn extract_text_preserves_em_dash() {
+        // &mdash; is em-dash U+2014
+        assert_eq!(
+            text_from_html("<span>Hello&mdash;World</span>"),
+            "Hello\u{2014}World"
+        );
+    }
+
+    #[test]
+    fn extract_text_preserves_en_dash() {
+        // &ndash; is en-dash U+2013
+        assert_eq!(
+            text_from_html("<span>2020&ndash;2024</span>"),
+            "2020\u{2013}2024"
+        );
+    }
+
+    #[test]
+    fn extract_text_decodes_common_entities() {
+        assert_eq!(text_from_html("<span>&amp;</span>"), "&");
+        assert_eq!(text_from_html("<span>&lt;</span>"), "<");
+        assert_eq!(text_from_html("<span>&gt;</span>"), ">");
+        assert_eq!(text_from_html("<span>&quot;</span>"), "\"");
+        assert_eq!(text_from_html("<span>&apos;</span>"), "'");
+    }
+
+    #[test]
+    fn extract_text_handles_mixed_content() {
+        assert_eq!(
+            text_from_html("<span>The&nbsp;<b>Rust</b>&mdash;Programming&nbsp;Language</span>"),
+            "The Rust\u{2014}Programming Language"
+        );
+    }
+
+    #[test]
+    fn extract_text_strips_links() {
+        assert_eq!(
+            text_from_html("<span>Check out <a href=\"https://example.com\">this link</a>!</span>"),
+            "Check out this link!"
+        );
     }
 }
