@@ -1,6 +1,7 @@
 mod cli;
 
 use std::io;
+use std::net::SocketAddr;
 use std::time::Duration;
 
 use clap::Parser;
@@ -56,6 +57,36 @@ pub enum CliError {
 }
 
 pub type CliResult<T> = std::result::Result<T, CliError>;
+
+/// Wait for a TCP port to become available, with retries.
+async fn wait_for_port(addr: SocketAddr) {
+    use tracing::debug;
+
+    const TIMEOUT: Duration = Duration::from_secs(30);
+    const RETRY_DELAY: Duration = Duration::from_millis(20);
+
+    let deadline = Instant::now() + TIMEOUT;
+
+    while Instant::now() < deadline {
+        match tokio::net::TcpStream::connect(addr).await {
+            Ok(_) => return,
+            Err(e) => debug!(target: LOG_TARGET, %addr, %e, "Port not yet available"),
+        }
+        tokio::time::sleep(RETRY_DELAY).await;
+    }
+    warn!(target: LOG_TARGET, %addr, "Port did not become available in time");
+}
+
+/// Spawn a task that waits for the port to open, then opens the browser.
+fn spawn_open_browser(addr: SocketAddr) {
+    tokio::spawn(async move {
+        wait_for_port(addr).await;
+        let url = format!("http://{addr}");
+        if cmd!("xdg-open", &url).run().is_err() {
+            warn!(target: LOG_TARGET, "Failed to open browser");
+        }
+    });
+}
 
 #[snafu::report]
 #[tokio::main]
@@ -198,9 +229,7 @@ async fn handle_cmd(opts: Opts) -> CliResult<serde_json::Value> {
             if !web_opts.skip_xdg_open {
                 // For unix sockets, we can't easily determine a URL to open, so skip xdg-open
                 if let BindAddr::Tcp(addr) = &ui_opts.listen {
-                    if cmd!("xdg-open", format!("http://{}", addr)).run().is_err() {
-                        warn!(target: LOG_TARGET, "Failed to open browser");
-                    };
+                    spawn_open_browser(*addr);
                 }
             }
 
