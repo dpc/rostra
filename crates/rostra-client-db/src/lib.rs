@@ -375,6 +375,24 @@ impl Database {
         .expect("Database panic")
     }
 
+    pub async fn count_missing_events_for_id(&self, id: RostraId) -> usize {
+        self.read_with(|tx| {
+            let events_missing_tbl = tx.open_table(&events_missing::TABLE)?;
+            Database::count_missing_events_for_id_tx(id, &events_missing_tbl)
+        })
+        .await
+        .expect("Database panic")
+    }
+
+    pub async fn count_heads_events_for_id(&self, id: RostraId) -> usize {
+        self.read_with(|tx| {
+            let events_heads_tbl = tx.open_table(&events_heads::TABLE)?;
+            Database::count_heads_events_tx(id, &events_heads_tbl)
+        })
+        .await
+        .expect("Database panic")
+    }
+
     pub async fn get_data_usage(&self, id: RostraId) -> IdsDataUsageRecord {
         self.read_with(|tx| {
             let ids_data_usage_tbl = tx.open_table(&ids_data_usage::TABLE)?;

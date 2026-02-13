@@ -370,6 +370,24 @@ impl Database {
             .collect::<Result<Vec<_>, _>>()?)
     }
 
+    pub fn count_missing_events_for_id_tx(
+        author: RostraId,
+        events_missing_table: &impl events_missing::ReadableTable,
+    ) -> DbResult<usize> {
+        Ok(events_missing_table
+            .range((author, ShortEventId::ZERO)..=(author, ShortEventId::MAX))?
+            .count())
+    }
+
+    pub fn count_heads_events_tx(
+        author: RostraId,
+        events_heads_table: &impl events_heads::ReadableTable,
+    ) -> DbResult<usize> {
+        Ok(events_heads_table
+            .range((author, ShortEventId::ZERO)..=(author, ShortEventId::MAX))?
+            .count())
+    }
+
     pub fn get_event_tx(
         event: impl Into<ShortEventId>,
         events_table: &impl events::ReadableTable,
