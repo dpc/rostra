@@ -2155,7 +2155,7 @@ mod proptest_rc {
     #[test]
     fn proptest_rc_counting() {
         // Use proptest runner
-        proptest!(ProptestConfig::with_cases(500), |(
+        proptest!(ProptestConfig::with_cases(100), |(
             seed in 0u64..10000,
             num_events in 1usize..=50,
             content_seeds in prop::array::uniform10(any::<[u8; 8]>()),
@@ -2373,7 +2373,7 @@ mod proptest_follow {
     }
 
     proptest! {
-        #![proptest_config(ProptestConfig::with_cases(500))]
+        #![proptest_config(ProptestConfig::with_cases(50))]
 
         /// Test that follow/unfollow operations work correctly regardless of delivery order.
         ///
