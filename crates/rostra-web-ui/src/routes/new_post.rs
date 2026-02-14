@@ -589,30 +589,7 @@ impl UiState {
                             }}
                         "#);
                         @let emoji_picker_id = format!("emoji-picker-{id_suffix}");
-                        @let emoji_onclick = format!(r#"
-                            event.preventDefault();
-                            event.stopPropagation();
-                            const picker = document.getElementById('{emoji_picker_id}');
-                            if (picker) {{
-                                const wasHidden = picker.classList.contains('-hidden');
-                                picker.classList.toggle('-hidden');
-                                if (wasHidden) {{
-                                    const ep = picker.querySelector('emoji-picker');
-                                    if (ep && ep.shadowRoot) {{
-                                        const searchInput = ep.shadowRoot.querySelector('#search');
-                                        if (searchInput) searchInput.focus();
-                                    }}
-                                    // Close on click outside
-                                    const closeOnClickOutside = (e) => {{
-                                        if (!picker.contains(e.target) && e.target !== this) {{
-                                            picker.classList.add('-hidden');
-                                            document.removeEventListener('click', closeOnClickOutside);
-                                        }}
-                                    }};
-                                    setTimeout(() => document.addEventListener('click', closeOnClickOutside), 0);
-                                }}
-                            }}
-                        "#);
+                        @let emoji_onclick = format!("toggleEmojiPicker('{emoji_picker_id}', event)");
                         div ."m-inlineReply__footerLeft" {
                             a ."m-inlineReply__helpButton"
                                 href="https://htmlpreview.github.io/?https://github.com/jgm/djot/blob/master/doc/syntax.html"
@@ -816,30 +793,7 @@ impl UiState {
                         a
                             ."m-newPostForm__emojiButton"
                             href="#"
-                            onclick=r#"
-                                event.preventDefault();
-                                event.stopPropagation();
-                                const tooltip = document.querySelector('.m-newPostForm__emojiBar');
-                                if (tooltip) {
-                                    const wasHidden = tooltip.classList.contains('-hidden');
-                                    tooltip.classList.toggle('-hidden');
-                                    if (wasHidden) {
-                                        const emojiPicker = document.querySelector('emoji-picker');
-                                        if (emojiPicker && emojiPicker.shadowRoot) {
-                                            const searchInput = emojiPicker.shadowRoot.querySelector('#search');
-                                            if (searchInput) searchInput.focus();
-                                        }
-                                        // Close on click outside
-                                        const closeOnClickOutside = (e) => {
-                                            if (!tooltip.contains(e.target) && e.target !== this) {
-                                                tooltip.classList.add('-hidden');
-                                                document.removeEventListener('click', closeOnClickOutside);
-                                            }
-                                        };
-                                        setTimeout(() => document.addEventListener('click', closeOnClickOutside), 0);
-                                    }
-                                }
-                            "#
+                            onclick="toggleEmojiPicker('emoji-picker-container', event)"
                         { "😀" }
                         @if user_id.is_some() {
                             button
