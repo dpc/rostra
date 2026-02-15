@@ -9,6 +9,7 @@ use crate::LOG_TARGET;
 const NOTIFICATIONS_LAST_SEEN_COOKIE_NAME: &str = "notifications-last-seen";
 const FOLLOWEES_LAST_SEEN_COOKIE_NAME: &str = "followees-last-seen";
 const NETWORK_LAST_SEEN_COOKIE_NAME: &str = "network-last-seen";
+const SHOUTBOX_LAST_SEEN_COOKIE_NAME: &str = "shoutbox-last-seen";
 const PERSONA_COOKIE_NAME: &str = "persona";
 
 pub(crate) trait CookiesExt {
@@ -40,6 +41,17 @@ pub(crate) trait CookiesExt {
     ) -> Option<ReceivedAtPaginationCursor>;
 
     fn save_network_last_seen(
+        &mut self,
+        self_id: impl Into<ShortRostraId>,
+        pagination: ReceivedAtPaginationCursor,
+    );
+
+    fn get_shoutbox_last_seen(
+        &self,
+        self_id: impl Into<ShortRostraId>,
+    ) -> Option<ReceivedAtPaginationCursor>;
+
+    fn save_shoutbox_last_seen(
         &mut self,
         self_id: impl Into<ShortRostraId>,
         pagination: ReceivedAtPaginationCursor,
@@ -132,6 +144,21 @@ impl CookiesExt for Cookies {
         pagination: ReceivedAtPaginationCursor,
     ) {
         save_cursor(self, self_id, NETWORK_LAST_SEEN_COOKIE_NAME, pagination);
+    }
+
+    fn get_shoutbox_last_seen(
+        &self,
+        self_id: impl Into<ShortRostraId>,
+    ) -> Option<ReceivedAtPaginationCursor> {
+        get_cursor(self, self_id, SHOUTBOX_LAST_SEEN_COOKIE_NAME)
+    }
+
+    fn save_shoutbox_last_seen(
+        &mut self,
+        self_id: impl Into<ShortRostraId>,
+        pagination: ReceivedAtPaginationCursor,
+    ) {
+        save_cursor(self, self_id, SHOUTBOX_LAST_SEEN_COOKIE_NAME, pagination);
     }
 
     fn get_persona(&self, self_id: impl Into<ShortRostraId>) -> Option<u8> {

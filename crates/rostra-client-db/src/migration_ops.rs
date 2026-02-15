@@ -123,6 +123,8 @@ impl Database {
         tx.open_table(&crate::social_posts_replies::TABLE)?;
         tx.open_table(&crate::social_posts_reactions::TABLE)?;
         tx.open_table(&crate::social_posts_self_mention::TABLE)?;
+
+        tx.open_table(&crate::shoutbox_posts_by_received_at::TABLE)?;
         Ok(())
     }
 

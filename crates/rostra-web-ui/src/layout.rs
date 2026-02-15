@@ -319,10 +319,11 @@ pub(crate) fn render_html_footer() -> Markup {
                   }));
 
                   // Badge counts component - reactive state for tab badges
-                  Alpine.data("badgeCounts", (initialFollowees, initialNetwork, initialNotifications) => ({
-                    followees: initialFollowees || 0,
-                    network: initialNetwork || 0,
-                    notifications: initialNotifications || 0,
+                  Alpine.data("badgeCounts", (initial) => ({
+                    followees: initial?.followees || 0,
+                    network: initial?.network || 0,
+                    notifications: initial?.notifications || 0,
+                    shoutbox: initial?.shoutbox || 0,
                     init() {
                       // Set up reactive title updates based on notifications
                       this.$watch('notifications', (count) => {
@@ -335,6 +336,7 @@ pub(crate) fn render_html_footer() -> Markup {
                       this.followees = detail.followees || 0;
                       this.network = detail.network || 0;
                       this.notifications = detail.notifications || 0;
+                      this.shoutbox = detail.shoutbox || 0;
                     },
                     formatCount(count) {
                       return count > 9 ? ' (9+)' : count > 0 ? ` (${count})` : '';

@@ -163,6 +163,7 @@ pub struct Database {
     self_head_updated: watch::Sender<Option<ShortEventId>>,
     new_content_tx: broadcast::Sender<VerifiedEventContent>,
     new_posts_tx: broadcast::Sender<(VerifiedEventContent, content_kind::SocialPost)>,
+    new_shoutbox_tx: broadcast::Sender<(VerifiedEventContent, content_kind::Shoutbox)>,
     new_heads_tx: broadcast::Sender<(RostraId, ShortEventId)>,
     ids_with_missing_events_tx: dedup_chan::Sender<RostraId>,
 }
@@ -252,6 +253,7 @@ impl Database {
         let (self_head_updated, _) = watch::channel(self_head);
         let (new_content_tx, _) = broadcast::channel(100);
         let (new_posts_tx, _) = broadcast::channel(100);
+        let (new_shoutbox_tx, _) = broadcast::channel(100);
         let (new_heads_tx, _) = broadcast::channel(100);
 
         let db = Self {
@@ -264,6 +266,7 @@ impl Database {
             self_head_updated,
             new_content_tx,
             new_posts_tx,
+            new_shoutbox_tx,
             new_heads_tx,
             ids_with_missing_events_tx: dedup_chan::Sender::new(),
         };
@@ -336,6 +339,12 @@ impl Database {
         &self,
     ) -> broadcast::Receiver<(VerifiedEventContent, content_kind::SocialPost)> {
         self.new_posts_tx.subscribe()
+    }
+
+    pub fn new_shoutbox_subscribe(
+        &self,
+    ) -> broadcast::Receiver<(VerifiedEventContent, content_kind::Shoutbox)> {
+        self.new_shoutbox_tx.subscribe()
     }
 
     pub fn new_heads_subscribe(&self) -> broadcast::Receiver<(RostraId, ShortEventId)> {

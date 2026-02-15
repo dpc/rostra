@@ -12,6 +12,7 @@ mod profile;
 mod profile_self;
 mod search;
 mod settings;
+mod shoutbox;
 mod timeline;
 pub(crate) mod unlock;
 mod welcome;
@@ -209,6 +210,8 @@ pub fn route_handler(state: SharedState) -> Router<Arc<UiState>> {
             post(new_post::post_inline_reply_preview),
         )
         .route("/followee", post(add_followee::add_followee))
+        .route("/shoutbox", get(shoutbox::get_shoutbox))
+        .route("/shoutbox/post", post(shoutbox::post_shoutbox))
         .route("/unlock", get(unlock::get).post(unlock::post_unlock))
         .route("/unlock/logout", get(unlock::get).post(unlock::logout))
         .route("/unlock/random", get(unlock::get_random))

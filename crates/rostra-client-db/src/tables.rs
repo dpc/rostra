@@ -446,6 +446,22 @@ def_table! {
     social_posts_self_mention: ShortEventId => ()
 }
 
+// ============================================================================
+// SHOUTBOX TABLES
+// ============================================================================
+
+def_table! {
+    /// Time-ordered index of shoutbox posts by reception time.
+    ///
+    /// Key: (received_timestamp, reception_order)
+    /// Value: post_event_id
+    ///
+    /// Similar to `social_posts_by_received_at` but for shoutbox posts.
+    /// The `reception_order` is a monotonically increasing counter that ensures
+    /// strict ordering even when multiple events arrive at the same timestamp.
+    shoutbox_posts_by_received_at: (Timestamp, u64) => ShortEventId
+}
+
 /// Wrapper for values where only the latest version matters.
 ///
 /// Used for singleton-style data where we track timestamps to ensure

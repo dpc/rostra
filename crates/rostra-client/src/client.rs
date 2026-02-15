@@ -502,6 +502,12 @@ impl Client {
         self.db.new_posts_subscribe()
     }
 
+    pub fn new_shoutbox_subscribe(
+        &self,
+    ) -> broadcast::Receiver<(VerifiedEventContent, content_kind::Shoutbox)> {
+        self.db.new_shoutbox_subscribe()
+    }
+
     pub fn new_heads_subscribe(&self) -> broadcast::Receiver<(RostraId, ShortEventId)> {
         self.db.new_heads_subscribe()
     }
@@ -665,6 +671,16 @@ impl Client {
             .await;
 
         Ok(verified_event)
+    }
+
+    pub async fn post_shoutbox(
+        &self,
+        id_secret: RostraIdSecretKey,
+        body: String,
+    ) -> PostResult<VerifiedEvent> {
+        self.publish_event(id_secret, content_kind::Shoutbox { djot_content: body })
+            .call()
+            .await
     }
 
     pub async fn social_post(

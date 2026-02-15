@@ -11,7 +11,7 @@ use rostra_client_db::IdSocialProfileRecord;
 use rostra_client_db::social::{
     EventPaginationCursor, ReceivedAtPaginationCursor, SocialPostRecord,
 };
-use rostra_core::event::{EventKind, PersonaId, PersonaSelector, SocialPost};
+use rostra_core::event::{EventKind, PersonaId, PersonaSelector, SocialPost, content_kind};
 use rostra_core::id::{RostraId, ToShort as _};
 use rostra_core::{ShortEventId, Timestamp};
 use rostra_util_error::FmtCompact as _;
@@ -33,6 +33,7 @@ pub struct PendingCounts {
     pub followees: usize,
     pub network: usize,
     pub notifications: usize,
+    pub shoutbox: usize,
 }
 
 #[derive(Deserialize)]
@@ -125,6 +126,7 @@ pub struct UpdatesQuery {
     pub followees: Option<usize>,
     pub network: Option<usize>,
     pub notifications: Option<usize>,
+    pub shoutbox: Option<usize>,
 }
 
 pub async fn get_updates(
@@ -137,6 +139,7 @@ pub async fn get_updates(
         followees: query.followees.unwrap_or(0),
         network: query.network.unwrap_or(0),
         notifications: query.notifications.unwrap_or(0),
+        shoutbox: query.shoutbox.unwrap_or(0),
     };
     ws.on_upgrade(move |ws| async move {
         let _ = state
@@ -194,6 +197,7 @@ impl UiState {
         let client_ref = client.client_ref()?;
         let self_id = client_ref.rostra_id();
         let mut new_posts = client_ref.new_posts_subscribe();
+        let mut new_shoutbox = client_ref.new_shoutbox_subscribe();
 
         let followees: HashMap<RostraId, PersonaSelector> = client_ref
             .db()
@@ -205,46 +209,79 @@ impl UiState {
         let mut followees_count = initial_pending.followees as u64;
         let mut network_count = initial_pending.network as u64;
         let mut notifications_count = initial_pending.notifications as u64;
+        let mut shoutbox_count = initial_pending.shoutbox as u64;
 
         loop {
-            let (event_content, social_post) = match new_posts.recv().await {
-                Ok(event_content) => event_content,
-                Err(tokio::sync::broadcast::error::RecvError::Closed) => {
-                    break;
+            tokio::select! {
+                result = new_posts.recv() => {
+                    let (event_content, social_post) = match result {
+                        Ok(event_content) => event_content,
+                        Err(tokio::sync::broadcast::error::RecvError::Closed) => {
+                            break;
+                        }
+                        Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => {
+                            continue;
+                        }
+                    };
+                    if event_content.event.event.kind != EventKind::SOCIAL_POST {
+                        continue;
+                    }
+                    let author = event_content.event.event.author;
+                    if author == self_id {
+                        continue;
+                    }
+
+                    network_count += 1;
+
+                    if followees
+                        .get(&author)
+                        .is_some_and(|selector| selector.matches(social_post.persona))
+                    {
+                        followees_count += 1;
+                    }
+
+                    let is_reply_to_self =
+                        social_post.reply_to.map(|ext_id| ext_id.rostra_id()) == Some(self_id);
+                    let is_self_mention = client_ref
+                        .db()
+                        .is_self_mention(event_content.event.event_id.to_short())
+                        .await;
+                    if is_reply_to_self || is_self_mention {
+                        notifications_count += 1;
+                    }
                 }
-                Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => {
-                    continue;
+                result = new_shoutbox.recv() => {
+                    let (event_content, shoutbox_content) = match result {
+                        Ok(event_content) => event_content,
+                        Err(tokio::sync::broadcast::error::RecvError::Closed) => {
+                            break;
+                        }
+                        Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => {
+                            continue;
+                        }
+                    };
+                    let author = event_content.event.event.author;
+                    // Count shoutbox posts from others
+                    if author != self_id {
+                        shoutbox_count += 1;
+                    }
+
+                    // Send the rendered shout for live updates
+                    let shout_html = self
+                        .render_shoutbox_post_live(&client_ref, self_id, author, &shoutbox_content)
+                        .await
+                        .into_string();
+                    let _ = ws.send(shout_html.into()).await;
                 }
-            };
-            if event_content.event.event.kind != EventKind::SOCIAL_POST {
-                continue;
-            }
-            let author = event_content.event.event.author;
-            if author == self_id {
-                continue;
-            }
-
-            network_count += 1;
-
-            if followees
-                .get(&author)
-                .is_some_and(|selector| selector.matches(social_post.persona))
-            {
-                followees_count += 1;
-            }
-
-            let is_reply_to_self =
-                social_post.reply_to.map(|ext_id| ext_id.rostra_id()) == Some(self_id);
-            let is_self_mention = client_ref
-                .db()
-                .is_self_mention(event_content.event.event_id.to_short())
-                .await;
-            if is_reply_to_self || is_self_mention {
-                notifications_count += 1;
             }
 
             let badge_html = self
-                .render_tab_badges(followees_count, network_count, notifications_count)
+                .render_tab_badges(
+                    followees_count,
+                    network_count,
+                    notifications_count,
+                    shoutbox_count,
+                )
                 .into_string();
             let _ = ws.send(badge_html.into()).await;
             tokio::time::sleep(Duration::from_millis(100)).await;
@@ -252,12 +289,82 @@ impl UiState {
         Ok(())
     }
 
-    fn render_tab_badges(&self, followees: u64, network: u64, notifications: u64) -> Markup {
+    fn render_tab_badges(
+        &self,
+        followees: u64,
+        network: u64,
+        notifications: u64,
+        shoutbox: u64,
+    ) -> Markup {
         let dispatch = format!(
-            "$dispatch('badges:updated', {{ followees: {followees}, network: {network}, notifications: {notifications} }})"
+            "$dispatch('badges:updated', {{ followees: {followees}, network: {network}, notifications: {notifications}, shoutbox: {shoutbox} }})"
         );
         html! {
             div x-init=(dispatch) {}
+        }
+    }
+
+    /// Render a shoutbox post for live WebSocket updates.
+    /// Returns HTML that will be inserted into the shoutbox via x-init.
+    async fn render_shoutbox_post_live(
+        &self,
+        client: &ClientRef<'_>,
+        self_id: RostraId,
+        author: RostraId,
+        content: &content_kind::Shoutbox,
+    ) -> Markup {
+        let profile = self.get_social_profile(author, client).await;
+        let rendered_content = self
+            .render_content(client, author, &content.djot_content)
+            .await;
+
+        // Get the actual latest cursor from the database
+        let latest_cursor = client.db().get_latest_shoutbox_received_at_cursor().await;
+
+        // Cookie name and value for updating "last seen" when on shoutbox page
+        let cookie_name = format!("{}-shoutbox-last-seen", self_id.to_short());
+        let cookie_value = latest_cursor
+            .map(|c| format!(r#"{{"ts":{},"seq":{}}}"#, u64::from(c.ts), c.seq))
+            .unwrap_or_default();
+
+        // The WebSocket handler appends [x-init] elements to body, calls initTree, then
+        // removes them. We use x-data + x-init to ensure Alpine context is
+        // available.
+        html! {
+            div
+                x-data
+                x-init=(format!(r#"
+                    const container = document.getElementById('shoutbox-posts');
+                    if (container) {{
+                        const post = $el.querySelector('.o-shoutbox__post');
+                        if (post) {{
+                            container.appendChild(post);
+                            const messages = document.getElementById('shoutbox-messages');
+                            if (messages) messages.scrollTop = messages.scrollHeight;
+                            // Update last-seen cookie since user is viewing shoutbox
+                            document.cookie = '{cookie_name}=' + encodeURIComponent('{cookie_value}') + '; path=/; max-age=31536000';
+                        }}
+                    }}
+                "#))
+            {
+                div ."o-shoutbox__post -new" {
+                    img ."o-shoutbox__avatar u-userImage"
+                        src=(self.avatar_url(author))
+                        alt="Avatar"
+                        {}
+                    div ."o-shoutbox__postBody" {
+                        div ."o-shoutbox__postMeta" {
+                            a ."o-shoutbox__author" href=(format!("/profile/{}", author)) {
+                                (profile.display_name)
+                            }
+                            span ."o-shoutbox__timestamp" { "just now" }
+                        }
+                        div ."o-shoutbox__postContent" {
+                            (rendered_content)
+                        }
+                    }
+                }
+            }
         }
     }
 
@@ -504,10 +611,17 @@ impl UiState {
             .await
         };
 
+        // Count pending shoutbox posts
+        let shoutbox_count = client
+            .db()
+            .count_shoutbox_posts_since(cookies.get_shoutbox_last_seen(rostra_id), 10)
+            .await;
+
         PendingCounts {
             followees: followees_count,
             network: network_count,
             notifications: notifications_count,
+            shoutbox: shoutbox_count,
         }
     }
 
@@ -614,14 +728,18 @@ impl UiState {
         let author_personas = client.db()?.get_personas(author_personas.into_iter()).await;
 
         let ws_url = format!(
-            "websocket('/updates?followees={f}&network={n}&notifications={no}')",
+            "websocket('/updates?followees={f}&network={n}&notifications={no}&shoutbox={s}')",
             f = pending_counts.followees,
             n = pending_counts.network,
-            no = pending_counts.notifications
+            no = pending_counts.notifications,
+            s = pending_counts.shoutbox
         );
         let badge_counts = format!(
-            "badgeCounts({}, {}, {})",
-            pending_counts.followees, pending_counts.network, pending_counts.notifications
+            "badgeCounts({{ followees: {}, network: {}, notifications: {}, shoutbox: {} }})",
+            pending_counts.followees,
+            pending_counts.network,
+            pending_counts.notifications,
+            pending_counts.shoutbox
         );
 
         Ok(html! {
@@ -663,6 +781,13 @@ impl UiState {
                         {
                             "Notifications"
                             span ."o-mainBarTimeline__pendingNotifications" x-text="formatCount(notifications)" {}
+                        }
+                        a ."o-mainBarTimeline__shoutbox"
+                            href="/shoutbox"
+                            ":class"="{ '-pending': shoutbox > 0 }"
+                        {
+                            "Shoutbox"
+                            span ."o-mainBarTimeline__newCount" x-text="formatCount(shoutbox)" {}
                         }
                     }
                 }

@@ -2525,3 +2525,182 @@ input:checked+.slider:before {
 .m-inlineReply__preview.-active .m-postView {
   opacity: 0.6;
 }
+
+/* ==========================================================================
+   Shoutbox - Chat-like global message board
+   ========================================================================== */
+
+.o-shoutbox {
+  display: flex;
+  flex-direction: column;
+  /* Use flex-grow to fill available space in parent */
+  flex: 1;
+  min-height: 0; /* Allow shrinking in flex context */
+  background-color: var(--color-timeline-bg);
+  border: 1px solid var(--color-timeline-item-border);
+  border-top: 0;
+}
+
+/* Make the mainBar a flex container when it contains shoutbox */
+.o-mainBar:has(.o-shoutbox) {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  box-sizing: border-box;
+}
+
+.o-shoutbox__messages {
+  flex: 1;
+  overflow-y: auto;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  min-height: 0; /* Critical for nested flex scroll */
+}
+
+.o-shoutbox__loadOlder {
+  display: block;
+  text-align: center;
+  padding: 0.75rem;
+  color: var(--color-link);
+  background-color: var(--color-tab-inactive-bg);
+  border-bottom: 1px solid var(--color-timeline-item-border);
+  cursor: pointer;
+  font-size: 0.9rem;
+}
+
+.o-shoutbox__loadOlder:hover {
+  background-color: var(--color-post-highlight-bg);
+}
+
+.o-shoutbox__loadOlder.-empty {
+  color: var(--color-text-muted, #888);
+  cursor: default;
+  font-style: italic;
+}
+
+.o-shoutbox__loadOlder.-empty:hover {
+  background-color: var(--color-tab-inactive-bg);
+}
+
+.o-shoutbox__posts {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+}
+
+.o-shoutbox__post {
+  padding: 0.5rem 1rem;
+  border-bottom: 1px solid var(--color-timeline-item-border);
+  display: flex;
+  flex-direction: row;
+  gap: 0.75rem;
+  align-items: flex-start;
+}
+
+.o-shoutbox__post.-new {
+  animation: shoutbox-highlight 2s ease-out;
+}
+
+@keyframes shoutbox-highlight {
+  from {
+    background-color: var(--color-post-highlight-bg);
+  }
+  to {
+    background-color: transparent;
+  }
+}
+
+.o-shoutbox__avatar {
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.o-shoutbox__postBody {
+  flex: 1;
+  min-width: 0;
+}
+
+.o-shoutbox__postHeader {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.o-shoutbox__postMeta {
+  display: flex;
+  flex-direction: row;
+  align-items: baseline;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+
+.o-shoutbox__author {
+  font-weight: 600;
+  color: var(--color-link);
+}
+
+.o-shoutbox__author:hover {
+  color: var(--color-link-hover);
+}
+
+.o-shoutbox__timestamp {
+  font-size: 0.75rem;
+  color: var(--color-text-muted, #888);
+}
+
+.o-shoutbox__postContent {
+  margin-top: 0.25rem;
+  word-wrap: break-word;
+  overflow-wrap: break-word;
+}
+
+.o-shoutbox__postContent p {
+  margin: 0;
+}
+
+/* Input form at bottom */
+.o-shoutbox__form {
+  border-top: 1px solid var(--color-timeline-item-border);
+  background-color: var(--color-tab-inactive-bg);
+  padding: 0.5rem clamp(0.5rem, 2vw, 1rem);
+  flex-shrink: 0;
+}
+
+.o-shoutbox__inputWrapper {
+  display: flex;
+  flex-direction: row;
+  gap: 0.5rem;
+  align-items: center;
+}
+
+.o-shoutbox__input {
+  flex: 1;
+  padding: 0.35rem 0.6rem;
+  border: 1px solid var(--color-border);
+  border-radius: var(--border-radius-std);
+  background-color: var(--color-bg-default);
+  color: var(--color-text-input);
+  font-family: inherit;
+  font-size: 1rem;
+  resize: none;
+  min-height: 1.2rem;
+  max-height: 6rem;
+  line-height: 1.2;
+  vertical-align: middle;
+}
+
+.o-shoutbox__input:focus {
+  outline: none;
+  border-color: var(--color-link);
+}
+
+/* Send button icon */
+.o-shoutbox__submitButtonIcon {
+  background: url('/assets/icons/arrow-right.svg') center/contain no-repeat;
+}
+

@@ -231,6 +231,31 @@ impl EventContentKind for SocialPost {
     const KIND: EventKind = EventKind::SOCIAL_POST;
 }
 
+/// Shoutbox post - simple broadcast message without persona, replies, or
+/// reactions
+#[cfg_attr(feature = "serde", derive(::serde::Serialize, ::serde::Deserialize))]
+#[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
+pub struct Shoutbox {
+    #[cfg_attr(feature = "serde", serde(rename = "c"))]
+    pub djot_content: String,
+}
+
+#[cfg(feature = "serde")]
+impl EventContentKind for Shoutbox {
+    const KIND: EventKind = EventKind::SHOUTBOX;
+
+    fn validate(&self) -> ContentValidationResult<()> {
+        // Limit to 1000 characters
+        if 1000 < self.djot_content.len() {
+            return Err(ContentValidationError);
+        }
+        if self.djot_content.is_empty() {
+            return Err(ContentValidationError);
+        }
+        Ok(())
+    }
+}
+
 /// A piece of media (like an image, or a video)
 #[cfg_attr(feature = "serde", derive(::serde::Serialize, ::serde::Deserialize))]
 #[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]

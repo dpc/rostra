@@ -10,9 +10,9 @@ use tracing::{debug, warn};
 use super::Database;
 use crate::event::ContentStoreRecord;
 use crate::{
-    DbResult, LOG_TARGET, content_store, events, events_content_state, social_posts,
-    social_posts_by_received_at, social_posts_by_time, social_posts_reactions,
-    social_posts_replies, tables,
+    DbResult, LOG_TARGET, content_store, events, events_content_state,
+    shoutbox_posts_by_received_at, social_posts, social_posts_by_received_at, social_posts_by_time,
+    social_posts_reactions, social_posts_replies, tables,
 };
 
 /// Cursor for paginating events by their author timestamp.
@@ -94,6 +94,15 @@ pub struct SocialPostRecord<C> {
     pub reply_to: Option<ExternalEventId>,
     pub content: C,
     pub reply_count: u64,
+}
+
+/// Record for a shoutbox post with associated metadata.
+#[derive(Clone, Debug)]
+pub struct ShoutboxPostRecord {
+    pub received_ts: Timestamp,
+    pub event_id: ShortEventId,
+    pub author: RostraId,
+    pub content: content_kind::Shoutbox,
 }
 
 impl Database {
@@ -781,5 +790,129 @@ impl Database {
         })
         .await
         .unwrap_or_default()
+    }
+
+    /// Get the cursor of the most recently received shoutbox post.
+    ///
+    /// Used for tracking "last seen" shoutbox position.
+    pub async fn get_latest_shoutbox_received_at_cursor(
+        &self,
+    ) -> Option<ReceivedAtPaginationCursor> {
+        self.read_with(|tx| {
+            let shoutbox_by_received_at_table =
+                tx.open_table(&shoutbox_posts_by_received_at::TABLE)?;
+
+            // Get the last (most recent) entry in the table
+            if let Some(entry) = shoutbox_by_received_at_table.last()? {
+                let (ts, seq) = entry.0.value();
+                Ok(Some(ReceivedAtPaginationCursor { ts, seq }))
+            } else {
+                Ok(None)
+            }
+        })
+        .await
+        .expect("Storage error")
+    }
+
+    /// Paginate shoutbox posts ordered by when we received them (reverse -
+    /// newest first).
+    ///
+    /// Unlike social posts, shoutbox posts are not filtered - all posts are
+    /// shown.
+    pub async fn paginate_shoutbox_posts_by_received_at_rev(
+        &self,
+        cursor: Option<ReceivedAtPaginationCursor>,
+        limit: usize,
+    ) -> (Vec<ShoutboxPostRecord>, Option<ReceivedAtPaginationCursor>) {
+        self.read_with(|tx| {
+            let events_table = tx.open_table(&events::TABLE)?;
+            let shoutbox_by_received_at_table =
+                tx.open_table(&shoutbox_posts_by_received_at::TABLE)?;
+            let events_content_state_table = tx.open_table(&events_content_state::TABLE)?;
+            let content_store_table = tx.open_table(&content_store::TABLE)?;
+
+            let (ret, cursor) = Self::paginate_table_rev(
+                &shoutbox_by_received_at_table,
+                cursor.map(|c| (c.ts, c.seq)),
+                limit,
+                move |(ts, _seq), event_id| {
+                    let Some(event) = Database::get_event_tx(event_id, &events_table)? else {
+                        warn!(target: LOG_TARGET, %event_id, "Missing event for shoutbox post");
+                        return Ok(None);
+                    };
+                    let content_hash = event.content_hash();
+
+                    // If event has a content state, it means content is deleted or pruned
+                    if Database::get_event_content_state_tx(event_id, &events_content_state_table)?
+                        .is_some()
+                    {
+                        return Ok(None);
+                    }
+
+                    // Get content from store
+                    let Some(store_record) =
+                        content_store_table.get(&content_hash)?.map(|g| g.value())
+                    else {
+                        return Ok(None);
+                    };
+                    let ContentStoreRecord::Present(content) = store_record else {
+                        return Ok(None);
+                    };
+
+                    let Ok(shoutbox) = content.deserialize_cbor::<content_kind::Shoutbox>() else {
+                        debug!(target: LOG_TARGET, %event_id, "Shoutbox content invalid");
+                        return Ok(None);
+                    };
+
+                    Ok(Some(ShoutboxPostRecord {
+                        received_ts: ts,
+                        author: event.author(),
+                        event_id,
+                        content: shoutbox,
+                    }))
+                },
+            )?;
+
+            Ok((
+                ret,
+                cursor.map(|(ts, seq)| ReceivedAtPaginationCursor { ts, seq }),
+            ))
+        })
+        .await
+        .expect("Storage error")
+    }
+
+    /// Count shoutbox posts received after the given cursor.
+    ///
+    /// Used for counting unread shoutbox messages.
+    pub async fn count_shoutbox_posts_since(
+        &self,
+        cursor: Option<ReceivedAtPaginationCursor>,
+        limit: usize,
+    ) -> usize {
+        self.read_with(|tx| {
+            let shoutbox_by_received_at_table =
+                tx.open_table(&shoutbox_posts_by_received_at::TABLE)?;
+
+            // Use cursor.next() to start AFTER the cursor
+            let start = cursor.map(|c| c.next());
+            let mut count = 0;
+
+            for entry in if let Some(start) = start {
+                shoutbox_by_received_at_table.range(&(start.ts, start.seq)..)?
+            } else {
+                shoutbox_by_received_at_table.range(..)?
+            } {
+                let _ = entry?;
+                count += 1;
+                if limit <= count {
+                    break;
+                }
+            }
+
+            Ok(count)
+        })
+        .await
+        .expect("Storage error")
     }
 }

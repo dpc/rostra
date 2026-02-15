@@ -11,8 +11,9 @@ use crate::event::EventSingletonRecord;
 use crate::{
     Database, DbError, IdSocialProfileRecord, IrohNodeRecord, LOG_TARGET, OverflowSnafu,
     SocialPostsReactionsRecord, SocialPostsRepliesRecord, WriteTransactionCtx,
-    events_singletons_new, social_posts, social_posts_by_received_at, social_posts_by_time,
-    social_posts_reactions, social_posts_replies, social_posts_self_mention,
+    events_singletons_new, shoutbox_posts_by_received_at, social_posts,
+    social_posts_by_received_at, social_posts_by_time, social_posts_reactions,
+    social_posts_replies, social_posts_self_mention,
 };
 
 #[derive(Debug, Snafu)]
@@ -274,6 +275,38 @@ impl Database {
                             .insert(&reply_to.event_id(), &reply_to_social_post_record)
                             .map_err(DbError::from)?;
                     }
+                }
+                EventKind::SHOUTBOX => {
+                    let content = event_content
+                        .deserialize_cbor::<content_kind::Shoutbox>()
+                        .boxed()
+                        .context(InvalidSnafu)?;
+
+                    // Insert into shoutbox_posts_by_received_at
+                    let mut shoutbox_by_received_at_tbl = tx
+                        .open_table(&shoutbox_posts_by_received_at::TABLE)
+                        .map_err(DbError::from)?;
+                    let reception_order = self.next_reception_order();
+                    let key = (now, reception_order);
+                    // Assert key uniqueness - reception_order is monotonic so this should never
+                    // fail
+                    let prev = shoutbox_by_received_at_tbl
+                        .insert(&key, &event_content.event_id().to_short())
+                        .map_err(DbError::from)?;
+                    debug_assert!(
+                        prev.is_none(),
+                        "shoutbox_posts_by_received_at key collision: {key:?}"
+                    );
+
+                    // Broadcast to subscribers
+                    tx.on_commit({
+                        let event_content = event_content.clone();
+                        let content = content.clone();
+                        let new_shoutbox_tx = self.new_shoutbox_tx.clone();
+                        move || {
+                            let _ = new_shoutbox_tx.send((event_content.to_owned(), content));
+                        }
+                    });
                 }
                 _ => {}
             },

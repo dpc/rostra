@@ -319,6 +319,8 @@ impl EventKind {
     pub const SOCIAL_POST: Self = EventKind::from_u16(0x20);
     pub const SOCIAL_PROFILE_UPDATE: Self = EventKind::from_u16(0x24);
     pub const SOCIAL_MEDIA: Self = EventKind::from_u16(0x25);
+    /// Shoutbox post - simple broadcast message
+    pub const SHOUTBOX: Self = EventKind::from_u16(0x30);
 
     pub const fn from_u16(value: u16) -> Self {
         Self(value.to_be_bytes())
@@ -340,6 +342,7 @@ impl fmt::Display for EventKind {
             Self::SOCIAL_POST => "social-post",
             Self::SOCIAL_PROFILE_UPDATE => "social-profile-update",
             Self::SOCIAL_MEDIA => "social-media",
+            Self::SHOUTBOX => "shoutbox",
             v => {
                 f.write_fmt(format_args!("{}", v.as_u16()))?;
                 return Ok(());
