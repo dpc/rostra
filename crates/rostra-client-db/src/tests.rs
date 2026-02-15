@@ -4150,8 +4150,7 @@ async fn test_wants_content_no_repeated_downloads() -> BoxedErrorResult<()> {
             .await;
         assert!(
             !wants,
-            "Iteration {}: wants_content should return false for existing content",
-            i
+            "Iteration {i}: wants_content should return false for existing content"
         );
     }
 
@@ -4196,8 +4195,7 @@ async fn test_wants_content_for_missing_content() -> BoxedErrorResult<()> {
             .await;
         assert!(
             wants,
-            "Iteration {}: wants_content should return true for missing content",
-            i
+            "Iteration {i}: wants_content should return true for missing content"
         );
     }
 

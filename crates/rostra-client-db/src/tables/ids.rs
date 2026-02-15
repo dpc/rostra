@@ -6,7 +6,6 @@
 use bincode::{Decode, Encode};
 use rostra_core::Timestamp;
 use rostra_core::event::PersonaSelector;
-use rostra_core::id::RestRostraId;
 
 /// Record for the `ids_followees` table.
 ///
