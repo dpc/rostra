@@ -4,7 +4,7 @@
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-25.11";
     flake-utils.url = "github:numtide/flake-utils";
-    flakebox.url = "github:rustshop/flakebox?rev=f96cbeafded56bc6f5c27fbd96e4fcc78b8a8861";
+    flakebox.url = "github:rustshop/flakebox";
 
     bundlers = {
       url = "github:NixOS/bundlers";
@@ -29,7 +29,7 @@
         pkgs = nixpkgs.legacyPackages.${system};
         projectName = "rostra";
 
-        flakeboxLib = flakebox.lib.${system} {
+        flakeboxLib = flakebox.lib.mkLib pkgs {
           config = {
             github.ci.buildOutputs = [ ".#ci.${projectName}" ];
             just.importPaths = [ "justfile.rostra.just" ];
