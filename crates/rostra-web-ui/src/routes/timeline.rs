@@ -254,8 +254,7 @@ impl UiState {
 
     fn render_tab_badges(&self, followees: u64, network: u64, notifications: u64) -> Markup {
         let dispatch = format!(
-            "$dispatch('badges:updated', {{ followees: {}, network: {}, notifications: {} }})",
-            followees, network, notifications
+            "$dispatch('badges:updated', {{ followees: {followees}, network: {network}, notifications: {notifications} }})"
         );
         html! {
             div x-init=(dispatch) {}
