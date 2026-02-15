@@ -1,8 +1,9 @@
-use std::collections::{BTreeMap, HashSet};
+use std::collections::{BTreeMap, BinaryHeap, HashSet};
 
 use futures::stream::{self, StreamExt as _};
+use rostra_client_db::{InsertEventOutcome, ProcessEventState};
 use rostra_core::ShortEventId;
-use rostra_core::event::VerifiedEvent;
+use rostra_core::event::{EventExt as _, VerifiedEvent};
 use rostra_core::id::{RostraId, ToShort as _};
 use rostra_p2p::Connection;
 use rostra_util_error::{BoxedErrorResult, FmtCompact as _, WhateverResult};
@@ -150,4 +151,108 @@ pub async fn fetch_event_content_only(
     }
 
     Ok(false)
+}
+
+/// Download events from a head, traversing the DAG using BinaryHeap.
+///
+/// This fetches events starting from `head` and exploring
+/// parent_aux/parent_prev. Returns true if any new data was downloaded.
+pub async fn download_events_from_head(
+    rostra_id: RostraId,
+    head: ShortEventId,
+    conn: &Connection,
+    storage: &rostra_client_db::Database,
+) -> WhateverResult<bool> {
+    let mut events = BinaryHeap::from([(0i32, head)]);
+    let mut downloaded_anything = false;
+
+    let peer_id = conn.remote_id();
+
+    while let Some((depth, event_id)) = events.pop() {
+        // Check if we already have this event locally
+        let (event, _insert_outcome, process_state) =
+            if let Some(local_event) = storage.get_event(event_id).await {
+                debug!(
+                    target: LOG_TARGET,
+                    %depth,
+                    %rostra_id,
+                    %event_id,
+                    "Event already exists locally"
+                );
+                let event = VerifiedEvent::assume_verified_from_signed(local_event.signed);
+                (
+                    event,
+                    InsertEventOutcome::AlreadyPresent,
+                    ProcessEventState::Existing,
+                )
+            } else {
+                debug!(
+                   target: LOG_TARGET,
+                    %depth,
+                    node_id = %peer_id,
+                    %rostra_id,
+                    %event_id,
+                    "Querying for event"
+                );
+                let Some(new_event) = conn
+                    .get_event(rostra_id, event_id)
+                    .await
+                    .whatever_context("Failed to query peer")?
+                else {
+                    debug!(
+                        target: LOG_TARGET,
+                        %depth,
+                        node_id = %peer_id,
+                        %rostra_id,
+                        %event_id,
+                        "Event not found"
+                    );
+                    continue;
+                };
+                downloaded_anything = true;
+                let (insert_outcome, process_state) = storage.process_event(&new_event).await;
+
+                (new_event, insert_outcome, process_state)
+            };
+
+        // Always add aux parent, as it allows us to explore the history fast and
+        // somewhat randomly
+        if let Some(parent) = event.parent_aux() {
+            events.push((depth - 1, parent));
+        }
+
+        if storage.wants_content(event_id, process_state).await {
+            // If we wanted content of the event, we might need content of the previous
+            // closest parent as well
+            if let Some(parent) = event.parent_prev() {
+                events.push((depth - 1, parent));
+            }
+            let content = conn
+                .get_event_content(event)
+                .await
+                .whatever_context("Failed to download peer data")?;
+
+            if let Some(content) = content {
+                storage.process_event_content(&content).await;
+            } else {
+                debug!(
+                    target: LOG_TARGET,
+                    %depth,
+                    node_id = %peer_id,
+                    %rostra_id,
+                    %event_id,
+                    "Event content not found"
+                );
+            }
+        } else {
+            debug!(
+                target: LOG_TARGET,
+                %rostra_id,
+                %event_id,
+                "Event content not wanted"
+            );
+        }
+    }
+
+    Ok(downloaded_anything)
 }

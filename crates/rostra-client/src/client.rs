@@ -322,6 +322,7 @@ impl Client {
             client.start_head_update_broadcaster();
             client.start_missing_event_fetcher();
             client.start_missing_event_content_fetcher();
+            client.start_new_head_fetcher();
         }
 
         if let Some(secret) = secret {
@@ -439,6 +440,10 @@ impl Client {
         tokio::spawn(MissingEventContentFetcher::new(self).run());
     }
 
+    pub(crate) fn start_new_head_fetcher(&self) {
+        tokio::spawn(crate::task::new_head_fetcher::NewHeadFetcher::new(self).run());
+    }
+
     pub(crate) async fn iroh_address(&self) -> WhateverResult<EndpointAddr> {
         pub(crate) fn sanitize_endpoint_addr(endpoint_addr: EndpointAddr) -> EndpointAddr {
             use iroh_base::TransportAddr;
@@ -495,6 +500,10 @@ impl Client {
         &self,
     ) -> broadcast::Receiver<(VerifiedEventContent, content_kind::SocialPost)> {
         self.db.new_posts_subscribe()
+    }
+
+    pub fn new_heads_subscribe(&self) -> broadcast::Receiver<(RostraId, ShortEventId)> {
+        self.db.new_heads_subscribe()
     }
 
     pub fn check_for_updates_tx_subscribe(&self) -> watch::Receiver<()> {

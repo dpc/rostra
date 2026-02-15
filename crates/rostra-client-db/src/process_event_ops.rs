@@ -92,6 +92,18 @@ impl Database {
                     parent_aux = %event.event.parent_aux,
                     "New event inserted"
                 );
+
+                // Not missing, means it's a head event (no known children yet)
+                // Broadcast new head event to subscribers
+                if !was_missing {
+                    let sender = self.new_heads_tx.clone();
+                    let author = event.author();
+                    let event_id = event.event_id.into();
+                    tx.on_commit(move || {
+                        let _ = sender.send((author, event_id));
+                    });
+                }
+
                 if event.event.author == self.self_id {
                     let mut events_self_table = tx.open_table(&crate::events_self::TABLE)?;
                     Database::insert_self_event_id_tx(event.event_id, &mut events_self_table)?;

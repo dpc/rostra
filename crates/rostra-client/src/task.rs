@@ -3,5 +3,6 @@ pub(crate) mod head_merger;
 pub(crate) mod head_update_broadcaster;
 pub(crate) mod missing_event_content_fetcher;
 pub(crate) mod missing_event_fetcher;
+pub(crate) mod new_head_fetcher;
 pub(crate) mod pkarr_id_publisher;
 pub(crate) mod request_handler;

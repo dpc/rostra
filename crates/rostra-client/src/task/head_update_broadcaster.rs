@@ -108,7 +108,7 @@ impl HeadUpdateBroadcaster {
         event_content: &EventContentRaw,
     ) -> WhateverResult<()> {
         let conn = client
-            .connect_uncached(id)
+            .connect_cached(id)
             .await
             .whatever_context("Couldn't connect")?;
 
