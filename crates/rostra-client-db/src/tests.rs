@@ -4205,3 +4205,306 @@ async fn test_wants_content_for_missing_content() -> BoxedErrorResult<()> {
 
     Ok(())
 }
+
+// ============================================================================
+// Broadcast Channel Tests
+// ============================================================================
+
+/// Test that new_heads_tx broadcasts when a new head event is inserted
+#[test_log::test(tokio::test(flavor = "multi_thread"))]
+async fn test_new_heads_broadcast() -> BoxedErrorResult<()> {
+    use std::time::Duration;
+
+    use rostra_core::event::content_kind::{self, EventContentKind as _};
+
+    let id_secret = RostraIdSecretKey::generate();
+    let author = id_secret.id();
+    let (_dir, db) = temp_db(author).await?;
+
+    // Subscribe to new heads before inserting events
+    let mut new_heads_rx = db.new_heads_subscribe();
+
+    // Create and insert an event (will be a head since no children)
+    let content = content_kind::SocialPost {
+        persona: rostra_core::event::PersonaId(0),
+        djot_content: Some("Test post".to_string()),
+        reply_to: None,
+        reaction: None,
+    };
+    let content_raw = content.serialize_cbor().unwrap();
+    let event = Event::builder_raw_content()
+        .author(author)
+        .kind(EventKind::SOCIAL_POST)
+        .content(&content_raw)
+        .build();
+    let signed_event = event.signed_by(id_secret);
+    let verified_event = VerifiedEvent::verify_signed(author, signed_event).expect("Valid event");
+    let event_id = verified_event.event_id;
+
+    db.process_event(&verified_event).await;
+
+    // Should receive the new head notification
+    let result = tokio::time::timeout(Duration::from_secs(1), new_heads_rx.recv()).await;
+    assert!(result.is_ok(), "Should receive new head notification");
+    let (received_author, received_head) = result.unwrap().expect("Channel should not be closed");
+    assert_eq!(received_author, author);
+    assert_eq!(received_head, event_id.into());
+
+    info!("=== new_heads_broadcast test passed ===");
+    Ok(())
+}
+
+/// Test that new_heads_tx does NOT broadcast for non-head events (was_missing)
+#[test_log::test(tokio::test(flavor = "multi_thread"))]
+async fn test_new_heads_broadcast_not_for_non_head() -> BoxedErrorResult<()> {
+    use std::time::Duration;
+
+    use rostra_core::event::content_kind::{self, EventContentKind as _};
+
+    let id_secret = RostraIdSecretKey::generate();
+    let author = id_secret.id();
+    let (_dir, db) = temp_db(author).await?;
+
+    // Create parent and child events
+    let content = content_kind::SocialPost {
+        persona: rostra_core::event::PersonaId(0),
+        djot_content: Some("Parent post".to_string()),
+        reply_to: None,
+        reaction: None,
+    };
+    let content_raw = content.serialize_cbor().unwrap();
+    let parent_event = Event::builder_raw_content()
+        .author(author)
+        .kind(EventKind::SOCIAL_POST)
+        .content(&content_raw)
+        .build();
+    let parent_signed = parent_event.signed_by(id_secret);
+    let parent_verified = VerifiedEvent::verify_signed(author, parent_signed).expect("Valid event");
+    let parent_id = parent_verified.event_id;
+
+    let child_content = content_kind::SocialPost {
+        persona: rostra_core::event::PersonaId(0),
+        djot_content: Some("Child post".to_string()),
+        reply_to: None,
+        reaction: None,
+    };
+    let child_content_raw = child_content.serialize_cbor().unwrap();
+    let child_event = Event::builder_raw_content()
+        .author(author)
+        .kind(EventKind::SOCIAL_POST)
+        .parent_prev(parent_id.into())
+        .content(&child_content_raw)
+        .build();
+    let child_signed = child_event.signed_by(id_secret);
+    let child_verified = VerifiedEvent::verify_signed(author, child_signed).expect("Valid event");
+
+    // Insert child first (parent becomes "missing")
+    db.process_event(&child_verified).await;
+
+    // Subscribe after child is inserted
+    let mut new_heads_rx = db.new_heads_subscribe();
+
+    // Now insert parent - it should NOT be a head (was_missing = true)
+    db.process_event(&parent_verified).await;
+
+    // Should NOT receive a notification for the parent (it's not a head)
+    let result = tokio::time::timeout(Duration::from_millis(100), new_heads_rx.recv()).await;
+    assert!(
+        result.is_err(),
+        "Should NOT receive new head notification for non-head event"
+    );
+
+    info!("=== new_heads_broadcast_not_for_non_head test passed ===");
+    Ok(())
+}
+
+/// Test that self_head_updated broadcasts when self head changes
+#[test_log::test(tokio::test(flavor = "multi_thread"))]
+async fn test_self_head_updated_broadcast() -> BoxedErrorResult<()> {
+    use std::time::Duration;
+
+    use rostra_core::event::content_kind::{self, EventContentKind as _};
+
+    let id_secret = RostraIdSecretKey::generate();
+    let author = id_secret.id();
+    let (_dir, db) = temp_db(author).await?;
+
+    // Subscribe to self head updates
+    let mut self_head_rx = db.self_head_subscribe();
+
+    // Create and insert an event from self
+    let content = content_kind::SocialPost {
+        persona: rostra_core::event::PersonaId(0),
+        djot_content: Some("Self post".to_string()),
+        reply_to: None,
+        reaction: None,
+    };
+    let content_raw = content.serialize_cbor().unwrap();
+    let event = Event::builder_raw_content()
+        .author(author)
+        .kind(EventKind::SOCIAL_POST)
+        .content(&content_raw)
+        .build();
+    let signed_event = event.signed_by(id_secret);
+    let verified_event = VerifiedEvent::verify_signed(author, signed_event).expect("Valid event");
+    let event_id = verified_event.event_id;
+
+    db.process_event(&verified_event).await;
+
+    // Should receive the self head update notification
+    let result = tokio::time::timeout(Duration::from_secs(1), self_head_rx.changed()).await;
+    assert!(
+        result.is_ok(),
+        "Should receive self head update notification"
+    );
+    assert!(result.unwrap().is_ok(), "Channel should not be closed");
+
+    let received_head = *self_head_rx.borrow();
+    assert_eq!(received_head, Some(event_id.into()));
+
+    info!("=== self_head_updated_broadcast test passed ===");
+    Ok(())
+}
+
+/// Test that self_head_updated does NOT broadcast for other users' events
+#[test_log::test(tokio::test(flavor = "multi_thread"))]
+async fn test_self_head_updated_not_for_others() -> BoxedErrorResult<()> {
+    use std::time::Duration;
+
+    use rostra_core::event::content_kind::{self, EventContentKind as _};
+
+    let self_secret = RostraIdSecretKey::generate();
+    let self_id = self_secret.id();
+    let other_secret = RostraIdSecretKey::generate();
+    let other_id = other_secret.id();
+
+    let (_dir, db) = temp_db(self_id).await?;
+
+    // Subscribe to self head updates
+    let mut self_head_rx = db.self_head_subscribe();
+
+    // Create and insert an event from OTHER user
+    let content = content_kind::SocialPost {
+        persona: rostra_core::event::PersonaId(0),
+        djot_content: Some("Other user post".to_string()),
+        reply_to: None,
+        reaction: None,
+    };
+    let content_raw = content.serialize_cbor().unwrap();
+    let event = Event::builder_raw_content()
+        .author(other_id)
+        .kind(EventKind::SOCIAL_POST)
+        .content(&content_raw)
+        .build();
+    let signed_event = event.signed_by(other_secret);
+    let verified_event = VerifiedEvent::verify_signed(other_id, signed_event).expect("Valid event");
+
+    db.process_event(&verified_event).await;
+
+    // Should NOT receive a self head update notification
+    let result = tokio::time::timeout(Duration::from_millis(100), self_head_rx.changed()).await;
+    assert!(
+        result.is_err(),
+        "Should NOT receive self head update for other user's event"
+    );
+
+    info!("=== self_head_updated_not_for_others test passed ===");
+    Ok(())
+}
+
+/// Test that new_content_tx broadcasts when content is processed
+#[test_log::test(tokio::test(flavor = "multi_thread"))]
+async fn test_new_content_broadcast() -> BoxedErrorResult<()> {
+    use std::time::Duration;
+
+    use rostra_core::event::VerifiedEventContent;
+    use rostra_core::event::content_kind::{self, EventContentKind as _};
+
+    let id_secret = RostraIdSecretKey::generate();
+    let author = id_secret.id();
+    let (_dir, db) = temp_db(author).await?;
+
+    // Subscribe to new content
+    let mut new_content_rx = db.new_content_subscribe();
+
+    // Create event with content
+    let content = content_kind::SocialPost {
+        persona: rostra_core::event::PersonaId(0),
+        djot_content: Some("Test content".to_string()),
+        reply_to: None,
+        reaction: None,
+    };
+    let content_raw = content.serialize_cbor().unwrap();
+    let event = Event::builder_raw_content()
+        .author(author)
+        .kind(EventKind::SOCIAL_POST)
+        .content(&content_raw)
+        .build();
+    let signed_event = event.signed_by(id_secret);
+    let verified_event = VerifiedEvent::verify_signed(author, signed_event).expect("Valid event");
+    let event_id = verified_event.event_id;
+
+    let verified_content = VerifiedEventContent::assume_verified(verified_event, content_raw);
+
+    // Process event with content
+    db.process_event_with_content(&verified_content).await;
+
+    // Should receive the new content notification
+    let result = tokio::time::timeout(Duration::from_secs(1), new_content_rx.recv()).await;
+    assert!(result.is_ok(), "Should receive new content notification");
+    let received_content = result.unwrap().expect("Channel should not be closed");
+    assert_eq!(received_content.event_id(), event_id);
+
+    info!("=== new_content_broadcast test passed ===");
+    Ok(())
+}
+
+/// Test that new_posts_tx broadcasts when a social post is processed
+#[test_log::test(tokio::test(flavor = "multi_thread"))]
+async fn test_new_posts_broadcast() -> BoxedErrorResult<()> {
+    use std::time::Duration;
+
+    use rostra_core::event::VerifiedEventContent;
+    use rostra_core::event::content_kind::{self, EventContentKind as _};
+
+    let id_secret = RostraIdSecretKey::generate();
+    let author = id_secret.id();
+    let (_dir, db) = temp_db(author).await?;
+
+    // Subscribe to new posts
+    let mut new_posts_rx = db.new_posts_subscribe();
+
+    // Create a social post
+    let post_text = "Test social post";
+    let content = content_kind::SocialPost {
+        persona: rostra_core::event::PersonaId(0),
+        djot_content: Some(post_text.to_string()),
+        reply_to: None,
+        reaction: None,
+    };
+    let content_raw = content.serialize_cbor().unwrap();
+    let event = Event::builder_raw_content()
+        .author(author)
+        .kind(EventKind::SOCIAL_POST)
+        .content(&content_raw)
+        .build();
+    let signed_event = event.signed_by(id_secret);
+    let verified_event = VerifiedEvent::verify_signed(author, signed_event).expect("Valid event");
+    let event_id = verified_event.event_id;
+
+    let verified_content = VerifiedEventContent::assume_verified(verified_event, content_raw);
+
+    // Process event with content
+    db.process_event_with_content(&verified_content).await;
+
+    // Should receive the new post notification
+    let result = tokio::time::timeout(Duration::from_secs(1), new_posts_rx.recv()).await;
+    assert!(result.is_ok(), "Should receive new post notification");
+    let (received_event_content, received_post) =
+        result.unwrap().expect("Channel should not be closed");
+    assert_eq!(received_event_content.event_id(), event_id);
+    assert_eq!(received_post.djot_content, Some(post_text.to_string()));
+
+    info!("=== new_posts_broadcast test passed ===");
+    Ok(())
+}

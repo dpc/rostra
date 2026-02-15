@@ -8,15 +8,6 @@ use rostra_core::Timestamp;
 use rostra_core::event::PersonaSelector;
 use rostra_core::id::RestRostraId;
 
-/// Record for reconstructing full RostraId from ShortRostraId.
-///
-/// Used by the `ids_full` table to map shortened IDs back to full IDs.
-#[derive(Debug, Encode, Decode, Clone, Copy)]
-pub struct IdRecord {
-    /// The "rest" of the RostraId (the part not in ShortRostraId)
-    pub id_rest: RestRostraId,
-}
-
 /// Record for the `ids_followees` table.
 ///
 /// Stored with key `(follower_id, followee_id)`, this tracks who someone
