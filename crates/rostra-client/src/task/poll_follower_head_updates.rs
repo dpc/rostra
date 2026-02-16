@@ -1,5 +1,6 @@
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
+use std::time::Duration;
 
 use futures::StreamExt as _;
 use futures::stream::FuturesUnordered;
@@ -8,13 +9,68 @@ use rostra_core::event::VerifiedEvent;
 use rostra_core::id::{RostraId, ToShort as _};
 use rostra_p2p::Connection;
 use rostra_util_error::FmtCompact as _;
-use tokio::sync::watch;
+use tokio::sync::{RwLock, watch};
+use tokio::time::Instant;
 use tracing::{debug, info, instrument, trace, warn};
 
-use crate::client::Client;
+use crate::client::{Client, INITIAL_BACKOFF_DURATION, MAX_BACKOFF_DURATION};
 use crate::connection_cache::ConnectionCache;
 
 const LOG_TARGET: &str = "rostra::poll_follower_heads";
+
+/// Per-peer backoff state for polling.
+#[derive(Debug, Clone, Default)]
+struct PeerBackoffState {
+    /// Number of consecutive failures
+    consecutive_failures: u32,
+    /// Time until which we should not attempt to poll
+    backoff_until: Option<Instant>,
+}
+
+impl PeerBackoffState {
+    /// Calculate the backoff duration based on consecutive failures.
+    fn calculate_backoff_duration(&self) -> Duration {
+        if self.consecutive_failures == 0 {
+            return Duration::ZERO;
+        }
+        let shift = self.consecutive_failures.saturating_sub(1).min(63);
+        let multiplier = 1u64 << shift;
+        let backoff_secs = INITIAL_BACKOFF_DURATION
+            .as_secs()
+            .saturating_mul(multiplier);
+        Duration::from_secs(backoff_secs).min(MAX_BACKOFF_DURATION)
+    }
+
+    /// Check if we should skip polling due to backoff.
+    fn is_in_backoff(&self) -> bool {
+        self.backoff_until
+            .map(|until| Instant::now() < until)
+            .unwrap_or(false)
+    }
+
+    /// Get remaining backoff duration, if any.
+    fn backoff_remaining(&self) -> Option<Duration> {
+        let until = self.backoff_until?;
+        let now = Instant::now();
+        if now < until { Some(until - now) } else { None }
+    }
+
+    /// Record a successful poll, resetting backoff state.
+    fn record_success(&mut self) {
+        self.consecutive_failures = 0;
+        self.backoff_until = None;
+    }
+
+    /// Record a failed poll, updating backoff state.
+    fn record_failure(&mut self) {
+        self.consecutive_failures = self.consecutive_failures.saturating_add(1);
+        let backoff_duration = self.calculate_backoff_duration();
+        self.backoff_until = Some(Instant::now() + backoff_duration);
+    }
+}
+
+/// Shared backoff state for all peers.
+type SharedBackoffState = Arc<RwLock<HashMap<RostraId, PeerBackoffState>>>;
 
 /// Polls followers for new head updates using the WAIT_FOLLOWERS_NEW_HEADS RPC.
 ///
@@ -49,6 +105,8 @@ impl PollFollowerHeadUpdates {
         let mut active_peers: HashSet<RostraId> = HashSet::new();
         // FuturesUnordered to manage concurrent polling tasks
         let mut poll_futures: FuturesUnordered<_> = FuturesUnordered::new();
+        // Shared backoff state for all peers
+        let backoff_state: SharedBackoffState = Arc::new(RwLock::new(HashMap::new()));
 
         // Start with self
         active_peers.insert(self.self_id);
@@ -81,10 +139,19 @@ impl PollFollowerHeadUpdates {
                 let db = self.db.clone();
                 let self_id = self.self_id;
                 let wot_rx = self.self_wot_rx.clone();
+                let backoff = backoff_state.clone();
 
                 poll_futures.push(async move {
-                    Self::poll_peer_for_heads(client, connections, db, self_id, peer_id, wot_rx)
-                        .await;
+                    Self::poll_peer_for_heads(
+                        client,
+                        connections,
+                        db,
+                        self_id,
+                        peer_id,
+                        wot_rx,
+                        backoff,
+                    )
+                    .await;
                     peer_id
                 });
             }
@@ -125,8 +192,30 @@ impl PollFollowerHeadUpdates {
         self_id: RostraId,
         peer_id: RostraId,
         wot_rx: watch::Receiver<Arc<WotData>>,
+        backoff_state: SharedBackoffState,
     ) {
         loop {
+            // Check if we're in backoff for this peer
+            {
+                let state = backoff_state.read().await;
+                if let Some(peer_state) = state.get(&peer_id) {
+                    if peer_state.is_in_backoff() {
+                        if let Some(remaining) = peer_state.backoff_remaining() {
+                            trace!(
+                                target: LOG_TARGET,
+                                peer_id = %peer_id.to_short(),
+                                remaining_secs = remaining.as_secs(),
+                                "Peer is in backoff, waiting"
+                            );
+                            // Sleep for the remaining backoff duration
+                            drop(state); // Release lock before sleeping
+                            tokio::time::sleep(remaining).await;
+                            continue;
+                        }
+                    }
+                }
+            }
+
             let Ok(client_ref) = client.client_ref() else {
                 break;
             };
@@ -140,8 +229,19 @@ impl PollFollowerHeadUpdates {
                         err = %err.fmt_compact(),
                         "Could not connect to peer for polling"
                     );
-                    // Wait a bit before retrying
-                    tokio::time::sleep(std::time::Duration::from_secs(30)).await;
+                    // Record failure and apply backoff
+                    {
+                        let mut state = backoff_state.write().await;
+                        let peer_state = state.entry(peer_id).or_default();
+                        peer_state.record_failure();
+                        debug!(
+                            target: LOG_TARGET,
+                            peer_id = %peer_id.to_short(),
+                            consecutive_failures = peer_state.consecutive_failures,
+                            backoff_secs = peer_state.calculate_backoff_duration().as_secs(),
+                            "Connection failed, applying backoff"
+                        );
+                    }
                     continue;
                 }
             };
@@ -149,6 +249,13 @@ impl PollFollowerHeadUpdates {
             match Self::poll_once(&conn, &db, self_id, &wot_rx).await {
                 Ok(()) => {
                     trace!(target: LOG_TARGET, %peer_id, "Successfully polled peer");
+                    // Reset backoff on success
+                    {
+                        let mut state = backoff_state.write().await;
+                        if let Some(peer_state) = state.get_mut(&peer_id) {
+                            peer_state.record_success();
+                        }
+                    }
                 }
                 Err(err) => {
                     debug!(
@@ -157,6 +264,19 @@ impl PollFollowerHeadUpdates {
                         err = %err,
                         "Error polling peer"
                     );
+                    // Record failure and apply backoff
+                    {
+                        let mut state = backoff_state.write().await;
+                        let peer_state = state.entry(peer_id).or_default();
+                        peer_state.record_failure();
+                        debug!(
+                            target: LOG_TARGET,
+                            peer_id = %peer_id.to_short(),
+                            consecutive_failures = peer_state.consecutive_failures,
+                            backoff_secs = peer_state.calculate_backoff_duration().as_secs(),
+                            "Poll failed, applying backoff"
+                        );
+                    }
                     // On error, break and let the outer loop restart
                     break;
                 }
