@@ -83,6 +83,55 @@ pub struct NodeP2PState {
     pub source: NodeSource,
     /// The RostraId this node is associated with (if known)
     pub rostra_id: Option<RostraId>,
+    /// Number of consecutive connection failures
+    pub consecutive_failures: u32,
+    /// Time until which we should not attempt to connect (backoff)
+    pub backoff_until: Option<Instant>,
+}
+
+/// Maximum backoff duration for failed connection attempts (10 minutes)
+pub const MAX_BACKOFF_DURATION: Duration = Duration::from_secs(10 * 60);
+
+/// Initial backoff duration for failed connection attempts (1 second)
+pub const INITIAL_BACKOFF_DURATION: Duration = Duration::from_secs(1);
+
+impl NodeP2PState {
+    /// Calculate the backoff duration based on consecutive failures.
+    ///
+    /// Uses exponential backoff: 1s, 2s, 4s, 8s, ... capped at 10 minutes.
+    pub fn calculate_backoff_duration(&self) -> Duration {
+        if self.consecutive_failures == 0 {
+            return Duration::ZERO;
+        }
+        let shift = self.consecutive_failures.saturating_sub(1).min(63);
+        let multiplier = 1u64 << shift;
+        let backoff_secs = INITIAL_BACKOFF_DURATION
+            .as_secs()
+            .saturating_mul(multiplier);
+        Duration::from_secs(backoff_secs).min(MAX_BACKOFF_DURATION)
+    }
+
+    /// Check if we should skip connecting due to backoff.
+    pub fn is_in_backoff(&self) -> bool {
+        self.backoff_until
+            .map(|until| Instant::now() < until)
+            .unwrap_or(false)
+    }
+
+    /// Record a successful connection, resetting backoff state.
+    pub fn record_success(&mut self, now: Timestamp) {
+        self.last_success = Some(now);
+        self.consecutive_failures = 0;
+        self.backoff_until = None;
+    }
+
+    /// Record a failed connection, updating backoff state.
+    pub fn record_failure(&mut self, now: Timestamp) {
+        self.last_failure = Some(now);
+        self.consecutive_failures = self.consecutive_failures.saturating_add(1);
+        let backoff_duration = self.calculate_backoff_duration();
+        self.backoff_until = Some(Instant::now() + backoff_duration);
+    }
 }
 
 /// How we learned about a node.
@@ -146,6 +195,25 @@ impl P2PState {
         let mut nodes = self.nodes.write().await;
         let state = nodes.entry(node_id).or_default();
         f(state);
+    }
+
+    /// Check if a node is currently in backoff.
+    pub async fn is_node_in_backoff(&self, node_id: IrohNodeId) -> bool {
+        self.nodes
+            .read()
+            .await
+            .get(&node_id)
+            .map(|s| s.is_in_backoff())
+            .unwrap_or(false)
+    }
+
+    /// Get the remaining backoff duration for a node, if any.
+    pub async fn get_node_backoff_remaining(&self, node_id: IrohNodeId) -> Option<Duration> {
+        let nodes = self.nodes.read().await;
+        let state = nodes.get(&node_id)?;
+        let until = state.backoff_until?;
+        let now = Instant::now();
+        if now < until { Some(until - now) } else { None }
     }
 }
 

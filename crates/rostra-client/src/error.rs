@@ -81,6 +81,8 @@ pub enum ConnectError {
     ConnectIroh {
         source: iroh::endpoint::ConnectError,
     },
+    #[snafu(display("Node is in backoff, try again later"))]
+    NodeInBackoff,
 }
 
 pub type ConnectResult<T> = std::result::Result<T, ConnectError>;
