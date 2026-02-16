@@ -1,12 +1,11 @@
-use std::collections::HashSet;
 use std::sync::Arc;
 
-use rostra_client_db::Database;
+use rostra_client_db::{Database, WotData};
 use rostra_core::ShortEventId;
 use rostra_core::id::{RostraId, ToShort as _};
 use rostra_util_error::FmtCompact as _;
 use snafu::ResultExt as _;
-use tokio::sync::broadcast;
+use tokio::sync::{broadcast, watch};
 use tracing::{debug, info, instrument, trace, warn};
 
 use crate::LOG_TARGET;
@@ -25,9 +24,7 @@ pub struct NewHeadFetcher {
     db: Arc<Database>,
     self_id: RostraId,
     new_heads_rx: broadcast::Receiver<(RostraId, ShortEventId)>,
-    self_followees_rx: tokio::sync::watch::Receiver<
-        std::collections::HashMap<RostraId, rostra_client_db::IdsFolloweesRecord>,
-    >,
+    wot_rx: watch::Receiver<Arc<WotData>>,
     connections: ConnectionCache,
 }
 
@@ -39,19 +36,17 @@ impl NewHeadFetcher {
             db: client.db().clone(),
             self_id: client.rostra_id(),
             new_heads_rx: client.new_heads_subscribe(),
-            self_followees_rx: client.self_followees_subscribe(),
+            wot_rx: client.self_wot_subscribe(),
             connections: client.connection_cache().clone(),
         }
     }
 
     #[instrument(name = "new-head-fetcher", skip(self), ret)]
     pub async fn run(mut self) {
-        // Initialize web of trust cache
-        let mut web_of_trust = self.build_web_of_trust().await;
         debug!(
             target: LOG_TARGET,
-            count = web_of_trust.len(),
-            "Initialized web of trust cache"
+            count = self.wot_rx.borrow().len(),
+            "Started with web of trust cache"
         );
 
         loop {
@@ -71,8 +66,14 @@ impl NewHeadFetcher {
 
                     trace!(target: LOG_TARGET, author = %author.to_short(), %head, "New head notification received");
 
-                    // Check if author is in our web of trust
-                    if !web_of_trust.contains(&author) {
+                    // Check if author is in our web of trust using the cached WoT
+                    // Clone the Arc to avoid holding the borrow across await
+                    let in_wot = {
+                        let wot = self.wot_rx.borrow();
+                        wot.contains(author, self.self_id)
+                    };
+
+                    if !in_wot {
                         trace!(
                             target: LOG_TARGET,
                             author = %author.to_short(),
@@ -93,33 +94,19 @@ impl NewHeadFetcher {
                         );
                     }
                 }
-                res = self.self_followees_rx.changed() => {
+                res = self.wot_rx.changed() => {
                     if res.is_err() {
-                        debug!(target: LOG_TARGET, "Followees channel closed, shutting down");
+                        debug!(target: LOG_TARGET, "WoT channel closed, shutting down");
                         break;
                     }
-                    // Rebuild web of trust when followees change
-                    web_of_trust = self.build_web_of_trust().await;
                     debug!(
                         target: LOG_TARGET,
-                        count = web_of_trust.len(),
-                        "Updated web of trust cache"
+                        count = self.wot_rx.borrow().len(),
+                        "Web of trust cache updated"
                     );
                 }
             }
         }
-    }
-
-    /// Build the web of trust set (self + followees + extended followees)
-    async fn build_web_of_trust(&self) -> HashSet<RostraId> {
-        let (followees, extended) = self.db.get_followees_extended(self.self_id).await;
-
-        let mut web_of_trust = HashSet::with_capacity(1 + followees.len() + extended.len());
-        web_of_trust.insert(self.self_id);
-        web_of_trust.extend(followees.into_keys());
-        web_of_trust.extend(extended);
-
-        web_of_trust
     }
 
     async fn fetch_events_for_head(

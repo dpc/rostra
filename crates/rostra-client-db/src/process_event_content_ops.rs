@@ -1,4 +1,5 @@
 use std::cmp;
+use std::sync::Arc;
 
 use rostra_core::Timestamp;
 use rostra_core::event::{EventExt as _, EventKind, VerifiedEventContent, content_kind};
@@ -86,18 +87,42 @@ impl Database {
 
                 if updated {
                     if author == self.self_id {
+                        // Self's followees changed - update both followees and WoT
                         let followees_sender = self.self_followees_updated.clone();
+                        let wot_sender = self.self_wot_updated.clone();
                         let self_followees =
                             Database::read_followees_tx(self.self_id, &ids_followees_t)?;
+                        let self_wot = Database::compute_wot_tx(
+                            self.self_id,
+                            &self_followees,
+                            &ids_followees_t,
+                        )?;
+                        let self_followees = Arc::new(self_followees);
+                        let self_wot = Arc::new(self_wot);
                         tx.on_commit(move || {
                             let _ = followees_sender.send(self_followees);
+                            let _ = wot_sender.send(self_wot);
+                        });
+                    } else if self.self_followees_updated.borrow().contains_key(&author) {
+                        // One of self's followees changed their followees - update WoT
+                        let wot_sender = self.self_wot_updated.clone();
+                        let self_followees =
+                            Database::read_followees_tx(self.self_id, &ids_followees_t)?;
+                        let self_wot = Database::compute_wot_tx(
+                            self.self_id,
+                            &self_followees,
+                            &ids_followees_t,
+                        )?;
+                        let self_wot = Arc::new(self_wot);
+                        tx.on_commit(move || {
+                            let _ = wot_sender.send(self_wot);
                         });
                     }
 
                     if followee == self.self_id {
                         let followers_sender = self.self_followers_updated.clone();
                         let self_followers =
-                            Database::read_followers_tx(self.self_id, &ids_followers_t)?;
+                            Arc::new(Database::read_followers_tx(self.self_id, &ids_followers_t)?);
 
                         tx.on_commit(move || {
                             let _ = followers_sender.send(self_followers);

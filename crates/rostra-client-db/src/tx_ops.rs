@@ -25,7 +25,7 @@ use super::{
     ids_self, tables,
 };
 use crate::{
-    IdSocialProfileRecord, IdsDataUsageRecord, LOG_TARGET, Latest, SocialPostRecord,
+    IdSocialProfileRecord, IdsDataUsageRecord, LOG_TARGET, Latest, SocialPostRecord, WotData,
     events_content_missing, ids_data_usage, ids_full, social_posts, social_profiles,
 };
 
@@ -56,6 +56,36 @@ impl Database {
             .range((id, RostraId::ZERO)..=(id, RostraId::MAX))?
             .map(|res| res.map(|(k, v)| (k.value().1, v.value())))
             .collect::<Result<HashMap<_, _>, _>>()?)
+    }
+
+    /// Compute the web of trust data from the given direct followees.
+    ///
+    /// The WoT includes:
+    /// - Direct followees (passed in)
+    /// - Extended followees: followees of direct followees, excluding those
+    ///   already in direct followees
+    pub fn compute_wot_tx(
+        self_id: RostraId,
+        direct_followees: &HashMap<RostraId, IdsFolloweesRecord>,
+        ids_followees_table: &impl ids_followees::ReadableTable,
+    ) -> DbResult<WotData> {
+        let mut extended = HashSet::new();
+
+        for followee_id in direct_followees.keys() {
+            // Get the followees of this followee
+            for result in Self::read_followees_tx_iter(*followee_id, ids_followees_table)? {
+                let (ext_id, _record) = result?;
+                // Don't include self or direct followees in extended
+                if ext_id != self_id && !direct_followees.contains_key(&ext_id) {
+                    extended.insert(ext_id);
+                }
+            }
+        }
+
+        Ok(WotData {
+            followees: direct_followees.clone(),
+            extended,
+        })
     }
 
     pub(crate) fn insert_self_event_id_tx(

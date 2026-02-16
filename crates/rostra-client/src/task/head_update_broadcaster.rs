@@ -10,6 +10,9 @@ use snafu::ResultExt as _;
 use tokio::sync::watch;
 use tracing::{debug, instrument, trace, warn};
 
+/// Arc-wrapped followers map for cheap cloning
+type FollowersMap = Arc<HashMap<RostraId, IdsFollowersRecord>>;
+
 use crate::ClientRef;
 use crate::client::Client;
 const LOG_TARGET: &str = "rostra::head_broadcaster";
@@ -18,7 +21,7 @@ pub struct HeadUpdateBroadcaster {
     client: crate::client::ClientHandle,
     db: Arc<Database>,
     self_id: RostraId,
-    self_followers_rx: watch::Receiver<HashMap<RostraId, IdsFollowersRecord>>,
+    self_followers_rx: watch::Receiver<FollowersMap>,
     self_head_rx: watch::Receiver<Option<ShortEventId>>,
 }
 
@@ -78,7 +81,7 @@ impl HeadUpdateBroadcaster {
             };
 
             // send to ourselves first, in case we have redundant nodes
-            for id in [self.self_id].into_iter().chain(followers.into_keys()) {
+            for id in [self.self_id].into_iter().chain(followers.keys().copied()) {
                 let Some(client) = self.client.app_ref_opt() else {
                     debug!(target: LOG_TARGET, "Client gone, quitting");
 

@@ -4506,3 +4506,235 @@ async fn test_new_posts_broadcast() -> BoxedErrorResult<()> {
     info!("=== new_posts_broadcast test passed ===");
     Ok(())
 }
+
+/// Test that self_followees_updated is triggered when self follows/unfollows
+/// someone
+#[test_log::test(tokio::test(flavor = "multi_thread"))]
+async fn test_self_followees_watch_channel() -> BoxedErrorResult<()> {
+    use std::time::Duration;
+
+    use rostra_core::event::VerifiedEventContent;
+    use rostra_core::event::content_kind::{self, EventContentKind as _};
+
+    let id_secret = RostraIdSecretKey::generate();
+    let self_id = id_secret.id();
+    let followee = RostraIdSecretKey::generate().id();
+    let (_dir, db) = temp_db(self_id).await?;
+
+    // Subscribe to followees updates
+    let mut followees_rx = db.self_followees_subscribe();
+
+    // Initially should be empty
+    assert!(
+        followees_rx.borrow().is_empty(),
+        "Should start with no followees"
+    );
+
+    // Create a follow event from self to followee
+    let follow_content = content_kind::Follow {
+        followee,
+        persona: None,
+        selector: Some(rostra_core::event::PersonaSelector::Except { ids: vec![] }),
+    };
+    let content_raw = follow_content.serialize_cbor().unwrap();
+    let event = Event::builder_raw_content()
+        .author(self_id)
+        .kind(EventKind::FOLLOW)
+        .content(&content_raw)
+        .build();
+    let signed_event = event.signed_by(id_secret);
+    let verified_event = VerifiedEvent::verify_signed(self_id, signed_event).expect("Valid event");
+    let verified_content = VerifiedEventContent::assume_verified(verified_event, content_raw);
+
+    // Process the follow event
+    db.process_event_with_content(&verified_content).await;
+
+    // Should receive the followees update
+    let result = tokio::time::timeout(Duration::from_secs(1), followees_rx.changed()).await;
+    assert!(
+        result.is_ok(),
+        "Should receive followees update notification"
+    );
+    assert!(result.unwrap().is_ok(), "Channel should not be closed");
+
+    // Verify the followee is now in the map
+    let followees = followees_rx.borrow();
+    assert!(
+        followees.contains_key(&followee),
+        "Followee should be in the map"
+    );
+    assert_eq!(followees.len(), 1, "Should have exactly one followee");
+
+    info!("=== self_followees_watch_channel test passed ===");
+    Ok(())
+}
+
+/// Test that self_followers_updated is triggered when someone follows/unfollows
+/// self
+#[test_log::test(tokio::test(flavor = "multi_thread"))]
+async fn test_self_followers_watch_channel() -> BoxedErrorResult<()> {
+    use std::time::Duration;
+
+    use rostra_core::event::VerifiedEventContent;
+    use rostra_core::event::content_kind::{self, EventContentKind as _};
+
+    let self_secret = RostraIdSecretKey::generate();
+    let self_id = self_secret.id();
+    let other_secret = RostraIdSecretKey::generate();
+    let other_id = other_secret.id();
+    let (_dir, db) = temp_db(self_id).await?;
+
+    // Subscribe to followers updates
+    let mut followers_rx = db.self_followers_subscribe();
+
+    // Initially should be empty
+    assert!(
+        followers_rx.borrow().is_empty(),
+        "Should start with no followers"
+    );
+
+    // Create a follow event from other to self
+    let follow_content = content_kind::Follow {
+        followee: self_id,
+        persona: None,
+        selector: Some(rostra_core::event::PersonaSelector::Except { ids: vec![] }),
+    };
+    let content_raw = follow_content.serialize_cbor().unwrap();
+    let event = Event::builder_raw_content()
+        .author(other_id)
+        .kind(EventKind::FOLLOW)
+        .content(&content_raw)
+        .build();
+    let signed_event = event.signed_by(other_secret);
+    let verified_event = VerifiedEvent::verify_signed(other_id, signed_event).expect("Valid event");
+    let verified_content = VerifiedEventContent::assume_verified(verified_event, content_raw);
+
+    // Process the follow event
+    db.process_event_with_content(&verified_content).await;
+
+    // Should receive the followers update
+    let result = tokio::time::timeout(Duration::from_secs(1), followers_rx.changed()).await;
+    assert!(
+        result.is_ok(),
+        "Should receive followers update notification"
+    );
+    assert!(result.unwrap().is_ok(), "Channel should not be closed");
+
+    // Verify the follower is now in the map
+    let followers = followers_rx.borrow();
+    assert!(
+        followers.contains_key(&other_id),
+        "Follower should be in the map"
+    );
+    assert_eq!(followers.len(), 1, "Should have exactly one follower");
+
+    info!("=== self_followers_watch_channel test passed ===");
+    Ok(())
+}
+
+/// Test that self_wot_updated (web of trust) is triggered when self follows
+/// someone
+#[test_log::test(tokio::test(flavor = "multi_thread"))]
+async fn test_self_wot_watch_channel() -> BoxedErrorResult<()> {
+    use std::time::Duration;
+
+    use rostra_core::event::VerifiedEventContent;
+    use rostra_core::event::content_kind::{self, EventContentKind as _};
+
+    let self_secret = RostraIdSecretKey::generate();
+    let self_id = self_secret.id();
+    let followee_a = RostraIdSecretKey::generate().id();
+    let (_dir, db) = temp_db(self_id).await?;
+
+    // Subscribe to WoT updates
+    let mut wot_rx = db.self_wot_subscribe();
+
+    // Initially should be empty
+    assert!(wot_rx.borrow().is_empty(), "Should start with empty WoT");
+
+    // Self follows A
+    let follow_a_content = content_kind::Follow {
+        followee: followee_a,
+        persona: None,
+        selector: Some(rostra_core::event::PersonaSelector::Except { ids: vec![] }),
+    };
+    let content_raw = follow_a_content.serialize_cbor().unwrap();
+    let event = Event::builder_raw_content()
+        .author(self_id)
+        .kind(EventKind::FOLLOW)
+        .content(&content_raw)
+        .build();
+    let signed_event = event.signed_by(self_secret);
+    let verified_event = VerifiedEvent::verify_signed(self_id, signed_event).expect("Valid event");
+    let verified_content = VerifiedEventContent::assume_verified(verified_event, content_raw);
+
+    db.process_event_with_content(&verified_content).await;
+
+    // Should receive WoT update
+    let result = tokio::time::timeout(Duration::from_secs(1), wot_rx.changed()).await;
+    assert!(result.is_ok(), "Should receive WoT update notification");
+    assert!(result.unwrap().is_ok(), "Channel should not be closed");
+
+    // Verify WoT now contains followee_a as a direct followee
+    {
+        let wot = wot_rx.borrow();
+        assert!(
+            wot.followees.contains_key(&followee_a),
+            "A should be in direct followees"
+        );
+        assert!(
+            wot.extended.is_empty(),
+            "Extended should be empty (A hasn't followed anyone)"
+        );
+        assert_eq!(wot.len(), 1, "WoT should have 1 entry");
+    }
+
+    info!("=== self_wot_watch_channel test passed ===");
+    Ok(())
+}
+
+/// Test that WoT contains method works correctly
+#[test_log::test(tokio::test(flavor = "multi_thread"))]
+async fn test_wot_contains() -> BoxedErrorResult<()> {
+    use rostra_core::event::VerifiedEventContent;
+    use rostra_core::event::content_kind::{self, EventContentKind as _};
+
+    let self_secret = RostraIdSecretKey::generate();
+    let self_id = self_secret.id();
+    let followee = RostraIdSecretKey::generate().id();
+    let stranger = RostraIdSecretKey::generate().id();
+    let (_dir, db) = temp_db(self_id).await?;
+
+    // Subscribe to WoT
+    let wot_rx = db.self_wot_subscribe();
+
+    // Follow someone
+    let follow_content = content_kind::Follow {
+        followee,
+        persona: None,
+        selector: Some(rostra_core::event::PersonaSelector::Except { ids: vec![] }),
+    };
+    let content_raw = follow_content.serialize_cbor().unwrap();
+    let event = Event::builder_raw_content()
+        .author(self_id)
+        .kind(EventKind::FOLLOW)
+        .content(&content_raw)
+        .build();
+    let signed_event = event.signed_by(self_secret);
+    let verified_event = VerifiedEvent::verify_signed(self_id, signed_event).expect("Valid event");
+    let verified_content = VerifiedEventContent::assume_verified(verified_event, content_raw);
+
+    db.process_event_with_content(&verified_content).await;
+
+    // Check contains
+    let wot = wot_rx.borrow();
+    assert!(wot.contains(self_id, self_id), "Self should be in WoT");
+    assert!(wot.contains(followee, self_id), "Followee should be in WoT");
+    assert!(
+        !wot.contains(stranger, self_id),
+        "Stranger should NOT be in WoT"
+    );
+
+    info!("=== wot_contains test passed ===");
+    Ok(())
+}

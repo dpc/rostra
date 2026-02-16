@@ -33,25 +33,20 @@ impl MissingEventFetcher {
     /// Run the thread
     #[instrument(name = "missing-event-fetcher", skip(self), ret)]
     pub async fn run(self) {
-        let initial_followers = {
-            let Ok(db) = self.client.db() else {
+        // Get initial IDs from WoT
+        let mut initial_ids: Vec<RostraId> = {
+            let Ok(client) = self.client.client_ref() else {
                 return;
             };
-            db
-        }
-        .get_followees_extended(self.self_id)
-        .await;
-
-        let mut initial_followers: Vec<RostraId> = initial_followers
-            .0
-            .into_keys()
-            .chain(initial_followers.1.into_iter())
-            .collect();
+            let wot = client.self_wot_subscribe();
+            let wot = wot.borrow();
+            wot.iter_all().collect()
+        };
         let mut ids_with_missing_events_rx = self.ids_with_missing_events_rx.clone();
 
         loop {
-            let author_id = if let Some(initial_follower_id) = initial_followers.pop() {
-                initial_follower_id
+            let author_id = if let Some(initial_id) = initial_ids.pop() {
+                initial_id
             } else {
                 match ids_with_missing_events_rx.recv().await {
                     Ok(id) => id,

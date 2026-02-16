@@ -13,6 +13,7 @@ mod tx_ops;
 use std::borrow::Cow;
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 use std::{io, ops, result};
 
 use event::ContentStoreRecord;
@@ -33,6 +34,45 @@ use tokio::task::JoinError;
 use tracing::{debug, error, info, instrument};
 
 pub use self::tables::*;
+
+/// Web of Trust data - contains direct followees and extended followees.
+///
+/// Extended followees are the followees of your direct followees, excluding
+/// those you already follow directly.
+#[derive(Debug, Clone, Default)]
+pub struct WotData {
+    /// Direct followees with their persona selectors
+    pub followees: HashMap<RostraId, ids::IdsFolloweesRecord>,
+    /// Extended followees (followees of followees), excluding direct followees
+    pub extended: HashSet<RostraId>,
+}
+
+impl WotData {
+    /// Returns true if the given id is in our web of trust (self, direct
+    /// followee, or extended)
+    pub fn contains(&self, id: RostraId, self_id: RostraId) -> bool {
+        id == self_id || self.followees.contains_key(&id) || self.extended.contains(&id)
+    }
+
+    /// Returns the total number of IDs in the web of trust (excluding self)
+    pub fn len(&self) -> usize {
+        self.followees.len() + self.extended.len()
+    }
+
+    /// Returns true if there are no followees
+    pub fn is_empty(&self) -> bool {
+        self.followees.is_empty()
+    }
+
+    /// Returns an iterator over all IDs in the web of trust (direct +
+    /// extended), excluding self
+    pub fn iter_all(&self) -> impl Iterator<Item = RostraId> + '_ {
+        self.followees
+            .keys()
+            .copied()
+            .chain(self.extended.iter().copied())
+    }
+}
 
 const LOG_TARGET: &str = "rostra::db";
 
@@ -158,8 +198,9 @@ pub struct Database {
     /// to ensure events received at the same timestamp are ordered correctly.
     reception_order_counter: std::sync::atomic::AtomicU64,
 
-    self_followees_updated: watch::Sender<HashMap<RostraId, IdsFolloweesRecord>>,
-    self_followers_updated: watch::Sender<HashMap<RostraId, IdsFollowersRecord>>,
+    self_followees_updated: watch::Sender<Arc<HashMap<RostraId, IdsFolloweesRecord>>>,
+    self_followers_updated: watch::Sender<Arc<HashMap<RostraId, IdsFollowersRecord>>>,
+    self_wot_updated: watch::Sender<Arc<WotData>>,
     self_head_updated: watch::Sender<Option<ShortEventId>>,
     new_content_tx: broadcast::Sender<VerifiedEventContent>,
     new_posts_tx: broadcast::Sender<(VerifiedEventContent, content_kind::SocialPost)>,
@@ -237,19 +278,25 @@ impl Database {
         let needs_reprocessing =
             Self::write_with_inner(&inner, Self::has_pending_migration_stash).await?;
 
-        let (self_head, iroh_secret, self_followees, self_followers) =
+        let (self_head, iroh_secret, self_followees, self_followers, self_wot) =
             Self::read_with_inner(&inner, |tx| {
+                let ids_followees_table = tx.open_table(&ids_followees::TABLE)?;
+                let self_followees = Self::read_followees_tx(self_id, &ids_followees_table)?;
+                let self_wot =
+                    Self::compute_wot_tx(self_id, &self_followees, &ids_followees_table)?;
                 Ok((
                     Self::read_head_tx(self_id, &tx.open_table(&events_heads::TABLE)?)?,
                     Self::read_iroh_secret_tx(&tx.open_table(&ids_self::TABLE)?)?,
-                    Self::read_followees_tx(self_id, &tx.open_table(&ids_followees::TABLE)?)?,
+                    self_followees,
                     Self::read_followers_tx(self_id, &tx.open_table(&ids_followers::TABLE)?)?,
+                    self_wot,
                 ))
             })
             .await?;
 
-        let (self_followees_updated, _) = watch::channel(self_followees);
-        let (self_followers_updated, _) = watch::channel(self_followers);
+        let (self_followees_updated, _) = watch::channel(Arc::new(self_followees));
+        let (self_followers_updated, _) = watch::channel(Arc::new(self_followers));
+        let (self_wot_updated, _) = watch::channel(Arc::new(self_wot));
         let (self_head_updated, _) = watch::channel(self_head);
         let (new_content_tx, _) = broadcast::channel(100);
         let (new_posts_tx, _) = broadcast::channel(100);
@@ -263,6 +310,7 @@ impl Database {
             reception_order_counter: std::sync::atomic::AtomicU64::new(0),
             self_followees_updated,
             self_followers_updated,
+            self_wot_updated,
             self_head_updated,
             new_content_tx,
             new_posts_tx,
@@ -318,14 +366,18 @@ impl Database {
 
     pub fn self_followees_subscribe(
         &self,
-    ) -> watch::Receiver<HashMap<RostraId, IdsFolloweesRecord>> {
+    ) -> watch::Receiver<Arc<HashMap<RostraId, IdsFolloweesRecord>>> {
         self.self_followees_updated.subscribe()
     }
 
     pub fn self_followers_subscribe(
         &self,
-    ) -> watch::Receiver<HashMap<RostraId, IdsFollowersRecord>> {
+    ) -> watch::Receiver<Arc<HashMap<RostraId, IdsFollowersRecord>>> {
         self.self_followers_updated.subscribe()
+    }
+
+    pub fn self_wot_subscribe(&self) -> watch::Receiver<Arc<WotData>> {
+        self.self_wot_updated.subscribe()
     }
 
     pub fn self_head_subscribe(&self) -> watch::Receiver<Option<ShortEventId>> {

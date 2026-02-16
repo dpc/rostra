@@ -14,7 +14,7 @@ use backon::Retryable as _;
 use iroh::address_lookup::dns::DnsAddressLookup;
 use iroh::address_lookup::pkarr::PkarrPublisher;
 use iroh_base::EndpointAddr;
-use rostra_client_db::{Database, DbResult, IdsFolloweesRecord, IdsFollowersRecord};
+use rostra_client_db::{Database, DbResult, IdsFolloweesRecord, IdsFollowersRecord, WotData};
 use rostra_core::event::{
     Event, EventContentRaw, IrohNodeId, PersonaId, PersonaSelector, SignedEvent, SocialPost,
     VerifiedEvent, VerifiedEventContent, content_kind,
@@ -849,13 +849,17 @@ impl Client {
 
     pub fn self_followees_subscribe(
         &self,
-    ) -> watch::Receiver<HashMap<RostraId, IdsFolloweesRecord>> {
+    ) -> watch::Receiver<Arc<HashMap<RostraId, IdsFolloweesRecord>>> {
         self.db.self_followees_subscribe()
     }
 
     pub fn self_followers_subscribe(
         &self,
-    ) -> watch::Receiver<HashMap<RostraId, IdsFollowersRecord>> {
+    ) -> watch::Receiver<Arc<HashMap<RostraId, IdsFollowersRecord>>> {
         self.db.self_followers_subscribe()
+    }
+
+    pub fn self_wot_subscribe(&self) -> watch::Receiver<Arc<WotData>> {
+        self.db.self_wot_subscribe()
     }
 }

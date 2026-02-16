@@ -75,7 +75,7 @@ pub struct RequestHandler {
     client: ClientHandle,
     endpoint: Endpoint,
     our_id: RostraId,
-    self_followees_rx: watch::Receiver<HashMap<RostraId, IdsFolloweesRecord>>,
+    self_followees_rx: watch::Receiver<Arc<HashMap<RostraId, IdsFolloweesRecord>>>,
 }
 
 impl RequestHandler {

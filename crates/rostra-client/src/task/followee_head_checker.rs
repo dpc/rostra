@@ -1,8 +1,8 @@
-use std::collections::{BTreeMap, HashMap};
+use std::collections::BTreeMap;
 use std::sync::Arc;
 use std::time::Duration;
 
-use rostra_client_db::{Database, IdsFolloweesRecord};
+use rostra_client_db::{Database, WotData};
 use rostra_core::id::{RostraId, ToShort as _};
 use rostra_core::{ShortEventId, Timestamp};
 use rostra_util::is_rostra_dev_mode_set;
@@ -23,7 +23,7 @@ pub struct FolloweeHeadChecker {
     client: crate::client::ClientHandle,
     db: Arc<Database>,
     self_id: RostraId,
-    followee_updated: watch::Receiver<HashMap<RostraId, IdsFolloweesRecord>>,
+    wot_updated: watch::Receiver<Arc<WotData>>,
     check_for_updates_rx: watch::Receiver<()>,
     connections: ConnectionCache,
 }
@@ -35,7 +35,7 @@ impl FolloweeHeadChecker {
             client: client.handle(),
             db: client.db().to_owned(),
             self_id: client.rostra_id(),
-            followee_updated: client.self_followees_subscribe(),
+            wot_updated: client.self_wot_subscribe(),
             check_for_updates_rx: client.check_for_updates_tx_subscribe(),
             connections: client.connection_cache().clone(),
         }
@@ -45,7 +45,7 @@ impl FolloweeHeadChecker {
     #[instrument(name = "followee-head-checker", skip(self), ret)]
     pub async fn run(self) {
         let mut check_for_updates_rx = self.check_for_updates_rx.clone();
-        let mut followee_updated = self.followee_updated.clone();
+        let mut wot_updated = self.wot_updated.clone();
         let mut interval = tokio::time::interval(if is_rostra_dev_mode_set() {
             Duration::from_secs(10)
         } else {
@@ -55,7 +55,7 @@ impl FolloweeHeadChecker {
             // Trigger on ticks or any change
             tokio::select! {
                 _ = interval.tick() => (),
-                res = followee_updated.changed() => {
+                res = wot_updated.changed() => {
                     if res.is_err() {
                         break;
                     }
@@ -68,21 +68,17 @@ impl FolloweeHeadChecker {
             }
             trace!(target: LOG_TARGET, "Woke up");
 
-            let Ok(storage) = self.client.db() else {
+            if self.client.db().is_err() {
                 break;
             };
 
             let connections = &self.connections;
             let followers_cache: SharedFollowerCache = Arc::new(Mutex::new(BTreeMap::new()));
 
-            let (followees_direct, followees_ext) =
-                storage.get_followees_extended(self.self_id).await;
+            // Use the cached WoT data - cheap Arc clone
+            let wot = wot_updated.borrow().clone();
 
-            for id in [self.self_id]
-                .into_iter()
-                .chain(followees_direct.into_keys())
-                .chain(followees_ext)
-            {
+            for id in [self.self_id].into_iter().chain(wot.iter_all()) {
                 let Some(client) = self.client.app_ref_opt() else {
                     debug!(target: LOG_TARGET, "Client gone, quitting");
 
