@@ -85,6 +85,7 @@ impl RpcId {
     pub const GET_EVENT_CONTENT: Self = Self(3);
     pub const WAIT_HEAD_UPDATE: Self = Self(4);
     pub const GET_HEAD: Self = Self(5);
+    pub const WAIT_FOLLOWERS_NEW_HEADS: Self = Self(6);
     pub const fn const_from(value: u16) -> Self {
         Self(value)
     }
@@ -202,6 +203,20 @@ define_rpc!(
     pub struct GetEventContentRequest(pub ShortEventId);,
     GetEventContentResponse,
     pub struct GetEventContentResponse(pub bool);
+);
+
+define_rpc!(
+    RpcId::WAIT_FOLLOWERS_NEW_HEADS,
+    WaitFollowersNewHeadsRequest,
+    /// Request to wait for a new head update from any of the server's direct
+    /// followers or self.
+    pub struct WaitFollowersNewHeadsRequest;,
+    WaitFollowersNewHeadsResponse,
+    /// Response containing the author and their new head event.
+    pub struct WaitFollowersNewHeadsResponse {
+        pub author: RostraId,
+        pub event: SignedEvent,
+    }
 );
 
 impl FeedEventResponse {
@@ -553,5 +568,14 @@ impl Connection {
 
     pub async fn get_head(&self, id: RostraId) -> RpcResult<Option<ShortEventId>> {
         Ok(self.make_rpc(&GetHeadRequest(id)).await?.0)
+    }
+
+    /// Wait for the server to receive a new head update from any of its direct
+    /// followers or self.
+    ///
+    /// This is a blocking call that returns when the server has a new head
+    /// event to share.
+    pub async fn wait_followers_new_heads(&self) -> RpcResult<WaitFollowersNewHeadsResponse> {
+        self.make_rpc(&WaitFollowersNewHeadsRequest).await
     }
 }

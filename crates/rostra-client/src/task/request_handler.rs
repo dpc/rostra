@@ -3,14 +3,15 @@ use std::sync::Arc;
 
 use iroh::Endpoint;
 use iroh::endpoint::Incoming;
-use rostra_client_db::{DbError, IdsFolloweesRecord};
+use rostra_client_db::{DbError, IdsFolloweesRecord, IdsFollowersRecord};
 use rostra_core::event::{EventContentRaw, EventExt as _, VerifiedEvent, VerifiedEventContent};
 use rostra_core::id::RostraId;
 use rostra_p2p::RpcError;
 use rostra_p2p::connection::{
     Connection, FeedEventRequest, FeedEventResponse, GetEventContentRequest,
     GetEventContentResponse, GetEventRequest, GetEventResponse, GetHeadRequest, GetHeadResponse,
-    MAX_REQUEST_SIZE, PingRequest, PingResponse, RpcId, RpcMessage as _, WaitHeadUpdateRequest,
+    MAX_REQUEST_SIZE, PingRequest, PingResponse, RpcId, RpcMessage as _,
+    WaitFollowersNewHeadsRequest, WaitFollowersNewHeadsResponse, WaitHeadUpdateRequest,
     WaitHeadUpdateResponse,
 };
 use rostra_p2p::util::ToShort as _;
@@ -76,6 +77,7 @@ pub struct RequestHandler {
     endpoint: Endpoint,
     our_id: RostraId,
     self_followees_rx: watch::Receiver<Arc<HashMap<RostraId, IdsFolloweesRecord>>>,
+    self_followers_rx: watch::Receiver<Arc<HashMap<RostraId, IdsFollowersRecord>>>,
 }
 
 impl RequestHandler {
@@ -86,6 +88,7 @@ impl RequestHandler {
             endpoint,
             our_id: client.rostra_id(),
             self_followees_rx: client.self_followees_subscribe(),
+            self_followers_rx: client.self_followers_subscribe(),
         }
         .into()
     }
@@ -159,6 +162,10 @@ impl RequestHandler {
                 }
                 RpcId::GET_HEAD => {
                     self.handle_get_head(req_msg, send, recv).await?;
+                }
+                RpcId::WAIT_FOLLOWERS_NEW_HEADS => {
+                    self.handle_wait_followers_new_heads(req_msg, send, recv)
+                        .await?;
                 }
                 _ => return UnknownRpcIdSnafu { id: rpc_id }.fail(),
             }
@@ -387,5 +394,68 @@ impl RequestHandler {
             .await
             .context(RpcSnafu)?;
         Ok(())
+    }
+
+    async fn handle_wait_followers_new_heads(
+        &self,
+        req_msg: Vec<u8>,
+        mut send: iroh::endpoint::SendStream,
+        _read: iroh::endpoint::RecvStream,
+    ) -> Result<(), IncomingConnectionError> {
+        let WaitFollowersNewHeadsRequest =
+            WaitFollowersNewHeadsRequest::decode_whole::<MAX_REQUEST_SIZE>(&req_msg)
+                .context(DecodingSnafu)?;
+
+        Connection::write_success_return_code(&mut send)
+            .await
+            .context(RpcSnafu)?;
+
+        // Subscribe to new heads broadcast
+        let mut new_heads_rx = self.client.db()?.new_heads_subscribe();
+
+        loop {
+            let (author, _head) = match new_heads_rx.recv().await {
+                Ok(msg) => msg,
+                Err(tokio::sync::broadcast::error::RecvError::Closed) => {
+                    return Err(ClientRefSnafu.build().into());
+                }
+                Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => {
+                    // Missed some updates, continue waiting
+                    continue;
+                }
+            };
+
+            // Check if author is self or a direct follower (not extended)
+            let is_relevant = author == self.our_id || {
+                let followers = self.self_followers_rx.borrow();
+                followers.contains_key(&author)
+            };
+
+            if !is_relevant {
+                continue;
+            }
+
+            // Get the full event from the database
+            let db = self.client.db()?;
+            let heads = db.get_heads(author).await;
+            let Some(head) = heads.into_iter().next() else {
+                continue;
+            };
+
+            let Some(event) = db.get_event(head).await else {
+                continue;
+            };
+
+            Connection::write_message(
+                &mut send,
+                &WaitFollowersNewHeadsResponse {
+                    author,
+                    event: event.signed,
+                },
+            )
+            .await
+            .context(RpcSnafu)?;
+            return Ok(());
+        }
     }
 }

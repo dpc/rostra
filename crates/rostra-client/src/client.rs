@@ -323,6 +323,7 @@ impl Client {
             client.start_missing_event_fetcher();
             client.start_missing_event_content_fetcher();
             client.start_new_head_fetcher();
+            client.start_poll_follower_head_updates();
         }
 
         if let Some(secret) = secret {
@@ -442,6 +443,12 @@ impl Client {
 
     pub(crate) fn start_new_head_fetcher(&self) {
         tokio::spawn(crate::task::new_head_fetcher::NewHeadFetcher::new(self).run());
+    }
+
+    pub(crate) fn start_poll_follower_head_updates(&self) {
+        tokio::spawn(
+            crate::task::poll_follower_head_updates::PollFollowerHeadUpdates::new(self).run(),
+        );
     }
 
     pub(crate) async fn iroh_address(&self) -> WhateverResult<EndpointAddr> {
