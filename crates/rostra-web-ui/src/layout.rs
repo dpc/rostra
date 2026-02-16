@@ -28,7 +28,7 @@ impl UiState {
                 link rel="stylesheet" type="text/css" href="/assets/libs/prismjs/prism.min.css" media="(prefers-color-scheme: light)";
                 link rel="stylesheet" type="text/css" href="/assets/libs/prismjs/prism-tomorrow.min.css" media="(prefers-color-scheme: dark)";
                 link rel="stylesheet" type="text/css" href="/assets/libs/prismjs/prism-toolbar.min.css";
-                link rel="icon" type="image/png" href="/assets/favicon.png";
+                link rel="icon" type="image/png" href="/assets/favicon.svg";
                 title { (page_title) }
                 // Feed discovery links
                 @if let Some(links) = feed_links {
