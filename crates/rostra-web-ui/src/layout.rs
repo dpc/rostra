@@ -286,19 +286,36 @@ pub(crate) fn render_html_footer() -> Markup {
                         const tpl = document.createElement('template');
                         tpl.innerHTML = event.data;
 
-                        // Morph each element in the fragment into the DOM
-                        tpl.content.querySelectorAll('[id]').forEach((element) => {
-                          const target = document.getElementById(element.id);
-                          if (target && Alpine.morph) {
-                            Alpine.morph(target, element);
+                        const focus = (el) => {
+                          const target = el?.matches?.('[x-autofocus]') ? el : el?.querySelector?.('[x-autofocus]');
+                          if (target) target.scrollIntoView({ block: 'nearest' });
+                        };
+
+                        // Process elements with IDs - morph or merge based on x-merge attribute
+                        tpl.content.querySelectorAll('[id]').forEach((content) => {
+                          const target = document.getElementById(content.id);
+                          if (!target) return;
+
+                          const merge = content.getAttribute('x-merge');
+                          if (merge === 'append') {
+                            target.append(...content.childNodes);
+                            Alpine.initTree(target.lastElementChild);
+                            focus(target.lastElementChild);
+                          } else if (merge === 'prepend') {
+                            target.prepend(...content.childNodes);
+                            Alpine.initTree(target.firstElementChild);
+                            focus(target.firstElementChild);
+                          } else {
+                            Alpine.morph(target, content);
+                            focus(target);
                           }
                         });
 
-                        // Initialize any new elements (for x-init to fire $dispatch)
-                        tpl.content.querySelectorAll('[x-init]').forEach((element) => {
-                          document.body.appendChild(element);
-                          Alpine.initTree(element);
-                          element.remove();
+                        // Run standalone x-init elements (for $dispatch etc.)
+                        tpl.content.querySelectorAll('[x-init]').forEach((el) => {
+                          document.body.appendChild(el);
+                          Alpine.initTree(el);
+                          el.remove();
                         });
                       };
 

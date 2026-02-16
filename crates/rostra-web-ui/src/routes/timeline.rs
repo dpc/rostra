@@ -54,7 +54,11 @@ pub async fn get_followees(
         form.event_id
             .map(|event_id| TimelineCursor::ByEventTime(EventPaginationCursor { ts, event_id }))
     });
-    let navbar = state.timeline_common_navbar(&session).await?;
+    let navbar = state
+        .timeline_common_navbar()
+        .session(&session)
+        .call()
+        .await?;
     Ok(Maud(
         state
             .render_timeline_page(
@@ -80,7 +84,11 @@ pub async fn get_network(
         form.event_id
             .map(|event_id| TimelineCursor::ByEventTime(EventPaginationCursor { ts, event_id }))
     });
-    let navbar = state.timeline_common_navbar(&session).await?;
+    let navbar = state
+        .timeline_common_navbar()
+        .session(&session)
+        .call()
+        .await?;
     Ok(Maud(
         state
             .render_timeline_page(
@@ -106,7 +114,11 @@ pub async fn get_notifications(
         form.seq
             .map(|seq| TimelineCursor::ByReceivedTime(ReceivedAtPaginationCursor { ts, seq }))
     });
-    let navbar = state.timeline_common_navbar(&session).await?;
+    let navbar = state
+        .timeline_common_navbar()
+        .session(&session)
+        .call()
+        .await?;
     Ok(Maud(
         state
             .render_timeline_page(
@@ -127,6 +139,8 @@ pub struct UpdatesQuery {
     pub network: Option<usize>,
     pub notifications: Option<usize>,
     pub shoutbox: Option<usize>,
+    /// If true, we're on the shoutbox page - skip shoutbox counter updates
+    pub on_shoutbox: Option<bool>,
 }
 
 pub async fn get_updates(
@@ -141,9 +155,10 @@ pub async fn get_updates(
         notifications: query.notifications.unwrap_or(0),
         shoutbox: query.shoutbox.unwrap_or(0),
     };
+    let on_shoutbox = query.on_shoutbox.unwrap_or(false);
     ws.on_upgrade(move |ws| async move {
         let _ = state
-            .handle_get_updates(ws, &session, pending)
+            .handle_get_updates(ws, &session, pending, on_shoutbox)
             .await
             .inspect_err(|err| {
                 debug!(target: LOG_TARGET, err=%err.fmt_compact(), "WS handler failed");
@@ -165,9 +180,14 @@ pub async fn get_post_replies(
 
 #[bon::bon]
 impl UiState {
+    #[builder]
     pub(crate) async fn timeline_common_navbar(
         &self,
         session: &UserSession,
+        /// If true, the new post form is hidden (e.g., on shoutbox page which
+        /// has its own input)
+        #[builder(default)]
+        hide_new_post_form: bool,
     ) -> RequestResult<Markup> {
         let client = self.client(session.id()).await?;
         let client_ref = client.client_ref()?;
@@ -182,7 +202,9 @@ impl UiState {
                     (self.render_self_profile_summary(session, ro_mode).await?)
                 }
 
-                (self.new_post_form(None, ro_mode, Some(user_id)))
+                @if !hide_new_post_form {
+                    (self.new_post_form(None, ro_mode, Some(user_id)))
+                }
             }
         })
     }
@@ -192,6 +214,7 @@ impl UiState {
         mut ws: WebSocket,
         user: &UserSession,
         initial_pending: PendingCounts,
+        on_shoutbox: bool,
     ) -> RequestResult<()> {
         let client = self.client(user.id()).await?;
         let client_ref = client.client_ref()?;
@@ -261,17 +284,20 @@ impl UiState {
                         }
                     };
                     let author = event_content.event.event.author;
-                    // Count shoutbox posts from others
-                    if author != self_id {
+
+                    // Only count shoutbox posts if not on shoutbox page
+                    if !on_shoutbox && author != self_id {
                         shoutbox_count += 1;
                     }
 
-                    // Send the rendered shout for live updates
-                    let shout_html = self
-                        .render_shoutbox_post_live(&client_ref, self_id, author, &shoutbox_content)
-                        .await
-                        .into_string();
-                    let _ = ws.send(shout_html.into()).await;
+                    // Send the rendered shout for live updates (only if on shoutbox page)
+                    if on_shoutbox {
+                        let shout_html = self
+                            .render_shoutbox_post_live(&client_ref, self_id, author, &shoutbox_content)
+                            .await
+                            .into_string();
+                        let _ = ws.send(shout_html.into()).await;
+                    }
                 }
             }
 
@@ -305,7 +331,7 @@ impl UiState {
     }
 
     /// Render a shoutbox post for live WebSocket updates.
-    /// Returns HTML that will be inserted into the shoutbox via x-init.
+    /// Returns HTML that will be appended to #shoutbox-posts via x-merge.
     async fn render_shoutbox_post_live(
         &self,
         client: &ClientRef<'_>,
@@ -327,27 +353,13 @@ impl UiState {
             .map(|c| format!(r#"{{"ts":{},"seq":{}}}"#, u64::from(c.ts), c.seq))
             .unwrap_or_default();
 
-        // The WebSocket handler appends [x-init] elements to body, calls initTree, then
-        // removes them. We use x-data + x-init to ensure Alpine context is
-        // available.
+        // WebSocket handler supports x-merge="append" for appending children to target
         html! {
-            div
-                x-data
-                x-init=(format!(r#"
-                    const container = document.getElementById('shoutbox-posts');
-                    if (container) {{
-                        const post = $el.querySelector('.o-shoutbox__post');
-                        if (post) {{
-                            container.appendChild(post);
-                            const messages = document.getElementById('shoutbox-messages');
-                            if (messages) messages.scrollTop = messages.scrollHeight;
-                            // Update last-seen cookie since user is viewing shoutbox
-                            document.cookie = '{cookie_name}=' + encodeURIComponent('{cookie_value}') + '; path=/; max-age=31536000';
-                        }}
-                    }}
-                "#))
-            {
-                div ."o-shoutbox__post -new" {
+            div id="shoutbox-posts" x-merge="append" {
+                div ."o-shoutbox__post -new"
+                    x-autofocus
+                    x-init=(format!(r#"document.cookie = '{cookie_name}=' + encodeURIComponent('{cookie_value}') + '; path=/; max-age=31536000';"#))
+                {
                     img ."o-shoutbox__avatar u-userImage"
                         src=(self.avatar_url(author))
                         alt="Avatar"

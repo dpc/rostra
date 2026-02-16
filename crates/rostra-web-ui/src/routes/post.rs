@@ -110,7 +110,11 @@ pub async fn get_single_post(
     }
 
     // Default behavior: render full timeline page
-    let navbar = state.timeline_common_navbar(&session).await?;
+    let navbar = state
+        .timeline_common_navbar()
+        .session(&session)
+        .call()
+        .await?;
     Ok(Maud(
         state
             .render_timeline_page(

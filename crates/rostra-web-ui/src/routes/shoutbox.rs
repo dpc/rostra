@@ -113,7 +113,8 @@ pub async fn get_shoutbox(
 
     // WebSocket URL for live updates (start with 0 counts, shoutbox is current page
     // so 0)
-    let ws_url = "websocket('/updates?followees=0&network=0&notifications=0&shoutbox=0')";
+    let ws_url =
+        "websocket('/updates?followees=0&network=0&notifications=0&shoutbox=0&on_shoutbox=true')";
     let badge_counts = "badgeCounts({ followees: 0, network: 0, notifications: 0, shoutbox: 0 })";
 
     // Render the shoutbox content with chat-like layout
@@ -189,7 +190,7 @@ pub async fn get_shoutbox(
             form ."o-shoutbox__form"
                 action="/shoutbox/post"
                 method="post"
-                x-target="shoutbox-posts ajax-scripts"
+                "x-target.nofocus"="shoutbox-posts ajax-scripts"
                 "@ajax:before"=(form_ajax.before)
                 "@ajax:after"=(form_ajax.after)
                 "@ajax:success"="setTimeout(() => { const el = document.getElementById('shoutbox-messages'); el.scrollTop = el.scrollHeight; }, 50)"
@@ -224,8 +225,13 @@ pub async fn get_shoutbox(
         }
     };
 
-    // Full page layout
-    let navbar = state.timeline_common_navbar(&session).await?;
+    // Full page layout (hide new post form since shoutbox has its own input)
+    let navbar = state
+        .timeline_common_navbar()
+        .session(&session)
+        .hide_new_post_form(true)
+        .call()
+        .await?;
     let page_layout = state.render_page_layout(navbar, shoutbox_content);
 
     let content = html! {
@@ -286,8 +292,10 @@ pub async fn post_shoutbox(
         div id="ajax-scripts" {
             script {
                 (PreEscaped(r#"
-                    const input = document.getElementById('shoutbox-input');
-                    if (input) input.value = '';
+                    (function() {
+                        const input = document.getElementById('shoutbox-input');
+                        if (input) input.value = '';
+                    })()
                 "#))
             }
         }
