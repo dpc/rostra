@@ -1,9 +1,9 @@
-use std::collections::{BTreeMap, BinaryHeap, HashSet};
+use std::collections::{BTreeMap, HashSet};
 
 use futures::stream::{self, StreamExt as _};
 use rostra_client_db::{InsertEventOutcome, ProcessEventState};
 use rostra_core::ShortEventId;
-use rostra_core::event::{EventExt as _, VerifiedEvent};
+use rostra_core::event::VerifiedEvent;
 use rostra_core::id::{RostraId, ToShort as _};
 use rostra_p2p::Connection;
 use rostra_util_error::{BoxedErrorResult, FmtCompact as _, WhateverResult};
@@ -153,24 +153,83 @@ pub async fn fetch_event_content_only(
     Ok(false)
 }
 
-/// Download events from a head, traversing the DAG using BinaryHeap.
+/// Download events from a head, traversing the DAG depth-first by timestamp
+/// (kinda).
 ///
-/// This fetches events starting from `head` and exploring
-/// parent_aux/parent_prev. Returns true if any new data was downloaded.
+/// Uses a BTreeMap-based queue sorted by (timestamp, depth, event_id) to
+/// process events from oldest to newest. This ensures we fetch parent events
+/// before their children, and we can establish a "cutoff" timestamp beyond
+/// which we don't need to fetch more events (because we already have processed
+/// content for those).
+///
+/// Returns true if any new data was downloaded.
 pub async fn download_events_from_head(
     rostra_id: RostraId,
     head: ShortEventId,
     conn: &Connection,
     storage: &rostra_client_db::Database,
 ) -> WhateverResult<bool> {
-    let mut events = BinaryHeap::from([(0i32, head)]);
-    let mut downloaded_anything = false;
+    use rostra_core::event::EventExt as _;
 
+    // Queue: (child_timestamp, depth, event_id) -> Option<ProcessEventState>
+    // None means we haven't fetched/checked this event yet
+    // Some means we have the event and know its ProcessEventState
+    let mut queue: BTreeMap<(u64, u64, ShortEventId), Option<ProcessEventState>> = BTreeMap::new();
+
+    // Cutoff timestamp: events with timestamps <= this are considered past
+    // the point where we must have processed this part of the history in the past.
+    let mut cutoff_timestamp: u64 = 0;
+
+    let mut downloaded_anything = false;
     let peer_id = conn.remote_id();
 
-    while let Some((depth, event_id)) = events.pop() {
-        // Check if we already have this event locally
-        let (event, _insert_outcome, process_state) =
+    // Start with head at "far future" timestamp and max depth
+    let far_future_ts = u64::MAX;
+    let max_depth = u64::MAX;
+    queue.insert((far_future_ts, max_depth, head), None);
+
+    while let Some((&(child_timestamp, depth, event_id), &process_state_opt)) =
+        queue.first_key_value()
+    {
+        // If we already have a ProcessEventState, it means we proccessed
+        // this node and its parents before, and we can download the content if needed
+        if let Some(process_state) = process_state_opt {
+            queue.remove(&(child_timestamp, depth, event_id));
+
+            if storage.wants_content(event_id, process_state).await {
+                debug!(
+                    target: LOG_TARGET,
+                    %depth,
+                    %rostra_id,
+                    %event_id,
+                    "Downloading content for event"
+                );
+                if let Some(event_record) = storage.get_event(event_id).await {
+                    let event = VerifiedEvent::assume_verified_from_signed(event_record.signed);
+                    let content = conn
+                        .get_event_content(event)
+                        .await
+                        .whatever_context("Failed to download event content")?;
+
+                    if let Some(content) = content {
+                        storage.process_event_content(&content).await;
+                    } else {
+                        debug!(
+                            target: LOG_TARGET,
+                            %depth,
+                            node_id = %peer_id,
+                            %rostra_id,
+                            %event_id,
+                            "Event content not found on peer"
+                        );
+                    }
+                }
+            }
+            continue;
+        }
+
+        // Fetch the event if we don't have it
+        let (event, process_state, insert_outcome) =
             if let Some(local_event) = storage.get_event(event_id).await {
                 debug!(
                     target: LOG_TARGET,
@@ -182,17 +241,17 @@ pub async fn download_events_from_head(
                 let event = VerifiedEvent::assume_verified_from_signed(local_event.signed);
                 (
                     event,
-                    InsertEventOutcome::AlreadyPresent,
                     ProcessEventState::Existing,
+                    InsertEventOutcome::AlreadyPresent,
                 )
             } else {
                 debug!(
-                   target: LOG_TARGET,
+                    target: LOG_TARGET,
                     %depth,
                     node_id = %peer_id,
                     %rostra_id,
                     %event_id,
-                    "Querying for event"
+                    "Querying peer for event"
                 );
                 let Some(new_event) = conn
                     .get_event(rostra_id, event_id)
@@ -205,51 +264,73 @@ pub async fn download_events_from_head(
                         node_id = %peer_id,
                         %rostra_id,
                         %event_id,
-                        "Event not found"
+                        "Event not found on peer"
                     );
+                    queue.remove(&(child_timestamp, depth, event_id));
                     continue;
                 };
                 downloaded_anything = true;
                 let (insert_outcome, process_state) = storage.process_event(&new_event).await;
-
-                (new_event, insert_outcome, process_state)
+                (new_event, process_state, insert_outcome)
             };
 
-        // Always add aux parent, as it allows us to explore the history fast and
-        // somewhat randomly
-        if let Some(parent) = event.parent_aux() {
-            events.push((depth - 1, parent));
+        // Check if this event is past the cutoff, so we can skip
+        // doing the heavier checks over and over.
+        if event.timestamp().as_u64() < cutoff_timestamp {
+            queue.remove(&(child_timestamp, depth, event_id));
+            debug!(
+                target: LOG_TARGET,
+                %depth,
+                %child_timestamp,
+                %cutoff_timestamp,
+                %rostra_id,
+                %event_id,
+                "Event past cutoff, skipping"
+            );
+            continue;
         }
 
-        if storage.wants_content(event_id, process_state).await {
-            // If we wanted content of the event, we might need content of the previous
-            // closest parent as well
-            if let Some(parent) = event.parent_prev() {
-                events.push((depth - 1, parent));
-            }
-            let content = conn
-                .get_event_content(event)
-                .await
-                .whatever_context("Failed to download peer data")?;
+        // Update queue entry with the process state
+        queue.insert((child_timestamp, depth, event_id), Some(process_state));
 
-            if let Some(content) = content {
-                storage.process_event_content(&content).await;
-            } else {
-                debug!(
-                    target: LOG_TARGET,
-                    %depth,
-                    node_id = %peer_id,
-                    %rostra_id,
-                    %event_id,
-                    "Event content not found"
-                );
-            }
-        } else {
+        // Check if content is missing (we need to fetch it)
+        let content_is_missing = storage.is_event_content_missing(event_id).await;
+
+        if !content_is_missing && matches!(insert_outcome, InsertEventOutcome::AlreadyPresent) {
+            // Content is not missing, and event isn't new - we have it and processed it
+            // before. Update cutoff and remove from queue.
+            queue.remove(&(child_timestamp, depth, event_id));
+            cutoff_timestamp = cutoff_timestamp.max(child_timestamp);
+            debug!(
+                target: LOG_TARGET,
+                %depth,
+                %rostra_id,
+                %event_id,
+                new_cutoff = %cutoff_timestamp,
+                "Content already present, updating cutoff"
+            );
+            continue;
+        }
+
+        // Content is missing - add parents to queue
+        // Protect against parents with ts lower their ancestors.
+        let parent_child_timestamp = event.event.timestamp.as_u64().min(child_timestamp);
+        let parent_depth = depth.saturating_sub(1);
+
+        for parent_id in [event.parent_prev(), event.parent_aux()]
+            .into_iter()
+            .flatten()
+        {
+            queue.insert((parent_child_timestamp, parent_depth, parent_id), None);
+
             debug!(
                 target: LOG_TARGET,
                 %rostra_id,
                 %event_id,
-                "Event content not wanted"
+                %parent_id,
+                %parent_child_timestamp,
+                %parent_depth,
+                "Added parent to queue"
             );
         }
     }

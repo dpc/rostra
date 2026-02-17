@@ -448,7 +448,7 @@ impl Database {
             }
 
             processed_count += 1;
-            if processed_count % 10000 == 0 {
+            if processed_count.is_multiple_of(10000) {
                 debug!(
                     target: LOG_TARGET,
                     processed_count,

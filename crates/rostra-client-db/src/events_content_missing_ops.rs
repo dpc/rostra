@@ -6,6 +6,17 @@ use tracing::warn;
 use crate::{Database, LOG_TARGET, events, tables};
 
 impl Database {
+    /// Check if an event's content is in the missing list
+    pub async fn is_event_content_missing(&self, event_id: ShortEventId) -> bool {
+        self.read_with(|tx| {
+            let events_content_missing_table =
+                tx.open_table(&tables::events_content_missing::TABLE)?;
+            Ok(events_content_missing_table.get(&event_id)?.is_some())
+        })
+        .await
+        .expect("Storage error")
+    }
+
     pub async fn paginate_missing_events_contents(
         &self,
         cursor: Option<ShortEventId>,
