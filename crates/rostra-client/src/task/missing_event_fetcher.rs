@@ -2,7 +2,7 @@ use rostra_core::ShortEventId;
 use rostra_core::event::{EventExt as _, SignedEventExt as _, VerifiedEvent};
 use rostra_core::id::{RostraId, ToShort as _};
 use rostra_p2p::Connection;
-use rostra_util_error::{BoxedErrorResult, FmtCompact, WhateverResult};
+use rostra_util_error::{FmtCompact as _, WhateverResult};
 use snafu::ResultExt as _;
 use tracing::{debug, instrument, trace, warn};
 
@@ -97,10 +97,7 @@ impl MissingEventFetcher {
                     if db.has_event(*missing_event).await {
                         continue;
                     }
-                    match self
-                        .get_event_from_conn(author_id, *missing_event, *follower_id, &conn, &db)
-                        .await
-                    {
+                    match self.get_event(author_id, *missing_event, &conn, &db).await {
                         Ok(_) => {}
                         Err(err) => {
                             debug!(
@@ -108,8 +105,8 @@ impl MissingEventFetcher {
                                 author_id = %author_id,
                                 event_id = %missing_event,
                                 follower_id = %follower_id,
-                                err = %(&*err).fmt_compact(),
-                                "Error while getting id from a peer"
+                                err = %err.fmt_compact(),
+                                "Error getting event from a peer"
                             );
                         }
                     }
@@ -118,41 +115,11 @@ impl MissingEventFetcher {
         }
     }
 
-    async fn get_event_from_conn(
-        &self,
-        author_id: RostraId,
-        event_id: ShortEventId,
-        follower_id: RostraId,
-        conn: &Connection,
-        db: &rostra_client_db::Database,
-    ) -> BoxedErrorResult<()> {
-        debug!(target:  LOG_TARGET,
-            author_id = %author_id,
-            event_id = %event_id,
-            follower_id = %follower_id,
-            "Getting event from a peer"
-        );
-        match self.get_event(author_id, event_id, conn, db).await {
-            Ok(_) => {}
-            Err(err) => {
-                debug!(target:  LOG_TARGET,
-                    author_id = %author_id,
-                    event_id = %event_id,
-                    follower_id = %follower_id,
-                    err = %err.fmt_compact(),
-                    "Error getting event from a peer"
-                );
-            }
-        }
-
-        Ok(())
-    }
-
     async fn get_event(
         &self,
         author_id: RostraId,
         event_id: ShortEventId,
-        conn: &rostra_p2p::Connection,
+        conn: &Connection,
         storage: &rostra_client_db::Database,
     ) -> WhateverResult<bool> {
         let event = conn
@@ -167,19 +134,7 @@ impl MissingEventFetcher {
             VerifiedEvent::verify_response(author_id, event_id, *event.event(), event.sig())
                 .whatever_context("Invalid event received")?;
 
-        let (_, process_state) = storage.process_event(&event).await;
-
-        if storage.wants_content(event_id, process_state).await {
-            let content = conn
-                .get_event_content(event)
-                .await
-                .whatever_context("Failed to download peer data")?;
-
-            if let Some(content) = content {
-                storage.process_event_content(&content).await;
-                return Ok(true);
-            }
-        }
+        storage.process_event(&event).await;
 
         Ok(true)
     }

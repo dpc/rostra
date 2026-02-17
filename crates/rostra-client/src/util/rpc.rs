@@ -153,8 +153,8 @@ pub async fn fetch_event_content_only(
     Ok(false)
 }
 
-/// Download events from a head, traversing the DAG depth-first by timestamp
-/// (kinda).
+/// Download events from a child event, traversing the DAG depth-first by
+/// timestamp (kinda).
 ///
 /// Uses a BTreeMap-based queue sorted by (timestamp, depth, event_id) to
 /// process events from oldest to newest. This ensures we fetch parent events
@@ -163,7 +163,7 @@ pub async fn fetch_event_content_only(
 /// content for those).
 ///
 /// Returns true if any new data was downloaded.
-pub async fn download_events_from_head(
+pub async fn download_events_from_child(
     rostra_id: RostraId,
     head: ShortEventId,
     conn: &Connection,

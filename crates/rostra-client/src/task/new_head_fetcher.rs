@@ -145,7 +145,8 @@ impl NewHeadFetcher {
                 "Fetching events from peer for new head"
             );
 
-            match crate::util::rpc::download_events_from_head(author, head, &conn, &self.db).await {
+            match crate::util::rpc::download_events_from_child(author, head, &conn, &self.db).await
+            {
                 Ok(true) => {
                     debug!(
                         target: LOG_TARGET,

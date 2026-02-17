@@ -284,6 +284,6 @@ impl FolloweeHeadChecker {
         conn: &rostra_p2p::Connection,
         head: ShortEventId,
     ) -> rostra_util_error::WhateverResult<bool> {
-        crate::util::rpc::download_events_from_head(rostra_id, head, conn, client.db()).await
+        crate::util::rpc::download_events_from_child(rostra_id, head, conn, client.db()).await
     }
 }
