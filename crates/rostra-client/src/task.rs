@@ -5,5 +5,6 @@ pub(crate) mod missing_event_content_fetcher;
 pub(crate) mod missing_event_fetcher;
 pub(crate) mod new_head_fetcher;
 pub(crate) mod pkarr_id_publisher;
+pub(crate) mod poll_followee_head_updates;
 pub(crate) mod poll_follower_head_updates;
 pub(crate) mod request_handler;

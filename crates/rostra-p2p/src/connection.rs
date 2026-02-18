@@ -578,4 +578,12 @@ impl Connection {
     pub async fn wait_followers_new_heads(&self) -> RpcResult<WaitFollowersNewHeadsResponse> {
         self.make_rpc(&WaitFollowersNewHeadsRequest).await
     }
+
+    /// Wait for the server's head to differ from `known_head`.
+    ///
+    /// If the server's head already differs, responds immediately.
+    /// Otherwise blocks until the head changes.
+    pub async fn wait_head_update(&self, known_head: ShortEventId) -> RpcResult<ShortEventId> {
+        Ok(self.make_rpc(&WaitHeadUpdateRequest(known_head)).await?.0)
+    }
 }
