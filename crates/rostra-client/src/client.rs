@@ -336,12 +336,20 @@ impl Client {
     pub async fn new(
         #[builder(start_fn)] id: RostraId,
         #[builder(default = true)] start_request_handler: bool,
+        /// When false, skips spawning background tasks (head checker, event
+        /// fetchers, etc.) even when a DB is provided. Useful for tests.
+        #[builder(default = true)]
+        start_background_tasks: bool,
         db: Option<Database>,
         secret: Option<RostraIdSecretKey>,
         /// When true, allows direct IP connections (exposes IP address).
         /// When false (default), uses relay-only mode for privacy.
         #[builder(default = false)]
         public_mode: bool,
+        /// Pre-built iroh endpoint. If provided, uses this instead of
+        /// creating a new one. Useful for tests that need custom endpoint
+        /// configuration.
+        iroh_endpoint: Option<iroh::Endpoint>,
     ) -> InitResult<Arc<Self>> {
         debug!(target: LOG_TARGET, id = %id, "Starting Rostra client");
         let is_mode_full = db.is_some();
@@ -354,9 +362,12 @@ impl Client {
             .context(InitPkarrClientSnafu)?
             .into();
 
-        trace!(target: LOG_TARGET, id = %id, "Creating Iroh endpoint");
-        let endpoint =
-            Self::make_iroh_endpoint(db.as_ref().map(|s| s.iroh_secret()), public_mode).await?;
+        let endpoint = if let Some(ep) = iroh_endpoint {
+            ep
+        } else {
+            trace!(target: LOG_TARGET, id = %id, "Creating Iroh endpoint");
+            Self::make_iroh_endpoint(db.as_ref().map(|s| s.iroh_secret()), public_mode).await?
+        };
         let (check_for_updates_tx, _) = watch::channel(());
 
         let db = match db {
@@ -385,7 +396,7 @@ impl Client {
             client.start_request_handler();
         }
 
-        if is_mode_full {
+        if is_mode_full && start_background_tasks {
             client.start_followee_head_checker();
             client.start_head_update_broadcaster();
             client.start_missing_event_fetcher();

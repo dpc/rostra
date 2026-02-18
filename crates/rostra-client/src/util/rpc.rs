@@ -5,6 +5,7 @@ use rostra_core::ShortEventId;
 use rostra_core::event::VerifiedEvent;
 use rostra_core::id::RostraId;
 use rostra_util_error::{BoxedErrorResult, WhateverResult};
+use rostra_util_fmt::AsFmtOption as _;
 use snafu::{OptionExt as _, Snafu};
 use tracing::debug;
 
@@ -163,6 +164,12 @@ pub async fn download_events_from_child(
                     .get_event_from_peers(client, peers, rostra_id, q_item_event_id)
                     .await
                 else {
+                    debug!(
+                        target: LOG_TARGET,
+                        depth = %q_item_depth,
+                        event_id = %q_item_event_id,
+                        "Failed to fetch event from any peer, skipping"
+                    );
                     continue;
                 };
                 downloaded_anything = true;
@@ -193,10 +200,24 @@ pub async fn download_events_from_child(
         }
 
         // Add parents to be processed
-        for parent_id in [event.parent_prev(), event.parent_aux()]
+        let parents: Vec<_> = [event.parent_prev(), event.parent_aux()]
             .into_iter()
             .flatten()
-        {
+            .collect();
+
+        let parent_prev = event.parent_prev();
+        let parent_aux = event.parent_aux();
+
+        debug!(
+            target: LOG_TARGET,
+            event_id = %q_item_event_id,
+            parent_prev = %parent_prev.fmt_option(),
+            parent_aux = %parent_aux.fmt_option(),
+            parent_count = parents.len(),
+            "Queueing parents for event"
+        );
+
+        for parent_id in parents {
             if let Some(existing) = in_queue.get_mut(&parent_id) {
                 existing.child_timestamp = existing.child_timestamp.min(q_item_ts_and_depth.0);
                 existing.child_depth = existing.child_depth.min(q_item_ts_and_depth.1);

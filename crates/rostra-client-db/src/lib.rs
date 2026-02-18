@@ -899,6 +899,26 @@ impl Database {
         .expect("Database panic")
     }
 
+    /// Register an iroh node endpoint for an identity.
+    ///
+    /// Useful for test setups where peer node addresses need to be manually
+    /// registered.
+    pub async fn insert_id_node(&self, id: RostraId, node_id: IrohNodeId, ts: Timestamp) {
+        self.write_with(|tx| {
+            let mut table = tx.open_table(&ids_nodes::TABLE)?;
+            table.insert(
+                &(id, node_id),
+                &IrohNodeRecord {
+                    announcement_ts: ts,
+                    stats: Default::default(),
+                },
+            )?;
+            Ok(())
+        })
+        .await
+        .expect("Database panic")
+    }
+
     /// Get events for an identity, sorted by timestamp (most recent first).
     ///
     /// Returns a vector of (EventRecord, Timestamp, EventContentState
