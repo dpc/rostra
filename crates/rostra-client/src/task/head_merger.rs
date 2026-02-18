@@ -2,7 +2,7 @@ use std::time::Duration;
 
 use rand::Rng as _;
 use rostra_core::event::{EventKind, VerifiedEvent};
-use rostra_core::id::{RostraId, RostraIdSecretKey};
+use rostra_core::id::{RostraId, RostraIdSecretKey, ToShort as _};
 use rostra_core::{Event, ShortEventId};
 use tokio::sync::watch;
 use tracing::{debug, instrument, trace};
@@ -29,7 +29,7 @@ impl HeadMerger {
     }
 
     /// Run the thread
-    #[instrument(name = "head-merger", skip(self), ret)]
+    #[instrument(name = "head-merger", skip(self), fields(self_id = %self.id.to_short()), ret)]
     pub async fn run(self) {
         let mut head_rx = self.self_head_rx.clone();
         while let Ok(_head) = head_rx.changed().await {

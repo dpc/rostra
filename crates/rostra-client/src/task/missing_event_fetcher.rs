@@ -31,7 +31,7 @@ impl MissingEventFetcher {
     }
 
     /// Run the thread
-    #[instrument(name = "missing-event-fetcher", skip(self), ret)]
+    #[instrument(name = "missing-event-fetcher", skip(self), fields(self_id = %self.self_id.to_short()), ret)]
     pub async fn run(self) {
         // Get initial IDs from WoT
         let mut initial_ids: Vec<RostraId> = {

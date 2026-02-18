@@ -62,11 +62,11 @@ impl ConnectionCache {
                 trace!(target: LOG_TARGET, %id, "Creating new connection");
                 match client.connect_uncached(id).await {
                     Ok(conn) => {
-                        trace!(target: LOG_TARGET, %id, "Connection successful");
+                        debug!(target: LOG_TARGET, %id, endpoint_id = %conn.remote_id().fmt_short(), "Connection successful");
                         Ok(conn)
                     }
                     Err(err) => {
-                        trace!(target: LOG_TARGET, %id, err = %err, "Connection failed");
+                        debug!(target: LOG_TARGET, %id, err = %err, "Connection failed");
                         Err(err)
                     }
                 }

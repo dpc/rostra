@@ -42,7 +42,7 @@ impl FolloweeHeadChecker {
     }
 
     /// Run the thread
-    #[instrument(name = "followee-head-checker", skip(self), ret)]
+    #[instrument(name = "followee-head-checker", skip(self), fields(self_id = %self.self_id.to_short()), ret)]
     pub async fn run(self) {
         let mut check_for_updates_rx = self.check_for_updates_rx.clone();
         let mut wot_updated = self.wot_updated.clone();

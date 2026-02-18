@@ -99,7 +99,7 @@ impl PollFollowerHeadUpdates {
         }
     }
 
-    #[instrument(name = "poll-follower-head-updates", skip(self), ret)]
+    #[instrument(name = "poll-follower-head-updates", skip(self), fields(self_id = %self.self_id.to_short()), ret)]
     pub async fn run(mut self) {
         // Keep track of which peers we're polling
         let mut active_peers: HashSet<RostraId> = HashSet::new();

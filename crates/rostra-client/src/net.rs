@@ -130,6 +130,12 @@ impl Client {
                                 .update(id, |state| state.last_success = Some(now))
                                 .await;
                         }
+                        debug!(
+                            target: LOG_TARGET,
+                            %node_id,
+                            rostra_id = %rostra_id.fmt_option(),
+                            "Connected to endpoint successfully"
+                        );
                         EndpointConnectResult::Success(conn)
                     }
                     Err(err) => {
@@ -186,6 +192,13 @@ impl Client {
             .await;
 
         let endpoints = self.db.get_id_endpoints(id).await;
+
+        debug!(
+            target: LOG_TARGET,
+            %id,
+            num_endpoints = endpoints.len(),
+            "Connecting to peer, trying known endpoints"
+        );
 
         // Try all known endpoints in parallel
         let mut connection_futures = FuturesUnordered::new();
@@ -265,6 +278,12 @@ impl Client {
                     self.p2p_state
                         .update_node(node_id, |state| state.record_success(now))
                         .await;
+                    debug!(
+                        target: LOG_TARGET,
+                        %id,
+                        %node_id,
+                        "Successfully connected to peer via known endpoint"
+                    );
                     return Ok(conn);
                 }
                 Err(_err) => {

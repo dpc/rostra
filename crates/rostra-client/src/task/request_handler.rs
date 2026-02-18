@@ -5,7 +5,7 @@ use iroh::Endpoint;
 use iroh::endpoint::Incoming;
 use rostra_client_db::{DbError, IdsFolloweesRecord, IdsFollowersRecord};
 use rostra_core::event::{EventContentRaw, EventExt as _, VerifiedEvent, VerifiedEventContent};
-use rostra_core::id::RostraId;
+use rostra_core::id::{RostraId, ToShort as _};
 use rostra_p2p::RpcError;
 use rostra_p2p::connection::{
     Connection, FeedEventRequest, FeedEventResponse, GetEventContentRequest,
@@ -94,7 +94,7 @@ impl RequestHandler {
     }
 
     /// Run the thread
-    #[instrument(name = "request-handler", skip(self), ret)]
+    #[instrument(name = "request-handler", skip(self), fields(self_id = %self.our_id.to_short()), ret)]
     pub async fn run(self: Arc<Self>) {
         loop {
             if self.client.app_ref_opt().is_none() {

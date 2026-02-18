@@ -82,7 +82,7 @@ impl PkarrIdPublisher {
     }
 
     /// Run the thread
-    #[instrument(name = "pkarr-id-publisher", skip(self), ret)]
+    #[instrument(name = "pkarr-id-publisher", skip(self), fields(self_id = %self.self_id().to_short()), ret)]
     pub async fn run(mut self) {
         info!(target: LOG_TARGET, "Starting pkarr id publisher");
         let mut interval = tokio::time::interval(publishing_interval());

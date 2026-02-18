@@ -40,7 +40,7 @@ impl NewHeadFetcher {
         }
     }
 
-    #[instrument(name = "new-head-fetcher", skip(self), ret)]
+    #[instrument(name = "new-head-fetcher", skip(self), fields(self_id = %self.self_id.to_short()), ret)]
     pub async fn run(mut self) {
         debug!(
             target: LOG_TARGET,
