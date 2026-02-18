@@ -11,7 +11,7 @@ use rostra_p2p::Connection;
 use rostra_util_error::FmtCompact as _;
 use tokio::sync::{RwLock, watch};
 use tokio::time::Instant;
-use tracing::{debug, info, instrument, trace, warn};
+use tracing::{debug, instrument, trace, warn};
 
 use crate::client::{Client, INITIAL_BACKOFF_DURATION, MAX_BACKOFF_DURATION};
 use crate::connection_cache::ConnectionCache;
@@ -326,49 +326,21 @@ impl PollFollowerHeadUpdates {
             return Ok(());
         }
 
-        // Store the event
-        let (insert_outcome, process_state) = db.process_event(&verified_event).await;
+        // Store the event (without content). Content will be fetched by
+        // NewHeadFetcher via download_events_from_child, which also
+        // traverses parent events. Not fetching content here ensures that
+        // wants_content() returns true for this event, preventing the
+        // probabilistic cutoff in download_events_from_child from skipping
+        // parent traversal.
+        let (insert_outcome, _process_state) = db.process_event(&verified_event).await;
 
         debug!(
             target: LOG_TARGET,
             author = %author.to_short(),
             event_id = %verified_event.event_id.to_short(),
             ?insert_outcome,
-            ?process_state,
-            "Processed new head event"
+            "Stored new head event (content deferred to NewHeadFetcher)"
         );
-
-        // Optionally fetch content if needed
-        if db
-            .wants_content(verified_event.event_id, process_state)
-            .await
-        {
-            match conn.get_event_content(verified_event).await {
-                Ok(Some(content)) => {
-                    db.process_event_content(&content).await;
-                    info!(
-                        target: LOG_TARGET,
-                        author = %author.to_short(),
-                        "Fetched and stored event content"
-                    );
-                }
-                Ok(None) => {
-                    debug!(
-                        target: LOG_TARGET,
-                        author = %author.to_short(),
-                        "Peer does not have event content"
-                    );
-                }
-                Err(err) => {
-                    debug!(
-                        target: LOG_TARGET,
-                        author = %author.to_short(),
-                        err = %err.fmt_compact(),
-                        "Failed to fetch event content"
-                    );
-                }
-            }
-        }
 
         Ok(())
     }
