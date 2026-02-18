@@ -5,7 +5,6 @@ use rostra_core::ShortEventId;
 use rostra_core::id::{RostraId, ToShort as _};
 use rostra_util::is_rostra_dev_mode_set;
 use rostra_util_error::FmtCompact as _;
-use snafu::ResultExt as _;
 use tracing::{debug, instrument, trace};
 
 use crate::LOG_TARGET;
@@ -66,54 +65,37 @@ impl MissingEventContentFetcher {
                         followers
                     };
 
-                    let mut fetched = false;
-                    for follower_id in followers.iter().chain([author_id, self.self_id].iter()) {
-                        let Ok(client) = self.client.client_ref().boxed() else {
-                            break;
-                        };
+                    let peers: Vec<RostraId> = followers
+                        .into_iter()
+                        .chain([author_id, self.self_id])
+                        .collect();
 
-                        let conn = match connections.get_or_connect(&client, *follower_id).await {
-                            Ok(conn) => conn,
-                            Err(err) => {
-                                debug!(target: LOG_TARGET,
-                                    author_id = %author_id.to_short(),
-                                    event_id = %event_id.to_short(),
-                                    follower_id = %follower_id.to_short(),
-                                    err = %err.fmt_compact(),
-                                    "Could not connect to fetch missing content"
-                                );
-                                continue;
-                            }
-                        };
-
-                        match crate::util::rpc::download_events_from_child(
-                            author_id, event_id, &conn, &db,
-                        )
-                        .await
-                        {
-                            Ok(true) => {
-                                fetched = true;
-                                break;
-                            }
-                            Ok(false) => {}
-                            Err(err) => {
-                                debug!(target: LOG_TARGET,
-                                    author_id = %author_id.to_short(),
-                                    event_id = %event_id.to_short(),
-                                    follower_id = %follower_id.to_short(),
-                                    err = %err.fmt_compact(),
-                                    "Error fetching missing content from peer"
-                                );
-                            }
+                    match crate::util::rpc::download_events_from_child(
+                        author_id,
+                        event_id,
+                        &self.client,
+                        connections,
+                        &peers,
+                        &db,
+                    )
+                    .await
+                    {
+                        Ok(true) => {}
+                        Ok(false) => {
+                            debug!(target: LOG_TARGET,
+                                author_id = %author_id.to_short(),
+                                event_id = %event_id.to_short(),
+                                "Could not fetch missing content from any peer"
+                            );
                         }
-                    }
-
-                    if !fetched {
-                        debug!(target: LOG_TARGET,
-                            author_id = %author_id.to_short(),
-                            event_id = %event_id.to_short(),
-                            "Could not fetch missing content from any peer"
-                        );
+                        Err(err) => {
+                            debug!(target: LOG_TARGET,
+                                author_id = %author_id.to_short(),
+                                event_id = %event_id.to_short(),
+                                err = %err.fmt_compact(),
+                                "Error fetching missing content"
+                            );
+                        }
                     }
                 }
 

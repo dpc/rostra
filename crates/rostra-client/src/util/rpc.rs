@@ -1,13 +1,11 @@
-use std::collections::{BTreeMap, BTreeSet, HashSet};
+use std::collections::{BTreeMap, BTreeSet};
 
-use futures::stream::{self, StreamExt as _};
 use rostra_client_db::{InsertEventOutcome, ProcessEventState};
 use rostra_core::ShortEventId;
 use rostra_core::event::VerifiedEvent;
-use rostra_core::id::{RostraId, ToShort as _};
-use rostra_p2p::Connection;
-use rostra_util_error::{BoxedErrorResult, FmtCompact as _, WhateverResult};
-use snafu::{OptionExt as _, ResultExt as _, Snafu};
+use rostra_core::id::RostraId;
+use rostra_util_error::{BoxedErrorResult, WhateverResult};
+use snafu::{OptionExt as _, Snafu};
 use tracing::debug;
 
 #[derive(Debug, Snafu)]
@@ -27,130 +25,27 @@ pub async fn get_event_content_from_followers(
     db: &rostra_client_db::Database,
 ) -> BoxedErrorResult<()> {
     let followers = if let Some(followers) = followers_by_followee_cache.get(&author_id) {
-        followers
+        followers.clone()
     } else {
         let followers = db.get_followers(author_id).await;
-        followers_by_followee_cache.insert(author_id, followers);
-
-        followers_by_followee_cache
-            .get(&author_id)
-            .expect("Just inserted")
+        followers_by_followee_cache.insert(author_id, followers.clone());
+        followers
     };
 
-    // Create a stream of all potential sources (followers + author + self)
-    let all_peers: HashSet<RostraId> = followers
-        .iter()
-        .cloned()
-        .chain([author_id, self_id])
-        .collect();
+    let peers: Vec<RostraId> = followers.into_iter().chain([author_id, self_id]).collect();
 
-    debug!(target: LOG_TARGET,
-        author_id = %author_id.to_short(),
-        event_id = %event_id.to_short(),
-        num_peers = all_peers.len(),
-        "Attempting to fetch event content from peers"
-    );
+    let event_record = db.get_event(event_id).await.context(ContentNotFoundSnafu)?;
 
-    let found = futures_lite::StreamExt::find_map(
-        &mut stream::iter(all_peers)
-            .map(|follower_id| {
-                let client = client.clone();
-                let connections_cache = connections_cache.clone();
-                async move {
-                    let Ok(client_ref) = client.client_ref().boxed() else {
-                        return None;
-                    };
+    let event = VerifiedEvent::assume_verified_from_signed(event_record.signed);
 
-                    let conn = match connections_cache
-                        .get_or_connect(&client_ref, follower_id)
-                        .await
-                    {
-                        Ok(conn) => conn,
-                        Err(err) => {
-                            debug!(target: LOG_TARGET,
-                                author_id = %author_id.to_short(),
-                                event_id = %event_id.to_short(),
-                                peer_id = %follower_id.to_short(),
-                                err = %err.fmt_compact(),
-                                "Failed to connect to peer"
-                            );
-                            return None;
-                        }
-                    };
+    let content = connections_cache
+        .get_event_content_from_peers(&client, &peers, event)
+        .await
+        .context(ContentNotFoundSnafu)?;
 
-                    debug!(target: LOG_TARGET,
-                        author_id = %author_id.to_short(),
-                        event_id = %event_id.to_short(),
-                        peer_id = %follower_id.to_short(),
-                        "Getting event content from a peer"
-                    );
-
-                    match fetch_event_content_only(event_id, &conn, db).await {
-                        Ok(true) => Some(()),
-                        Ok(false) => {
-                            debug!(target: LOG_TARGET,
-                                author_id = %author_id.to_short(),
-                                event_id = %event_id.to_short(),
-                                peer_id = %follower_id.to_short(),
-                                "Peer does not have the content"
-                            );
-                            None
-                        }
-                        Err(err) => {
-                            debug!(target: LOG_TARGET,
-                                author_id = %author_id.to_short(),
-                                event_id = %event_id.to_short(),
-                                peer_id = %follower_id.to_short(),
-                                err = %err.fmt_compact(),
-                                "Error getting event content from peer"
-                            );
-                            None
-                        }
-                    }
-                }
-            })
-            .buffer_unordered(10),
-        |result| result,
-    )
-    .await;
-
-    if found.is_none() {
-        debug!(target: LOG_TARGET,
-            author_id = %author_id.to_short(),
-            event_id = %event_id.to_short(),
-            "No peer had the event content"
-        );
-        return Err(ContentNotFoundError.into());
-    }
+    db.process_event_content(&content).await;
 
     Ok(())
-}
-
-/// Fetches only the content for an event that already exists in storage.
-///
-/// This is the specialized version used in missing_event_content_fetcher.rs.
-pub async fn fetch_event_content_only(
-    event_id: ShortEventId,
-    conn: &Connection,
-    storage: &rostra_client_db::Database,
-) -> WhateverResult<bool> {
-    let event = storage
-        .get_event(event_id)
-        .await
-        .whatever_context("Unknown event")?;
-
-    let event = VerifiedEvent::assume_verified_from_signed(event.signed);
-    let content = conn
-        .get_event_content(event)
-        .await
-        .whatever_context("Failed to download event content")?;
-
-    if let Some(content) = content {
-        storage.process_event_content(&content).await;
-        return Ok(true);
-    }
-
-    Ok(false)
 }
 
 /// Download events from a child event, traversing the DAG depth-first by
@@ -162,12 +57,16 @@ pub async fn fetch_event_content_only(
 /// which we don't need to fetch more events (because we already have processed
 /// content for those).
 ///
+/// Tries multiple peers (via the connection cache) when fetching events and
+/// content.
+///
 /// Returns true if any new data was downloaded.
 pub async fn download_events_from_child(
     rostra_id: RostraId,
     head: ShortEventId,
-    // TODO: this should be connection pool so we can connect to any source of events we can
-    conn: &Connection,
+    client: &crate::client::ClientHandle,
+    connections: &ConnectionCache,
+    peers: &[RostraId],
     storage: &rostra_client_db::Database,
 ) -> WhateverResult<bool> {
     use rostra_core::event::EventExt as _;
@@ -188,7 +87,6 @@ pub async fn download_events_from_child(
     let mut in_queue: BTreeMap<ShortEventId, QueueItemData> = BTreeMap::new();
 
     let mut downloaded_anything = false;
-    let peer_id = conn.remote_id();
 
     // Start with head at "far future" timestamp and max depth
     let far_future_ts = u64::MAX;
@@ -216,49 +114,22 @@ pub async fn download_events_from_child(
         // content if needed
         if let Some(process_state) = q_item_data.process_state {
             if storage.wants_content(q_item_event_id, process_state).await {
+                let event = q_item_data
+                    .event
+                    .expect("Must have event set at this point");
+
                 debug!(
                     target: LOG_TARGET,
-                            depth = %q_item_depth,
-                            node_id = %peer_id,
-                            event_id = %q_item_event_id,
+                    depth = %q_item_depth,
+                    event_id = %q_item_event_id,
                     "Downloading content for event"
                 );
-                // TODO: fetch the content from author, our own ids, and followers
-                let content = match conn
-                    .get_event_content(
-                        q_item_data
-                            .event
-                            .expect("Must have event set at this point"),
-                    )
+
+                if let Some(content) = connections
+                    .get_event_content_from_peers(client, peers, event)
                     .await
                 {
-                    Ok(c) => c,
-                    Err(err) => {
-                        debug!(
-                            target: LOG_TARGET,
-                            depth = %q_item_depth,
-                            node_id = %peer_id,
-                            event_id = %q_item_event_id,
-                            "Event content not found"
-                        );
-                        // Note: we are not inserting the event back to the queue,
-                        // effectively skipping processing it, as we were not able
-                        // to get it at all.
-                        continue;
-                    }
-                };
-
-                if let Some(content) = content {
                     storage.process_event_content(&content).await;
-                } else {
-                    debug!(
-                        target: LOG_TARGET,
-                        depth = %q_item_depth,
-                        node_id = %peer_id,
-                        event_id = %q_item_event_id,
-                        "Event content not found"
-                    );
-                    continue;
                 }
             }
             continue;
@@ -284,39 +155,14 @@ pub async fn download_events_from_child(
                 debug!(
                     target: LOG_TARGET,
                     depth = %q_item_depth,
-                    node_id = %peer_id,
                     event_id = %q_item_event_id,
-                    "Querying peer for event"
+                    "Querying peers for event"
                 );
-                // TODO: we must try to get the event from themselves, our own other ids or
-                // their followers instead of just them
-                let new_event_res = match conn.get_event(rostra_id, q_item_event_id).await {
-                    Ok(e) => e,
-                    Err(err) => {
-                        debug!(
-                            target: LOG_TARGET,
-                            depth = %q_item_depth,
-                            node_id = %peer_id,
-                            event_id = %q_item_event_id,
-                            "Failed to fetch event"
-                        );
-                        // Note: we are not inserting the event back to the queue,
-                        // effectively skipping processing it, as we were not able
-                        // to get it at all.
-                        continue;
-                    }
-                };
-                let Some(new_event) = new_event_res else {
-                    debug!(
-                        target: LOG_TARGET,
-                        depth = %q_item_depth,
-                        node_id = %peer_id,
-                        event_id = %q_item_event_id,
-                        "Event not found on peer"
-                    );
-                    // Note: we are not inserting the event back to the queue,
-                    // effectively skipping processing it, as we were not able
-                    // to get it at all.
+
+                let Some(new_event) = connections
+                    .get_event_from_peers(client, peers, rostra_id, q_item_event_id)
+                    .await
+                else {
                     continue;
                 };
                 downloaded_anything = true;
@@ -340,11 +186,9 @@ pub async fn download_events_from_child(
         );
 
         if !storage.wants_content(q_item_event_id, process_state).await
-                && matches!(insert_outcome, InsertEventOutcome::AlreadyPresent)
-                // TODO: or with probability of 50%, instead of false here
-                && false
+            && matches!(insert_outcome, InsertEventOutcome::AlreadyPresent)
+            && rand::random::<bool>()
         {
-            // Since we don't want
             continue;
         }
 
@@ -353,10 +197,9 @@ pub async fn download_events_from_child(
             .into_iter()
             .flatten()
         {
-            if in_queue.contains_key(&parent_id) {
-                // TODO: update data for the parent_id inside in_queue to be minimum
-                // child_timestamp and child_depth of this iteration and what's
-                // already there
+            if let Some(existing) = in_queue.get_mut(&parent_id) {
+                existing.child_timestamp = existing.child_timestamp.min(q_item_ts_and_depth.0);
+                existing.child_depth = existing.child_depth.min(q_item_ts_and_depth.1);
                 continue;
             }
             queue.insert((None, parent_id));

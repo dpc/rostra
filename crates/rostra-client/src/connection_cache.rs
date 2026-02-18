@@ -1,10 +1,13 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use rostra_core::id::RostraId;
+use futures::stream::{self, StreamExt as _};
+use rostra_core::ShortEventId;
+use rostra_core::event::{VerifiedEvent, VerifiedEventContent};
+use rostra_core::id::{RostraId, ToShort as _};
 use rostra_p2p::Connection;
 use tokio::sync::{Mutex, OnceCell};
-use tracing::trace;
+use tracing::{debug, trace};
 
 use crate::ClientRef;
 use crate::error::ConnectResult;
@@ -71,5 +74,118 @@ impl ConnectionCache {
             .await;
 
         result.cloned()
+    }
+
+    /// Try to fetch an event from multiple peers with some parallelism.
+    ///
+    /// Returns `Some(event)` from the first peer that has it, or `None`.
+    pub async fn get_event_from_peers(
+        &self,
+        client: &crate::client::ClientHandle,
+        peers: &[RostraId],
+        author_id: RostraId,
+        event_id: ShortEventId,
+    ) -> Option<VerifiedEvent> {
+        let result = futures_lite::StreamExt::find_map(
+            &mut stream::iter(peers.iter().copied())
+                .map(|peer_id| {
+                    let client = client.clone();
+                    let cache = self.clone();
+                    async move {
+                        let client_ref = client.client_ref().ok()?;
+                        let conn = cache.get_or_connect(&client_ref, peer_id).await.ok()?;
+                        match conn.get_event(author_id, event_id).await {
+                            Ok(Some(event)) => Some(event),
+                            Ok(None) => {
+                                debug!(
+                                    target: LOG_TARGET,
+                                    peer_id = %peer_id.to_short(),
+                                    event_id = %event_id.to_short(),
+                                    "Event not found on peer"
+                                );
+                                None
+                            }
+                            Err(_err) => {
+                                debug!(
+                                    target: LOG_TARGET,
+                                    peer_id = %peer_id.to_short(),
+                                    event_id = %event_id.to_short(),
+                                    "Failed to fetch event from peer"
+                                );
+                                None
+                            }
+                        }
+                    }
+                })
+                .buffer_unordered(4),
+            |result| result,
+        )
+        .await;
+
+        if result.is_none() {
+            debug!(
+                target: LOG_TARGET,
+                event_id = %event_id.to_short(),
+                "Event not found on any peer"
+            );
+        }
+
+        result
+    }
+
+    /// Try to fetch event content from multiple peers with some parallelism.
+    ///
+    /// Returns `Some(content)` from the first peer that has it, or `None`.
+    pub async fn get_event_content_from_peers(
+        &self,
+        client: &crate::client::ClientHandle,
+        peers: &[RostraId],
+        event: VerifiedEvent,
+    ) -> Option<VerifiedEventContent> {
+        let result = futures_lite::StreamExt::find_map(
+            &mut stream::iter(peers.iter().copied())
+                .map(|peer_id| {
+                    let client = client.clone();
+                    let cache = self.clone();
+                    async move {
+                        let client_ref = client.client_ref().ok()?;
+                        let conn = cache.get_or_connect(&client_ref, peer_id).await.ok()?;
+                        match conn.get_event_content(event).await {
+                            Ok(Some(content)) => Some(content),
+                            Ok(None) => {
+                                debug!(
+                                    target: LOG_TARGET,
+                                    peer_id = %peer_id.to_short(),
+                                    event_id = %event.event_id.to_short(),
+                                    "Peer does not have content"
+                                );
+                                None
+                            }
+                            Err(_err) => {
+                                debug!(
+                                    target: LOG_TARGET,
+                                    peer_id = %peer_id.to_short(),
+                                    event_id = %event.event_id.to_short(),
+                                    "Failed to fetch content from peer"
+                                );
+                                None
+                            }
+                        }
+                    }
+                })
+                .buffer_unordered(4),
+            |result| result,
+        )
+        .await;
+
+        if result.is_none() {
+            debug!(
+                target: LOG_TARGET,
+                event_id = %event.event_id.to_short(),
+                "Event content not found from any peer"
+            );
+        }
+
+        result
     }
 }

@@ -4,7 +4,6 @@ use rostra_client_db::{Database, WotData};
 use rostra_core::ShortEventId;
 use rostra_core::id::{RostraId, ToShort as _};
 use rostra_util_error::FmtCompact as _;
-use snafu::ResultExt as _;
 use tokio::sync::{broadcast, watch};
 use tracing::{debug, info, instrument, trace, warn};
 
@@ -116,66 +115,45 @@ impl NewHeadFetcher {
     ) -> rostra_util_error::WhateverResult<()> {
         let followers = self.db.get_followers(author).await;
 
-        // Try each follower (plus author and self) to get the events
-        for follower_id in followers.iter().chain([author, self.self_id].iter()) {
-            let Ok(client) = self.client.client_ref().boxed() else {
-                break;
-            };
+        let peers: Vec<RostraId> = followers
+            .into_iter()
+            .chain([author, self.self_id])
+            .collect();
 
-            let conn = match self.connections.get_or_connect(&client, *follower_id).await {
-                Ok(conn) => conn,
-                Err(err) => {
-                    debug!(
-                        target: LOG_TARGET,
-                        author = %author.to_short(),
-                        %head,
-                        follower_id = %follower_id.to_short(),
-                        err = %err.fmt_compact(),
-                        "Could not connect to fetch new head events"
-                    );
-                    continue;
-                }
-            };
-
-            debug!(
-                target: LOG_TARGET,
-                author = %author.to_short(),
-                %head,
-                follower_id = %follower_id.to_short(),
-                "Fetching events from peer for new head"
-            );
-
-            match crate::util::rpc::download_events_from_child(author, head, &conn, &self.db).await
-            {
-                Ok(true) => {
-                    debug!(
-                        target: LOG_TARGET,
-                        author = %author.to_short(),
-                        %head,
-                        follower_id = %follower_id.to_short(),
-                        "Successfully fetched events for new head"
-                    );
-                    return Ok(());
-                }
-                Ok(false) => {
-                    debug!(
-                        target: LOG_TARGET,
-                        author = %author.to_short(),
-                        %head,
-                        follower_id = %follower_id.to_short(),
-                        "No new events found from peer"
-                    );
-                }
-                Err(err) => {
-                    debug!(
-                        target: LOG_TARGET,
-                        author = %author.to_short(),
-                        %head,
-                        follower_id = %follower_id.to_short(),
-                        err = %err.fmt_compact(),
-                        "Error fetching events from peer"
-                    );
-                }
+        match crate::util::rpc::download_events_from_child(
+            author,
+            head,
+            &self.client,
+            &self.connections,
+            &peers,
+            &self.db,
+        )
+        .await
+        {
+            Ok(true) => {
+                debug!(
+                    target: LOG_TARGET,
+                    author = %author.to_short(),
+                    %head,
+                    "Successfully fetched events for new head"
+                );
+            }
+            Ok(false) => {
+                debug!(
+                    target: LOG_TARGET,
+                    author = %author.to_short(),
+                    %head,
+                    "No new events found from any peer"
+                );
+            }
+            Err(err) => {
+                debug!(
+                    target: LOG_TARGET,
+                    author = %author.to_short(),
+                    %head,
+                    err = %err.fmt_compact(),
+                    "Error fetching events for new head"
+                );
             }
         }
 

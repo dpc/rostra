@@ -227,63 +227,34 @@ impl FolloweeHeadChecker {
             }
         };
 
-        for follower_id in followers.iter().chain([rostra_id, self.self_id].iter()) {
-            let Ok(client) = self.client.client_ref().boxed() else {
-                break;
-            };
+        let peers: Vec<RostraId> = followers
+            .into_iter()
+            .chain([rostra_id, self.self_id])
+            .collect();
 
-            // ConnectionCache handles its own interior mutability
-            let conn = match connections.get_or_connect(&client, *follower_id).await {
-                Ok(conn) => conn,
-                Err(err) => {
-                    debug!(target: LOG_TARGET,
-                        rostra_id = %rostra_id,
-                        head = %head,
-                        follower_id = %follower_id,
-                        err = %err.fmt_compact(),
-                        "Could not connect to fetch updates"
-                    );
+        let client_ref = self.client.client_ref().boxed()?;
 
-                    continue;
-                }
-            };
-
-            debug!(target: LOG_TARGET,
-                rostra_id = %rostra_id,
-                head = %head,
-                follower_id = %follower_id,
-                "Getting event data from a peer"
-            );
-
-            match self
-                .download_new_data_from(&client, rostra_id, &conn, head)
-                .await
-            {
-                Ok(true) => {
-                    return Ok(());
-                }
-                Ok(false) => {}
-                Err(err) => {
-                    debug!(target: LOG_TARGET,
-                        rostra_id = %rostra_id,
-                        head = %head,
-                        follower_id = %follower_id,
-                        err = %err.fmt_compact(),
-                        "Error getting event from a peer"
-                    );
-                }
+        match crate::util::rpc::download_events_from_child(
+            rostra_id,
+            head,
+            &self.client,
+            connections,
+            &peers,
+            client_ref.db(),
+        )
+        .await
+        {
+            Ok(_) => {}
+            Err(err) => {
+                debug!(target: LOG_TARGET,
+                    rostra_id = %rostra_id,
+                    head = %head,
+                    err = %err.fmt_compact(),
+                    "Error downloading new data"
+                );
             }
         }
-        Ok(())
-    }
 
-    async fn download_new_data_from(
-        &self,
-        client: &ClientRef<'_>,
-        rostra_id: RostraId,
-        conn: &rostra_p2p::Connection,
-        head: ShortEventId,
-    ) -> rostra_util_error::WhateverResult<bool> {
-        crate::util::rpc::download_events_from_child(rostra_id, head, conn, client.db()).await
+        Ok(())
     }
 }
