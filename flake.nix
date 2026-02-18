@@ -193,15 +193,8 @@
           packages = with pkgs; [
             jq
             systemfd
-            treefmt
             cargo-mutants
-
-            (pkgs.callPackage ./nix/pkgs/wild.nix { })
           ];
-          shellHook = ''
-            export FLAKEBOX_GIT_LS_TEXT_IGNORE="crates/rostra-web-ui/assets/libs/|crates/rostra-web-ui/assets/icons"
-            export CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_RUSTFLAGS="-C link-arg=--ld-path=wild"
-          '';
         };
       }
     );
