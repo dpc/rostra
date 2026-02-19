@@ -2574,13 +2574,16 @@ input:checked+.slider:before {
 }
 
 .o-shoutbox__loadOlder.-empty {
+  padding: 0;
+  border-bottom: none;
+  background-color: transparent;
   color: var(--color-text-muted, #888);
   cursor: default;
   font-style: italic;
 }
 
 .o-shoutbox__loadOlder.-empty:hover {
-  background-color: var(--color-tab-inactive-bg);
+  background-color: transparent;
 }
 
 .o-shoutbox__posts {
