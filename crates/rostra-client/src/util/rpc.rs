@@ -96,6 +96,14 @@ pub async fn download_events_from_child(
 
     let mut downloaded_anything = false;
 
+    // Stats
+    let mut max_queue_len: usize = 0;
+    let mut events_traversed: usize = 0;
+    let mut event_fetch_attempts: usize = 0;
+    let mut content_fetch_attempts: usize = 0;
+    let mut new_events: usize = 0;
+    let mut new_contents: usize = 0;
+
     // Start with head at "far future" timestamp and max depth
     let far_future_ts = u64::MAX;
     let max_depth = u64::MAX;
@@ -112,6 +120,9 @@ pub async fn download_events_from_child(
     );
 
     while let Some((q_item_ts_and_depth, q_item_event_id)) = queue.pop_first() {
+        // +1 because we just popped one
+        max_queue_len = max_queue_len.max(queue.len() + 1);
+
         let q_item_data = in_queue
             .remove(&q_item_event_id)
             .expect("Must always be there");
@@ -133,15 +144,20 @@ pub async fn download_events_from_child(
                     "Downloading content for event"
                 );
 
+                content_fetch_attempts += 1;
                 if let Some(content) = connections
                     .get_event_content_from_peers(networking, peers, event)
                     .await
                 {
                     storage.process_event_content(&content).await;
+                    new_contents += 1;
                 }
             }
             continue;
         }
+
+        // Every event goes through here once on the first time
+        events_traversed += 1;
 
         assert!(q_item_ts_and_depth.is_none());
         // Fetch the event if we don't have it
@@ -167,6 +183,7 @@ pub async fn download_events_from_child(
                     "Querying peers for event"
                 );
 
+                event_fetch_attempts += 1;
                 let Some(new_event) = connections
                     .get_event_from_peers(networking, peers, rostra_id, q_item_event_id)
                     .await
@@ -180,6 +197,7 @@ pub async fn download_events_from_child(
                     continue;
                 };
                 downloaded_anything = true;
+                new_events += 1;
                 let (insert_outcome, process_state) = storage.process_event(&new_event).await;
                 (new_event, process_state, insert_outcome)
             };
@@ -250,6 +268,19 @@ pub async fn download_events_from_child(
             );
         }
     }
+
+    debug!(
+        target: LOG_TARGET,
+        author = %rostra_id.to_short(),
+        %head,
+        max_queue_len,
+        events_traversed,
+        event_fetch_attempts,
+        content_fetch_attempts,
+        new_events,
+        new_contents,
+        "Finished downloading events from head"
+    );
 
     Ok(downloaded_anything)
 }
