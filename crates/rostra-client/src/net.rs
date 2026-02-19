@@ -14,7 +14,7 @@ use rostra_p2p_api::ROSTRA_P2P_V0_ALPN;
 use rostra_util_error::FmtCompact as _;
 use rostra_util_fmt::AsFmtOption as _;
 use snafu::{OptionExt as _, ResultExt as _};
-use tracing::{debug, trace, warn};
+use tracing::{debug, trace};
 
 use super::{RRECORD_HEAD_KEY, RRECORD_P2P_KEY, get_rrecord_typed};
 use crate::client::{NodeSource, P2PState};

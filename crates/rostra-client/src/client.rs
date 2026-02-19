@@ -306,10 +306,6 @@ pub struct Client {
 
     pub(crate) db: Arc<Database>,
 
-    /// A watch-channel that can be used to notify some tasks manually to check
-    /// for updates again
-    check_for_updates_tx: watch::Sender<()>,
-
     active: AtomicBool,
 
     /// Networking layer (endpoint, pkarr, p2p_state, connection cache)
@@ -354,8 +350,6 @@ impl Client {
             trace!(target: LOG_TARGET, id = %id, "Creating Iroh endpoint");
             Self::make_iroh_endpoint(db.as_ref().map(|s| s.iroh_secret()), public_mode).await?
         };
-        let (check_for_updates_tx, _) = watch::channel(());
-
         let db: Arc<Database> = match db {
             Some(db) => db,
             _ => {
@@ -375,7 +369,6 @@ impl Client {
             networking,
             db,
             id,
-            check_for_updates_tx,
             active: AtomicBool::new(false),
         });
 
@@ -385,7 +378,6 @@ impl Client {
         }
 
         if is_mode_full && start_background_tasks {
-            client.start_followee_head_checker();
             client.start_head_update_broadcaster();
             client.start_missing_event_fetcher();
             client.start_missing_event_content_fetcher();
@@ -496,9 +488,6 @@ impl Client {
         tokio::spawn(RequestHandler::new(self, self.networking.endpoint.clone()).run());
     }
 
-    pub(crate) fn start_followee_head_checker(&self) {
-        tokio::spawn(crate::task::followee_head_checker::FolloweeHeadChecker::new(self).run());
-    }
     pub(crate) fn start_head_update_broadcaster(&self) {
         tokio::spawn(crate::task::head_update_broadcaster::HeadUpdateBroadcaster::new(self).run());
     }
@@ -591,10 +580,6 @@ impl Client {
 
     pub fn new_heads_subscribe(&self) -> broadcast::Receiver<(RostraId, ShortEventId)> {
         self.db.new_heads_subscribe()
-    }
-
-    pub fn check_for_updates_tx_subscribe(&self) -> watch::Receiver<()> {
-        self.check_for_updates_tx.subscribe()
     }
 
     pub fn ids_with_missing_events_subscribe(
