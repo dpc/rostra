@@ -447,8 +447,9 @@ impl RequestHandler {
                 }
             };
 
-            // Check if author is self or a direct follower (not extended)
-            let is_relevant = author == self.our_id || {
+            // Check if author is a direct follower (not extended).
+            // Own head changes are served via WAIT_HEAD_UPDATE instead.
+            let is_relevant = {
                 let followers = self.self_followers_rx.borrow();
                 followers.contains_key(&author)
             };

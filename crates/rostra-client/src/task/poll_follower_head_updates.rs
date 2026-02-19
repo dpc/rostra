@@ -111,7 +111,8 @@ impl PollFollowerHeadUpdates {
         // Shared backoff state for all peers
         let backoff_state: SharedBackoffState = Arc::new(RwLock::new(HashMap::new()));
 
-        // Start with self
+        // Always poll self — another instance of our node may learn
+        // about follower updates we don't know about locally.
         active_peers.insert(self.self_id);
 
         loop {
