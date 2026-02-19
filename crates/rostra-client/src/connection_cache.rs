@@ -7,7 +7,7 @@ use rostra_core::event::{VerifiedEvent, VerifiedEventContent};
 use rostra_core::id::{RostraId, ToShort as _};
 use rostra_p2p::Connection;
 use tokio::sync::{Mutex, OnceCell};
-use tracing::{debug, info, trace};
+use tracing::{debug, trace};
 
 use crate::error::ConnectResult;
 use crate::net::ClientNetworking;
@@ -62,11 +62,11 @@ impl ConnectionCache {
                 trace!(target: LOG_TARGET, %id, "Creating new connection");
                 match networking.connect_uncached(id).await {
                     Ok(conn) => {
-                        info!(target: LOG_TARGET, %id, endpoint_id = %conn.remote_id().fmt_short(), "Connection successful");
+                        debug!(target: LOG_TARGET, %id, endpoint_id = %conn.remote_id().fmt_short(), "Connection successful");
                         Ok(conn)
                     }
                     Err(err) => {
-                        debug!(target: LOG_TARGET, %id, err = %err, "Connection failed");
+                        trace!(target: LOG_TARGET, %id, err = %err, "Connection failed");
                         Err(err)
                     }
                 }

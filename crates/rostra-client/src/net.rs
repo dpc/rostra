@@ -264,7 +264,7 @@ impl ClientNetworking {
 
         let node_ids = self.id_endpoint_lookup.get_node_ids(id).await;
 
-        debug!(
+        trace!(
             target: LOG_TARGET,
             %id,
             num_endpoints = node_ids.len(),
@@ -354,7 +354,7 @@ impl ClientNetworking {
                     self.p2p_state
                         .update_node(node_id, |state| state.record_failure(now))
                         .await;
-                    debug!(
+                    trace!(
                         target: LOG_TARGET,
                         %id,
                         %node_id,
@@ -366,7 +366,7 @@ impl ClientNetworking {
         }
 
         if !node_ids.is_empty() {
-            debug!(
+            trace!(
                 target: LOG_TARGET,
                 %id,
                 "All known endpoints failed, trying pkarr resolution"
@@ -391,7 +391,7 @@ impl ClientNetworking {
             EndpointConnectResult::Failed(err) => Err(err),
             EndpointConnectResult::InBackoff => {
                 if let Some(remaining) = self.p2p_state.get_node_backoff_remaining(node_id).await {
-                    warn!(
+                    trace!(
                         target: LOG_TARGET,
                         %id,
                         %node_id,

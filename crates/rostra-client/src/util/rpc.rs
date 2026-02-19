@@ -1,3 +1,4 @@
+use std::cmp::Reverse;
 use std::collections::{BTreeMap, BTreeSet};
 
 use rostra_client_db::{InsertEventOutcome, ProcessEventState};
@@ -59,6 +60,9 @@ pub async fn get_event_content_from_followers(
 /// which we don't need to fetch more events (because we already have processed
 /// content for those).
 ///
+/// Depth starts at 0 for the head and increments for each parent traversal.
+/// Higher depth (deeper into the DAG) is processed first via `Reverse`.
+///
 /// Tries multiple peers (via the connection cache) when fetching events and
 /// content.
 ///
@@ -76,7 +80,8 @@ pub async fn download_events_from_child(
     struct QueueItemData {
         process_state: Option<ProcessEventState>,
         child_timestamp: u64,
-        child_depth: u64,
+        /// Depth in the DAG from the starting head (0 = head, 1 = parent, etc.)
+        depth: u64,
         event: Option<VerifiedEvent>,
     }
     debug!(
@@ -86,10 +91,12 @@ pub async fn download_events_from_child(
         "Fetching new events from new head/child"
     );
 
-    // Queue: (timestamp, depth, event_id) -> Option<ProcessEventState>
+    // Queue key: (timestamp, Reverse(depth), event_id)
     // None means we haven't fetched/checked this event yet
     // Some means we have the event and know its ProcessEventState
-    let mut queue: BTreeSet<(Option<(u64, u64)>, ShortEventId)> = BTreeSet::new();
+    // Reverse(depth) ensures deeper events (higher depth) are processed first
+    type QueueKey = (Option<(u64, Reverse<u64>)>, ShortEventId);
+    let mut queue: BTreeSet<QueueKey> = BTreeSet::new();
 
     // Information about elements in the queue
     let mut in_queue: BTreeMap<ShortEventId, QueueItemData> = BTreeMap::new();
@@ -104,9 +111,8 @@ pub async fn download_events_from_child(
     let mut new_events: usize = 0;
     let mut new_contents: usize = 0;
 
-    // Start with head at "far future" timestamp and max depth
+    // Start with head at "far future" timestamp and depth 0
     let far_future_ts = u64::MAX;
-    let max_depth = u64::MAX;
 
     queue.insert((None, head));
     in_queue.insert(
@@ -114,7 +120,7 @@ pub async fn download_events_from_child(
         QueueItemData {
             process_state: None,
             child_timestamp: far_future_ts,
-            child_depth: max_depth,
+            depth: 0,
             event: None,
         },
     );
@@ -127,7 +133,7 @@ pub async fn download_events_from_child(
             .remove(&q_item_event_id)
             .expect("Must always be there");
 
-        let q_item_depth = q_item_data.child_depth - 1;
+        let q_item_depth = q_item_data.depth;
         // If we already have a ProcessEventState, it means we processed
         // this event and its parents already, and we can now download and process the
         // content if needed
@@ -202,12 +208,9 @@ pub async fn download_events_from_child(
                 (new_event, process_state, insert_outcome)
             };
 
-        let q_item_ts_and_depth = (
-            q_item_data.child_timestamp.min(event.timestamp().as_u64()),
-            q_item_depth,
-        );
+        let q_item_ts = q_item_data.child_timestamp.min(event.timestamp().as_u64());
 
-        queue.insert((Some(q_item_ts_and_depth), q_item_event_id));
+        queue.insert((Some((q_item_ts, Reverse(q_item_depth))), q_item_event_id));
         in_queue.insert(
             q_item_event_id,
             QueueItemData {
@@ -242,10 +245,12 @@ pub async fn download_events_from_child(
             "Queueing parents for event"
         );
 
+        let parent_depth = q_item_depth + 1;
+
         for parent_id in parents {
             if let Some(existing) = in_queue.get_mut(&parent_id) {
-                existing.child_timestamp = existing.child_timestamp.min(q_item_ts_and_depth.0);
-                existing.child_depth = existing.child_depth.min(q_item_ts_and_depth.1);
+                existing.child_timestamp = existing.child_timestamp.min(q_item_ts);
+                existing.depth = existing.depth.max(parent_depth);
                 continue;
             }
             queue.insert((None, parent_id));
@@ -253,8 +258,8 @@ pub async fn download_events_from_child(
                 parent_id,
                 QueueItemData {
                     process_state: None,
-                    child_timestamp: q_item_ts_and_depth.0,
-                    child_depth: q_item_ts_and_depth.1,
+                    child_timestamp: q_item_ts,
+                    depth: parent_depth,
                     event: None,
                 },
             );
