@@ -3,7 +3,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use rostra_client_db::{InsertEventOutcome, ProcessEventState};
 use rostra_core::ShortEventId;
 use rostra_core::event::VerifiedEvent;
-use rostra_core::id::RostraId;
+use rostra_core::id::{RostraId, ToShort as _};
 use rostra_util_error::{BoxedErrorResult, WhateverResult};
 use rostra_util_fmt::AsFmtOption as _;
 use snafu::{OptionExt as _, Snafu};
@@ -79,6 +79,12 @@ pub async fn download_events_from_child(
         child_depth: u64,
         event: Option<VerifiedEvent>,
     }
+    debug!(
+        target: LOG_TARGET,
+        author = %rostra_id.to_short(),
+        %head,
+        "Fetching new events from new head/child"
+    );
 
     // Queue: (timestamp, depth, event_id) -> Option<ProcessEventState>
     // None means we haven't fetched/checked this event yet
@@ -195,7 +201,7 @@ pub async fn download_events_from_child(
 
         if !storage.wants_content(q_item_event_id, process_state).await
             && matches!(insert_outcome, InsertEventOutcome::AlreadyPresent)
-            && rand::random::<bool>()
+            && !rand::random::<u8>().is_multiple_of(4)
         {
             continue;
         }
