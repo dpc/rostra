@@ -77,12 +77,17 @@ pub enum ConnectError {
     Resolve {
         source: IdResolveError,
     },
-    PeerUnavailable,
+    #[snafu(display("Ping failed after connecting: {source}"))]
+    PingFailed {
+        source: rostra_p2p::RpcError,
+    },
     ConnectIroh {
         source: iroh::endpoint::ConnectError,
     },
     #[snafu(display("Node is in backoff, try again later"))]
     NodeInBackoff,
+    #[snafu(display("Resolved to own endpoint, cannot connect to self"))]
+    ResolvedToSelf,
 }
 
 pub type ConnectResult<T> = std::result::Result<T, ConnectError>;

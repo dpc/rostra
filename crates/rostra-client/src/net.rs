@@ -15,8 +15,7 @@ use tracing::{debug, trace, warn};
 
 use crate::client::{Client, NodeSource};
 use crate::error::{
-    ConnectError, ConnectIrohSnafu, ConnectResult, NodeInBackoffSnafu, PeerUnavailableSnafu,
-    ResolveSnafu,
+    ConnectError, ConnectIrohSnafu, ConnectResult, NodeInBackoffSnafu, ResolveSnafu,
 };
 // ConnectIrohSnafu is used for .context() in connect_ticket
 use crate::id::CompactTicket;
@@ -149,7 +148,7 @@ impl Client {
                             err = %err.fmt_compact(),
                             "Ping failed after connection"
                         );
-                        EndpointConnectResult::Failed(ConnectError::PeerUnavailable)
+                        EndpointConnectResult::Failed(ConnectError::PingFailed { source: err })
                     }
                 }
             }
@@ -240,16 +239,15 @@ impl Client {
             connection_futures.push(async move {
                 if pub_key == our_id {
                     // Skip connecting to our own Id
-                    return (node_id, Err(ConnectError::PeerUnavailable));
+                    return (node_id, None, Err::<Connection, _>("skipped: own endpoint".to_string()));
                 }
 
                 let result = async {
                     let conn_result = endpoint
                         .connect(pub_key, ROSTRA_P2P_V0_ALPN)
-                        .await
-                        .context(ConnectionSnafu);
+                        .await;
                     trace!(target: LOG_TARGET, %node_id, err = %conn_result.as_ref().err().fmt_option(), "Iroh connect result");
-                    let conn = Connection::from(conn_result?);
+                    let conn = Connection::from(conn_result.context(ConnectionSnafu)?);
 
                     // Verify connection with ping
                     let ping_result = conn.ping(0).await;
@@ -258,17 +256,17 @@ impl Client {
                     Ok::<_, rostra_p2p::RpcError>(conn)
                 }
                 .await;
+                let err_str = result.as_ref().err().map(|e| e.fmt_compact().to_string());
                 (
                     node_id,
-                    result.map_err(|_| ConnectError::PeerUnavailable),
+                    err_str,
+                    result.map_err(|e| e.to_string()),
                 )
             });
         }
 
         // Try all connections in parallel, take first success
-        while let Some((node_id, result)) = connection_futures.next().await {
-            debug!(target: LOG_TARGET, %node_id, err = %result.as_ref().err().fmt_option(), "Connection result");
-
+        while let Some((node_id, err_detail, result)) = connection_futures.next().await {
             match result {
                 Ok(conn) => {
                     let now = Timestamp::now();
@@ -286,11 +284,18 @@ impl Client {
                     );
                     return Ok(conn);
                 }
-                Err(_err) => {
+                Err(_) => {
                     let now = Timestamp::now();
                     self.p2p_state
                         .update_node(node_id, |state| state.record_failure(now))
                         .await;
+                    debug!(
+                        target: LOG_TARGET,
+                        %id,
+                        %node_id,
+                        err = %err_detail.as_deref().unwrap_or("unknown"),
+                        "Failed to connect to known endpoint"
+                    );
                 }
             }
         }
@@ -331,7 +336,7 @@ impl Client {
                 }
                 Err(NodeInBackoffSnafu.build())
             }
-            EndpointConnectResult::Skipped => Err(PeerUnavailableSnafu.build()),
+            EndpointConnectResult::Skipped => Err(ConnectError::ResolvedToSelf),
         }
     }
 

@@ -17,13 +17,16 @@ use rostra_p2p::connection::{
 use rostra_p2p::util::ToShort as _;
 use rostra_util_error::{BoxedError, FmtCompact as _};
 use snafu::{Location, OptionExt as _, ResultExt as _, Snafu};
-use tokio::sync::watch;
+use tokio::sync::{Semaphore, watch};
 use tracing::{debug, info, instrument, trace};
 
 use crate::client::Client;
 use crate::{ClientHandle, ClientRefError, ClientRefSnafu};
 
 const LOG_TARGET: &str = "rostra::req_handler";
+
+/// Maximum number of concurrent RPC handlers per connection.
+const MAX_CONCURRENT_RPCS_PER_CONNECTION: usize = 32;
 
 #[derive(Debug, Snafu)]
 pub enum IncomingConnectionError {
@@ -112,7 +115,7 @@ impl RequestHandler {
     }
     pub async fn handle_incoming(self: Arc<Self>, incoming: Incoming) {
         let peer_addr = incoming.remote_address();
-        if let Err(err) = self.handle_incoming_try(incoming).await {
+        if let Err(err) = Arc::clone(&self).handle_incoming_try(incoming).await {
             match err {
                 // normal, mostly ignore
                 IncomingConnectionError::Connection { source: _, .. } => {
@@ -124,12 +127,17 @@ impl RequestHandler {
             }
         }
     }
-    pub async fn handle_incoming_try(&self, incoming: Incoming) -> IncomingConnectionResult<()> {
+    pub async fn handle_incoming_try(
+        self: &Arc<Self>,
+        incoming: Incoming,
+    ) -> IncomingConnectionResult<()> {
         let conn = incoming
             .accept()
             .context(ConnectionStreamSnafu)?
             .await
             .context(ConnectionSnafu)?;
+
+        let semaphore = Arc::new(Semaphore::new(MAX_CONCURRENT_RPCS_PER_CONNECTION));
 
         loop {
             let (send, mut recv) = conn.accept_bi().await.context(ConnectionStreamSnafu)?;
@@ -144,31 +152,43 @@ impl RequestHandler {
                 "Rpc request"
             );
 
-            match rpc_id {
-                RpcId::PING => {
-                    self.handle_ping_request(req_msg, send).await?;
+            let permit = semaphore
+                .clone()
+                .acquire_owned()
+                .await
+                .expect("semaphore never closed");
+
+            // Spawn each RPC handler as a separate task so that blocking
+            // RPCs (WAIT_HEAD_UPDATE, WAIT_FOLLOWERS_NEW_HEADS) don't
+            // prevent other RPCs on the same connection from being accepted.
+            let handler = self.clone();
+            tokio::spawn(async move {
+                let result = match rpc_id {
+                    RpcId::PING => handler.handle_ping_request(req_msg, send).await,
+                    RpcId::FEED_EVENT => handler.handle_feed_event(req_msg, send, recv).await,
+                    RpcId::GET_EVENT => handler.handle_get_event(req_msg, send, recv).await,
+                    RpcId::GET_EVENT_CONTENT => {
+                        handler.handle_get_event_content(req_msg, send, recv).await
+                    }
+                    RpcId::WAIT_HEAD_UPDATE => {
+                        handler.handle_wait_head_update(req_msg, send, recv).await
+                    }
+                    RpcId::GET_HEAD => handler.handle_get_head(req_msg, send, recv).await,
+                    RpcId::WAIT_FOLLOWERS_NEW_HEADS => {
+                        handler
+                            .handle_wait_followers_new_heads(req_msg, send, recv)
+                            .await
+                    }
+                    _ => {
+                        debug!(target: LOG_TARGET, %rpc_id, "Unknown RPC ID");
+                        return;
+                    }
+                };
+                drop(permit);
+                if let Err(err) = result {
+                    debug!(target: LOG_TARGET, err = %err.fmt_compact(), "RPC handler error");
                 }
-                RpcId::FEED_EVENT => {
-                    self.handle_feed_event(req_msg, send, recv).await?;
-                }
-                RpcId::GET_EVENT => {
-                    self.handle_get_event(req_msg, send, recv).await?;
-                }
-                RpcId::GET_EVENT_CONTENT => {
-                    self.handle_get_event_content(req_msg, send, recv).await?;
-                }
-                RpcId::WAIT_HEAD_UPDATE => {
-                    self.handle_wait_head_update(req_msg, send, recv).await?;
-                }
-                RpcId::GET_HEAD => {
-                    self.handle_get_head(req_msg, send, recv).await?;
-                }
-                RpcId::WAIT_FOLLOWERS_NEW_HEADS => {
-                    self.handle_wait_followers_new_heads(req_msg, send, recv)
-                        .await?;
-                }
-                _ => return UnknownRpcIdSnafu { id: rpc_id }.fail(),
-            }
+            });
         }
     }
 
