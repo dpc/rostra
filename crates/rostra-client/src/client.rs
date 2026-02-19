@@ -25,21 +25,18 @@ use rostra_p2p::RpcError;
 use rostra_p2p::connection::{Connection, FeedEventResponse};
 use rostra_p2p_api::ROSTRA_P2P_V0_ALPN;
 use rostra_util_error::{FmtCompact as _, WhateverResult};
-use rostra_util_fmt::AsFmtOption as _;
 use snafu::{Location, OptionExt as _, ResultExt as _, Snafu, ensure};
 use tokio::sync::{RwLock, broadcast, watch};
 use tokio::time::Instant;
 use tracing::{debug, info, trace, warn};
 
-use super::{RRECORD_HEAD_KEY, RRECORD_P2P_KEY, get_rrecord_typed};
 use crate::LOG_TARGET;
 use crate::error::{
     ActivateResult, ActivateSnafu, ConnectResult, IdResolveError, IdResolveResult,
-    IdSecretReadResult, InitIrohClientSnafu, InitPkarrClientSnafu, InitResult, InvalidIdSnafu,
-    IoSnafu, MissingTicketSnafu, ParsingSnafu, PkarrResolveSnafu, PostResult, RRecordSnafu,
-    SecretMismatchSnafu,
+    IdSecretReadResult, InitIrohClientSnafu, InitPkarrClientSnafu, InitResult, IoSnafu,
+    ParsingSnafu, PostResult, SecretMismatchSnafu,
 };
-use crate::id::{CompactTicket, IdPublishedData, IdResolvedData};
+use crate::id::{CompactTicket, IdResolvedData};
 use crate::task::head_merger::HeadMerger;
 use crate::task::missing_event_content_fetcher::MissingEventContentFetcher;
 use crate::task::missing_event_fetcher::MissingEventFetcher;
@@ -296,7 +293,7 @@ impl ClientRef<'_> {
     /// This is more efficient than `connect_uncached` when making repeated
     /// connections to the same peer.
     pub async fn connect_cached(&self, id: RostraId) -> ConnectResult<Connection> {
-        self.connection_cache.get_or_connect(self, id).await
+        self.networking.connect_cached(id).await
     }
 }
 
@@ -304,18 +301,10 @@ pub struct Client {
     /// Weak self-reference that can be given out to components
     pub(crate) handle: ClientHandle,
 
-    pub(crate) pkarr_client: Arc<pkarr::Client>,
-
     /// Our main identity (pkarr/ed25519_dalek keypair)
     pub(crate) id: RostraId,
 
     pub(crate) db: Arc<Database>,
-
-    /// Our iroh-net endpoint
-    ///
-    /// Each time new random-seed generated one, (optionally) published via
-    /// Pkarr under main `RostraId` identity.
-    pub(crate) endpoint: iroh::Endpoint,
 
     /// A watch-channel that can be used to notify some tasks manually to check
     /// for updates again
@@ -323,11 +312,8 @@ pub struct Client {
 
     active: AtomicBool,
 
-    /// In-memory P2P connection state for debugging
-    pub(crate) p2p_state: P2PState,
-
-    /// Shared connection cache for all tasks
-    connection_cache: crate::connection_cache::ConnectionCache,
+    /// Networking layer (endpoint, pkarr, p2p_state, connection cache)
+    pub(crate) networking: Arc<crate::net::ClientNetworking>,
 }
 
 #[bon::bon]
@@ -370,7 +356,7 @@ impl Client {
         };
         let (check_for_updates_tx, _) = watch::channel(());
 
-        let db = match db {
+        let db: Arc<Database> = match db {
             Some(db) => db,
             _ => {
                 debug!(target: LOG_TARGET, id = %id, "Creating temporary in-memory database");
@@ -379,16 +365,18 @@ impl Client {
         }
         .into();
         trace!(target: LOG_TARGET, id = %id, "Creating client");
-        let client = Arc::new_cyclic(|client| Self {
-            handle: client.clone().into(),
+        let networking = Arc::new(crate::net::ClientNetworking::new(
             endpoint,
             pkarr_client,
+            db.clone() as Arc<dyn crate::net::IdEndpointLookup>,
+        ));
+        let client = Arc::new_cyclic(|client| Self {
+            handle: client.clone().into(),
+            networking,
             db,
             id,
             check_for_updates_tx,
             active: AtomicBool::new(false),
-            p2p_state: P2PState::new(),
-            connection_cache: crate::connection_cache::ConnectionCache::new(),
         });
 
         trace!(target: LOG_TARGET, id = %id, "Starting client tasks");
@@ -431,7 +419,7 @@ impl Client {
 
         let db = &self.db;
 
-        let our_endpoint = IrohNodeId::from_bytes(*self.endpoint.id().as_bytes());
+        let our_endpoint = IrohNodeId::from_bytes(*self.networking.endpoint.id().as_bytes());
         let endpoints = db.get_id_endpoints(self.rostra_id()).await;
 
         if let Some((_existing_id, _existing_record)) = endpoints
@@ -457,7 +445,7 @@ impl Client {
         self.publish_event(
             id_secret,
             content_kind::NodeAnnouncement::Iroh {
-                addr: IrohNodeId::from_bytes(*self.endpoint.id().as_bytes()),
+                addr: IrohNodeId::from_bytes(*self.networking.endpoint.id().as_bytes()),
             },
         )
         .call()
@@ -505,7 +493,7 @@ impl Client {
     }
 
     pub(crate) fn start_request_handler(&self) {
-        tokio::spawn(RequestHandler::new(self, self.endpoint.clone()).run());
+        tokio::spawn(RequestHandler::new(self, self.networking.endpoint.clone()).run());
     }
 
     pub(crate) fn start_followee_head_checker(&self) {
@@ -578,7 +566,7 @@ impl Client {
             }
         }
 
-        Ok(sanitize_endpoint_addr(self.endpoint.addr()))
+        Ok(sanitize_endpoint_addr(self.networking.endpoint.addr()))
     }
 
     pub fn self_head_subscribe(&self) -> watch::Receiver<Option<ShortEventId>> {
@@ -630,56 +618,46 @@ impl Client {
 
     /// Access in-memory P2P connection state for debugging.
     pub fn p2p_state(&self) -> &P2PState {
-        &self.p2p_state
+        self.networking.p2p_state()
     }
 
     /// Access the shared connection cache.
     pub fn connection_cache(&self) -> &crate::connection_cache::ConnectionCache {
-        &self.connection_cache
+        self.networking.connection_cache()
+    }
+
+    /// Access the networking layer.
+    pub fn networking(&self) -> &Arc<crate::net::ClientNetworking> {
+        &self.networking
     }
 
     /// Returns our local Iroh node ID.
     pub fn local_iroh_id(&self) -> IrohNodeId {
-        IrohNodeId::from_bytes(*self.endpoint.id().as_bytes())
+        IrohNodeId::from_bytes(*self.networking.endpoint.id().as_bytes())
     }
 
     pub async fn resolve_id_data(&self, id: RostraId) -> IdResolveResult<IdResolvedData> {
-        let public_key = pkarr::PublicKey::try_from(id).context(InvalidIdSnafu)?;
-        let domain = public_key.to_string();
-        let packet = self
-            .pkarr_client
-            .resolve(&public_key)
-            .await
-            .context(PkarrResolveSnafu)?;
-
-        let timestamp = packet.timestamp();
-        let ticket = get_rrecord_typed(&packet, &domain, RRECORD_P2P_KEY).context(RRecordSnafu)?;
-        let head = get_rrecord_typed(&packet, &domain, RRECORD_HEAD_KEY).context(RRecordSnafu)?;
-
-        trace!(
-            target: LOG_TARGET,
-            %id,
-            ticket = %ticket.fmt_option(),
-            head = %head.fmt_option(),
-            "Resolved Id"
-        );
-
-        Ok(IdResolvedData {
-            published: IdPublishedData { ticket, head },
-            timestamp: timestamp.as_u64(),
-        })
+        self.networking.resolve_id_data(id).await
     }
 
     pub async fn resolve_id_ticket(&self, id: RostraId) -> IdResolveResult<CompactTicket> {
-        self.resolve_id_data(id)
-            .await?
-            .published
-            .ticket
-            .context(MissingTicketSnafu)
+        self.networking.resolve_id_ticket(id).await
+    }
+
+    pub async fn connect_uncached(&self, id: RostraId) -> ConnectResult<Connection> {
+        self.networking.connect_uncached(id).await
+    }
+
+    pub async fn connect_by_pkarr_resolution(&self, id: RostraId) -> ConnectResult<Connection> {
+        self.networking.connect_by_pkarr_resolution(id).await
+    }
+
+    pub async fn connect_ticket(&self, ticket: CompactTicket) -> ConnectResult<Connection> {
+        self.networking.connect_ticket(ticket).await
     }
 
     pub(crate) fn pkarr_client(&self) -> Arc<pkarr::Client> {
-        self.pkarr_client.clone()
+        self.networking.pkarr_client.clone()
     }
 
     pub(crate) async fn does_have_event(&self, _event_id: rostra_core::EventId) -> bool {

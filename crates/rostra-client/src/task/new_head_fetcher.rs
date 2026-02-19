@@ -10,6 +10,7 @@ use tracing::{debug, info, instrument, trace, warn};
 use crate::LOG_TARGET;
 use crate::client::Client;
 use crate::connection_cache::ConnectionCache;
+use crate::net::ClientNetworking;
 
 /// Fetches events when any ID gets a new head written to the database.
 ///
@@ -19,7 +20,7 @@ use crate::connection_cache::ConnectionCache;
 /// Only processes heads from IDs in our web of trust (self, followees,
 /// and extended followees).
 pub struct NewHeadFetcher {
-    client: crate::client::ClientHandle,
+    networking: Arc<ClientNetworking>,
     db: Arc<Database>,
     self_id: RostraId,
     new_heads_rx: broadcast::Receiver<(RostraId, ShortEventId)>,
@@ -31,7 +32,7 @@ impl NewHeadFetcher {
     pub fn new(client: &Client) -> Self {
         debug!(target: LOG_TARGET, "Starting new head fetcher");
         Self {
-            client: client.handle(),
+            networking: client.networking().clone(),
             db: client.db().clone(),
             self_id: client.rostra_id(),
             new_heads_rx: client.new_heads_subscribe(),
@@ -123,7 +124,7 @@ impl NewHeadFetcher {
         match crate::util::rpc::download_events_from_child(
             author,
             head,
-            &self.client,
+            &self.networking,
             &self.connections,
             &peers,
             &self.db,

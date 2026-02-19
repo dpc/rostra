@@ -9,8 +9,8 @@ use rostra_p2p::Connection;
 use tokio::sync::{Mutex, OnceCell};
 use tracing::{debug, info, trace};
 
-use crate::ClientRef;
 use crate::error::ConnectResult;
+use crate::net::ClientNetworking;
 
 const LOG_TARGET: &str = "rostra-client::connection-cache";
 
@@ -36,7 +36,7 @@ impl ConnectionCache {
 
     pub async fn get_or_connect(
         &self,
-        client: &ClientRef<'_>,
+        networking: &ClientNetworking,
         id: RostraId,
     ) -> ConnectResult<Connection> {
         let mut pool_lock = self.connections.lock().await;
@@ -60,7 +60,7 @@ impl ConnectionCache {
         let result = entry_arc
             .get_or_try_init(|| async {
                 trace!(target: LOG_TARGET, %id, "Creating new connection");
-                match client.connect_uncached(id).await {
+                match networking.connect_uncached(id).await {
                     Ok(conn) => {
                         info!(target: LOG_TARGET, %id, endpoint_id = %conn.remote_id().fmt_short(), "Connection successful");
                         Ok(conn)
@@ -81,7 +81,7 @@ impl ConnectionCache {
     /// Returns `Some(event)` from the first peer that has it, or `None`.
     pub async fn get_event_from_peers(
         &self,
-        client: &crate::client::ClientHandle,
+        networking: &ClientNetworking,
         peers: &[RostraId],
         author_id: RostraId,
         event_id: ShortEventId,
@@ -89,11 +89,9 @@ impl ConnectionCache {
         let result = futures_lite::StreamExt::find_map(
             &mut stream::iter(peers.iter().copied())
                 .map(|peer_id| {
-                    let client = client.clone();
                     let cache = self.clone();
                     async move {
-                        let client_ref = client.client_ref().ok()?;
-                        let conn = cache.get_or_connect(&client_ref, peer_id).await.ok()?;
+                        let conn = cache.get_or_connect(networking, peer_id).await.ok()?;
                         match conn.get_event(author_id, event_id).await {
                             Ok(Some(event)) => Some(event),
                             Ok(None) => {
@@ -138,18 +136,16 @@ impl ConnectionCache {
     /// Returns `Some(content)` from the first peer that has it, or `None`.
     pub async fn get_event_content_from_peers(
         &self,
-        client: &crate::client::ClientHandle,
+        networking: &ClientNetworking,
         peers: &[RostraId],
         event: VerifiedEvent,
     ) -> Option<VerifiedEventContent> {
         let result = futures_lite::StreamExt::find_map(
             &mut stream::iter(peers.iter().copied())
                 .map(|peer_id| {
-                    let client = client.clone();
                     let cache = self.clone();
                     async move {
-                        let client_ref = client.client_ref().ok()?;
-                        let conn = cache.get_or_connect(&client_ref, peer_id).await.ok()?;
+                        let conn = cache.get_or_connect(networking, peer_id).await.ok()?;
                         match conn.get_event_content(event).await {
                             Ok(Some(content)) => Some(content),
                             Ok(None) => {

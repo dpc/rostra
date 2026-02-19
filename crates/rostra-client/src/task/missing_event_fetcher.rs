@@ -1,3 +1,5 @@
+use std::sync::Arc;
+
 use rostra_core::ShortEventId;
 use rostra_core::event::{EventExt as _, SignedEventExt as _, VerifiedEvent};
 use rostra_core::id::{RostraId, ToShort as _};
@@ -9,11 +11,13 @@ use tracing::{debug, instrument, trace, warn};
 use crate::LOG_TARGET;
 use crate::client::Client;
 use crate::connection_cache::ConnectionCache;
+use crate::net::ClientNetworking;
 
 #[derive(Clone)]
 pub struct MissingEventFetcher {
     // Notably, we want to shutdown when db disconnects, so let's not keep references to it here
     client: crate::client::ClientHandle,
+    networking: Arc<ClientNetworking>,
     self_id: RostraId,
     ids_with_missing_events_rx: dedup_chan::Receiver<RostraId>,
     connections: ConnectionCache,
@@ -24,6 +28,7 @@ impl MissingEventFetcher {
         debug!(target: LOG_TARGET, "Starting missing event fetcher" );
         Self {
             client: client.handle(),
+            networking: client.networking().clone(),
             self_id: client.rostra_id(),
             ids_with_missing_events_rx: client.ids_with_missing_events_subscribe(100),
             connections: client.connection_cache().clone(),
@@ -74,16 +79,19 @@ impl MissingEventFetcher {
             let connections = &self.connections;
 
             for follower_id in followers.iter().chain([self.self_id].iter()) {
-                let Ok(client) = self.client.client_ref().boxed() else {
+                if self.client.app_ref_opt().is_none() {
                     break;
-                };
+                }
                 debug!(
                     target:  LOG_TARGET,
                     author_id = %author_id,
                     follower_id = %follower_id,
                     "Looking for a missing events from"
                 );
-                let Ok(conn) = connections.get_or_connect(&client, *follower_id).await else {
+                let Ok(conn) = connections
+                    .get_or_connect(&self.networking, *follower_id)
+                    .await
+                else {
                     debug!(
                         target:  LOG_TARGET,
                         author_id = %author_id,

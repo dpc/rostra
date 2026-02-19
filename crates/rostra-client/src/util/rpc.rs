@@ -15,9 +15,10 @@ pub struct ContentNotFoundError;
 
 use crate::LOG_TARGET;
 use crate::connection_cache::ConnectionCache;
+use crate::net::ClientNetworking;
 
 pub async fn get_event_content_from_followers(
-    client: crate::client::ClientHandle,
+    networking: &ClientNetworking,
     self_id: RostraId,
     author_id: RostraId,
     event_id: ShortEventId,
@@ -40,7 +41,7 @@ pub async fn get_event_content_from_followers(
     let event = VerifiedEvent::assume_verified_from_signed(event_record.signed);
 
     let content = connections_cache
-        .get_event_content_from_peers(&client, &peers, event)
+        .get_event_content_from_peers(networking, &peers, event)
         .await
         .context(ContentNotFoundSnafu)?;
 
@@ -65,7 +66,7 @@ pub async fn get_event_content_from_followers(
 pub async fn download_events_from_child(
     rostra_id: RostraId,
     head: ShortEventId,
-    client: &crate::client::ClientHandle,
+    networking: &ClientNetworking,
     connections: &ConnectionCache,
     peers: &[RostraId],
     storage: &rostra_client_db::Database,
@@ -127,7 +128,7 @@ pub async fn download_events_from_child(
                 );
 
                 if let Some(content) = connections
-                    .get_event_content_from_peers(client, peers, event)
+                    .get_event_content_from_peers(networking, peers, event)
                     .await
                 {
                     storage.process_event_content(&content).await;
@@ -161,7 +162,7 @@ pub async fn download_events_from_child(
                 );
 
                 let Some(new_event) = connections
-                    .get_event_from_peers(client, peers, rostra_id, q_item_event_id)
+                    .get_event_from_peers(networking, peers, rostra_id, q_item_event_id)
                     .await
                 else {
                     debug!(

@@ -15,6 +15,7 @@ use tracing::{debug, instrument, trace, warn};
 
 use crate::client::{Client, INITIAL_BACKOFF_DURATION, MAX_BACKOFF_DURATION};
 use crate::connection_cache::ConnectionCache;
+use crate::net::ClientNetworking;
 
 const LOG_TARGET: &str = "rostra::poll_follower_heads";
 
@@ -79,6 +80,7 @@ type SharedBackoffState = Arc<RwLock<HashMap<RostraId, PeerBackoffState>>>;
 /// the event is verified and added to the database.
 pub struct PollFollowerHeadUpdates {
     client: crate::client::ClientHandle,
+    networking: Arc<ClientNetworking>,
     db: Arc<Database>,
     self_id: RostraId,
     self_followers_rx: watch::Receiver<Arc<HashMap<RostraId, IdsFollowersRecord>>>,
@@ -91,6 +93,7 @@ impl PollFollowerHeadUpdates {
         debug!(target: LOG_TARGET, "Starting poll follower head updates task");
         Self {
             client: client.handle(),
+            networking: client.networking().clone(),
             db: client.db().clone(),
             self_id: client.rostra_id(),
             self_followers_rx: client.self_followers_subscribe(),
@@ -134,7 +137,7 @@ impl PollFollowerHeadUpdates {
             // Spawn polling tasks for peers that don't have active connections
             let peers_to_poll: Vec<_> = active_peers.iter().copied().collect();
             for peer_id in peers_to_poll {
-                let client = self.client.clone();
+                let networking = self.networking.clone();
                 let connections = self.connections.clone();
                 let db = self.db.clone();
                 let self_id = self.self_id;
@@ -143,7 +146,7 @@ impl PollFollowerHeadUpdates {
 
                 poll_futures.push(async move {
                     Self::poll_peer_for_heads(
-                        client,
+                        networking,
                         connections,
                         db,
                         self_id,
@@ -186,7 +189,7 @@ impl PollFollowerHeadUpdates {
     }
 
     async fn poll_peer_for_heads(
-        client: crate::client::ClientHandle,
+        networking: Arc<ClientNetworking>,
         connections: ConnectionCache,
         db: Arc<Database>,
         self_id: RostraId,
@@ -216,11 +219,7 @@ impl PollFollowerHeadUpdates {
                 }
             }
 
-            let Ok(client_ref) = client.client_ref() else {
-                break;
-            };
-
-            let conn = match connections.get_or_connect(&client_ref, peer_id).await {
+            let conn = match connections.get_or_connect(&networking, peer_id).await {
                 Ok(conn) => conn,
                 Err(err) => {
                     debug!(

@@ -13,12 +13,13 @@ use tracing::{debug, instrument, trace, warn};
 /// Arc-wrapped followers map for cheap cloning
 type FollowersMap = Arc<HashMap<RostraId, IdsFollowersRecord>>;
 
-use crate::ClientRef;
 use crate::client::Client;
+
 const LOG_TARGET: &str = "rostra::head_broadcaster";
 
 pub struct HeadUpdateBroadcaster {
     client: crate::client::ClientHandle,
+    networking: Arc<crate::net::ClientNetworking>,
     db: Arc<Database>,
     self_id: RostraId,
     self_followers_rx: watch::Receiver<FollowersMap>,
@@ -30,6 +31,7 @@ impl HeadUpdateBroadcaster {
         debug!(target: LOG_TARGET, "Starting followee head broadcasting task" );
         Self {
             client: client.handle(),
+            networking: client.networking().clone(),
             db: client.db().to_owned(),
             self_id: client.rostra_id(),
 
@@ -82,14 +84,13 @@ impl HeadUpdateBroadcaster {
 
             // send to ourselves first, in case we have redundant nodes
             for id in [self.self_id].into_iter().chain(followers.keys().copied()) {
-                let Some(client) = self.client.app_ref_opt() else {
+                if self.client.app_ref_opt().is_none() {
                     debug!(target: LOG_TARGET, "Client gone, quitting");
-
                     break;
                 };
 
                 if let Err(err) = self
-                    .broadcast_event(&client, id, &event.signed, &event_content)
+                    .broadcast_event(id, &event.signed, &event_content)
                     .await
                 {
                     debug!(
@@ -105,12 +106,12 @@ impl HeadUpdateBroadcaster {
 
     async fn broadcast_event(
         &self,
-        client: &ClientRef<'_>,
         id: RostraId,
         signed_event: &SignedEvent,
         event_content: &EventContentRaw,
     ) -> WhateverResult<()> {
-        let conn = client
+        let conn = self
+            .networking
             .connect_cached(id)
             .await
             .whatever_context("Couldn't connect")?;

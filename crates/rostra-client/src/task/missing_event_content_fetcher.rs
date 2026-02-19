@@ -10,11 +10,13 @@ use tracing::{debug, instrument, trace};
 use crate::LOG_TARGET;
 use crate::client::Client;
 use crate::connection_cache::ConnectionCache;
+use crate::net::ClientNetworking;
 
 #[derive(Clone)]
 pub struct MissingEventContentFetcher {
     // Notably, we want to shutdown when db disconnects, so let's not keep references to it here
     client: crate::client::ClientHandle,
+    networking: std::sync::Arc<ClientNetworking>,
     self_id: RostraId,
     connections: ConnectionCache,
 }
@@ -24,6 +26,7 @@ impl MissingEventContentFetcher {
         debug!(target: LOG_TARGET, "Starting missing event content fetcher" );
         Self {
             client: client.handle(),
+            networking: client.networking().clone(),
             self_id: client.rostra_id(),
             connections: client.connection_cache().clone(),
         }
@@ -73,7 +76,7 @@ impl MissingEventContentFetcher {
                     match crate::util::rpc::download_events_from_child(
                         author_id,
                         event_id,
-                        &self.client,
+                        &self.networking,
                         connections,
                         &peers,
                         &db,

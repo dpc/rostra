@@ -1,7 +1,10 @@
 use std::collections::HashSet;
+use std::sync::Arc;
 
+use futures::future::BoxFuture;
 use futures::stream::{FuturesUnordered, StreamExt as _};
 use iroh_base::EndpointAddr;
+use rostra_client_db::Database;
 use rostra_core::Timestamp;
 use rostra_core::event::IrohNodeId;
 use rostra_core::id::{RostraId, ToShort as _};
@@ -10,17 +13,40 @@ use rostra_p2p::connection::Connection;
 use rostra_p2p_api::ROSTRA_P2P_V0_ALPN;
 use rostra_util_error::FmtCompact as _;
 use rostra_util_fmt::AsFmtOption as _;
-use snafu::ResultExt as _;
+use snafu::{OptionExt as _, ResultExt as _};
 use tracing::{debug, trace, warn};
 
-use crate::client::{Client, NodeSource};
+use super::{RRECORD_HEAD_KEY, RRECORD_P2P_KEY, get_rrecord_typed};
+use crate::client::{NodeSource, P2PState};
+use crate::connection_cache::ConnectionCache;
 use crate::error::{
-    ConnectError, ConnectIrohSnafu, ConnectResult, NodeInBackoffSnafu, ResolveSnafu,
+    ConnectError, ConnectIrohSnafu, ConnectResult, IdResolveResult, InvalidIdSnafu,
+    MissingTicketSnafu, NodeInBackoffSnafu, PkarrResolveSnafu, RRecordSnafu, ResolveSnafu,
 };
 // ConnectIrohSnafu is used for .context() in connect_ticket
-use crate::id::CompactTicket;
+use crate::id::{CompactTicket, IdPublishedData, IdResolvedData};
 
 const LOG_TARGET: &str = "rostra::client-net";
+
+/// Trait for looking up known iroh node IDs for a given RostraId.
+///
+/// This abstraction allows `ClientNetworking` to operate without a direct
+/// database dependency, making it easier to test networking in isolation.
+pub trait IdEndpointLookup: Send + Sync {
+    fn get_node_ids(&self, id: RostraId) -> BoxFuture<'_, HashSet<IrohNodeId>>;
+}
+
+impl IdEndpointLookup for Database {
+    fn get_node_ids(&self, id: RostraId) -> BoxFuture<'_, HashSet<IrohNodeId>> {
+        Box::pin(async move {
+            self.get_id_endpoints(id)
+                .await
+                .into_keys()
+                .map(|(_ts, node_id)| node_id)
+                .collect()
+        })
+    }
+}
 
 /// Result of attempting to connect to an endpoint.
 #[derive(Debug)]
@@ -35,7 +61,53 @@ pub enum EndpointConnectResult {
     Skipped,
 }
 
-impl Client {
+/// Networking layer for the Rostra client.
+///
+/// Handles all peer-to-peer connection logic including:
+/// - Direct endpoint connections with backoff
+/// - Parallel endpoint probing for a given RostraId
+/// - Pkarr-based endpoint resolution
+/// - Connection caching
+pub struct ClientNetworking {
+    pub(crate) endpoint: iroh::Endpoint,
+    pub(crate) pkarr_client: Arc<pkarr::Client>,
+    pub(crate) p2p_state: P2PState,
+    pub(crate) connection_cache: ConnectionCache,
+    id_endpoint_lookup: Arc<dyn IdEndpointLookup>,
+}
+
+impl ClientNetworking {
+    pub fn new(
+        endpoint: iroh::Endpoint,
+        pkarr_client: Arc<pkarr::Client>,
+        id_endpoint_lookup: Arc<dyn IdEndpointLookup>,
+    ) -> Self {
+        Self {
+            endpoint,
+            pkarr_client,
+            p2p_state: P2PState::new(),
+            connection_cache: ConnectionCache::new(),
+            id_endpoint_lookup,
+        }
+    }
+
+    /// Access in-memory P2P connection state for debugging.
+    pub fn p2p_state(&self) -> &P2PState {
+        &self.p2p_state
+    }
+
+    /// Access the shared connection cache.
+    pub fn connection_cache(&self) -> &ConnectionCache {
+        &self.connection_cache
+    }
+
+    /// Connect to a peer using the shared connection cache.
+    ///
+    /// Returns a cached connection if available, otherwise creates a new one.
+    pub async fn connect_cached(&self, id: RostraId) -> ConnectResult<Connection> {
+        self.connection_cache.get_or_connect(self, id).await
+    }
+
     /// Connect to a specific iroh endpoint with backoff handling.
     ///
     /// This is the core connection function that:
@@ -190,24 +262,19 @@ impl Client {
             .update(id, |state| state.last_attempt = Some(now))
             .await;
 
-        let endpoints = self.db.get_id_endpoints(id).await;
+        let node_ids = self.id_endpoint_lookup.get_node_ids(id).await;
 
         debug!(
             target: LOG_TARGET,
             %id,
-            num_endpoints = endpoints.len(),
+            num_endpoints = node_ids.len(),
             "Connecting to peer, trying known endpoints"
         );
 
         // Try all known endpoints in parallel
         let mut connection_futures = FuturesUnordered::new();
 
-        let node_ids: HashSet<_> = endpoints
-            .into_keys()
-            .map(|(_ts, node_id)| node_id)
-            .collect();
-
-        for node_id in node_ids.clone() {
+        for node_id in node_ids.iter().copied() {
             let Ok(pub_key) = iroh::PublicKey::from_bytes(&node_id.to_bytes()) else {
                 debug!(target: LOG_TARGET, %id, "Invalid iroh id for rostra id found");
                 continue;
@@ -239,13 +306,15 @@ impl Client {
             connection_futures.push(async move {
                 if pub_key == our_id {
                     // Skip connecting to our own Id
-                    return (node_id, None, Err::<Connection, _>("skipped: own endpoint".to_string()));
+                    return (
+                        node_id,
+                        None,
+                        Err::<Connection, _>("skipped: own endpoint".to_string()),
+                    );
                 }
 
                 let result = async {
-                    let conn_result = endpoint
-                        .connect(pub_key, ROSTRA_P2P_V0_ALPN)
-                        .await;
+                    let conn_result = endpoint.connect(pub_key, ROSTRA_P2P_V0_ALPN).await;
                     trace!(target: LOG_TARGET, %node_id, err = %conn_result.as_ref().err().fmt_option(), "Iroh connect result");
                     let conn = Connection::from(conn_result.context(ConnectionSnafu)?);
 
@@ -257,11 +326,7 @@ impl Client {
                 }
                 .await;
                 let err_str = result.as_ref().err().map(|e| e.fmt_compact().to_string());
-                (
-                    node_id,
-                    err_str,
-                    result.map_err(|e| e.to_string()),
-                )
+                (node_id, err_str, result.map_err(|e| e.to_string()))
             });
         }
 
@@ -349,5 +414,40 @@ impl Client {
             .await
             .context(ConnectIrohSnafu)?
             .into())
+    }
+
+    pub async fn resolve_id_data(&self, id: RostraId) -> IdResolveResult<IdResolvedData> {
+        let public_key = pkarr::PublicKey::try_from(id).context(InvalidIdSnafu)?;
+        let domain = public_key.to_string();
+        let packet = self
+            .pkarr_client
+            .resolve(&public_key)
+            .await
+            .context(PkarrResolveSnafu)?;
+
+        let timestamp = packet.timestamp();
+        let ticket = get_rrecord_typed(&packet, &domain, RRECORD_P2P_KEY).context(RRecordSnafu)?;
+        let head = get_rrecord_typed(&packet, &domain, RRECORD_HEAD_KEY).context(RRecordSnafu)?;
+
+        trace!(
+            target: LOG_TARGET,
+            %id,
+            ticket = %ticket.fmt_option(),
+            head = %head.fmt_option(),
+            "Resolved Id"
+        );
+
+        Ok(IdResolvedData {
+            published: IdPublishedData { ticket, head },
+            timestamp: timestamp.as_u64(),
+        })
+    }
+
+    pub async fn resolve_id_ticket(&self, id: RostraId) -> IdResolveResult<CompactTicket> {
+        self.resolve_id_data(id)
+            .await?
+            .published
+            .ticket
+            .context(MissingTicketSnafu)
     }
 }

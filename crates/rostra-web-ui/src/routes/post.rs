@@ -189,7 +189,7 @@ pub async fn fetch_missing_post(
     let content_id = post_content_html_id(post_thread_id, event_id);
 
     if get_event_content_from_followers(
-        client.handle(),
+        client.networking(),
         client.rostra_id(),
         author_id,
         event_id,

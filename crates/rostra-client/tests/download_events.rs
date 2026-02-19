@@ -124,7 +124,7 @@ async fn test_download_events_from_child() -> BoxedErrorResult<()> {
     let downloaded = rostra_client::util::rpc::download_events_from_child(
         id_a,
         head_id,
-        &client_b.handle(),
+        client_b.networking(),
         &connections,
         &peers,
         db_b,

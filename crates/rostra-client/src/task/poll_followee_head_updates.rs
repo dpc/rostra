@@ -13,6 +13,7 @@ use tracing::{debug, instrument, trace, warn};
 
 use crate::client::{Client, INITIAL_BACKOFF_DURATION, MAX_BACKOFF_DURATION};
 use crate::connection_cache::ConnectionCache;
+use crate::net::ClientNetworking;
 
 const LOG_TARGET: &str = "rostra::poll_followee_heads";
 
@@ -69,6 +70,7 @@ type SharedBackoffState = Arc<RwLock<HashMap<RostraId, PeerBackoffState>>>;
 /// This gives fast catch-up when reconnecting after being offline.
 pub struct PollFolloweeHeadUpdates {
     client: crate::client::ClientHandle,
+    networking: Arc<ClientNetworking>,
     db: Arc<Database>,
     self_id: RostraId,
     self_followees_rx: watch::Receiver<Arc<HashMap<RostraId, IdsFolloweesRecord>>>,
@@ -80,6 +82,7 @@ impl PollFolloweeHeadUpdates {
         debug!(target: LOG_TARGET, "Starting poll followee head updates task");
         Self {
             client: client.handle(),
+            networking: client.networking().clone(),
             db: client.db().clone(),
             self_id: client.rostra_id(),
             self_followees_rx: client.self_followees_subscribe(),
@@ -117,13 +120,13 @@ impl PollFolloweeHeadUpdates {
             // Spawn polling tasks for peers that need them
             let peers_to_poll: Vec<_> = active_peers.iter().copied().collect();
             for peer_id in peers_to_poll {
-                let client = self.client.clone();
+                let networking = self.networking.clone();
                 let connections = self.connections.clone();
                 let db = self.db.clone();
                 let backoff = backoff_state.clone();
 
                 poll_futures.push(async move {
-                    Self::poll_followee(client, connections, db, peer_id, backoff).await;
+                    Self::poll_followee(networking, connections, db, peer_id, backoff).await;
                     peer_id
                 });
             }
@@ -153,7 +156,7 @@ impl PollFolloweeHeadUpdates {
     }
 
     async fn poll_followee(
-        client: crate::client::ClientHandle,
+        networking: Arc<ClientNetworking>,
         connections: ConnectionCache,
         db: Arc<Database>,
         followee_id: RostraId,
@@ -180,11 +183,7 @@ impl PollFolloweeHeadUpdates {
                 }
             }
 
-            let Ok(client_ref) = client.client_ref() else {
-                break;
-            };
-
-            let conn = match connections.get_or_connect(&client_ref, followee_id).await {
+            let conn = match connections.get_or_connect(&networking, followee_id).await {
                 Ok(conn) => conn,
                 Err(err) => {
                     debug!(

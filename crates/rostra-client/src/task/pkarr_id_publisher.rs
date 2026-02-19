@@ -187,11 +187,8 @@ impl PkarrIdPublisher {
     }
 
     async fn connect_self(&self) -> BoxedErrorResult<()> {
-        let conn = self
-            .client
-            .client_ref()?
-            .connect_by_pkarr_resolution(self.self_id())
-            .await?;
+        let client = self.client.client_ref()?;
+        let conn = client.connect_by_pkarr_resolution(self.self_id()).await?;
 
         conn.ping(3).await?;
 

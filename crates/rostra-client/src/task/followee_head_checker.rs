@@ -11,9 +11,10 @@ use snafu::ResultExt as _;
 use tokio::sync::{Mutex, watch};
 use tracing::{debug, info, instrument, trace};
 
-use crate::ClientRef;
 use crate::client::Client;
 use crate::connection_cache::ConnectionCache;
+use crate::net::ClientNetworking;
+
 const LOG_TARGET: &str = "rostra::head_checker";
 
 /// Shared follower cache for concurrent head checking
@@ -21,6 +22,7 @@ type SharedFollowerCache = Arc<Mutex<BTreeMap<RostraId, Vec<RostraId>>>>;
 
 pub struct FolloweeHeadChecker {
     client: crate::client::ClientHandle,
+    networking: Arc<ClientNetworking>,
     db: Arc<Database>,
     self_id: RostraId,
     wot_updated: watch::Receiver<Arc<WotData>>,
@@ -33,6 +35,7 @@ impl FolloweeHeadChecker {
         debug!(target: LOG_TARGET, "Starting followee head checking task" );
         Self {
             client: client.handle(),
+            networking: client.networking().clone(),
             db: client.db().to_owned(),
             self_id: client.rostra_id(),
             wot_updated: client.self_wot_subscribe(),
@@ -79,9 +82,8 @@ impl FolloweeHeadChecker {
             let wot = wot_updated.borrow().clone();
 
             for id in [self.self_id].into_iter().chain(wot.iter_all()) {
-                let Some(client) = self.client.app_ref_opt() else {
+                if self.client.app_ref_opt().is_none() {
                     debug!(target: LOG_TARGET, "Client gone, quitting");
-
                     break;
                 };
 
@@ -91,7 +93,7 @@ impl FolloweeHeadChecker {
 
                 tokio::join!(
                     async {
-                        let res = self.check_for_new_head_pkarr(&client, id).await;
+                        let res = self.check_for_new_head_pkarr(id).await;
                         trace!(target: LOG_TARGET, %id, ?res, "pkarr check finished");
                         self.process_head_check_result(
                             "pkarr",
@@ -103,7 +105,7 @@ impl FolloweeHeadChecker {
                         .await;
                     },
                     async {
-                        let res = self.check_for_new_head_iroh(&client, id, connections).await;
+                        let res = self.check_for_new_head_iroh(id, connections).await;
                         trace!(target: LOG_TARGET, %id, ?res, "iroh check finished");
                         self.process_head_check_result(
                             "iroh",
@@ -150,17 +152,16 @@ impl FolloweeHeadChecker {
 
     async fn check_for_new_head_iroh(
         &self,
-        client: &ClientRef<'_>,
         id: RostraId,
         connections: &ConnectionCache,
     ) -> BoxedErrorResult<Option<ShortEventId>> {
-        let Ok(conn) = connections.get_or_connect(client, id).await else {
+        let Ok(conn) = connections.get_or_connect(&self.networking, id).await else {
             return Ok(None);
         };
 
         let head = conn.get_head(id).await.boxed()?;
         let now = Timestamp::now();
-        client
+        self.networking
             .p2p_state()
             .update(id, |state| {
                 state.last_head_check = Some(now);
@@ -181,13 +182,12 @@ impl FolloweeHeadChecker {
 
     async fn check_for_new_head_pkarr(
         &self,
-        client: &ClientRef<'_>,
         id: RostraId,
     ) -> BoxedErrorResult<Option<ShortEventId>> {
-        let data = client.resolve_id_data(id).await.boxed()?;
+        let data = self.networking.resolve_id_data(id).await.boxed()?;
 
         let now = Timestamp::now();
-        client
+        self.networking
             .p2p_state()
             .update(id, |state| {
                 state.last_pkarr_resolve = Some(now);
@@ -232,15 +232,13 @@ impl FolloweeHeadChecker {
             .chain([rostra_id, self.self_id])
             .collect();
 
-        let client_ref = self.client.client_ref().boxed()?;
-
         match crate::util::rpc::download_events_from_child(
             rostra_id,
             head,
-            &self.client,
+            &self.networking,
             connections,
             &peers,
-            client_ref.db(),
+            &self.db,
         )
         .await
         {
