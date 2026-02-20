@@ -1,5 +1,5 @@
 ---
-title: Rostra - we could have a decent social network
+title: Rostra - we can have a nice social network
 sub_title: Pleeeeese?
 author: dpc
 ---
@@ -162,3 +162,15 @@ Rostra: WebUI
   * Notifications, Mentions
   * Shoutbox
   * RSS feeds
+
+<!-- end_slide -->
+
+
+The End
+====
+
+Thanks you for your time!
+
+You can easily try out Rostra using [Rostra's public demo instance](https://rostra.me).
+
+Please share your feedback on [Rostra's Github Discussions page](https://github.com/dpc/rostra/discussions), or [dpc's #support Matrix channel](https://matrix.to/#/#support:dpc.pw).
