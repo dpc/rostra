@@ -15,11 +15,24 @@
       this._initEmojiDb();
     },
 
-    _initEmojiDb() {
+    async _initEmojiDb() {
       if (window.EmojiDatabase) {
-        this.emojiDatabase = new window.EmojiDatabase({
-          dataSource: "/assets/libs/emoji-picker-element/data.json",
-        });
+        try {
+          this.emojiDatabase = new window.EmojiDatabase({
+            dataSource: "/assets/libs/emoji-picker-element/data.json",
+          });
+          // Wait for the database to be ready (fetches data.json)
+          await this.emojiDatabase.ready();
+          // The library fires a fire-and-forget checkForUpdates promise
+          // (_lazyUpdate) that can reject on network errors. Swallow it.
+          if (this.emojiDatabase._lazyUpdate) {
+            this.emojiDatabase._lazyUpdate.catch(() => {});
+          }
+        } catch (e) {
+          // Network error during page load — retry shortly
+          this.emojiDatabase = null;
+          setTimeout(() => this._initEmojiDb(), 1000);
+        }
       } else {
         // Module hasn't loaded yet, retry shortly
         setTimeout(() => this._initEmojiDb(), 100);

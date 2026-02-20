@@ -84,7 +84,6 @@ impl UiState {
             body ."o-body"
                 x-data="notifications"
                 "@ajax:error.window"=r#"
-                    console.log('AJAX error event:', $event.detail);
                     const xhr = $event.detail.xhr || $event.detail;
                     const status = xhr?.status;
                     let message;

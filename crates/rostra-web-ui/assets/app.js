@@ -152,22 +152,12 @@ document.addEventListener("DOMContentLoaded", () => {
 // Window event listeners
 // =============================================================================
 
-// Catch unhandled promise rejections (network errors)
+// Suppress unhandled promise rejections from TypeErrors — these are typically
+// transient (e.g. emoji-picker background updates, clicking during page load)
+// and not actionable for the user. Actual AJAX errors are handled separately
+// by the @ajax:error handler.
 window.addEventListener("unhandledrejection", (event) => {
-  console.log("Unhandled rejection:", event);
-  if (
-    event.reason instanceof TypeError &&
-    (event.reason.message.includes("NetworkError") ||
-      event.reason.message.includes("fetch"))
-  ) {
-    window.dispatchEvent(
-      new CustomEvent("notify", {
-        detail: {
-          type: "error",
-          message: "\u26a0 Network Error - Unable to complete request",
-        },
-      }),
-    );
+  if (event.reason instanceof TypeError) {
     event.preventDefault();
   }
 });
