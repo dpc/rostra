@@ -37,9 +37,30 @@ pub async fn get_event_content_from_followers(
 
     let peers: Vec<RostraId> = followers.into_iter().chain([author_id, self_id]).collect();
 
-    let event_record = db.get_event(event_id).await.context(ContentNotFoundSnafu)?;
+    debug!(
+        target: LOG_TARGET,
+        author = %author_id.to_short(),
+        %event_id,
+        peer_count = peers.len(),
+        "Fetching event content from followers"
+    );
 
-    let event = VerifiedEvent::assume_verified_from_signed(event_record.signed);
+    let event = if let Some(event_record) = db.get_event(event_id).await {
+        VerifiedEvent::assume_verified_from_signed(event_record.signed)
+    } else {
+        debug!(
+            target: LOG_TARGET,
+            author = %author_id.to_short(),
+            %event_id,
+            "Event not in DB, fetching from peers first"
+        );
+        let event = connections_cache
+            .get_event_from_peers(networking, &peers, author_id, event_id)
+            .await
+            .context(ContentNotFoundSnafu)?;
+        db.process_event(&event).await;
+        event
+    };
 
     let content = connections_cache
         .get_event_content_from_peers(networking, &peers, event)

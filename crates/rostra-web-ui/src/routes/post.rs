@@ -12,6 +12,7 @@ use rostra_core::id::{RostraId, ToShort as _};
 use rostra_core::{ExternalEventId, ShortEventId, Timestamp};
 use serde::Deserialize;
 use tower_cookies::Cookies;
+use tracing::debug;
 
 use super::timeline::TimelineMode;
 use super::unlock::session::{RoMode, UserSession};
@@ -188,7 +189,7 @@ pub async fn fetch_missing_post(
 
     let content_id = post_content_html_id(post_thread_id, event_id);
 
-    if get_event_content_from_followers(
+    if let Err(err) = get_event_content_from_followers(
         client.networking(),
         client.rostra_id(),
         author_id,
@@ -198,8 +199,14 @@ pub async fn fetch_missing_post(
         client.db(),
     )
     .await
-    .is_ok()
     {
+        debug!(
+            author = %author_id.to_short(),
+            %event_id,
+            %err,
+            "Failed to fetch missing post content"
+        );
+    } else {
         // Post was fetched successfully, render the updated content
         let db = client.db();
         if let Some(post_record) = db.get_social_post(event_id).await {
