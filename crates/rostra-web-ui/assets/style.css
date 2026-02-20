@@ -540,6 +540,26 @@ img.u-userImage[loading="lazy"][src][width][height] {
   border-bottom: 1px solid var(--color-timeline-item-border);
 }
 
+.o-mainBarTimeline__rest {
+  display: block;
+  text-align: center;
+  padding: 0.75rem;
+  color: var(--color-link);
+  background-color: var(--color-tab-inactive-bg);
+  border-top: 1px solid var(--color-timeline-item-border);
+  font-size: 0.9rem;
+}
+
+.o-mainBarTimeline__rest:hover {
+  background-color: var(--color-post-highlight-bg);
+}
+
+.o-mainBarTimeline__rest.-empty {
+  padding: 0.25rem;
+  border-top: none;
+  background-color: transparent;
+}
+
 .o-mainBar__item {
   padding: 10pt;
   border-bottom: 1px solid gray;
