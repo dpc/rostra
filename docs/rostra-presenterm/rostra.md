@@ -156,6 +156,7 @@ Rostra: WebUI
  * Hosted instance: public or private
 * Features:
   * Social Post
+  * Djot (Markdown) formatting
   * Native or External Media (videos & large attachements!)
   * Emojis, LaTeX Math, Syntax Highlightning
   * Notifications, Mentions
