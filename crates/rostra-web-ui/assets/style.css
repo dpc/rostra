@@ -1320,6 +1320,14 @@ emoji-picker {
   box-shadow: 0 4px 8px rgba(0, 0, 0, 0.2);
 }
 
+.m-nojs-textarea {
+  width: 100%;
+  box-sizing: border-box;
+  margin-bottom: 0.5rem;
+  resize: vertical;
+  height: auto;
+}
+
 .o-previewDialog__post {
   margin-bottom: 20px;
   border: 1px solid var(--color-timeline-item-border);

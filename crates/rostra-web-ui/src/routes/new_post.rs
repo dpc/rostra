@@ -250,23 +250,15 @@ pub async fn get_post_preview_dialog(
                 div id="post-preview-dialog" ."o-previewDialog" {}
             }));
         }
-        // No-JS: redirect back would be ideal, but just show an empty page
-        let navbar = state
-            .timeline_common_navbar()
-            .session(&session)
-            .call()
-            .await?;
+        // No-JS: show empty page with back link
         let back_url = redirect_to.as_deref().unwrap_or("/");
-        let page_layout = state.render_page_layout(
-            navbar,
-            html! {
-                p { "Nothing to preview." }
-                a href=(back_url) { "Go back" }
-            },
-        );
+        let body = html! {
+            p style="padding: 0.75rem;" { "Nothing to preview." }
+            a href=(back_url) style="padding: 0.75rem;" { "Go back" }
+        };
         return Ok(Maud(
             state
-                .render_html_page("Post Preview", page_layout, None)
+                .render_nojs_full_page(&session, "Post Preview", body)
                 .await?,
         ));
     }
@@ -355,32 +347,25 @@ pub async fn get_post_preview_dialog(
     }
 
     // No-JS path: render full page with preview and submit form
-    let navbar = state
-        .timeline_common_navbar()
-        .session(&session)
-        .call()
-        .await?;
+    let body = html! {
+        div ."o-mainBarTimeline__item" {
+            (preview_content)
+        }
+        div ."o-mainBarTimeline__item" {
+            form action="/post" method="post" {
+                input type="hidden" name="content" value=(form.content) {}
+                @if let Some(ref redirect) = redirect_to {
+                    input type="hidden" name="redirect" value=(redirect) {}
+                }
+                @if let Some(reply_to) = form.reply_to {
+                    input type="hidden" name="reply_to" value=(reply_to) {}
+                }
+                @if let Some(post_thread_id) = form.post_thread_id {
+                    input type="hidden" name="post_thread_id" value=(post_thread_id) {}
+                }
 
-    let main_content = html! {
-        div ."o-mainBarTimeline" {
-            h4 style="padding: 0.75rem; margin: 0;" { "Post Preview" }
-            div ."o-mainBarTimeline__item" {
-                (preview_content)
-            }
-            div style="padding: 0.75rem;" {
-                form action="/post" method="post" {
-                    input type="hidden" name="content" value=(form.content) {}
-                    @if let Some(ref redirect) = redirect_to {
-                        input type="hidden" name="redirect" value=(redirect) {}
-                    }
-                    @if let Some(reply_to) = form.reply_to {
-                        input type="hidden" name="reply_to" value=(reply_to) {}
-                    }
-                    @if let Some(post_thread_id) = form.post_thread_id {
-                        input type="hidden" name="post_thread_id" value=(post_thread_id) {}
-                    }
-
-                    div style="display: flex; gap: 0.5rem; align-items: center; flex-wrap: wrap;" {
+                div ."o-previewDialog__actionContainer" {
+                    div ."o-previewDialog__personaContainer" {
                         select name="persona" ."o-previewDialog__personaSelect" {
                             @for (persona_id, persona_display_name) in &personas {
                                 option
@@ -389,18 +374,17 @@ pub async fn get_post_preview_dialog(
                                 { (persona_display_name) }
                             }
                         }
-
-                        (fragment::button("o-previewDialog__submitButton", "Post").call())
                     }
+
+                    (fragment::button("o-previewDialog__submitButton", "Post").call())
                 }
             }
         }
     };
 
-    let page_layout = state.render_page_layout(navbar, main_content);
     Ok(Maud(
         state
-            .render_html_page("Post Preview", page_layout, None)
+            .render_nojs_full_page(&session, "Post Preview", body)
             .await?,
     ))
 }
@@ -448,6 +432,8 @@ pub struct InlineReplyInput {
 pub async fn get_inline_reply(
     state: State<SharedState>,
     session: UserSession,
+    AjaxRequest(is_ajax): AjaxRequest,
+    headers: HeaderMap,
     Query(form): Query<InlineReplyInput>,
 ) -> RequestResult<impl IntoResponse> {
     let client_handle = state.client(session.id()).await?;
@@ -461,50 +447,111 @@ pub async fn get_inline_reply(
         .paginate_social_post_comments_rev(reply_to_id, None, 100)
         .await;
 
-    let form_markup = state.render_inline_reply_form(
-        form.reply_to,
-        form.post_thread_id,
-        self_id,
-        state.ro_mode(session.session_token()),
-    );
+    // AJAX path: return the fragment
+    if is_ajax {
+        let form_markup = state.render_inline_reply_form(
+            form.reply_to,
+            form.post_thread_id,
+            self_id,
+            state.ro_mode(session.session_token()),
+        );
 
-    let replies_id = super::post::post_replies_html_id(form.post_thread_id, reply_to_id);
-    let preview_id = post_inline_reply_preview_html_id(form.post_thread_id, reply_to_id);
-    let added_id = post_inline_reply_added_html_id(form.post_thread_id, reply_to_id);
+        let replies_id = super::post::post_replies_html_id(form.post_thread_id, reply_to_id);
+        let preview_id = post_inline_reply_preview_html_id(form.post_thread_id, reply_to_id);
+        let added_id = post_inline_reply_added_html_id(form.post_thread_id, reply_to_id);
 
-    Ok(Maud(html! {
-        // Replies container wraps everything
-        div id=(replies_id) ."m-postView__replies" {
-            // The form (already has its own wrapper div with id)
-            (form_markup)
+        return Ok(Maud(html! {
+            // Replies container wraps everything
+            div id=(replies_id) ."m-postView__replies" {
+                // The form (already has its own wrapper div with id)
+                (form_markup)
 
-            // Empty preview placeholder
-            div id=(preview_id) {}
+                // Empty preview placeholder
+                div id=(preview_id) {}
 
-            // Added placeholder for new replies
-            div id=(added_id) x-merge="after" {}
+                // Added placeholder for new replies
+                div id=(added_id) x-merge="after" {}
 
-            // Existing replies
-            @for comment in comments {
-                @if let Some(djot_content) = comment.content.djot_content.as_ref() {
-                    div ."o-postOverview__repliesItem" {
-                        (state.render_post_context(
-                            &client_ref,
-                            comment.author
-                            ).event_id(comment.event_id)
-                            .post_thread_id(form.post_thread_id)
-                            .content(djot_content)
-                            .reply_count(comment.reply_count)
-                            .timestamp(comment.ts)
-                            .ro(state.ro_mode(session.session_token()))
-                            .call().await?)
+                // Existing replies
+                @for comment in comments {
+                    @if let Some(djot_content) = comment.content.djot_content.as_ref() {
+                        div ."o-postOverview__repliesItem" {
+                            (state.render_post_context(
+                                &client_ref,
+                                comment.author
+                                ).event_id(comment.event_id)
+                                .post_thread_id(form.post_thread_id)
+                                .content(djot_content)
+                                .reply_count(comment.reply_count)
+                                .timestamp(comment.ts)
+                                .ro(state.ro_mode(session.session_token()))
+                                .call().await?)
+                        }
                     }
                 }
-            }
 
-            (re_typeset_mathjax())
+                (re_typeset_mathjax())
+            }
+        }));
+    }
+
+    // No-JS path: render full page with reply form
+    let redirect_to = headers
+        .get(axum::http::header::REFERER)
+        .and_then(|v| v.to_str().ok());
+
+    // Load the parent post for context
+    let parent_post = client_ref.db().get_social_post(reply_to_id).await;
+
+    let body = html! {
+        // Show the post being replied to
+        @if let Some(ref parent) = parent_post {
+            @if let Some(djot_content) = parent.content.djot_content.as_ref() {
+                div ."o-mainBarTimeline__item" {
+                    (state.render_post_context(
+                        &client_ref,
+                        parent.author
+                        ).event_id(parent.event_id)
+                        .post_thread_id(form.post_thread_id)
+                        .content(djot_content)
+                        .reply_count(parent.reply_count)
+                        .timestamp(parent.ts)
+                        .ro(state.ro_mode(session.session_token()))
+                        .call().await?)
+                }
+            }
         }
-    }))
+
+        // Reply form that submits to preview_dialog for a preview step
+        div ."o-mainBarTimeline__item" {
+            form action="/post/preview_dialog" method="post" {
+                input type="hidden" name="reply_to" value=(form.reply_to) {}
+                input type="hidden" name="post_thread_id" value=(form.post_thread_id) {}
+                @if let Some(redirect) = redirect_to {
+                    input type="hidden" name="redirect" value=(redirect) {}
+                }
+
+                textarea
+                    ."m-nojs-textarea"
+                    name="content"
+                    placeholder="Your reply..."
+                    dir="auto"
+                    rows="4"
+                    {}
+
+                div ."o-previewDialog__actionContainer" {
+                    div {}
+                    (fragment::button("o-previewDialog__submitButton", "Preview").call())
+                }
+            }
+        }
+    };
+
+    Ok(Maud(
+        state
+            .render_nojs_full_page(&session, "Post Reply", body)
+            .await?,
+    ))
 }
 
 /// Handler for canceling/clearing inline reply form - returns empty
@@ -635,7 +682,7 @@ impl UiState {
                         textarea
                             id=(textarea_id)
                             ."m-inlineReply__content"
-                            placeholder="Write your reply..."
+                            placeholder="Your reply..."
                             dir="auto"
                             name="content"
                             "@input"=(input_handler)

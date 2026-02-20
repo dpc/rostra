@@ -2,6 +2,7 @@ use maud::{DOCTYPE, Markup, PreEscaped, html};
 
 use crate::UiState;
 use crate::error::RequestResult;
+use crate::routes::unlock::session::UserSession;
 
 /// Feed discovery links for inclusion in HTML head
 pub struct FeedLinks {
@@ -155,6 +156,42 @@ impl UiState {
             (navbar)
             main ."o-mainBar" {
                 (main_content)
+            }
+        }
+    }
+
+    /// Renders a full no-JS page with a timeline-like layout.
+    ///
+    /// Used by handlers to render a complete page when JavaScript is disabled.
+    pub async fn render_nojs_full_page(
+        &self,
+        session: &UserSession,
+        title: &str,
+        body: Markup,
+    ) -> RequestResult<Markup> {
+        let navbar = self
+            .timeline_common_navbar()
+            .session(session)
+            .call()
+            .await?;
+
+        let main_content = html! {
+            div ."o-mainBarTimeline" {
+                (Self::render_page_tab_bar(title))
+                (body)
+            }
+        };
+
+        let page_layout = self.render_page_layout(navbar, main_content);
+        self.render_html_page(title, page_layout, None).await
+    }
+
+    /// Renders a tab bar with a back button and a title tab.
+    pub fn render_page_tab_bar(title: &str) -> Markup {
+        html! {
+            div ."o-mainBarTimeline__tabs" {
+                a ."o-mainBarTimeline__back" href="/" onclick="history.back(); return false;" { "<" }
+                span ."-active" { (title) }
             }
         }
     }

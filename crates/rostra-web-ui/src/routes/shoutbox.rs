@@ -127,7 +127,7 @@ pub async fn get_shoutbox(
                 x-data=(badge_counts)
                 "@badges:updated.window"="onUpdate($event.detail)"
             {
-                a ."o-mainBarTimeline__back" onclick="history.back()" { "<" }
+                a ."o-mainBarTimeline__back" href="/" onclick="history.back(); return false;" { "<" }
                 a ."o-mainBarTimeline__followees"
                     href="/followees"
                 {

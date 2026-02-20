@@ -169,11 +169,68 @@ pub async fn get_updates(
 pub async fn get_post_replies(
     state: State<SharedState>,
     session: UserSession,
+    AjaxRequest(is_ajax): AjaxRequest,
     Path((post_thread_id, event_id)): Path<(ShortEventId, ShortEventId)>,
 ) -> RequestResult<impl IntoResponse> {
+    // AJAX path: return the fragment
+    if is_ajax {
+        return Ok(Maud(
+            state
+                .render_post_replies(post_thread_id, event_id, &session)
+                .await?,
+        ));
+    }
+
+    // No-JS path: render full page with parent post and replies
+    let client_handle = state.client(session.id()).await?;
+    let client_ref = client_handle.client_ref()?;
+
+    let parent_post = client_ref.db().get_social_post(event_id).await;
+
+    let (comments, _) = client_ref
+        .db()
+        .paginate_social_post_comments_rev(event_id, None, 100)
+        .await;
+
+    let body = html! {
+        // Show the parent post
+        @if let Some(ref parent) = parent_post {
+            div ."o-mainBarTimeline__item" {
+                (state.render_post_context(
+                    &client_ref,
+                    parent.author
+                    ).event_id(parent.event_id)
+                    .post_thread_id(post_thread_id)
+                    .maybe_content(parent.content.djot_content.as_deref())
+                    .reply_count(parent.reply_count)
+                    .timestamp(parent.ts)
+                    .ro(state.ro_mode(session.session_token()))
+                    .call().await?)
+            }
+        }
+
+        // Show replies
+        @for comment in &comments {
+            @if let Some(djot_content) = comment.content.djot_content.as_ref() {
+                div ."o-mainBarTimeline__item" style="margin-left: 1rem;" {
+                    (state.render_post_context(
+                        &client_ref,
+                        comment.author
+                        ).event_id(comment.event_id)
+                        .post_thread_id(post_thread_id)
+                        .content(djot_content)
+                        .reply_count(comment.reply_count)
+                        .timestamp(comment.ts)
+                        .ro(state.ro_mode(session.session_token()))
+                        .call().await?)
+                }
+            }
+        }
+    };
+
     Ok(Maud(
         state
-            .render_post_replies(post_thread_id, event_id, &session)
+            .render_nojs_full_page(&session, "Replies", body)
             .await?,
     ))
 }
@@ -762,7 +819,7 @@ impl UiState {
                     x-data=(badge_counts)
                     "@badges:updated.window"="onUpdate($event.detail)"
                 {
-                    a ."o-mainBarTimeline__back" onclick="history.back()" { "<" }
+                    a ."o-mainBarTimeline__back" href="/" onclick="history.back(); return false;" { "<" }
 
                     @if let TimelineMode::Profile(_) = mode {
                         a ."o-mainBarTimeline__profile"
