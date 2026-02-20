@@ -2,7 +2,7 @@ mod extractor;
 
 use axum::extract::State;
 use axum::response::IntoResponse;
-use maud::{Markup, PreEscaped, html};
+use maud::{Markup, html};
 use rostra_client::ClientRef;
 use rostra_client_db::IdSocialProfileRecord;
 use rostra_core::ShortEventId;
@@ -96,22 +96,6 @@ impl UiState {
             .await;
         Ok(html! {
             div id="self-profile-summary" ."m-profileSummary" {
-                script {
-                    (PreEscaped(
-                    r#"
-                    function copyIdToClipboard(event) {
-                        const target = event.target;
-                        const id = target.getAttribute('data-value');
-                        navigator.clipboard.writeText(id);
-                        target.classList.add('-active');
-
-                        setTimeout(() => {
-                            target.classList.remove('-active');
-                        }, 1000);
-                    }
-                    "#
-                    ))
-                }
                 img ."m-profileSummary__userImage u-userImage"
                     src=(self.avatar_url(self_id))
                     alt="Self avatar"
@@ -171,13 +155,6 @@ impl UiState {
                 "@ajax:before"=(ajax_attrs.before)
                 "@ajax:after"=(ajax_attrs.after)
             {
-                script {
-                    (PreEscaped(r#"
-                        function previewAvatar(event) {
-                            document.querySelector('.m-profileSummary__userImage').src=URL.createObjectURL(event.target.files[0]);
-                        }
-                    "#))
-                }
                 label for="avatar-upload" ."m-profileSummary__userImageLabel" {
                     img ."m-profileSummary__userImage u-userImage"
                         src=(self.avatar_url(user.id()))

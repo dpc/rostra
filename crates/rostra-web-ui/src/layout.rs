@@ -1,4 +1,4 @@
-use maud::{DOCTYPE, Markup, PreEscaped, html};
+use maud::{DOCTYPE, Markup, html};
 
 use crate::UiState;
 use crate::error::RequestResult;
@@ -44,6 +44,7 @@ impl UiState {
                 script defer src="/assets/libs/alpinejs-intersect@3.14.3.js" {}
                 script defer src="/assets/libs/alpinejs-morph@3.14.3.js" {}
                 script defer src="/assets/libs/alpine-ajax@0.12.6.js" {}
+                script defer src="/assets/app.js" {}
                 script defer src="/assets/libs/alpinejs@3.14.3.js" {}
                 // Disable Prism.js automatic highlighting - we'll do it manually
                 script {
@@ -81,34 +82,7 @@ impl UiState {
         Ok(html! {
             (self.render_html_head(title, feed_links))
             body ."o-body"
-                x-data=r#"{
-                    notifications: [],
-                    nextId: 1,
-                    addNotification(type, message, duration = null) {
-                        // Check if this exact message already exists
-                        const exists = this.notifications.some(n => n.message === message && n.type === type);
-                        if (exists) {
-                            return; // Don't add duplicate
-                        }
-
-                        const id = this.nextId++;
-                        this.notifications.push({ id, type, message });
-
-                        // Auto-dismiss all notification types
-                        const dismissTime = duration !== null ? duration :
-                                          type === 'error' ? 8000 :
-                                          4000;
-                        setTimeout(() => {
-                            this.removeNotification(id);
-                        }, dismissTime);
-                    },
-                    removeNotification(id) {
-                        this.notifications = this.notifications.filter(n => n.id !== id);
-                    },
-                    clearErrorNotifications() {
-                        this.notifications = this.notifications.filter(n => n.type !== 'error');
-                    }
-                }"#
+                x-data="notifications"
                 "@ajax:error.window"=r#"
                     console.log('AJAX error event:', $event.detail);
                     const xhr = $event.detail.xhr || $event.detail;
@@ -221,183 +195,5 @@ impl UiState {
 pub(crate) fn render_html_footer() -> Markup {
     html! {
         script defer src="/assets/libs/mathjax-3.2.2/tex-mml-chtml.js" {}
-
-        // Prevent flickering of images when they are already in the cache
-        script {
-            (PreEscaped(r#"
-                document.addEventListener("DOMContentLoaded", () => {
-                  const images = document.querySelectorAll('img[loading="lazy"]');
-                  images.forEach(img => {
-                    const testImg = new Image();
-                    testImg.src = img.src;
-                    if (testImg.complete) {
-                      img.removeAttribute("loading");
-                    }
-                  });
-                });
-
-                // Catch unhandled promise rejections (network errors)
-                window.addEventListener('unhandledrejection', (event) => {
-                  console.log('Unhandled rejection:', event);
-                  if (event.reason instanceof TypeError &&
-                      (event.reason.message.includes('NetworkError') ||
-                       event.reason.message.includes('fetch'))) {
-                    window.dispatchEvent(new CustomEvent('notify', {
-                      detail: { type: 'error', message: '⚠ Network Error - Unable to complete request' }
-                    }));
-                    event.preventDefault();
-                  }
-                });
-            "#))
-        }
-
-        // Trigger Prism.js highlighting after DOM loads
-        script {
-            (PreEscaped(r#"
-                document.addEventListener('DOMContentLoaded', () => {
-                    // Manually trigger highlighting after everything is loaded
-                    if (window.Prism) {
-                        Prism.highlightAll();
-                    }
-                });
-            "#))
-        }
-
-        // Play/pause videos based on visibility
-        script {
-            (PreEscaped(r#"
-                document.addEventListener('DOMContentLoaded', () => {
-                    const videoObserver = new IntersectionObserver((entries) => {
-                        entries.forEach(entry => {
-                            const video = entry.target;
-                            if (entry.isIntersecting) {
-                                video.play().catch(() => {});
-                            } else {
-                                video.pause();
-                            }
-                        });
-                    }, { threshold: 0.5 });
-
-                    // Observe existing videos
-                    document.querySelectorAll('.m-rostraMedia__video').forEach(v => videoObserver.observe(v));
-
-                    // Observe new videos added dynamically (for AJAX/htmx)
-                    const mutationObserver = new MutationObserver((mutations) => {
-                        mutations.forEach(mutation => {
-                            mutation.addedNodes.forEach(node => {
-                                if (node.nodeType === 1) {
-                                    node.querySelectorAll?.('.m-rostraMedia__video').forEach(v => videoObserver.observe(v));
-                                    if (node.classList?.contains('m-rostraMedia__video')) {
-                                        videoObserver.observe(node);
-                                    }
-                                }
-                            });
-                        });
-                    });
-                    mutationObserver.observe(document.body, { childList: true, subtree: true });
-                });
-            "#))
-        }
-
-        // Alpine.js initialization
-        script {
-            (PreEscaped(r#"
-                document.addEventListener("alpine:init", () => {
-                  // Generic WebSocket handler - just handles connection and HTML morphing
-                  Alpine.data("websocket", (url) => ({
-                    ws: null,
-                    init() {
-                      this.connect(url);
-                    },
-                    connect(url) {
-                      const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
-                      const wsUrl = `${protocol}//${window.location.host}${url}`;
-
-                      this.ws = new WebSocket(wsUrl);
-
-                      this.ws.onopen = () => {
-                        console.log("WebSocket connected");
-                      };
-
-                      this.ws.onmessage = (event) => {
-                        const tpl = document.createElement('template');
-                        tpl.innerHTML = event.data;
-
-                        const focus = (el) => {
-                          const target = el?.matches?.('[x-autofocus]') ? el : el?.querySelector?.('[x-autofocus]');
-                          if (target) target.scrollIntoView({ block: 'nearest' });
-                        };
-
-                        // Process elements with IDs - morph or merge based on x-merge attribute
-                        tpl.content.querySelectorAll('[id]').forEach((content) => {
-                          const target = document.getElementById(content.id);
-                          if (!target) return;
-
-                          const merge = content.getAttribute('x-merge');
-                          if (merge === 'append') {
-                            target.append(...content.childNodes);
-                            Alpine.initTree(target.lastElementChild);
-                            focus(target.lastElementChild);
-                          } else if (merge === 'prepend') {
-                            target.prepend(...content.childNodes);
-                            Alpine.initTree(target.firstElementChild);
-                            focus(target.firstElementChild);
-                          } else {
-                            Alpine.morph(target, content);
-                            focus(target);
-                          }
-                        });
-
-                        // Run standalone x-init elements (for $dispatch etc.)
-                        tpl.content.querySelectorAll('[x-init]').forEach((el) => {
-                          document.body.appendChild(el);
-                          Alpine.initTree(el);
-                          el.remove();
-                        });
-                      };
-
-                      this.ws.onerror = (error) => {
-                        // Suppress error logging - it's expected if WebSocket isn't available
-                      };
-
-                      this.ws.onclose = () => {
-                        // Don't reconnect - WebSocket is optional
-                        // If we want reconnection, it should be with exponential backoff
-                      };
-                    },
-                    destroy() {
-                      if (this.ws) {
-                        this.ws.close();
-                      }
-                    }
-                  }));
-
-                  // Badge counts component - reactive state for tab badges
-                  Alpine.data("badgeCounts", (initial) => ({
-                    followees: initial?.followees || 0,
-                    network: initial?.network || 0,
-                    notifications: initial?.notifications || 0,
-                    shoutbox: initial?.shoutbox || 0,
-                    init() {
-                      // Set up reactive title updates based on notifications
-                      this.$watch('notifications', (count) => {
-                        document.title = count > 9 ? 'Rostra (9+)' : count > 0 ? `Rostra (${count})` : 'Rostra';
-                      });
-                      // Set initial title
-                      document.title = this.notifications > 9 ? 'Rostra (9+)' : this.notifications > 0 ? `Rostra (${this.notifications})` : 'Rostra';
-                    },
-                    onUpdate(detail) {
-                      this.followees = detail.followees || 0;
-                      this.network = detail.network || 0;
-                      this.notifications = detail.notifications || 0;
-                      this.shoutbox = detail.shoutbox || 0;
-                    },
-                    formatCount(count) {
-                      return count > 9 ? ' (9+)' : count > 0 ? ` (${count})` : '';
-                    }
-                  }));
-                });
-            "#))
-        }
     }
 }

@@ -508,67 +508,6 @@ impl UiState {
                 (PreEscaped(include_str!("text_autocomplete.js")))
             }
 
-            // Initialize emoji picker toggle function
-            script {
-                (PreEscaped(r#"
-                    window.toggleEmojiPicker = function(pickerId, event) {
-                        event.preventDefault();
-                        event.stopPropagation();
-                        const picker = document.getElementById(pickerId) || document.querySelector(pickerId);
-                        if (!picker) return;
-
-                        const wasHidden = picker.classList.contains('-hidden');
-                        picker.classList.toggle('-hidden');
-
-                        if (wasHidden) {
-                            const ep = picker.querySelector('emoji-picker');
-                            if (ep && ep.shadowRoot) {
-                                const searchInput = ep.shadowRoot.querySelector('#search');
-                                if (searchInput) searchInput.focus();
-                            }
-                            // Close on click outside
-                            const closeOnClickOutside = (e) => {
-                                if (!picker.contains(e.target)) {
-                                    picker.classList.add('-hidden');
-                                    document.removeEventListener('click', closeOnClickOutside);
-                                }
-                            };
-                            setTimeout(() => document.addEventListener('click', closeOnClickOutside), 0);
-                        }
-                    };
-                "#))
-            }
-
-            // Initialize insertMediaSyntax function once
-            script {
-                (PreEscaped(r#"
-                    window.insertMediaSyntax = function(eventId, targetSelector) {
-                        const textarea = document.querySelector(targetSelector);
-                        const syntax = '![media](rostra-media:' + eventId + ')';
-
-                        if (textarea) {
-                            const start = textarea.selectionStart;
-                            const end = textarea.selectionEnd;
-                            const text = textarea.value;
-
-                            const newText = text.substring(0, start) + syntax + text.substring(end);
-                            textarea.value = newText;
-
-                            const newPos = start + syntax.length;
-                            textarea.setSelectionRange(newPos, newPos);
-                            textarea.focus();
-
-                            textarea.dispatchEvent(new Event('input', { bubbles: true }));
-                        }
-
-                        const mediaList = document.querySelector('.o-mediaList');
-                        if (mediaList) {
-                            mediaList.style.display = 'none';
-                        }
-                    };
-                "#))
-            }
-
             (re_typeset_mathjax())
 
         };

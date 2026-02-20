@@ -1,7 +1,7 @@
 use axum::Form;
 use axum::extract::{Path, Query, State};
 use axum::response::IntoResponse;
-use maud::{Markup, PreEscaped, html};
+use maud::{Markup, html};
 use rostra_client_db::social::EventPaginationCursor;
 use rostra_core::event::PersonaId;
 use rostra_core::id::RostraId;
@@ -60,20 +60,6 @@ pub async fn get_follow_dialog(
     let ajax_attrs = fragment::AjaxLoadingAttrs::for_class("o-followDialog__submitButton");
     Ok(Maud(html! {
         div id="follow-dialog-content" ."o-followDialog -active" {
-            script {
-                (PreEscaped(r#"
-                function togglePersonaList() {
-                    const selectedOption = document.querySelector('#follow-type-select').value;
-                    const personaList = document.querySelector('.o-followDialog__personaList');
-
-                    if (selectedOption === 'follow_all' || selectedOption === 'follow_only') {
-                        personaList.classList.add('-visible');
-                    } else {
-                        personaList.classList.remove('-visible');
-                    }
-                }
-                "#))
-            }
             (fragment::dialog_escape_handler("follow-dialog-content"))
             div ."o-followDialog__content" {
                 h4 ."o-followDialog__title" {
@@ -239,22 +225,6 @@ impl UiState {
         let rendered_bio = self.render_bio(client_ref, &profile.bio).await;
         Ok(html! {
             div id="profile-summary" ."m-profileSummary" {
-                script {
-                    (PreEscaped(
-                    r#"
-                    function copyIdToClipboard(event) {
-                        const target = event.target;
-                        const id = target.getAttribute('data-value');
-                        navigator.clipboard.writeText(id);
-                        target.classList.add('-active');
-
-                        setTimeout(() => {
-                            target.classList.remove('-active');
-                        }, 1000);
-                    }
-                    "#
-                    ))
-                }
                 img ."m-profileSummary__userImage u-userImage"
                     src=(self.avatar_url(profile_id))
                     alt=(format!("{}'s avatar", profile.display_name))
