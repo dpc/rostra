@@ -79,54 +79,70 @@ pub async fn get_single_post(
     Query(query): Query<SinglePostQuery>,
     Path((author, event_id)): Path<(RostraId, ShortEventId)>,
 ) -> RequestResult<impl IntoResponse> {
+    let client_handle = state.client(session.id()).await?;
+    let client_ref = client_handle.client_ref()?;
+
+    let post_record = client_ref.db().get_social_post(event_id).await;
+
     // Render raw post if it's an AJAX request or raw=true query parameter
     if is_ajax || query.raw {
-        let client_handle = state.client(session.id()).await?;
-        let client_ref = client_handle.client_ref()?;
-        let db = client_ref.db();
-
-        // Get the post record
-        let post_record = db.get_social_post(event_id).await;
-
-        if let Some(post_record) = post_record {
-            return Ok(Maud(
-                state
-                    .render_post_context(&client_ref, author)
-                    .event_id(event_id)
-                    .post_thread_id(event_id)
-                    .maybe_content(post_record.content.djot_content.as_deref())
-                    .timestamp(post_record.ts)
-                    .ro(state.ro_mode(session.session_token()))
-                    .call()
-                    .await?,
-            ));
-        } else {
-            // Post not found, return error message
-            return Ok(Maud(html! {
-                div ."error" {
-                    "Post not found"
-                }
-            }));
-        }
+        return Ok(Maud(
+            state
+                .render_post_context(&client_ref, author)
+                .event_id(event_id)
+                .post_thread_id(event_id)
+                .maybe_content(
+                    post_record
+                        .as_ref()
+                        .and_then(|r| r.content.djot_content.as_deref()),
+                )
+                .maybe_timestamp(post_record.as_ref().map(|r| r.ts))
+                .ro(state.ro_mode(session.session_token()))
+                .call()
+                .await?,
+        ));
     }
 
-    // Default behavior: render full timeline page
-    let navbar = state
-        .timeline_common_navbar()
-        .session(&session)
-        .call()
-        .await?;
+    // Full page: if we have the post record with content, use the timeline page
+    if post_record
+        .as_ref()
+        .is_some_and(|r| r.content.djot_content.is_some())
+    {
+        let navbar = state
+            .timeline_common_navbar()
+            .session(&session)
+            .call()
+            .await?;
+        return Ok(Maud(
+            state
+                .render_timeline_page(
+                    navbar,
+                    None,
+                    &session,
+                    &mut cookies,
+                    TimelineMode::ProfileSingle(author, event_id),
+                    is_ajax,
+                )
+                .await?,
+        ));
+    }
+
+    // Full page: event or content missing — render with Fetch button
+    let body = html! {
+        div ."o-mainBarTimeline__item" {
+            (state
+                .render_post_context(&client_ref, author)
+                .event_id(event_id)
+                .post_thread_id(event_id)
+                .maybe_timestamp(post_record.as_ref().map(|r| r.ts))
+                .ro(state.ro_mode(session.session_token()))
+                .call()
+                .await?)
+        }
+    };
+
     Ok(Maud(
-        state
-            .render_timeline_page(
-                navbar,
-                None,
-                &session,
-                &mut cookies,
-                TimelineMode::ProfileSingle(author, event_id),
-                is_ajax,
-            )
-            .await?,
+        state.render_nojs_full_page(&session, "Post", body).await?,
     ))
 }
 
