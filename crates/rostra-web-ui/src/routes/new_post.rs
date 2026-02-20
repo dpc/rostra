@@ -1,5 +1,6 @@
 use axum::Form;
 use axum::extract::{Query, State};
+use axum::http::HeaderMap;
 use axum::response::IntoResponse;
 use maud::{Markup, PreEscaped, html};
 use rostra_core::event::PersonaId;
@@ -19,6 +20,7 @@ use super::unlock::session::{RoMode, UserSession};
 use super::{Maud, fragment};
 use crate::UiState;
 use crate::html_utils::re_typeset_mathjax;
+use crate::util::extractors::ajax_request::AjaxRequest;
 
 #[derive(Deserialize)]
 pub struct PostInput {
@@ -27,6 +29,8 @@ pub struct PostInput {
     persona: Option<u8>,
     /// For inline reply mode: the post thread context ID
     post_thread_id: Option<ShortEventId>,
+    /// Where to redirect after posting (no-JS fallback)
+    redirect: Option<String>,
 }
 
 fn focus_on_new_post_content_input() -> Markup {
@@ -71,6 +75,7 @@ pub async fn post_new_post(
     state: State<SharedState>,
     session: UserSession,
     mut cookies: Cookies,
+    AjaxRequest(is_ajax): AjaxRequest,
     Form(form): Form<PostInput>,
 ) -> RequestResult<impl IntoResponse> {
     let id_secret = state
@@ -85,6 +90,8 @@ pub async fn post_new_post(
         cookies.save_persona(client_ref.rostra_id(), persona_id);
     }
 
+    let redirect_to = form.redirect.clone();
+
     let event = client_ref
         .social_post(
             id_secret,
@@ -93,6 +100,23 @@ pub async fn post_new_post(
             PersonaId(form.persona.unwrap_or_default()),
         )
         .await?;
+
+    // No-JS: redirect back to the page the user was on
+    if !is_ajax {
+        let location = redirect_to.as_deref().unwrap_or("/");
+        return Ok(Maud(html! {
+            (maud::DOCTYPE)
+            html {
+                head {
+                    meta http-equiv="refresh" content=(format!("0;url={location}")) {}
+                }
+                body {
+                    p { "Post published. Redirecting..." }
+                    a href=(location) { "Click here if not redirected." }
+                }
+            }
+        }));
+    }
 
     // If this is an inline reply, insert the new reply after the added placeholder
     if let (Some(post_thread_id), Some(reply_to)) = (form.post_thread_id, form.reply_to) {
@@ -204,99 +228,181 @@ pub async fn get_post_preview_dialog(
     state: State<SharedState>,
     session: UserSession,
     cookies: Cookies,
+    AjaxRequest(is_ajax): AjaxRequest,
+    headers: HeaderMap,
     Form(form): Form<PostInput>,
 ) -> RequestResult<impl IntoResponse> {
+    // Determine redirect target for no-JS: use form field, fall back to Referer
+    let redirect_to = form.redirect.clone().or_else(|| {
+        headers
+            .get(axum::http::header::REFERER)
+            .and_then(|v| v.to_str().ok())
+            .map(String::from)
+    });
+
     let client = state.client(session.id()).await?;
     let client_ref = client.client_ref()?;
     let self_id = client_ref.rostra_id();
 
     if form.content.is_empty() {
-        return Ok(Maud(html! {
-            div id="post-preview-dialog" ."o-previewDialog" {}
-        }));
+        if is_ajax {
+            return Ok(Maud(html! {
+                div id="post-preview-dialog" ."o-previewDialog" {}
+            }));
+        }
+        // No-JS: redirect back would be ideal, but just show an empty page
+        let navbar = state
+            .timeline_common_navbar()
+            .session(&session)
+            .call()
+            .await?;
+        let back_url = redirect_to.as_deref().unwrap_or("/");
+        let page_layout = state.render_page_layout(
+            navbar,
+            html! {
+                p { "Nothing to preview." }
+                a href=(back_url) { "Go back" }
+            },
+        );
+        return Ok(Maud(
+            state
+                .render_html_page("Post Preview", page_layout, None)
+                .await?,
+        ));
     }
-    let personas = client_ref.db().get_personas_for_id(self_id).await;
 
-    // Get the saved persona from cookie
+    let personas = client_ref.db().get_personas_for_id(self_id).await;
     let saved_persona = cookies.get_persona(self_id);
 
-    Ok(Maud(html! {
-        div id="post-preview-dialog" ."o-previewDialog -active" {
-            (fragment::dialog_escape_handler("post-preview-dialog"))
-            div ."o-previewDialog__content" {
-                h4 ."o-previewDialog__title" { "Post Preview" }
-                div ."o-previewDialog__post" {
-                    (state.render_post_context(
-                        &client.client_ref()?,
-                        self_id
-                        )
-                        .content(&form.content)
-                        .timestamp(rostra_core::Timestamp::now())
-                        .ro(state.ro_mode(session.session_token()))
-                        .call().await?
-                    )
-                }
+    let preview_content = state
+        .render_post_context(&client.client_ref()?, self_id)
+        .content(&form.content)
+        .timestamp(rostra_core::Timestamp::now())
+        .ro(state.ro_mode(session.session_token()))
+        .call()
+        .await?;
 
-                @let ajax_attrs = fragment::AjaxLoadingAttrs::for_class("o-previewDialog__submitButton");
-                // Build x-target: include inline reply containers if applicable
-                @let x_target = if let (Some(post_thread_id), Some(reply_to)) = (form.post_thread_id, form.reply_to) {
-                    let reply_to_id = reply_to.event_id().to_short();
-                    let form_id = post_inline_reply_form_html_id(post_thread_id, reply_to_id);
-                    let preview_id = post_inline_reply_preview_html_id(post_thread_id, reply_to_id);
-                    let added_id = post_inline_reply_added_html_id(post_thread_id, reply_to_id);
-                    format!("{form_id} {preview_id} {added_id} post-preview-dialog ajax-scripts")
-                } else {
-                    "new-post-form post-preview-dialog new-post-preview new-post-added ajax-scripts".to_string()
-                };
-                div ."o-previewDialog__actions" {
-                    form ."o-previewDialog__form"
-                        action="/post"
-                        method="post"
-                        x-target=(x_target)
-                        "x-on:keyup.enter.ctrl.shift"="$el.requestSubmit()"
-                        "@ajax:before"=(ajax_attrs.before)
-                        "@ajax:after"=(ajax_attrs.after)
-                    {
-                        input type="hidden" name="content" value=(form.content) {}
-                        @if let Some(reply_to) = form.reply_to {
-                            input type="hidden" name="reply_to" value=(reply_to) {}
-                        }
-                        @if let Some(post_thread_id) = form.post_thread_id {
-                            input type="hidden" name="post_thread_id" value=(post_thread_id) {}
-                        }
+    // AJAX path: return the dialog overlay fragment
+    if is_ajax {
+        return Ok(Maud(html! {
+            div id="post-preview-dialog" ."o-previewDialog -active" {
+                (fragment::dialog_escape_handler("post-preview-dialog"))
+                div ."o-previewDialog__content" {
+                    h4 ."o-previewDialog__title" { "Post Preview" }
+                    div ."o-previewDialog__post" {
+                        (preview_content)
+                    }
 
-                        div ."o-previewDialog__actionContainer" {
-                            div ."o-previewDialog__personaContainer" {
-                                select
-                                    name="persona"
-                                    id="persona-select"
-                                    ."o-previewDialog__personaSelect"
-                                    x-autofocus
-                                {
-                                    @for (persona_id, persona_display_name) in personas {
-                                        option
-                                            value=(persona_id)
-                                            selected[saved_persona.map_or(false, |id| PersonaId(id) == persona_id)]
-                                        { (persona_display_name) }
-                                    }
-                                }
+                    @let ajax_attrs = fragment::AjaxLoadingAttrs::for_class("o-previewDialog__submitButton");
+                    @let x_target = if let (Some(post_thread_id), Some(reply_to)) = (form.post_thread_id, form.reply_to) {
+                        let reply_to_id = reply_to.event_id().to_short();
+                        let form_id = post_inline_reply_form_html_id(post_thread_id, reply_to_id);
+                        let preview_id = post_inline_reply_preview_html_id(post_thread_id, reply_to_id);
+                        let added_id = post_inline_reply_added_html_id(post_thread_id, reply_to_id);
+                        format!("{form_id} {preview_id} {added_id} post-preview-dialog ajax-scripts")
+                    } else {
+                        "new-post-form post-preview-dialog new-post-preview new-post-added ajax-scripts".to_string()
+                    };
+                    div ."o-previewDialog__actions" {
+                        form ."o-previewDialog__form"
+                            action="/post"
+                            method="post"
+                            x-target=(x_target)
+                            "x-on:keyup.enter.ctrl.shift"="$el.requestSubmit()"
+                            "@ajax:before"=(ajax_attrs.before)
+                            "@ajax:after"=(ajax_attrs.after)
+                        {
+                            input type="hidden" name="content" value=(form.content) {}
+                            @if let Some(reply_to) = form.reply_to {
+                                input type="hidden" name="reply_to" value=(reply_to) {}
+                            }
+                            @if let Some(post_thread_id) = form.post_thread_id {
+                                input type="hidden" name="post_thread_id" value=(post_thread_id) {}
                             }
 
-                            div ."o-previewDialog__actionButtons" {
-                                (fragment::button("o-previewDialog__cancelButton", "Cancel")
-                                    .button_type("button")
-                                    .onclick("document.querySelector('.o-previewDialog').classList.remove('-active')")
-                                    .call())
+                            div ."o-previewDialog__actionContainer" {
+                                div ."o-previewDialog__personaContainer" {
+                                    select
+                                        name="persona"
+                                        id="persona-select"
+                                        ."o-previewDialog__personaSelect"
+                                        x-autofocus
+                                    {
+                                        @for (persona_id, persona_display_name) in &personas {
+                                            option
+                                                value=(persona_id)
+                                                selected[saved_persona.map_or(false, |id| PersonaId(id) == *persona_id)]
+                                            { (persona_display_name) }
+                                        }
+                                    }
+                                }
 
-                                (fragment::button("o-previewDialog__submitButton", "Post").call())
+                                div ."o-previewDialog__actionButtons" {
+                                    (fragment::button("o-previewDialog__cancelButton", "Cancel")
+                                        .button_type("button")
+                                        .onclick("document.querySelector('.o-previewDialog').classList.remove('-active')")
+                                        .call())
+
+                                    (fragment::button("o-previewDialog__submitButton", "Post").call())
+                                }
                             }
                         }
                     }
                 }
+                (re_typeset_mathjax())
             }
-            (re_typeset_mathjax())
+        }));
+    }
+
+    // No-JS path: render full page with preview and submit form
+    let navbar = state
+        .timeline_common_navbar()
+        .session(&session)
+        .call()
+        .await?;
+
+    let main_content = html! {
+        div ."o-mainBarTimeline" {
+            h4 style="padding: 0.75rem; margin: 0;" { "Post Preview" }
+            div ."o-mainBarTimeline__item" {
+                (preview_content)
+            }
+            div style="padding: 0.75rem;" {
+                form action="/post" method="post" {
+                    input type="hidden" name="content" value=(form.content) {}
+                    @if let Some(ref redirect) = redirect_to {
+                        input type="hidden" name="redirect" value=(redirect) {}
+                    }
+                    @if let Some(reply_to) = form.reply_to {
+                        input type="hidden" name="reply_to" value=(reply_to) {}
+                    }
+                    @if let Some(post_thread_id) = form.post_thread_id {
+                        input type="hidden" name="post_thread_id" value=(post_thread_id) {}
+                    }
+
+                    div style="display: flex; gap: 0.5rem; align-items: center; flex-wrap: wrap;" {
+                        select name="persona" ."o-previewDialog__personaSelect" {
+                            @for (persona_id, persona_display_name) in &personas {
+                                option
+                                    value=(persona_id)
+                                    selected[saved_persona.map_or(false, |id| PersonaId(id) == *persona_id)]
+                                { (persona_display_name) }
+                            }
+                        }
+
+                        (fragment::button("o-previewDialog__submitButton", "Post").call())
+                    }
+                }
+            }
         }
-    }))
+    };
+
+    let page_layout = state.render_page_layout(navbar, main_content);
+    Ok(Maud(
+        state
+            .render_html_page("Post Preview", page_layout, None)
+            .await?,
+    ))
 }
 
 pub async fn get_new_post_preview(
