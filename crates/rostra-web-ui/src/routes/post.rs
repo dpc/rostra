@@ -447,13 +447,7 @@ impl UiState {
         let post_main = html! {
             div ."m-postView__main"
             {
-                img ."m-postView__userImage u-userImage"
-                    src=(self.avatar_url(author))
-                    alt=(format!("{display_name}'s avatar"))
-                    width="32pt"
-                    height="32pt"
-                    loading="lazy"
-                { }
+                (fragment::avatar("m-postView__userImage", self.avatar_url(author), &format!("{display_name}'s avatar")))
 
                 div ."m-postView__contentSide" {
 

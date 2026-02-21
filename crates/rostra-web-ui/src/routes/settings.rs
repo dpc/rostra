@@ -18,6 +18,9 @@ use crate::error::RequestResult;
 use crate::util::time::format_timestamp;
 use crate::{SharedState, UiState};
 
+/// dpc's (Rostra author) RostraId as a string.
+const DPC_ROSTRA_ID: &str = "rse1okfyp4yj75i6riwbz86mpmbgna3f7qr66aj1njceqoigjabegy";
+
 pub async fn get_settings() -> impl IntoResponse {
     Redirect::to("/settings/following")
 }
@@ -330,20 +333,14 @@ impl UiState {
 
                     h3 ."o-settingsContent__sectionHeader" { "Suggestion" }
                     div ."m-followeeList__item" {
-                        img ."m-followeeList__avatar u-userImage"
-                            src="/avatar/rse1okfyp4yj75i6riwbz86mpmbgna3f7qr66aj1njceqoigjabegy"
-                            alt="Avatar"
-                            width="32"
-                            height="32"
-                            loading="lazy"
-                            {}
+                        (fragment::avatar("m-followeeList__avatar", format!("/avatar/{DPC_ROSTRA_ID}"), "Avatar"))
                         a ."m-followeeList__name"
-                            href="/profile/rse1okfyp4yj75i6riwbz86mpmbgna3f7qr66aj1njceqoigjabegy"
+                            href=(format!("/profile/{DPC_ROSTRA_ID}"))
                         {
                             "dpc (Rostra's author)"
                         }
                         (fragment::ajax_button(
-                            "/profile/rse1okfyp4yj75i6riwbz86mpmbgna3f7qr66aj1njceqoigjabegy/follow",
+                            &format!("/profile/{DPC_ROSTRA_ID}/follow"),
                             "get",
                             "follow-dialog-content",
                             "m-followeeList__followButton",
@@ -357,13 +354,7 @@ impl UiState {
                 } @else {
                     @for (followee_id, display_name) in &followee_items {
                         div ."m-followeeList__item" {
-                            img ."m-followeeList__avatar u-userImage"
-                                src=(self.avatar_url(*followee_id))
-                                alt="Avatar"
-                                width="32"
-                                height="32"
-                                loading="lazy"
-                                {}
+                            (fragment::avatar("m-followeeList__avatar", self.avatar_url(*followee_id), "Avatar"))
                             a ."m-followeeList__name"
                                 href=(format!("/profile/{}", followee_id))
                             {
@@ -429,13 +420,7 @@ impl UiState {
                 } @else {
                     @for (follower_id, display_name) in &follower_items {
                         div ."m-followeeList__item" {
-                            img ."m-followeeList__avatar u-userImage"
-                                src=(self.avatar_url(*follower_id))
-                                alt="Avatar"
-                                width="32"
-                                height="32"
-                                loading="lazy"
-                                {}
+                            (fragment::avatar("m-followeeList__avatar", self.avatar_url(*follower_id), "Avatar"))
                             a ."m-followeeList__name"
                                 href=(format!("/profile/{}", follower_id))
                             {

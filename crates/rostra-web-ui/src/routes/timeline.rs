@@ -20,9 +20,9 @@ use tower_cookies::Cookies;
 use tracing::{debug, warn};
 
 use super::super::error::RequestResult;
-use super::Maud;
 use super::cookies::CookiesExt as _;
 use super::unlock::session::UserSession;
+use super::{Maud, fragment};
 use crate::html_utils::re_typeset_mathjax;
 use crate::layout::FeedLinks;
 use crate::util::extractors::AjaxRequest;
@@ -417,10 +417,7 @@ impl UiState {
                     x-autofocus
                     x-init=(format!(r#"document.cookie = '{cookie_name}=' + encodeURIComponent('{cookie_value}') + '; path=/; max-age=31536000';"#))
                 {
-                    img ."o-shoutbox__avatar u-userImage"
-                        src=(self.avatar_url(author))
-                        alt="Avatar"
-                        {}
+                    (fragment::avatar("o-shoutbox__avatar", self.avatar_url(author), "Avatar"))
                     div ."o-shoutbox__postBody" {
                         div ."o-shoutbox__postMeta" {
                             a ."o-shoutbox__author" href=(format!("/profile/{}", author)) {

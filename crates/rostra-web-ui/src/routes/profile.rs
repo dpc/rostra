@@ -225,13 +225,7 @@ impl UiState {
         let rendered_bio = self.render_bio(client_ref, &profile.bio).await;
         Ok(html! {
             div id="profile-summary" ."m-profileSummary" {
-                img ."m-profileSummary__userImage u-userImage"
-                    src=(self.avatar_url(profile_id))
-                    alt=(format!("{}'s avatar", profile.display_name))
-                    width="32pt"
-                    height="32pt"
-                    loading="lazy"
-                    { }
+                (fragment::avatar("m-profileSummary__userImage", self.avatar_url(profile_id), &format!("{}'s avatar", profile.display_name)))
 
                 div ."m-profileSummary__content" {
                     a ."m-profileSummary__displayName u-displayName"

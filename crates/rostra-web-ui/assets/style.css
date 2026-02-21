@@ -289,20 +289,8 @@ img {
   max-width: 100%;
 }
 
-img.u-userImage[loading="lazy"] {
+img.u-userImage {
   display: block;
-  /* Start invisible */
-  opacity: 0;
-  /* Very fast fade to minimize perceived flicker */
-  transition: opacity 0.1s ease-in;
-}
-
-/* Cached images (or loaded ones) fade in instantly */
-img.u-userImage[src]:not([loading="lazy"]),
-/* Non-lazy images */
-img.u-userImage[loading="lazy"][src][width][height] {
-  /* Lazy images with dimensions */
-  opacity: 1;
 }
 
 /* UTILITY CLASSES */

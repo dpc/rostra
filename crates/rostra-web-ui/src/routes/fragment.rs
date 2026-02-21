@@ -2,6 +2,16 @@
 
 use maud::{Markup, html};
 
+/// Renders a user avatar image.
+pub fn avatar(class: &str, src: impl maud::Render, alt: &str) -> Markup {
+    html! {
+        img .(class) ."u-userImage"
+            src=(src)
+            alt=(alt)
+        { }
+    }
+}
+
 /// Renders a button with an icon.
 ///
 /// The icon class is automatically derived from the button class by appending

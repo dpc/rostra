@@ -1,6 +1,5 @@
 ---
-title: Rostra - we can have a nice social network
-sub_title: Pleeeeese?
+title: Rostra - we can have a nice distributed social network
 author: dpc
 ---
 

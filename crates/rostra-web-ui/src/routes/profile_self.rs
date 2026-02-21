@@ -96,13 +96,7 @@ impl UiState {
             .await;
         Ok(html! {
             div id="self-profile-summary" ."m-profileSummary" {
-                img ."m-profileSummary__userImage u-userImage"
-                    src=(self.avatar_url(self_id))
-                    alt="Self avatar"
-                    width="32pt"
-                    height="32pt"
-                    loading="lazy"
-                    { }
+                (fragment::avatar("m-profileSummary__userImage", self.avatar_url(self_id), "Self avatar"))
 
                 div ."m-profileSummary__content" {
                     a ."m-profileSummary__displayName u-displayName"
@@ -156,11 +150,7 @@ impl UiState {
                 "@ajax:after"=(ajax_attrs.after)
             {
                 label for="avatar-upload" ."m-profileSummary__userImageLabel" {
-                    img ."m-profileSummary__userImage u-userImage"
-                        src=(self.avatar_url(user.id()))
-                        width="32pt"
-                        height="32pt" {
-                    }
+                    (fragment::avatar("m-profileSummary__userImage", self.avatar_url(user.id()), "Edit avatar"))
                 }
                 input # "avatar-upload"
                     ."m-profileSummary__userImageInput"
