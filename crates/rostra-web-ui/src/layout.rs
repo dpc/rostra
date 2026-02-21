@@ -83,23 +83,6 @@ impl UiState {
             (self.render_html_head(title, feed_links))
             body ."o-body"
                 x-data="notifications"
-                "@ajax:error.window"=r#"
-                    const xhr = $event.detail.xhr || $event.detail;
-                    const status = xhr?.status;
-                    let message;
-                    if (status === 0 || status === undefined) {
-                        message = '⚠ Network Error - Unable to complete request';
-                    } else if (status >= 500) {
-                        message = '⚠ Server Error (' + status + ')';
-                    } else if (status >= 400) {
-                        message = '⚠ Request Failed (' + status + ')';
-                    }
-                    if (message) {
-                        $data.addNotification('error', message);
-                    }
-                "#
-                "@ajax:success.window"="$data.clearErrorNotifications()"
-                "@notify.window"="$data.addNotification($event.detail.type || 'info', $event.detail.message, $event.detail.duration)"
             {
                 // Global notification area
                 div ."o-notificationArea" {

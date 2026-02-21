@@ -171,6 +171,36 @@ document.addEventListener("alpine:init", () => {
   Alpine.data("notifications", () => ({
     notifications: [],
     nextId: 1,
+    init() {
+      // Handle AJAX errors
+      window.addEventListener("ajax:error", (event) => {
+        const xhr = event.detail?.xhr || event.detail;
+        const status = xhr?.status;
+        let message;
+        if (status === 0 || status === undefined) {
+          message = "\u26a0 Network Error - Unable to complete request";
+        } else if (status >= 500) {
+          message = "\u26a0 Server Error (" + status + ")";
+        } else if (status >= 400) {
+          message = "\u26a0 Request Failed (" + status + ")";
+        }
+        if (message) {
+          this.addNotification("error", message);
+        }
+      });
+      // Clear error notifications on successful AJAX
+      window.addEventListener("ajax:success", () => {
+        this.clearErrorNotifications();
+      });
+      // Handle custom notify events
+      window.addEventListener("notify", (event) => {
+        this.addNotification(
+          event.detail.type || "info",
+          event.detail.message,
+          event.detail.duration,
+        );
+      });
+    },
     addNotification(type, message, duration = null) {
       // Check if this exact message already exists
       const exists = this.notifications.some(
