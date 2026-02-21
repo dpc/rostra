@@ -5,7 +5,7 @@ use axum::Form;
 use axum::extract::ws::WebSocket;
 use axum::extract::{Path, State, WebSocketUpgrade};
 use axum::response::IntoResponse;
-use maud::{Markup, PreEscaped, html};
+use maud::{Markup, html};
 use rostra_client::ClientRef;
 use rostra_client_db::IdSocialProfileRecord;
 use rostra_client_db::social::{
@@ -476,37 +476,8 @@ impl UiState {
             div id="follow-dialog-content" {}
 
             // Initialize emoji picker and make Database available globally
-            script type="module" {
-                (PreEscaped(r#"
-                    import { Picker, Database } from '/assets/libs/emoji-picker-element/index.js';
-                    import textFieldEdit from '/assets/libs/text-field-edit/index.js';
+            script type="module" src="/assets/emoji-init.js" {}
 
-                    // Make Database available globally for the Alpine component
-                    window.EmojiDatabase = Database;
-
-                    // Handle emoji picker clicks - find the correct textarea from the picker's container
-                    document.addEventListener('emoji-click', e => {
-                        const picker = e.target;
-                        const container = picker.closest('[data-textarea-selector]');
-                        let textarea;
-                        if (container) {
-                            // Inline reply picker - use the data attribute to find the textarea
-                            textarea = document.querySelector(container.dataset.textareaSelector);
-                        } else {
-                            // Main form picker - use default selector
-                            textarea = document.getElementById('new-post-content');
-                        }
-                        if (textarea) {
-                            textFieldEdit.insert(textarea, e.detail.unicode);
-                        }
-                    });
-                "#))
-            }
-
-            // Initialize text autocomplete (mentions and emojis) once (outside form to avoid re-execution)
-            script {
-                (PreEscaped(include_str!("text_autocomplete.js")))
-            }
 
             (re_typeset_mathjax())
 

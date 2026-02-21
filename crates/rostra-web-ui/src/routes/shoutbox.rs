@@ -237,11 +237,6 @@ pub async fn get_shoutbox(
     let content = html! {
         (page_layout)
         div id="ajax-scripts" style="display: none;" {}
-
-        // Initialize text autocomplete (required by navbar's new post form)
-        script {
-            (PreEscaped(include_str!("text_autocomplete.js")))
-        }
     };
 
     Ok(Maud(

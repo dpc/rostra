@@ -31,13 +31,17 @@ pub async fn search_profiles(
     // Get extended followers (direct + followers of followers)
     let (direct, extended) = db.get_followees_extended(session.id()).await;
 
-    // Filter by display name or rostra_id prefix (self + direct followees +
-    // extended)
-    let mut results = Vec::new();
-    for id in std::iter::once(session.id())
+    // Deduplicate IDs (direct followees can overlap with extended)
+    let mut seen = std::collections::HashSet::new();
+    let all_ids: Vec<_> = std::iter::once(session.id())
         .chain(direct.keys().copied())
         .chain(extended)
-    {
+        .filter(|id| seen.insert(*id))
+        .collect();
+
+    // Filter by display name or rostra_id prefix
+    let mut results = Vec::new();
+    for id in all_ids {
         if results.len() >= 10 {
             break;
         }
