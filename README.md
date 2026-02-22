@@ -29,7 +29,9 @@ social-graph-based data model.
 
 ## Introduction to Rostra
 
-[![Rostra video](https://img.youtube.com/vi/KjUVKUOg4aE/maxresdefault.jpg)](https://www.youtube.com/watch?v=KjUVKUOg4aE)
+[<img src="https://img.youtube.com/vi/KjUVKUOg4aE/maxresdefault.jpg" alt="Introduction to Rostra" />](https://www.youtube.com/watch?v=KjUVKUOg4aE)
+
+*▶ Watch on YouTube*
 
 ## Using
 
