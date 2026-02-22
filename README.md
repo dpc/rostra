@@ -27,6 +27,10 @@ social-graph-based data model.
 
 ![Screenshot of Rostra's p2p social network web UI](https://i.imgur.com/7hGZrP4.png)
 
+## Introduction to Rostra
+
+[![Rostra video](https://img.youtube.com/vi/KjUVKUOg4aE/maxresdefault.jpg)](https://www.youtube.com/watch?v=KjUVKUOg4aE)
+
 ## Using
 
 ### Using a public instance
