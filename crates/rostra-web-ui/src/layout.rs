@@ -10,12 +10,21 @@ pub struct FeedLinks {
     pub atom_url: String,
 }
 
+/// Open Graph meta tags for rich link previews
+pub struct OpenGraphMeta {
+    pub title: String,
+    pub description: String,
+    pub url: String,
+    pub image: Option<String>,
+}
+
 impl UiState {
     /// Html page header
     pub(crate) fn render_html_head(
         &self,
         page_title: &str,
         feed_links: Option<&FeedLinks>,
+        og: Option<&OpenGraphMeta>,
     ) -> Markup {
         html! {
             (DOCTYPE)
@@ -35,6 +44,16 @@ impl UiState {
                 @if let Some(links) = feed_links {
                     link rel="alternate" type="application/atom+xml"
                          title=(links.title) href=(links.atom_url);
+                }
+                // Open Graph meta tags
+                @if let Some(og) = og {
+                    meta property="og:type" content="article";
+                    meta property="og:title" content=(og.title);
+                    meta property="og:description" content=(og.description);
+                    meta property="og:url" content=(og.url);
+                    @if let Some(ref image) = og.image {
+                        meta property="og:image" content=(image);
+                    }
                 }
                 // Hide elements with x-cloak until Alpine initializes
                 style { "[x-cloak] { display: none !important; }" }
@@ -72,9 +91,10 @@ impl UiState {
         title: &str,
         content: Markup,
         feed_links: Option<&FeedLinks>,
+        og: Option<&OpenGraphMeta>,
     ) -> RequestResult<Markup> {
         Ok(html! {
-            (self.render_html_head(title, feed_links))
+            (self.render_html_head(title, feed_links, og))
             body ."o-body"
                 x-data="notifications"
             {
@@ -133,7 +153,7 @@ impl UiState {
         };
 
         let page_layout = self.render_page_layout(navbar, main_content);
-        self.render_html_page(title, page_layout, None).await
+        self.render_html_page(title, page_layout, None, None).await
     }
 
     /// Renders a tab bar with a back button and a title tab.
@@ -164,6 +184,19 @@ impl UiState {
                 }
             }
         }
+    }
+}
+
+/// Truncate a string at a word boundary, appending "..." if truncated.
+pub fn truncate_at_word_boundary(s: &str, max_len: usize) -> String {
+    if s.len() <= max_len {
+        return s.to_string();
+    }
+    let truncated: String = s.chars().take(max_len.saturating_sub(3)).collect();
+    if let Some(last_space) = truncated.rfind(' ') {
+        format!("{}...", &truncated[..last_space])
+    } else {
+        format!("{truncated}...")
     }
 }
 

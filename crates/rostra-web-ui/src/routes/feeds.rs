@@ -54,8 +54,13 @@ pub async fn get_profile_feed_atom(
             .render_content(&client_ref, post.author, djot_content)
             .await;
 
-        // Create a title from the first line or truncated content
-        let title = create_title_from_content(djot_content);
+        // Extract title from djot content
+        let excerpt = rostra_djot::extract::extract_excerpt(djot_content);
+        let title = excerpt
+            .first_heading
+            .or(excerpt.first_paragraph)
+            .map(|s| crate::layout::truncate_at_word_boundary(&s, 80))
+            .unwrap_or_default();
 
         // Convert timestamp to RFC 3339 format for Atom
         let updated = timestamp_to_rfc3339(post.ts);
@@ -107,28 +112,6 @@ pub async fn get_profile_feed_atom(
     };
 
     Ok(AtomFeed(feed))
-}
-
-/// Create a title from djot content by taking the first line or truncating
-fn create_title_from_content(content: &str) -> String {
-    let first_line = content.lines().next().unwrap_or("");
-
-    // Remove any djot/markdown formatting characters for the title
-    let clean = first_line
-        .trim_start_matches(['#', '*', '_', '>', '-'])
-        .trim();
-
-    if clean.len() <= 80 {
-        clean.to_string()
-    } else {
-        // Truncate at word boundary
-        let truncated: String = clean.chars().take(77).collect();
-        if let Some(last_space) = truncated.rfind(' ') {
-            format!("{}...", &truncated[..last_space])
-        } else {
-            format!("{truncated}...")
-        }
-    }
 }
 
 /// Convert a rostra Timestamp to RFC 3339 format for Atom feeds

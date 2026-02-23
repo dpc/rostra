@@ -18,6 +18,7 @@ use super::timeline::TimelineMode;
 use super::unlock::session::{RoMode, UserSession};
 use super::{Maud, fragment};
 use crate::error::{ReadOnlyModeSnafu, RequestResult};
+use crate::layout::{OpenGraphMeta, truncate_at_word_boundary};
 use crate::util::extractors::AjaxRequest;
 use crate::util::time::format_timestamp;
 use crate::{SharedState, UiState};
@@ -104,10 +105,44 @@ pub async fn get_single_post(
     }
 
     // Full page: if we have the post record with content, use the timeline page
-    if post_record
+    if let Some(post_record) = post_record
         .as_ref()
-        .is_some_and(|r| r.content.djot_content.is_some())
+        .filter(|r| r.content.djot_content.is_some())
     {
+        // Build Open Graph meta tags for rich link previews
+        let og = if let Some(djot_content) = post_record.content.djot_content.as_deref() {
+            let excerpt = rostra_djot::extract::extract_excerpt(djot_content);
+
+            let display_name = state
+                .get_social_profile_opt(author, &client_ref)
+                .await
+                .map(|p| p.display_name)
+                .unwrap_or_else(|| author.to_short().to_string());
+
+            let title = excerpt.first_heading.unwrap_or_else(|| {
+                excerpt
+                    .first_paragraph
+                    .as_deref()
+                    .map(|p| truncate_at_word_boundary(p, 80))
+                    .unwrap_or_else(|| format!("Post by {display_name}"))
+            });
+
+            let description = excerpt
+                .first_paragraph
+                .as_deref()
+                .map(|p| truncate_at_word_boundary(p, 200))
+                .unwrap_or_default();
+
+            Some(OpenGraphMeta {
+                title,
+                description,
+                url: format!("/post/{author}/{event_id}"),
+                image: Some(state.avatar_url(author)),
+            })
+        } else {
+            None
+        };
+
         let navbar = state
             .timeline_common_navbar()
             .session(&session)
@@ -122,6 +157,7 @@ pub async fn get_single_post(
                     &mut cookies,
                     TimelineMode::ProfileSingle(author, event_id),
                     is_ajax,
+                    og.as_ref(),
                 )
                 .await?,
         ));

@@ -37,6 +37,7 @@ pub async fn get_profile(
                 &mut cookies,
                 TimelineMode::Profile(profile_id),
                 is_ajax,
+                None,
             )
             .await?,
     ))

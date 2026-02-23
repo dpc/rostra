@@ -24,7 +24,7 @@ use super::cookies::CookiesExt as _;
 use super::unlock::session::UserSession;
 use super::{Maud, fragment};
 use crate::html_utils::re_typeset;
-use crate::layout::FeedLinks;
+use crate::layout::{FeedLinks, OpenGraphMeta};
 use crate::util::extractors::AjaxRequest;
 use crate::{LOG_TARGET, SharedState, UiState};
 
@@ -68,6 +68,7 @@ pub async fn get_followees(
                 &mut cookies,
                 TimelineMode::Followees,
                 is_ajax,
+                None,
             )
             .await?,
     ))
@@ -98,6 +99,7 @@ pub async fn get_network(
                 &mut cookies,
                 TimelineMode::Network,
                 is_ajax,
+                None,
             )
             .await?,
     ))
@@ -128,6 +130,7 @@ pub async fn get_notifications(
                 &mut cookies,
                 TimelineMode::Notifications,
                 is_ajax,
+                None,
             )
             .await?,
     ))
@@ -434,6 +437,7 @@ impl UiState {
         }
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub(crate) async fn render_timeline_page(
         &self,
         navbar: Markup,
@@ -442,6 +446,7 @@ impl UiState {
         cookies: &mut Cookies,
         mode: TimelineMode,
         is_ajax_request: bool,
+        og: Option<&OpenGraphMeta>,
     ) -> RequestResult<Markup> {
         let client = self.client(session.id()).await?;
         let client_ref = client.client_ref()?;
@@ -492,7 +497,7 @@ impl UiState {
             _ => None,
         };
 
-        self.render_html_page("Rostra", content, feed_links.as_ref())
+        self.render_html_page("Rostra", content, feed_links.as_ref(), og)
             .await
     }
 
