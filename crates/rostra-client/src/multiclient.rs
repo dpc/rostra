@@ -42,16 +42,24 @@ pub struct MultiClient {
     /// When true, allows direct IP connections (exposes IP address).
     /// When false (default), uses relay-only mode for privacy.
     public_mode: bool,
+    /// Shared pkarr client reused across all Rostra client instances.
+    pkarr_client: Arc<pkarr::Client>,
 }
 
 impl MultiClient {
-    pub fn new(data_dir: PathBuf, max_clients: usize, public_mode: bool) -> Self {
+    pub fn new(
+        data_dir: PathBuf,
+        max_clients: usize,
+        public_mode: bool,
+        pkarr_client: Arc<pkarr::Client>,
+    ) -> Self {
         Self {
             data_dir,
             inner: RwLock::new(Default::default()),
             max_clients: max_clients.max(1), // Ensure at least 1 client
             usage_queue: RwLock::new(VecDeque::new()),
             public_mode,
+            pkarr_client,
         }
     }
 }
@@ -96,6 +104,7 @@ impl MultiClient {
         let client = Client::builder(id)
             .db(db)
             .public_mode(self.public_mode)
+            .pkarr_client(self.pkarr_client.clone())
             .build()
             .await
             .context(ClientInitSnafu)?;

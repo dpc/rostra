@@ -332,19 +332,24 @@ impl Client {
         /// creating a new one. Useful for tests that need custom endpoint
         /// configuration.
         iroh_endpoint: Option<iroh::Endpoint>,
+        /// Pre-built pkarr client. If provided, uses this instead of
+        /// creating a new one. Since the pkarr client is identity-agnostic,
+        /// a single instance can be shared across all Rostra clients.
+        /// Use [`Client::make_pkarr_client`] to create one.
+        pkarr_client: Option<Arc<pkarr::Client>>,
     ) -> InitResult<Arc<Self>> {
         debug!(target: LOG_TARGET, id = %id, "Starting Rostra client");
         let client_start = Instant::now();
         let is_mode_full = db.is_some();
 
-        trace!(target: LOG_TARGET, id = %id, "Creating Pkarr client");
-        let pkarr_client = pkarr::Client::builder()
-            .relays(&["https://dns.iroh.link/pkarr"])
-            .expect("Can't fail")
-            .build()
-            .context(InitPkarrClientSnafu)?
-            .into();
-        debug!(target: LOG_TARGET, id = %id, elapsed_ms = %client_start.elapsed().as_millis(), "Pkarr client created");
+        let pkarr_client = if let Some(pc) = pkarr_client {
+            pc
+        } else {
+            trace!(target: LOG_TARGET, id = %id, "Creating Pkarr client");
+            let pc = Self::make_pkarr_client()?;
+            debug!(target: LOG_TARGET, id = %id, elapsed_ms = %client_start.elapsed().as_millis(), "Pkarr client created");
+            pc
+        };
 
         let endpoint = if let Some(ep) = iroh_endpoint {
             ep
@@ -453,6 +458,21 @@ impl Client {
         .await?;
 
         Ok(())
+    }
+
+    /// Create a shared pkarr client.
+    ///
+    /// The pkarr client is identity-agnostic, so a single instance can
+    /// be reused across all Rostra clients via the `pkarr_client`
+    /// parameter on [`Client::builder`].
+    pub fn make_pkarr_client() -> InitResult<Arc<pkarr::Client>> {
+        Ok(Arc::new(
+            pkarr::Client::builder()
+                .relays(&["https://dns.iroh.link/pkarr"])
+                .expect("Can't fail")
+                .build()
+                .context(InitPkarrClientSnafu)?,
+        ))
     }
 
     pub(crate) async fn make_iroh_endpoint(

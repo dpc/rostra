@@ -2,6 +2,7 @@
 
 use std::net::SocketAddr;
 
+use rostra_client::Client;
 use rostra_client::multiclient::MultiClient;
 use rostra_core::id::{RostraId, RostraIdSecretKey};
 use rostra_web_ui::{Opts, UiServer};
@@ -27,7 +28,8 @@ impl TestServer {
         let temp_dir = TempDir::new().expect("Failed to create temp dir");
         let data_dir = temp_dir.path().to_path_buf();
 
-        let clients = MultiClient::new(data_dir.clone(), 10, false);
+        let pkarr_client = Client::make_pkarr_client().expect("Failed to create pkarr client");
+        let clients = MultiClient::new(data_dir.clone(), 10, false, pkarr_client);
 
         let opts = Opts::new(
             rostra_util_bind_addr::BindAddr::Tcp(SocketAddr::from(([127, 0, 0, 1], 0))),
