@@ -9,7 +9,7 @@ use rostra_core::id::RostraId;
 use rostra_util_error::FmtCompact as _;
 use snafu::{ResultExt as _, Snafu};
 use tokio::sync::RwLock;
-use tracing::{info, warn};
+use tracing::{debug, info, warn};
 
 use crate::error::InitError;
 use crate::{Client, ClientHandle, LOG_TARGET};
@@ -73,10 +73,13 @@ impl MultiClient {
         }
 
         // Client not loaded, need to load it
+        let load_start = Instant::now();
+
         let db_path = Database::mk_db_path(&self.data_dir, id).await?;
 
         let compact = db_path.exists();
         let mut db = Database::open(&db_path, id).await.context(DatabaseSnafu)?;
+        debug!(target: LOG_TARGET, id = %id, elapsed_ms = %load_start.elapsed().as_millis(), "Database opened");
 
         if compact {
             if let Err(err) = db.compact().await {
@@ -87,6 +90,7 @@ impl MultiClient {
                     "Failed to compact database"
                 );
             }
+            debug!(target: LOG_TARGET, id = %id, elapsed_ms = %load_start.elapsed().as_millis(), "Database compacted");
         }
 
         let client = Client::builder(id)
@@ -95,6 +99,7 @@ impl MultiClient {
             .build()
             .await
             .context(ClientInitSnafu)?;
+        debug!(target: LOG_TARGET, id = %id, elapsed_ms = %load_start.elapsed().as_millis(), "Client built");
 
         // Check if we need to evict clients
         self.maybe_evict_clients().await?;

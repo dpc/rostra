@@ -334,6 +334,7 @@ impl Client {
         iroh_endpoint: Option<iroh::Endpoint>,
     ) -> InitResult<Arc<Self>> {
         debug!(target: LOG_TARGET, id = %id, "Starting Rostra client");
+        let client_start = Instant::now();
         let is_mode_full = db.is_some();
 
         trace!(target: LOG_TARGET, id = %id, "Creating Pkarr client");
@@ -343,12 +344,16 @@ impl Client {
             .build()
             .context(InitPkarrClientSnafu)?
             .into();
+        debug!(target: LOG_TARGET, id = %id, elapsed_ms = %client_start.elapsed().as_millis(), "Pkarr client created");
 
         let endpoint = if let Some(ep) = iroh_endpoint {
             ep
         } else {
             trace!(target: LOG_TARGET, id = %id, "Creating Iroh endpoint");
-            Self::make_iroh_endpoint(db.as_ref().map(|s| s.iroh_secret()), public_mode).await?
+            let ep =
+                Self::make_iroh_endpoint(db.as_ref().map(|s| s.iroh_secret()), public_mode).await?;
+            debug!(target: LOG_TARGET, id = %id, elapsed_ms = %client_start.elapsed().as_millis(), "Iroh endpoint created");
+            ep
         };
         let db: Arc<Database> = match db {
             Some(db) => db,
@@ -402,6 +407,7 @@ impl Client {
     }
 
     pub async fn unlock_active(&self, id_secret: RostraIdSecretKey) -> ActivateResult<()> {
+        let unlock_start = Instant::now();
         ensure!(self.id == id_secret.id(), SecretMismatchSnafu);
 
         if !self.active.swap(true, SeqCst) {
@@ -413,6 +419,7 @@ impl Client {
 
         let our_endpoint = IrohNodeId::from_bytes(*self.networking.endpoint.id().as_bytes());
         let endpoints = db.get_id_endpoints(self.rostra_id()).await;
+        debug!(target: LOG_TARGET, elapsed_ms = %unlock_start.elapsed().as_millis(), "Fetched id endpoints");
 
         if let Some((_existing_id, _existing_record)) = endpoints
             .iter()
@@ -428,8 +435,10 @@ impl Client {
                     info!(target: LOG_TARGET, "Published node announcement");
                 }
             }
+            debug!(target: LOG_TARGET, elapsed_ms = %unlock_start.elapsed().as_millis(), "Node announcement published");
         }
 
+        debug!(target: LOG_TARGET, elapsed_ms = %unlock_start.elapsed().as_millis(), "unlock_active complete");
         Ok(())
     }
 
