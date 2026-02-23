@@ -113,11 +113,15 @@ pub async fn get_single_post(
         let og = if let Some(djot_content) = post_record.content.djot_content.as_deref() {
             let excerpt = rostra_djot::extract::extract_excerpt(djot_content);
 
-            let display_name = state
-                .get_social_profile_opt(author, &client_ref)
-                .await
-                .map(|p| p.display_name)
+            let og_profile = state.get_social_profile_opt(author, &client_ref).await;
+            let display_name = og_profile
+                .as_ref()
+                .map(|p| p.display_name.clone())
                 .unwrap_or_else(|| author.to_short().to_string());
+            let og_event_id = og_profile
+                .as_ref()
+                .map(|p| p.event_id)
+                .unwrap_or(ShortEventId::ZERO);
 
             let title = excerpt.first_heading.unwrap_or_else(|| {
                 excerpt
@@ -137,7 +141,7 @@ pub async fn get_single_post(
                 title,
                 description,
                 url: format!("/post/{author}/{event_id}"),
-                image: Some(state.avatar_url(author)),
+                image: Some(state.avatar_url(author, og_event_id)),
             })
         } else {
             None
@@ -483,7 +487,7 @@ impl UiState {
         let post_main = html! {
             div ."m-postView__main"
             {
-                (fragment::avatar("m-postView__userImage", self.avatar_url(author), &format!("{display_name}'s avatar")))
+                (fragment::avatar("m-postView__userImage", self.avatar_url(author, user_profile.as_ref().map(|p| p.event_id).unwrap_or(ShortEventId::ZERO)), &format!("{display_name}'s avatar")))
 
                 div ."m-postView__contentSide" {
 

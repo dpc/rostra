@@ -1,6 +1,7 @@
 mod common;
 
 use common::TestServer;
+use reqwest::header;
 
 #[test_log::test(tokio::test(flavor = "multi_thread"))]
 async fn unauthenticated_landing_page_returns_200() {
@@ -93,5 +94,82 @@ async fn ajax_request_to_unlock_returns_401_not_redirect_loop() {
     assert!(
         body.contains("Session expired"),
         "Expected session expired message, got: {body}"
+    );
+}
+
+#[test_log::test(tokio::test(flavor = "multi_thread"))]
+async fn default_avatar_returns_svg_directly() {
+    let server = TestServer::start().await;
+    let driver = server.driver();
+
+    let (id, _secret) = driver.login_new_identity().await;
+
+    // User has no avatar set — should get SVG directly (no redirect)
+    let resp = driver.get(&format!("/profile/{id}/avatar")).await;
+    assert_eq!(resp.status(), 200);
+
+    let content_type = resp
+        .headers()
+        .get(header::CONTENT_TYPE)
+        .expect("Missing Content-Type")
+        .to_str()
+        .unwrap();
+    assert_eq!(content_type, "image/svg+xml");
+
+    assert!(
+        resp.headers().get(header::ETAG).is_some(),
+        "Default avatar should have an ETag"
+    );
+
+    let body = resp.text().await.unwrap();
+    assert!(
+        body.contains("<svg"),
+        "Response body should contain SVG content"
+    );
+}
+
+#[test_log::test(tokio::test(flavor = "multi_thread"))]
+async fn default_avatar_etag_returns_304() {
+    let server = TestServer::start().await;
+    let driver = server.driver();
+
+    let (id, _secret) = driver.login_new_identity().await;
+
+    let resp = driver.get(&format!("/profile/{id}/avatar")).await;
+    assert_eq!(resp.status(), 200);
+    let etag = resp
+        .headers()
+        .get(header::ETAG)
+        .expect("Missing ETag")
+        .to_str()
+        .unwrap()
+        .to_owned();
+
+    // Second request with If-None-Match should return 304
+    let resp = driver
+        .get_if_none_match(&format!("/profile/{id}/avatar"), &etag)
+        .await;
+    assert_eq!(resp.status(), 304);
+}
+
+#[test_log::test(tokio::test(flavor = "multi_thread"))]
+async fn avatar_by_id_has_24h_cache() {
+    let server = TestServer::start().await;
+    let driver = server.driver();
+
+    let (id, _secret) = driver.login_new_identity().await;
+
+    let resp = driver.get(&format!("/profile/{id}/avatar")).await;
+    assert_eq!(resp.status(), 200);
+
+    let cache_control = resp
+        .headers()
+        .get(header::CACHE_CONTROL)
+        .expect("Missing Cache-Control on avatar route")
+        .to_str()
+        .unwrap();
+    assert_eq!(
+        cache_control, "public, max-age=86400",
+        "avatar route should cache for 24h"
     );
 }

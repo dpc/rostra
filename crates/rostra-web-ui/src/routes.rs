@@ -21,13 +21,12 @@ use std::sync::Arc;
 
 use axum::Router;
 use axum::body::Body;
-use axum::extract::{DefaultBodyLimit, FromRequest, Path, Request, State};
+use axum::extract::{DefaultBodyLimit, FromRequest, Request, State};
 use axum::http::header::{self, CONTENT_TYPE};
-use axum::http::{HeaderMap, HeaderValue, StatusCode};
-use axum::middleware::{self, Next};
+use axum::http::{HeaderValue, StatusCode};
+use axum::middleware::Next;
 use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
-use axum_dpc_static_assets::handle_etag;
 use maud::Markup;
 
 use super::SharedState;
@@ -65,10 +64,21 @@ where
 }
 
 pub async fn cache_control(request: Request, next: Next) -> Response {
-    // Check if this is a static asset request (always cacheable)
-    let is_static_asset = request.uri().path().starts_with("/assets/");
+    let path = request.uri().path().to_owned();
 
     let mut response = next.run(request).await;
+
+    // Avatars: long cache, busted by ?v= query param on URL changes
+    if path.starts_with("/profile/") && path.ends_with("/avatar") {
+        response.headers_mut().insert(
+            "cache-control",
+            HeaderValue::from_static("public, max-age=86400"),
+        );
+        return response;
+    }
+
+    // Check if this is a static asset request (always cacheable)
+    let is_static_asset = path.starts_with("/assets/");
 
     if let Some(content_type) = response.headers().get(CONTENT_TYPE) {
         const NON_CACHEABLE_CONTENT_TYPES: &[&str] = &["text/html", "application/json"];
@@ -104,57 +114,6 @@ pub async fn cache_control(request: Request, next: Next) -> Response {
     response
 }
 
-pub async fn get_static_asset(
-    state: State<SharedState>,
-    Path(path): Path<String>,
-    req_headers: HeaderMap,
-) -> impl IntoResponse {
-    if let Some(assets) = &state.assets {
-        if let Some(asset) = assets.get(&path) {
-            let mut resp_headers = HeaderMap::new();
-
-            // Set content type
-            if let Some(content_type) = asset.content_type() {
-                resp_headers.insert(
-                    axum::http::header::CONTENT_TYPE,
-                    axum::http::HeaderValue::from_static(content_type),
-                );
-            }
-
-            // Handle ETag and conditional request
-            if let Some(response) = handle_etag(&req_headers, &asset.etag, &mut resp_headers) {
-                return response;
-            }
-
-            let accepts_brotli = req_headers
-                .get_all(axum::http::header::ACCEPT_ENCODING)
-                .into_iter()
-                .any(|encodings| {
-                    let Ok(str) = encodings.to_str() else {
-                        return false;
-                    };
-
-                    str.split(',').any(|s| s.trim() == "br")
-                });
-
-            let content = match (accepts_brotli, asset.compressed.as_ref()) {
-                (true, Some(compressed)) => {
-                    resp_headers.insert(
-                        axum::http::header::CONTENT_ENCODING,
-                        axum::http::HeaderValue::from_static("br"),
-                    );
-                    compressed.clone()
-                }
-                _ => asset.raw.clone(),
-            };
-
-            return (resp_headers, content).into_response();
-        }
-    }
-
-    axum::http::StatusCode::NOT_FOUND.into_response()
-}
-
 pub async fn not_found(_state: State<SharedState>, _req: Request<Body>) -> impl IntoResponse {
     (
         StatusCode::NOT_FOUND,
@@ -177,7 +136,7 @@ pub fn route_handler(state: SharedState) -> Router<Arc<UiState>> {
             "/profile/{id}/follow",
             get(profile::get_follow_dialog).post(profile::post_follow),
         )
-        .route("/avatar/{id}", get(avatar::get))
+        .route("/profile/{id}/avatar", get(avatar::get))
         .route("/media/{author}/{event_id}", get(media::get))
         .route("/media/{author}/list", get(media::list))
         .route(
@@ -236,5 +195,4 @@ pub fn route_handler(state: SharedState) -> Router<Arc<UiState>> {
         // .route("/m/:metric/:type", get(metric_get))
         .fallback(not_found)
         .with_state(state)
-        .layer(middleware::from_fn(cache_control))
 }

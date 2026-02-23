@@ -80,8 +80,8 @@ impl UiState {
         client.db().get_social_profile(id).await
     }
 
-    pub fn avatar_url(&self, id: RostraId) -> String {
-        format!("/avatar/{id}")
+    pub fn avatar_url(&self, id: RostraId, event_id: ShortEventId) -> String {
+        format!("/profile/{id}/avatar?v={event_id}")
     }
 
     pub async fn render_self_profile_summary(
@@ -96,7 +96,7 @@ impl UiState {
             .await;
         Ok(html! {
             div id="self-profile-summary" ."m-profileSummary" {
-                (fragment::avatar("m-profileSummary__userImage", self.avatar_url(self_id), "Self avatar"))
+                (fragment::avatar("m-profileSummary__userImage", self.avatar_url(self_id, self_profile.event_id), "Self avatar"))
 
                 div ."m-profileSummary__content" {
                     a ."m-profileSummary__displayName u-displayName"
@@ -150,7 +150,7 @@ impl UiState {
                 "@ajax:after"=(ajax_attrs.after)
             {
                 label for="avatar-upload" ."m-profileSummary__userImageLabel" {
-                    (fragment::avatar("m-profileSummary__userImage", self.avatar_url(user.id()), "Edit avatar"))
+                    (fragment::avatar("m-profileSummary__userImage", self.avatar_url(client_ref.rostra_id(), self_profile.event_id), "Edit avatar"))
                 }
                 input # "avatar-upload"
                     ."m-profileSummary__userImageInput"

@@ -156,6 +156,16 @@ impl UiDriver {
             .expect("GET request failed")
     }
 
+    /// Send a GET request with an `If-None-Match` header (for ETag validation).
+    pub async fn get_if_none_match(&self, path: &str, etag: &str) -> reqwest::Response {
+        self.client
+            .get(self.url(path))
+            .header("If-None-Match", etag)
+            .send()
+            .await
+            .expect("GET request failed")
+    }
+
     /// Send a GET request with the `X-Alpine-Request` header (simulates AJAX).
     pub async fn ajax_get(&self, path: &str) -> reqwest::Response {
         self.client

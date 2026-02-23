@@ -420,7 +420,7 @@ impl UiState {
                     x-autofocus
                     x-init=(format!(r#"document.cookie = '{cookie_name}=' + encodeURIComponent('{cookie_value}') + '; path=/; max-age=31536000';"#))
                 {
-                    (fragment::avatar("o-shoutbox__avatar", self.avatar_url(author), "Avatar"))
+                    (fragment::avatar("o-shoutbox__avatar", self.avatar_url(author, profile.event_id), "Avatar"))
                     div ."o-shoutbox__postBody" {
                         div ."o-shoutbox__postMeta" {
                             a ."o-shoutbox__author" href=(format!("/profile/{}", author)) {

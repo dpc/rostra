@@ -106,7 +106,6 @@ pub type UiStateClientResult<T> = result::Result<T, UiStateClientError>;
 
 pub struct UiState {
     clients: MultiClient,
-    assets: Option<Arc<StaticAssets>>,
     default_profile: Option<RostraId>,
     welcome_redirect: Option<String>,
     /// In-memory storage for secret keys.
@@ -330,7 +329,6 @@ async fn build_state_and_session(
 
     let state = Arc::new(UiState {
         clients,
-        assets: assets.clone(),
         default_profile: opts.default_profile,
         welcome_redirect: opts.welcome_redirect.clone(),
         secrets: secrets::SecretStore::new(),
@@ -390,8 +388,8 @@ pub async fn start_ui(opts: Opts, clients: MultiClient) -> ServerResult<UiServer
             router
                 .with_state(state)
                 .layer(CookieManagerLayer::new())
-                .layer(middleware::from_fn(cache_control))
                 .layer(session_layer)
+                .layer(middleware::from_fn(cache_control))
                 .layer(cors)
                 .layer(compression_layer())
                 .into_make_service_with_connect_info::<SocketAddr>(),
@@ -434,8 +432,8 @@ pub async fn run_ui(opts: Opts, clients: MultiClient) -> ServerResult<()> {
                 router
                     .with_state(state)
                     .layer(CookieManagerLayer::new())
-                    .layer(middleware::from_fn(cache_control))
                     .layer(session_layer)
+                    .layer(middleware::from_fn(cache_control))
                     .layer(compression_layer())
                     .into_make_service(),
             )

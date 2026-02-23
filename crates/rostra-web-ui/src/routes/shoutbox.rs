@@ -307,7 +307,7 @@ impl UiState {
 
         Ok(html! {
             div ."o-shoutbox__post" {
-                (fragment::avatar("o-shoutbox__avatar", self.avatar_url(post.author), "Avatar"))
+                (fragment::avatar("o-shoutbox__avatar", self.avatar_url(post.author, profile.event_id), "Avatar"))
                 div ."o-shoutbox__postBody" {
                     div ."o-shoutbox__postMeta" {
                         a ."o-shoutbox__author" href=(format!("/profile/{}", post.author)) {

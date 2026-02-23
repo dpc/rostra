@@ -7,9 +7,9 @@ use maud::{Markup, html};
 use rostra_client::id::IdResolvedData;
 use rostra_client::{IdP2PState, NodeP2PState};
 use rostra_client_db::{EventContentState, EventRecord, IdsDataUsageRecord, IrohNodeRecord};
-use rostra_core::Timestamp;
 use rostra_core::event::IrohNodeId;
 use rostra_core::id::RostraId;
+use rostra_core::{ShortEventId, Timestamp};
 use serde::Deserialize;
 
 use super::unlock::session::UserSession;
@@ -323,7 +323,11 @@ impl UiState {
                 .as_ref()
                 .map(|p| p.display_name.clone())
                 .unwrap_or_else(|| followee_id.to_string());
-            followee_items.push((followee_id, display_name));
+            let event_id = profile
+                .as_ref()
+                .map(|p| p.event_id)
+                .unwrap_or(ShortEventId::ZERO);
+            followee_items.push((followee_id, display_name, event_id));
         }
 
         // Sort by display name
@@ -338,7 +342,7 @@ impl UiState {
 
                     h3 ."o-settingsContent__sectionHeader" { "Suggestion" }
                     div ."m-followeeList__item" {
-                        (fragment::avatar("m-followeeList__avatar", format!("/avatar/{DPC_ROSTRA_ID}"), "Avatar"))
+                        (fragment::avatar("m-followeeList__avatar", format!("/profile/{DPC_ROSTRA_ID}/avatar"), "Avatar"))
                         a ."m-followeeList__name"
                             href=(format!("/profile/{DPC_ROSTRA_ID}"))
                         {
@@ -357,9 +361,9 @@ impl UiState {
                         .call())
                     }
                 } @else {
-                    @for (followee_id, display_name) in &followee_items {
+                    @for (followee_id, display_name, event_id) in &followee_items {
                         div ."m-followeeList__item" {
-                            (fragment::avatar("m-followeeList__avatar", self.avatar_url(*followee_id), "Avatar"))
+                            (fragment::avatar("m-followeeList__avatar", self.avatar_url(*followee_id, *event_id), "Avatar"))
                             a ."m-followeeList__name"
                                 href=(format!("/profile/{}", followee_id))
                             {
@@ -398,7 +402,11 @@ impl UiState {
                 .as_ref()
                 .map(|p| p.display_name.clone())
                 .unwrap_or_else(|| follower_id.to_string());
-            follower_items.push((follower_id, display_name));
+            let event_id = profile
+                .as_ref()
+                .map(|p| p.event_id)
+                .unwrap_or(ShortEventId::ZERO);
+            follower_items.push((follower_id, display_name, event_id));
         }
 
         // Sort by display name
@@ -423,9 +431,9 @@ impl UiState {
                         }
                     }
                 } @else {
-                    @for (follower_id, display_name) in &follower_items {
+                    @for (follower_id, display_name, event_id) in &follower_items {
                         div ."m-followeeList__item" {
-                            (fragment::avatar("m-followeeList__avatar", self.avatar_url(*follower_id), "Avatar"))
+                            (fragment::avatar("m-followeeList__avatar", self.avatar_url(*follower_id, *event_id), "Avatar"))
                             a ."m-followeeList__name"
                                 href=(format!("/profile/{}", follower_id))
                             {
