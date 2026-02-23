@@ -50,9 +50,7 @@ impl IntoResponse for &UserRequestError {
         let (status_code, message) = match self {
             UserRequestError::SomethingNotFound => (StatusCode::NOT_FOUND, self.to_string()),
             UserRequestError::InvalidData => (StatusCode::BAD_REQUEST, self.to_string()),
-            UserRequestError::BadRequest { message } => {
-                (StatusCode::BAD_REQUEST, message.clone())
-            }
+            UserRequestError::BadRequest { message } => (StatusCode::BAD_REQUEST, message.clone()),
             UserRequestError::ContentValidation { source } => {
                 (StatusCode::BAD_REQUEST, source.public_message.clone())
             }

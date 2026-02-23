@@ -33,6 +33,8 @@ use routes::cache_control;
 use snafu::{ResultExt as _, Snafu, Whatever, ensure};
 use tokio::net::{TcpListener, TcpSocket, UnixListener};
 use tokio::signal;
+use tokio::sync::oneshot;
+use tokio::task::JoinHandle;
 use tower_cookies::CookieManagerLayer;
 use tower_http::CompressionLevel;
 use tower_http::compression::CompressionLayer;
@@ -272,8 +274,37 @@ pub async fn get_unix_listener(path: &Path) -> ServerResult<UnixListener> {
     Ok(UnixListener::bind(path)?)
 }
 
-pub async fn run_ui(opts: Opts, clients: MultiClient) -> ServerResult<()> {
-    // Todo: allow disabling with a cmdline flag too?
+/// A running UI server handle.
+///
+/// Use [`start_ui`] to create one. Call [`shutdown`](UiServer::shutdown) to
+/// trigger graceful shutdown and wait for the server to finish.
+pub struct UiServer {
+    local_addr: SocketAddr,
+    shutdown_tx: Option<oneshot::Sender<()>>,
+    task: JoinHandle<Result<(), io::Error>>,
+}
+
+impl UiServer {
+    pub fn local_addr(&self) -> SocketAddr {
+        self.local_addr
+    }
+
+    /// Trigger graceful shutdown and wait for the server to finish.
+    pub async fn shutdown(self) -> Result<(), io::Error> {
+        drop(self.shutdown_tx);
+        self.task.await.expect("server task panicked")
+    }
+}
+
+/// Build shared state and session layer from options and clients.
+async fn build_state_and_session(
+    opts: &Opts,
+    clients: MultiClient,
+) -> ServerResult<(
+    SharedState,
+    Option<Arc<StaticAssets>>,
+    SessionManagerLayer<RedbSessionStore>,
+)> {
     let assets = if is_rostra_dev_mode_set() {
         None
     } else {
@@ -284,7 +315,6 @@ pub async fn run_ui(opts: Opts, clients: MultiClient) -> ServerResult<()> {
         ))
     };
 
-    // Create persistent session store with shared redb database
     let session_db_path = opts.data_dir.join("webui.redb");
     let session_db = tokio::task::spawn_blocking(move || {
         redb::Database::create(session_db_path)
@@ -311,42 +341,84 @@ pub async fn run_ui(opts: Opts, clients: MultiClient) -> ServerResult<()> {
         .with_name("rostra_session")
         .with_expiry(Expiry::OnInactivity(time::Duration::days(30)));
 
+    Ok((state, assets, session_layer))
+}
+
+/// Build the router with all layers applied.
+fn build_router(state: SharedState, assets: Option<Arc<StaticAssets>>) -> Router<Arc<UiState>> {
+    let mut router = Router::new().merge(routes::route_handler(state));
+    router = match assets {
+        Some(assets) => router.nest_service("/assets", StaticAssetService::new(assets)),
+        _ => router.nest_service(
+            "/assets",
+            ServeDir::new(format!("{}/assets", env!("CARGO_MANIFEST_DIR"))),
+        ),
+    };
+    router
+}
+
+/// Start the UI server on a TCP address and return a handle.
+///
+/// The server runs in a background tokio task. Call
+/// [`UiServer::shutdown`] to stop it, or drop the handle
+/// to trigger shutdown automatically.
+pub async fn start_ui(opts: Opts, clients: MultiClient) -> ServerResult<UiServer> {
+    let BindAddr::Tcp(addr) = &opts.listen else {
+        panic!("start_ui only supports TCP addresses; use run_ui for Unix sockets");
+    };
+
+    let (state, assets, session_layer) = build_state_and_session(&opts, clients).await?;
+
+    let listener = get_tcp_listener(*addr, opts.reuseport).await?;
+    let local_addr = listener.local_addr()?;
+
+    info!(
+        target: LOG_TARGET,
+        listen = %local_addr,
+        origin = %opts.cors_origin_url_str(local_addr),
+        "Starting TCP server"
+    );
+
+    let router = build_router(state.clone(), assets);
+
+    let cors = cors_layer(&opts, local_addr)?;
+    let (shutdown_tx, shutdown_rx) = oneshot::channel::<()>();
+
+    let task = tokio::spawn(async move {
+        axum::serve(
+            listener,
+            router
+                .with_state(state)
+                .layer(CookieManagerLayer::new())
+                .layer(middleware::from_fn(cache_control))
+                .layer(session_layer)
+                .layer(cors)
+                .layer(compression_layer())
+                .into_make_service_with_connect_info::<SocketAddr>(),
+        )
+        .with_graceful_shutdown(async {
+            let _ = shutdown_rx.await;
+        })
+        .await
+    });
+
+    Ok(UiServer {
+        local_addr,
+        shutdown_tx: Some(shutdown_tx),
+        task,
+    })
+}
+
+pub async fn run_ui(opts: Opts, clients: MultiClient) -> ServerResult<()> {
     match &opts.listen {
-        BindAddr::Tcp(addr) => {
-            let listener = get_tcp_listener(*addr, opts.reuseport).await?;
-            let local_addr = listener.local_addr()?;
-
-            info!(
-                target: LOG_TARGET,
-                listen = %local_addr,
-                origin = %opts.cors_origin_url_str(local_addr),
-                "Starting TCP server"
-            );
-
-            let mut router = Router::new().merge(routes::route_handler(state.clone()));
-            router = match assets.clone() {
-                Some(assets) => router.nest_service("/assets", StaticAssetService::new(assets)),
-                _ => router.nest_service(
-                    "/assets",
-                    ServeDir::new(format!("{}/assets", env!("CARGO_MANIFEST_DIR"))),
-                ),
-            };
-
-            axum::serve(
-                listener,
-                router
-                    .with_state(state)
-                    .layer(CookieManagerLayer::new())
-                    .layer(middleware::from_fn(cache_control))
-                    .layer(session_layer.clone())
-                    .layer(cors_layer(&opts, local_addr)?)
-                    .layer(compression_layer())
-                    .into_make_service_with_connect_info::<SocketAddr>(),
-            )
-            .with_graceful_shutdown(shutdown_signal())
-            .await?;
+        BindAddr::Tcp(_) => {
+            let server = start_ui(opts, clients).await?;
+            shutdown_signal().await;
+            Ok(server.shutdown().await?)
         }
         BindAddr::Unix(path) => {
+            let (state, assets, session_layer) = build_state_and_session(&opts, clients).await?;
+
             let listener = get_unix_listener(path).await?;
 
             info!(
@@ -355,14 +427,7 @@ pub async fn run_ui(opts: Opts, clients: MultiClient) -> ServerResult<()> {
                 "Starting Unix socket server"
             );
 
-            let mut router = Router::new().merge(routes::route_handler(state.clone()));
-            router = match assets.clone() {
-                Some(assets) => router.nest_service("/assets", StaticAssetService::new(assets)),
-                _ => router.nest_service(
-                    "/assets",
-                    ServeDir::new(format!("{}/assets", env!("CARGO_MANIFEST_DIR"))),
-                ),
-            };
+            let router = build_router(state.clone(), assets);
 
             axum::serve(
                 listener,
@@ -376,10 +441,10 @@ pub async fn run_ui(opts: Opts, clients: MultiClient) -> ServerResult<()> {
             )
             .with_graceful_shutdown(shutdown_signal())
             .await?;
+
+            Ok(())
         }
     }
-
-    Ok(())
 }
 
 fn compression_layer() -> CompressionLayer<SizeAbove> {

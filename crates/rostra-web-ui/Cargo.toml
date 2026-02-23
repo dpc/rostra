@@ -53,3 +53,10 @@ serde = { workspace = true }
 url = { workspace = true }
 urlencoding = { workspace = true }
 rand = { workspace = true }
+
+[dev-dependencies]
+reqwest = { workspace = true, features = ["cookies"] }
+tempfile = { workspace = true }
+test-log = { workspace = true }
+tokio = { workspace = true, features = ["macros"] }
+rostra-core = { workspace = true }
