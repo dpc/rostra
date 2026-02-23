@@ -182,8 +182,17 @@ impl Database {
                 }
             };
 
-        // Note: events_content_missing and events_content_state are handled in
-        // insert_event_tx
+        // Notify the content fetcher when new content needs fetching.
+        // This fires when a new event with content_len > 0 was inserted and
+        // its content is not already available (ProcessEventState::New).
+        if matches!(process_event_content_state, ProcessEventState::New) && 0 < event.content_len()
+        {
+            let notify = self.content_missing_notify.clone();
+            tx.on_commit(move || {
+                notify.notify_one();
+            });
+        }
+
         Ok((insert_event_outcome, process_event_content_state))
     }
 }

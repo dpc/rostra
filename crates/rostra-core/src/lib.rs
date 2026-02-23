@@ -153,6 +153,16 @@ impl Timestamp {
         self.0
     }
 
+    /// Add seconds to this timestamp (saturating at `Timestamp::MAX`).
+    pub const fn saturating_add_secs(self, secs: u64) -> Self {
+        Self(self.0.saturating_add(secs))
+    }
+
+    /// Seconds elapsed since `earlier`, or 0 if `earlier` is after `self`.
+    pub const fn secs_since(self, earlier: Self) -> u64 {
+        self.0.saturating_sub(earlier.0)
+    }
+
     /// Convert to `time::OffsetDateTime`
     pub fn to_offset_date_time(self) -> Option<time::OffsetDateTime> {
         time::OffsetDateTime::from_unix_timestamp(self.0 as i64).ok()

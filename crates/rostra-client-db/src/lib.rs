@@ -29,7 +29,7 @@ use rostra_core::id::{RostraId, ToShort as _};
 use rostra_core::{ShortEventId, Timestamp};
 use rostra_util_error::{BoxedError, FmtCompact as _};
 use snafu::{Location, ResultExt as _, Snafu};
-use tokio::sync::{broadcast, watch};
+use tokio::sync::{Notify, broadcast, watch};
 use tokio::task::JoinError;
 use tracing::{debug, error, info, instrument};
 
@@ -207,6 +207,12 @@ pub struct Database {
     new_shoutbox_tx: broadcast::Sender<(VerifiedEventContent, content_kind::Shoutbox)>,
     new_heads_tx: broadcast::Sender<(RostraId, ShortEventId)>,
     ids_with_missing_events_tx: dedup_chan::Sender<RostraId>,
+
+    /// Notification for when new content is added to `events_content_missing`.
+    ///
+    /// The `MissingEventContentFetcher` task waits on this to wake up
+    /// immediately when new missing content arrives, instead of polling.
+    content_missing_notify: Arc<Notify>,
 }
 
 impl Database {
@@ -317,6 +323,7 @@ impl Database {
             new_shoutbox_tx,
             new_heads_tx,
             ids_with_missing_events_tx: dedup_chan::Sender::new(),
+            content_missing_notify: Arc::new(Notify::new()),
         };
 
         // If total migration stashed events, reprocess them now using the real
@@ -408,6 +415,14 @@ impl Database {
         capacity: usize,
     ) -> dedup_chan::Receiver<RostraId> {
         self.ids_with_missing_events_tx.subscribe(capacity)
+    }
+
+    /// Get a handle to the content-missing notification.
+    ///
+    /// The `MissingEventContentFetcher` calls `notified()` on this to wake up
+    /// when new missing content is inserted into the database.
+    pub fn content_missing_notify(&self) -> Arc<Notify> {
+        self.content_missing_notify.clone()
     }
 
     pub async fn has_event(&self, event_id: impl Into<ShortEventId>) -> bool {
@@ -665,8 +680,19 @@ impl Database {
             return Ok(());
         }
 
-        // Remove from missing list
-        events_content_missing_table.remove(&event_content.event_id().to_short())?;
+        // Remove from missing list (need next_fetch_attempt for composite key)
+        {
+            let event_short_id = event_content.event_id().to_short();
+            let state = events_content_state_table
+                .get(&event_short_id)?
+                .map(|g| g.value());
+            if let Some(EventContentState::Missing {
+                next_fetch_attempt, ..
+            }) = state
+            {
+                events_content_missing_table.remove(&(next_fetch_attempt, event_short_id))?;
+            }
+        }
 
         // Check if content should be processed (not deleted/pruned, is Missing)
         let can_insert = if u32::from(event_content.event.event.content_len) < Self::MAX_CONTENT_LEN

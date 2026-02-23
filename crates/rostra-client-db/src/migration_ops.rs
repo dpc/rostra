@@ -62,19 +62,22 @@ pub type LegacyContentStoreRecordOwned = LegacyContentStoreRecord<'static>;
 /// Current schema version.
 ///
 /// Increment this when making schema changes that require migration.
-const DB_VER: u64 = 17;
+const DB_VER: u64 = 19;
 
 /// Versions older than this require a total migration.
 ///
 /// This should be set to the version where we last did a major schema
 /// overhaul. Older databases get rebuilt from scratch.
-const DB_VER_REQUIRES_TOTAL_MIGRATION: u64 = 17;
+const DB_VER_REQUIRES_TOTAL_MIGRATION: u64 = 19;
 
-/// DB version that introduced the tuple struct ContentStoreRecord format.
+/// Last DB version that used the legacy enum `ContentStoreRecord::Present(...)`
+/// format.
 ///
-/// Versions at or below this used an enum `ContentStoreRecord::Present(...)`.
-/// During total migration, we use `LegacyContentStoreRecord` for older data.
-const DB_VER_LEGACY_CONTENT_STORE_FORMAT: u64 = 17;
+/// Versions at or below this used an enum wrapper. Version 17+ switched to
+/// the tuple struct `ContentStoreRecord(Cow<...>)` format. During total
+/// migration, we use `LegacyContentStoreRecord` for databases from these
+/// older versions.
+const DB_VER_LEGACY_CONTENT_STORE_FORMAT: u64 = 16;
 
 /// Prefix used for temporary tables during total migration.
 const MIGRATION_TEMP_PREFIX: &str = "_total_migration_";
@@ -220,10 +223,7 @@ impl Database {
     /// This copies events/content_store/ids_self to temp tables, deletes all
     /// other tables, and initializes fresh schema. The ids_self is restored
     /// immediately so the Database can be created normally.
-    fn prepare_total_migration(
-        dbtx: &WriteTransactionCtx,
-        source_ver: u64,
-    ) -> DbResult<()> {
+    fn prepare_total_migration(dbtx: &WriteTransactionCtx, source_ver: u64) -> DbResult<()> {
         // Define temp table definitions
         let events_temp: redb_bincode::TableDefinition<
             '_,
@@ -439,9 +439,7 @@ impl Database {
                 let legacy_table = legacy_content_temp_table.as_ref()?;
                 let legacy_record = legacy_table.get(&event_id).ok()?.map(|g| g.value())?;
                 match legacy_record {
-                    LegacyEventContentState::Present(cow) => {
-                        Some(cow.as_ref().to_owned())
-                    }
+                    LegacyEventContentState::Present(cow) => Some(cow.as_ref().to_owned()),
                     LegacyEventContentState::Invalid(cow) => {
                         debug!(
                             target: LOG_TARGET,

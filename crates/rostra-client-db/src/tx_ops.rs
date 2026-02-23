@@ -189,7 +189,6 @@ impl Database {
             if let Some(parent_event_record) = parent_event {
                 if event.is_delete_parent_aux_content_set() && parent_is_aux {
                     deleted_parent = Some(parent_id);
-                    events_content_missing_table.remove(&parent_id)?;
 
                     let parent_content_hash = parent_event_record.content_hash();
                     let old_state = events_content_state_table
@@ -200,6 +199,13 @@ impl Database {
                             },
                         )?
                         .map(|g| g.value());
+
+                    if let Some(EventContentState::Missing {
+                        next_fetch_attempt, ..
+                    }) = old_state
+                    {
+                        events_content_missing_table.remove(&(next_fetch_attempt, parent_id))?;
+                    }
 
                     // Decrement RC unless already decremented
                     // (Deleted/Pruned/Invalid all decrement RC on transition).
@@ -283,10 +289,17 @@ impl Database {
 
             if 0 < event.content_len() {
                 // Regular content: mark as Missing, check content_missing
-                events_content_state_table.insert(&event_id, &EventContentState::Missing)?;
+                events_content_state_table.insert(
+                    &event_id,
+                    &EventContentState::Missing {
+                        last_fetch_attempt: None,
+                        fetch_attempt_count: 0,
+                        next_fetch_attempt: Timestamp::ZERO,
+                    },
+                )?;
 
                 if content_store_table.get(&content_hash)?.is_none() {
-                    events_content_missing_table.insert(&event_id, &())?;
+                    events_content_missing_table.insert(&(Timestamp::ZERO, event_id), &())?;
                 }
             } else {
                 // Empty content: store it immediately, go straight to "processed"
@@ -339,7 +352,7 @@ impl Database {
             .map(|g| g.value())
         {
             match state {
-                EventContentState::Missing => {
+                EventContentState::Missing { .. } => {
                     // Content not yet processed, can insert
                     return Ok(true);
                 }
@@ -389,7 +402,7 @@ impl Database {
                 // Already pruned, nothing to do
                 return Ok(true);
             }
-            Some(EventContentState::Missing) | None => {
+            Some(EventContentState::Missing { .. }) | None => {
                 // Can proceed to prune
             }
         }
@@ -408,7 +421,12 @@ impl Database {
         }
 
         events_content_state_table.insert(&event_id, &EventContentState::Pruned)?;
-        events_content_missing_table.remove(&event_id)?;
+        if let Some(EventContentState::Missing {
+            next_fetch_attempt, ..
+        }) = old_state
+        {
+            events_content_missing_table.remove(&(next_fetch_attempt, event_id))?;
+        }
 
         Ok(true)
     }
@@ -509,7 +527,7 @@ impl Database {
             .map(|r| r.value())
         {
             match state {
-                EventContentState::Missing => {
+                EventContentState::Missing { .. } => {
                     // Content not yet processed - fall through to check
                     // content_store
                 }
@@ -585,7 +603,7 @@ impl Database {
             match state {
                 // Missing means content wasn't in store at event insertion,
                 // but it might be now - check the store
-                EventContentState::Missing => {}
+                EventContentState::Missing { .. } => {}
                 // Deleted, pruned, or invalid means content is not available
                 EventContentState::Deleted { .. }
                 | EventContentState::Pruned
@@ -868,19 +886,23 @@ impl Database {
             // Check if the event's content was already deleted/pruned
             // In the new model, RC was incremented at insertion time,
             // so we decrement here unless it was already decremented (deleted/pruned)
-            let was_already_unwanted = events_content_state_table
+            let old_state = events_content_state_table
                 .get(&event_id)?
-                .map(|g| {
-                    matches!(
-                        g.value(),
-                        EventContentState::Deleted { .. } | EventContentState::Pruned
-                    )
-                })
-                .unwrap_or(false);
+                .map(|g| g.value());
+
+            let was_already_unwanted = matches!(
+                old_state,
+                Some(EventContentState::Deleted { .. } | EventContentState::Pruned)
+            );
 
             // Remove per-event state
             events_content_state_table.remove(&event_id)?;
-            events_content_missing_table.remove(&event_id)?;
+            if let Some(EventContentState::Missing {
+                next_fetch_attempt, ..
+            }) = old_state
+            {
+                events_content_missing_table.remove(&(next_fetch_attempt, event_id))?;
+            }
 
             // Decrement RC if content wasn't already unwanted
             if !was_already_unwanted {
@@ -1009,7 +1031,7 @@ impl Database {
         let mut usage = Self::get_usage_mut(author, ids_data_usage_table)?;
 
         match old_state {
-            Some(EventContentState::Missing) => {
+            Some(EventContentState::Missing { .. }) => {
                 usage.missing_payload_size = usage.missing_payload_size.saturating_sub(len);
                 usage.missing_payload_num = usage.missing_payload_num.saturating_sub(1);
             }
@@ -1025,7 +1047,7 @@ impl Database {
                 usage.current_content_size = usage.current_content_size.saturating_sub(len);
                 usage.current_payload_num = usage.current_payload_num.saturating_sub(1);
             }
-            // Already deleted — should not happen (caller guards against it)
+            // Already deleted -- should not happen (caller guards against it)
             Some(EventContentState::Deleted { .. }) => {}
         }
 
@@ -1051,7 +1073,7 @@ impl Database {
         let mut usage = Self::get_usage_mut(author, ids_data_usage_table)?;
 
         match old_state {
-            Some(EventContentState::Missing) => {
+            Some(EventContentState::Missing { .. }) => {
                 usage.missing_payload_size = usage.missing_payload_size.saturating_sub(len);
                 usage.missing_payload_num = usage.missing_payload_num.saturating_sub(1);
             }

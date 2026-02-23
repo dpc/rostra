@@ -614,7 +614,7 @@ impl UiState {
 
         // Format content state
         let content_state_str = match content_state {
-            Some(EventContentState::Missing) => "Missing",
+            Some(EventContentState::Missing { .. }) => "Missing",
             Some(EventContentState::Deleted { .. }) => "Deleted",
             Some(EventContentState::Pruned) => "Pruned",
             Some(EventContentState::Invalid) => "Invalid",

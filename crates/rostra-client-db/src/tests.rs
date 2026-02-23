@@ -357,6 +357,7 @@ async fn test_content_reference_counting() -> BoxedErrorResult<()> {
 async fn test_event_arrives_before_content() -> BoxedErrorResult<()> {
     use std::borrow::Cow;
 
+    use rostra_core::Timestamp;
     use rostra_core::id::ToShort;
 
     use crate::event::ContentStoreRecord;
@@ -396,7 +397,9 @@ async fn test_event_arrives_before_content() -> BoxedErrorResult<()> {
 
         // Verify: Event should NOT be in events_content_missing (content_len=0)
         assert!(
-            events_content_missing_table.get(&event_id)?.is_none(),
+            events_content_missing_table
+                .get(&(Timestamp::ZERO, event_id))?
+                .is_none(),
             "content_len=0 event should NOT be in events_content_missing"
         );
 
@@ -453,6 +456,7 @@ async fn test_event_arrives_before_content() -> BoxedErrorResult<()> {
 async fn test_content_exists_when_event_arrives() -> BoxedErrorResult<()> {
     use std::borrow::Cow;
 
+    use rostra_core::Timestamp;
     use rostra_core::id::ToShort;
 
     use crate::event::ContentStoreRecord;
@@ -496,7 +500,9 @@ async fn test_content_exists_when_event_arrives() -> BoxedErrorResult<()> {
 
         // Verify: Event should NOT be in events_content_missing
         assert!(
-            events_content_missing_table.get(&event_id)?.is_none(),
+            events_content_missing_table
+                .get(&(Timestamp::ZERO, event_id))?
+                .is_none(),
             "Event should NOT be in events_content_missing"
         );
 
@@ -542,6 +548,7 @@ async fn test_content_exists_when_event_arrives() -> BoxedErrorResult<()> {
 async fn test_multiple_events_share_content() -> BoxedErrorResult<()> {
     use std::borrow::Cow;
 
+    use rostra_core::Timestamp;
     use rostra_core::id::ToShort;
 
     use crate::event::ContentStoreRecord;
@@ -595,7 +602,9 @@ async fn test_multiple_events_share_content() -> BoxedErrorResult<()> {
             "RC=1 after A arrives (content_len=0 now gets RC increment)"
         );
         assert!(
-            events_content_missing_table.get(&event_a_id)?.is_none(),
+            events_content_missing_table
+                .get(&(Timestamp::ZERO, event_a_id))?
+                .is_none(),
             "A should NOT be in missing (content_len=0)"
         );
 
@@ -636,7 +645,9 @@ async fn test_multiple_events_share_content() -> BoxedErrorResult<()> {
             "RC=2 after B arrives (both A and B increment RC)"
         );
         assert!(
-            events_content_missing_table.get(&event_b_id)?.is_none(),
+            events_content_missing_table
+                .get(&(Timestamp::ZERO, event_b_id))?
+                .is_none(),
             "B should NOT be in missing (content_len=0)"
         );
         // No content state entry for content_len=0 events
@@ -665,6 +676,7 @@ async fn test_multiple_events_share_content() -> BoxedErrorResult<()> {
 async fn test_multiple_events_waiting_for_content() -> BoxedErrorResult<()> {
     use std::borrow::Cow;
 
+    use rostra_core::Timestamp;
     use rostra_core::id::ToShort;
 
     use crate::event::ContentStoreRecord;
@@ -718,8 +730,16 @@ async fn test_multiple_events_waiting_for_content() -> BoxedErrorResult<()> {
         )?;
 
         // content_len=0: neither in missing, RC=2 (both events increment)
-        assert!(events_content_missing_table.get(&event_a_id)?.is_none());
-        assert!(events_content_missing_table.get(&event_b_id)?.is_none());
+        assert!(
+            events_content_missing_table
+                .get(&(Timestamp::ZERO, event_a_id))?
+                .is_none()
+        );
+        assert!(
+            events_content_missing_table
+                .get(&(Timestamp::ZERO, event_b_id))?
+                .is_none()
+        );
         assert_eq!(
             Database::get_content_rc_tx(content_hash, &content_rc_table)?,
             2,
@@ -1568,6 +1588,7 @@ async fn test_data_usage_new_event_metadata() -> BoxedErrorResult<()> {
 /// immediately — no Missing state, no RC, no payload tracking.
 #[test_log::test(tokio::test(flavor = "multi_thread"))]
 async fn test_empty_content_event_skips_missing_state() -> BoxedErrorResult<()> {
+    use rostra_core::Timestamp;
     use rostra_core::id::ToShort as _;
 
     use crate::ids_data_usage;
@@ -1613,7 +1634,7 @@ async fn test_empty_content_event_skips_missing_state() -> BoxedErrorResult<()> 
         assert_eq!(rc, 1, "Empty-content event should increment RC");
 
         // Not in events_content_missing
-        let missing = events_content_missing_table.get(&event_id.to_short())?;
+        let missing = events_content_missing_table.get(&(Timestamp::ZERO, event_id.to_short()))?;
         assert!(
             missing.is_none(),
             "Empty-content event should not be in events_content_missing"
@@ -2474,7 +2495,7 @@ mod proptest_rc {
             // Deleted, Pruned, and Invalid events don't contribute.
             let has_rc = match state {
                 None => true,
-                Some(EventContentState::Missing) => true,
+                Some(EventContentState::Missing { .. }) => true,
                 Some(
                     EventContentState::Deleted { .. }
                     | EventContentState::Pruned
@@ -3416,8 +3437,11 @@ async fn test_total_migration() -> BoxedErrorResult<()> {
         let write_txn = raw_db.begin_write().boxed()?;
         {
             let mut table = write_txn.open_table(&db_version::TABLE).boxed()?;
-            // Set version to 1 to trigger total migration
-            let old_version: u64 = 1;
+            // Set version to 17 to trigger total migration (current is 18).
+            // Using 17 (not 1) because the test writes data with the current
+            // ContentStoreRecord tuple struct format, and versions <= 16 are
+            // treated as legacy enum format during migration.
+            let old_version: u64 = 17;
             table.insert(&(), &old_version).boxed()?;
         }
         write_txn.commit().boxed()?;
@@ -3804,7 +3828,7 @@ async fn test_content_processing_idempotency() -> BoxedErrorResult<()> {
         let events_content_state_table = tx.open_table(&events_content_state::TABLE)?;
         let state = Database::get_event_content_state_tx(post_id, &events_content_state_table)?;
         assert!(
-            matches!(state, Some(EventContentState::Missing)),
+            matches!(state, Some(EventContentState::Missing { .. })),
             "Post should be Unprocessed before content arrives"
         );
         Ok(())
@@ -3844,7 +3868,7 @@ async fn test_content_processing_idempotency() -> BoxedErrorResult<()> {
         let events_content_state_table = tx.open_table(&events_content_state::TABLE)?;
         let state = Database::get_event_content_state_tx(reply_id, &events_content_state_table)?;
         assert!(
-            matches!(state, Some(EventContentState::Missing)),
+            matches!(state, Some(EventContentState::Missing { .. })),
             "Reply should be Unprocessed before content arrives"
         );
         Ok(())
@@ -3976,7 +4000,7 @@ async fn test_delete_while_unprocessed() -> BoxedErrorResult<()> {
 
         let state = Database::get_event_content_state_tx(post_id, &events_content_state_table)?;
         assert!(
-            matches!(state, Some(EventContentState::Missing)),
+            matches!(state, Some(EventContentState::Missing { .. })),
             "Post should be Unprocessed"
         );
 

@@ -28,7 +28,7 @@ event insertion time.
 | `content_store` | `ContentHash` | Content storage (deduplicated by hash) |
 | `content_rc` | `ContentHash` | Reference count per content hash |
 | `events_content_state` | `ShortEventId` | Per-event processing state |
-| `events_content_missing` | `ShortEventId` | Events waiting for content bytes |
+| `events_content_missing` | `(Timestamp, ShortEventId)` | Events waiting for content, sorted by next fetch time |
 
 ## State Machine
 
@@ -61,7 +61,7 @@ straight to "no entry" (processed) during event insertion.
 
 | State | `events_content_state` | Meaning |
 |-------|------------------------|---------|
-| Missing | `Missing` | Event inserted, content not yet processed |
+| Missing | `Missing { last_fetch_attempt, fetch_attempt_count, next_fetch_attempt }` | Event inserted, content not yet processed |
 | Processed | *no entry* | Content processed, side effects applied |
 | Invalid | `Invalid` | Content failed validation (e.g. CBOR deserialization) |
 | Deleted | `Deleted { deleted_by }` | Author deleted this content |
@@ -97,13 +97,15 @@ collection when no events need the content.
 1. insert_event_tx:
    - Add event to `events`
    - Increment RC for content_hash
-   - Mark as Missing in `events_content_state`
+   - Mark as Missing { count: 0, next: ZERO } in `events_content_state`
    - Content already in store? Skip adding to `events_content_missing`
+   - Otherwise add (Timestamp::ZERO, event_id) to `events_content_missing`
 
 2. process_event_content_tx:
    - Check can_insert_event_content_tx: Missing? → proceed
    - Apply side effects (reply counts, follow updates, etc.)
    - Store content in `content_store` (if not already there)
+   - Remove from `events_content_missing` (using next_fetch_attempt from state)
    - Remove Missing marker from `events_content_state`
 ```
 
@@ -248,6 +250,70 @@ if events_table.get(&event_id)?.is_some() {
 
 Duplicate event delivery is a no-op. RC not incremented again.
 
+## Content Fetch Scheduling
+
+Missing content is fetched by the `MissingEventContentFetcher` task using an
+event-driven approach with exponential backoff.
+
+### Table Structure
+
+The `events_content_missing` table uses a composite key `(Timestamp,
+ShortEventId)` where the `Timestamp` is the scheduled next fetch attempt time.
+This makes the table naturally sorted by when content should next be fetched.
+
+### Missing State Metadata
+
+The `EventContentState::Missing` variant tracks fetch attempt metadata:
+
+```rust
+Missing {
+    last_fetch_attempt: Option<Timestamp>,  // when we last tried (fact)
+    fetch_attempt_count: u16,               // how many times we tried (fact)
+    next_fetch_attempt: Timestamp,          // when to try next (scheduling)
+}
+```
+
+The `next_fetch_attempt` field mirrors the `Timestamp` component of the
+`events_content_missing` key, enabling removal (which requires the full
+composite key).
+
+### Fetcher Loop
+
+Instead of scanning the entire missing table on a fixed interval, the fetcher:
+
+1. Peeks at the first entry (smallest key = earliest due)
+2. If due now: attempts to fetch from peers
+3. If not due: sleeps until the scheduled time
+4. If table is empty: waits for a `Notify` signal
+
+A `Notify` channel wakes the fetcher immediately when new missing content is
+inserted (via `on_commit` hook in `process_event_tx`).
+
+### Backoff Formula
+
+On fetch failure, the next attempt is scheduled with exponential backoff:
+
+```
+backoff_secs = min(60 * 1.5^(attempt_count - 1), 86400)
+```
+
+- Initial backoff: 60 seconds (1 minute)
+- Maximum backoff: 86400 seconds (24 hours)
+- New entries start with `next_fetch_attempt = Timestamp::ZERO` (try immediately)
+
+### Failed Fetch Recording
+
+The `record_failed_content_fetch` DB method:
+
+1. Reads current `Missing` state to get `fetch_attempt_count`
+2. Removes old schedule entry from `events_content_missing`
+3. Inserts new schedule entry with updated `next_attempt_at`
+4. Updates `events_content_state` with incremented count and timestamps
+
+The caller provides both `attempted_at` (fact) and `next_attempt_at`
+(scheduling decision). The backoff calculation lives in the fetcher, not the
+DB layer.
+
 ## Potential Concerns
 
 ### 1. No Automatic Garbage Collection
@@ -302,6 +368,7 @@ The content lifecycle model handles:
 - Empty content (content_len == 0, processed immediately at insertion)
 - Invalid content (failed validation, RC decremented, bytes discarded)
 - Content deletion and pruning (with double-decrement prevention)
+- Fetch scheduling (exponential backoff for missing content, event-driven wake-up)
 
 The `Missing` state is the key to idempotency - it ensures content side
 effects are applied exactly once per event, regardless of how many times the

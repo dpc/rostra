@@ -80,7 +80,7 @@ impl ReceivedAtPaginationCursor {
         } else {
             // seq overflow, increment timestamp
             Self {
-                ts: Timestamp::from(u64::from(self.ts).saturating_add(1)),
+                ts: self.ts.saturating_add_secs(1),
                 seq: 0,
             }
         }

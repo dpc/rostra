@@ -8,8 +8,8 @@
 use std::borrow::Cow;
 
 use bincode::{Decode, Encode};
-use rostra_core::ShortEventId;
 use rostra_core::event::{EventContentRaw, EventContentUnsized, EventExt, SignedEvent};
+use rostra_core::{ShortEventId, Timestamp};
 use serde::Serialize;
 
 /// Record for the main `events` table.
@@ -141,7 +141,19 @@ pub enum EventContentState {
     /// After processing, the event will have NO entry in
     /// `events_content_state`, indicating content was successfully
     /// processed.
-    Missing,
+    ///
+    /// The `next_fetch_attempt` field mirrors the `Timestamp` component of
+    /// the `events_content_missing` table key `(Timestamp, ShortEventId)`,
+    /// enabling removal from that table (which requires the full composite
+    /// key).
+    Missing {
+        /// When we last attempted to fetch this content from peers.
+        last_fetch_attempt: Option<Timestamp>,
+        /// Number of times we've attempted to fetch this content.
+        fetch_attempt_count: u16,
+        /// Scheduled time for next fetch attempt.
+        next_fetch_attempt: Timestamp,
+    },
 
     /// Content was deleted by the author via a deletion event.
     ///

@@ -49,12 +49,11 @@
 //! 2. RC is incremented in [`content_rc`] (for all non-deleted events,
 //!    including `content_len == 0`)
 //! 3. If `content_len > 0`: event is marked as
-//!    [`Missing`](EventContentState::Missing) in [`events_content_state`],
-//!    and if content bytes are not in [`content_store`], event is added to
+//!    [`Missing`](EventContentState::Missing) in [`events_content_state`], and
+//!    if content bytes are not in [`content_store`], event is added to
 //!    [`events_content_missing`]
-//! 4. If `content_len == 0`: empty content stored in [`content_store`],
-//!    event goes straight to "processed" (no entry in
-//!    [`events_content_state`])
+//! 4. If `content_len == 0`: empty content stored in [`content_store`], event
+//!    goes straight to "processed" (no entry in [`events_content_state`])
 //!
 //! **Content Processing** (via `process_event_content_tx`):
 //! 1. Check if event is `Missing` (if not, skip - already processed)
@@ -70,8 +69,8 @@
 //! 2. RC is decremented in [`content_rc`]
 //!
 //! **Content Pruning** (local decision, e.g., content too large):
-//! 1. Event's content state changes to [`Pruned`](EventContentState::Pruned)
-//!    in [`events_content_state`]
+//! 1. Event's content state changes to [`Pruned`](EventContentState::Pruned) in
+//!    [`events_content_state`]
 //! 2. RC is decremented in [`content_rc`]
 //!
 //! **Garbage Collection**:
@@ -391,17 +390,25 @@ def_table! {
 }
 
 def_table! {
-    /// Events whose content we want but don't have yet.
+    /// Events whose content we want but haven't fetched yet, sorted by
+    /// scheduled fetch time.
     ///
-    /// Key: ShortEventId
+    /// Key: `(next_attempt_ts, event_id)` — sorted by next scheduled fetch
+    /// time, so the fetcher can peek at the first entry and sleep until then.
     ///
-    /// When we receive an event but not its content, we record it here.
-    /// The sync protocol uses this to request missing content from peers.
+    /// The `next_attempt_ts` component uses `Timestamp::ZERO` for newly
+    /// inserted events (meaning "try immediately"). After each failed fetch
+    /// attempt, the entry is re-inserted with an exponentially increasing
+    /// timestamp based on the attempt count.
+    ///
+    /// The corresponding `EventContentState::Missing` entry stores a copy of
+    /// `next_attempt_ts` (as `next_fetch_attempt`) to enable efficient
+    /// removal from this table when the content state changes.
     ///
     /// **Note**: Events in this table already have their RC counted in
     /// `content_rc`. When content arrives, the event is removed from this
     /// table but RC stays the same.
-    events_content_missing: ShortEventId => ()
+    events_content_missing: (Timestamp, ShortEventId) => ()
 }
 
 def_table! {
