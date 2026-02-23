@@ -90,6 +90,75 @@ window.insertMediaSyntax = function (eventId, targetSelector) {
   }
 };
 
+window.uploadMediaFile = function (inputEl) {
+  const file = inputEl.files[0];
+  if (!file) return;
+
+  const formData = new FormData();
+  formData.append("media_file", file);
+
+  const progressEl = document.getElementById("upload-progress");
+  const fillEl = document.getElementById("upload-progress-fill");
+  const textEl = document.getElementById("upload-progress-text");
+
+  if (progressEl) progressEl.classList.add("-active");
+  if (fillEl) fillEl.style.width = "0%";
+  if (textEl) textEl.textContent = "0%";
+
+  const xhr = new XMLHttpRequest();
+
+  xhr.upload.addEventListener("progress", (e) => {
+    if (e.lengthComputable) {
+      const percent = Math.round((e.loaded / e.total) * 100);
+      if (fillEl) fillEl.style.width = percent + "%";
+      if (textEl) textEl.textContent = percent + "%";
+    }
+  });
+
+  xhr.addEventListener("load", () => {
+    if (progressEl) progressEl.classList.remove("-active");
+    inputEl.value = "";
+
+    if (xhr.status >= 200 && xhr.status < 300) {
+      // Parse response and execute scripts (same as alpine-ajax would)
+      const tpl = document.createElement("template");
+      tpl.innerHTML = xhr.responseText;
+      const scripts = tpl.content.querySelectorAll("script");
+      scripts.forEach((script) => {
+        const s = document.createElement("script");
+        s.textContent = script.textContent;
+        document.body.appendChild(s);
+        s.remove();
+      });
+    } else {
+      let message = "Upload failed (" + xhr.status + ")";
+      try {
+        const body = JSON.parse(xhr.responseText);
+        if (body.message) message = body.message;
+      } catch (_) {}
+      window.dispatchEvent(
+        new CustomEvent("notify", {
+          detail: { type: "error", message },
+        }),
+      );
+    }
+  });
+
+  xhr.addEventListener("error", () => {
+    if (progressEl) progressEl.classList.remove("-active");
+    inputEl.value = "";
+    window.dispatchEvent(
+      new CustomEvent("notify", {
+        detail: { type: "error", message: "Upload failed - network error" },
+      }),
+    );
+  });
+
+  xhr.open("POST", "/media/publish");
+  xhr.setRequestHeader("X-Alpine-Request", "true");
+  xhr.send(formData);
+};
+
 // =============================================================================
 // DOMContentLoaded handlers
 // =============================================================================
@@ -162,6 +231,18 @@ window.addEventListener("unhandledrejection", (event) => {
   }
 });
 
+// When alpine-ajax gets a non-2xx response whose body doesn't contain
+// the expected target element, it fires ajax:missing and then falls back
+// to a native form resubmission (which navigates the browser to the raw
+// JSON error page). Preventing default on ajax:missing stops that fallback;
+// the ajax:error handler (in the notifications component) has already
+// dispatched a toast notification by this point.
+window.addEventListener("ajax:missing", (event) => {
+  if (!event.detail.response.ok) {
+    event.preventDefault();
+  }
+});
+
 // =============================================================================
 // Alpine.js component registrations
 // =============================================================================
@@ -174,15 +255,29 @@ document.addEventListener("alpine:init", () => {
     init() {
       // Handle AJAX errors
       window.addEventListener("ajax:error", (event) => {
-        const xhr = event.detail?.xhr || event.detail;
-        const status = xhr?.status;
+        const detail = event.detail?.xhr || event.detail;
+        const status = detail?.status;
+        const raw = event.detail?.raw || detail?.raw;
         let message;
-        if (status === 0 || status === undefined) {
-          message = "\u26a0 Network Error - Unable to complete request";
-        } else if (status >= 500) {
-          message = "\u26a0 Server Error (" + status + ")";
-        } else if (status >= 400) {
-          message = "\u26a0 Request Failed (" + status + ")";
+
+        // Try to extract message from JSON response body
+        if (raw) {
+          try {
+            const body = JSON.parse(raw);
+            if (body.message) {
+              message = body.message;
+            }
+          } catch (_) {}
+        }
+
+        if (!message) {
+          if (status === 0 || status === undefined) {
+            message = "\u26a0 Network Error - Unable to complete request";
+          } else if (status >= 500) {
+            message = "\u26a0 Server Error (" + status + ")";
+          } else if (status >= 400) {
+            message = "\u26a0 Request Failed (" + status + ")";
+          }
         }
         if (message) {
           this.addNotification("error", message);

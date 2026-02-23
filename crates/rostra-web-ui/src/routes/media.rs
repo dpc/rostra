@@ -73,14 +73,14 @@ pub async fn publish(
                     .to_string();
                 let data = field.bytes().await.boxed().context(OtherSnafu)?;
 
-                // Limit file size to 10MB
-                if data.len() > 10 * 1024 * 1024 {
+                // Limit file size to 200MB
+                if 200 * 1024 * 1024 < data.len() {
                     return Ok(Maud(html! {
                         div id="ajax-scripts" {
                             script {
                                 (PreEscaped(r#"
                                     window.dispatchEvent(new CustomEvent('notify', {
-                                        detail: { type: 'error', message: 'File too large. Maximum size is 10MB.' }
+                                        detail: { type: 'error', message: 'File too large. Maximum size is 200MB.' }
                                     }));
                                 "#))
                             }
@@ -255,6 +255,12 @@ pub async fn list(
                             }
                         }
                     }
+                }
+                div id="upload-progress" ."o-mediaList__progress" {
+                    div ."o-mediaList__progressBar" {
+                        div id="upload-progress-fill" ."o-mediaList__progressFill" {}
+                    }
+                    span id="upload-progress-text" ."o-mediaList__progressText" {}
                 }
                 div ."o-mediaList__actionButtons" {
                     (fragment::button("o-mediaList__uploadButton", "Upload")

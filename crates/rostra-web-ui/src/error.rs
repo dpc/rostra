@@ -6,6 +6,7 @@ use rostra_client::ClientRefError;
 use rostra_client::error::{ActivateError, InitError, PostError};
 use rostra_client::multiclient::MultiClientError;
 use rostra_client_db::DbError;
+use rostra_core::event::ContentValidationError;
 use rostra_util_error::{BoxedError, FmtCompact as _};
 use serde::Serialize;
 use snafu::Snafu;
@@ -14,12 +15,34 @@ use tracing::{debug, warn};
 use super::routes::AppJson;
 use crate::{LOG_TARGET, UiStateClientError};
 
+/// Walk the error source chain looking for a specific error type.
+fn find_in_chain<'a, T: std::error::Error + 'static>(
+    e: &'a (dyn std::error::Error + 'static),
+) -> Option<&'a T> {
+    let mut cur: &dyn std::error::Error = e;
+    loop {
+        if let Some(t) = cur.downcast_ref::<T>() {
+            return Some(t);
+        }
+        cur = cur.source()?;
+    }
+}
+
 /// Error by the user
 #[derive(Debug, Snafu)]
 pub enum UserRequestError {
     SomethingNotFound,
     #[snafu(visibility(pub(crate)))]
     InvalidData,
+    #[snafu(visibility(pub(crate)))]
+    #[snafu(display("{message}"))]
+    BadRequest {
+        message: String,
+    },
+    #[snafu(transparent)]
+    ContentValidation {
+        source: ContentValidationError,
+    },
 }
 
 impl IntoResponse for &UserRequestError {
@@ -27,6 +50,12 @@ impl IntoResponse for &UserRequestError {
         let (status_code, message) = match self {
             UserRequestError::SomethingNotFound => (StatusCode::NOT_FOUND, self.to_string()),
             UserRequestError::InvalidData => (StatusCode::BAD_REQUEST, self.to_string()),
+            UserRequestError::BadRequest { message } => {
+                (StatusCode::BAD_REQUEST, message.clone())
+            }
+            UserRequestError::ContentValidation { source } => {
+                (StatusCode::BAD_REQUEST, source.public_message.clone())
+            }
         };
         (status_code, AppJson(UserErrorResponse { message })).into_response()
     }
@@ -76,8 +105,6 @@ pub enum RequestError {
         source: UiStateClientError,
         redirect: Option<String>,
     },
-    #[snafu(transparent)]
-    PostError { source: PostError },
     #[snafu(visibility(pub(crate)))]
     Other { source: BoxedError },
     #[snafu(visibility(pub(crate)))]
@@ -104,6 +131,21 @@ impl From<UiStateClientError> for RequestError {
     }
 }
 
+/// Route `PostError::Validation` through `UserRequestError` so it's
+/// discoverable by the error-chain walk in `IntoResponse`.
+impl From<PostError> for RequestError {
+    fn from(source: PostError) -> Self {
+        match source {
+            PostError::Validation { source } => RequestError::User {
+                source: source.into(),
+            },
+            other => RequestError::Other {
+                source: Box::new(other),
+            },
+        }
+    }
+}
+
 impl IntoResponse for RequestError {
     fn into_response(self) -> Response {
         debug!(
@@ -112,50 +154,35 @@ impl IntoResponse for RequestError {
             "Request Error"
         );
 
-        let (status_code, message) = match root_cause(&self).downcast_ref::<UserRequestError>() {
-            Some(user_err) => {
-                return user_err.into_response();
+        if let Some(user_err) = find_in_chain::<UserRequestError>(&self) {
+            return user_err.into_response();
+        }
+
+        let (status_code, message) = match self {
+            RequestError::StateClient { redirect, .. }
+            | RequestError::LoginRequired { redirect } => {
+                // Use standard HTTP redirect for Alpine-ajax
+                let url = match redirect {
+                    Some(ref path) => {
+                        format!("/unlock?redirect={}", urlencoding::encode(path))
+                    }
+                    None => "/unlock".to_string(),
+                };
+                return Redirect::to(&url).into_response();
             }
-            _ => {
-                match self {
-                    RequestError::StateClient { redirect, .. }
-                    | RequestError::LoginRequired { redirect } => {
-                        // Use standard HTTP redirect for Alpine-ajax
-                        let url = match redirect {
-                            Some(ref path) => {
-                                format!("/unlock?redirect={}", urlencoding::encode(path))
-                            }
-                            None => "/unlock".to_string(),
-                        };
-                        return Redirect::to(&url).into_response();
-                    }
-                    err => {
-                        warn!(
-                            target: LOG_TARGET,
-                            err = %err.fmt_compact(),
-                            "Unexpected Request Error"
-                        );
-                        (
-                            StatusCode::INTERNAL_SERVER_ERROR,
-                            "Internal Service Error".to_owned(),
-                        )
-                    }
-                }
+            err => {
+                warn!(
+                    target: LOG_TARGET,
+                    err = %err.fmt_compact(),
+                    "Unexpected Request Error"
+                );
+                (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "Internal Service Error".to_owned(),
+                )
             }
         };
 
         (status_code, AppJson(UserErrorResponse { message })).into_response()
     }
-}
-
-fn root_cause<E>(e: &E) -> &(dyn std::error::Error + 'static)
-where
-    E: std::error::Error + 'static,
-{
-    let mut cur_source: &dyn std::error::Error = e;
-
-    while let Some(new_source) = cur_source.source() {
-        cur_source = new_source;
-    }
-    cur_source
 }

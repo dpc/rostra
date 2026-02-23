@@ -224,7 +224,7 @@ pub async fn post_new_post(
     }))
 }
 
-pub async fn get_post_preview_dialog(
+pub async fn post_post_preview_dialog(
     state: State<SharedState>,
     session: UserSession,
     cookies: Cookies,
@@ -244,23 +244,13 @@ pub async fn get_post_preview_dialog(
     let client_ref = client.client_ref()?;
     let self_id = client_ref.rostra_id();
 
-    if form.content.is_empty() {
-        if is_ajax {
-            return Ok(Maud(html! {
-                div id="post-preview-dialog" ."o-previewDialog" {}
-            }));
-        }
-        // No-JS: show empty page with back link
-        let back_url = redirect_to.as_deref().unwrap_or("/");
-        let body = html! {
-            p style="padding: 0.75rem;" { "Nothing to preview." }
-            a href=(back_url) style="padding: 0.75rem;" { "Go back" }
-        };
-        return Ok(Maud(
-            state
-                .render_nojs_full_page(&session, "Post Preview", body)
-                .await?,
-        ));
+    if form.content.trim().is_empty() {
+        return Err(crate::error::RequestError::User {
+            source: crate::error::BadRequestSnafu {
+                message: "Post content cannot be empty",
+            }
+            .build(),
+        });
     }
 
     let personas = client_ref.db().get_personas_for_id(self_id).await;
@@ -989,22 +979,12 @@ impl UiState {
                     input type="hidden" name="target" value="#new-post-content" {}
                 }
 
-                @let upload_ajax = fragment::AjaxLoadingAttrs::for_document_class("m-newPostForm__uploadButton");
-                form id="media-upload-form"
-                    action="/media/publish"
-                    method="post"
-                    enctype="multipart/form-data"
-                    x-target="ajax-scripts"
+                input id="media-file-input"
+                    name="media_file"
+                    type="file"
                     style="display: none;"
-                    "@ajax:before"=(upload_ajax.before)
-                    "@ajax:after"=(upload_ajax.after)
-                {
-                    input id="media-file-input"
-                        name="media_file"
-                        type="file"
-                        "@change"="$el.form.requestSubmit(); $el.value = '';"
-                        {}
-                }
+                    "@change"="uploadMediaFile($el)"
+                    {}
             }
 
             // Emoji picker (outside form to avoid re-creation on swap)

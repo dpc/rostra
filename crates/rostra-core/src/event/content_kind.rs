@@ -15,7 +15,10 @@ use crate::{
 };
 
 #[derive(Debug, Snafu)]
-pub struct ContentValidationError;
+#[snafu(display("Content validation error: {public_message}"))]
+pub struct ContentValidationError {
+    pub public_message: String,
+}
 
 pub type ContentValidationResult<T> = std::result::Result<T, ContentValidationError>;
 
@@ -247,10 +250,14 @@ impl EventContentKind for Shoutbox {
     fn validate(&self) -> ContentValidationResult<()> {
         // Limit to 1000 characters
         if 1000 < self.djot_content.len() {
-            return Err(ContentValidationError);
+            return Err(ContentValidationError {
+                public_message: "Shoutbox message too long (max 1000 characters)".into(),
+            });
         }
         if self.djot_content.is_empty() {
-            return Err(ContentValidationError);
+            return Err(ContentValidationError {
+                public_message: "Shoutbox message cannot be empty".into(),
+            });
         }
         Ok(())
     }
@@ -282,20 +289,25 @@ impl EventContentKind for SocialMedia {
     }
 
     fn validate(&self) -> ContentValidationResult<()> {
-        // Limit media file size to 9MB to prevent issues, until
-        // we have a better data management and reclamation system.
-        if self.data.len() > 9 * 1024 * 1024 {
-            return Err(ContentValidationError);
+        // Limit media file size to 200MB
+        if 200 * 1024 * 1024 < self.data.len() {
+            return Err(ContentValidationError {
+                public_message: "File too large (max 200MB)".into(),
+            });
         }
 
         // Validate MIME type length
-        if self.mime.len() > 100 {
-            return Err(ContentValidationError);
+        if 100 < self.mime.len() {
+            return Err(ContentValidationError {
+                public_message: "MIME type too long".into(),
+            });
         }
 
         // Don't allow empty data
         if self.data.is_empty() {
-            return Err(ContentValidationError);
+            return Err(ContentValidationError {
+                public_message: "File is empty".into(),
+            });
         }
 
         Ok(())
@@ -319,23 +331,33 @@ impl EventContentKind for SocialProfileUpdate {
 
     fn validate(&self) -> ContentValidationResult<()> {
         if 100 < self.display_name.len() {
-            return Err(ContentValidationError);
+            return Err(ContentValidationError {
+                public_message: "Display name too long (max 100 characters)".into(),
+            });
         }
 
         if 1000 < self.bio.len() {
-            return Err(ContentValidationError);
+            return Err(ContentValidationError {
+                public_message: "Bio too long (max 1000 characters)".into(),
+            });
         }
 
         if let Some(avatar) = self.avatar.as_ref() {
             if 100 < avatar.0.len() {
-                return Err(ContentValidationError);
+                return Err(ContentValidationError {
+                    public_message: "Avatar MIME type too long".into(),
+                });
             }
 
             if !avatar.0.starts_with("image/") {
-                return Err(ContentValidationError);
+                return Err(ContentValidationError {
+                    public_message: "Avatar must be an image".into(),
+                });
             }
             if 1_000_000 < avatar.1.len() {
-                return Err(ContentValidationError);
+                return Err(ContentValidationError {
+                    public_message: "Avatar too large (max 1MB)".into(),
+                });
             }
         }
         Ok(())

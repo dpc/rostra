@@ -182,7 +182,7 @@ pub fn route_handler(state: SharedState) -> Router<Arc<UiState>> {
         .route("/media/{author}/list", get(media::list))
         .route(
             "/media/publish",
-            post(media::publish).layer(DefaultBodyLimit::max(9_000_000)),
+            post(media::publish).layer(DefaultBodyLimit::max(200_000_000)),
         )
         .route("/updates", get(timeline::get_updates))
         .route("/post/{author}/{event}", get(post::get_single_post))
@@ -198,7 +198,7 @@ pub fn route_handler(state: SharedState) -> Router<Arc<UiState>> {
         )
         .route(
             "/post/preview_dialog",
-            post(new_post::get_post_preview_dialog),
+            post(new_post::post_post_preview_dialog),
         )
         .route("/post/inline_reply", get(new_post::get_inline_reply))
         .route(
