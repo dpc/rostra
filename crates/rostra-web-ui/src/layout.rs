@@ -46,10 +46,6 @@ impl UiState {
                 script defer src="/assets/libs/alpine-ajax@0.12.6.js" {}
                 script defer src="/assets/app.js" {}
                 script defer src="/assets/libs/alpinejs@3.14.3.js" {}
-                // Disable Prism.js automatic highlighting - we'll do it manually
-                script {
-                    "window.Prism = window.Prism || {}; Prism.manual = true;"
-                }
                 // Load Prism.js for code highlighting
                 // Note: C must load before C++ since C++ extends C
                 script defer src="/assets/libs/prismjs/prism-core.min.js" {}
