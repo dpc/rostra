@@ -214,7 +214,7 @@ pub async fn list(
     }
 
     Ok(Maud(html! {
-        div id="media-list" ."o-mediaList -active" {
+        div id="media-list" ."o-mediaList -active" data-target=(target_selector) {
             (fragment::dialog_escape_handler("media-list"))
             div ."o-mediaList__content" {
                 h4 ."o-mediaList__title" { "Select media to attach" }

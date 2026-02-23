@@ -66,6 +66,11 @@ window.toggleEmojiPicker = function (pickerId, event) {
 };
 
 window.insertMediaSyntax = function (eventId, targetSelector) {
+  // Fall back to the target stored on the media list dialog (set when it was opened)
+  if (!targetSelector) {
+    const mediaList = document.getElementById("media-list");
+    targetSelector = mediaList?.dataset.target;
+  }
   const textarea = document.querySelector(targetSelector);
   const syntax = "![media](rostra-media:" + eventId + ")";
 
