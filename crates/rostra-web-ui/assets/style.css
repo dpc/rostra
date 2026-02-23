@@ -347,14 +347,14 @@ img.u-userImage {
 
 
 .u-userImage {
-  width: 32pt;
-  height: 32pt;
+  width: 43px;
+  height: 43px;
   display: inline-block;
 
   background-color: whitesmoke;
   border-radius: var(--border-radius-std);
   border: 1px solid var(--color-button-border);
-  padding: 1pt;
+  padding: 1px;
 
 }
 

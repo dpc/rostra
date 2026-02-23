@@ -5,9 +5,12 @@ use maud::{Markup, html};
 /// Renders a user avatar image.
 pub fn avatar(class: &str, src: impl maud::Render, alt: &str) -> Markup {
     html! {
+        // width/height attributes prevent layout shift while avatars load
         img .(class) ."u-userImage"
             src=(src)
             alt=(alt)
+            width="43"
+            height="43"
         { }
     }
 }
