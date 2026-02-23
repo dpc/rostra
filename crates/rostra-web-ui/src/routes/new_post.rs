@@ -1002,7 +1002,6 @@ impl UiState {
                     input id="media-file-input"
                         name="media_file"
                         type="file"
-                        accept="image/*,video/*,audio/*"
                         "@change"="$el.form.requestSubmit(); $el.value = '';"
                         {}
                 }
