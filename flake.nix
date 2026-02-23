@@ -34,13 +34,13 @@
             github.ci.buildOutputs = [ ".#ci.${projectName}" ];
             just.importPaths = [ "justfile.rostra.just" ];
             just.rules.watch.enable = false;
-            toolchain.channel = "latest";
+            toolchain.channel = "stable";
             rust.rustfmt.enable = false;
           };
         };
 
         toolchainArgs = {
-          extraRustFlags = "-Z threads=0";
+          # extraRustFlags = "-Z threads=0";
         };
 
         stdToolchains = (flakeboxLib.mkStdToolchains (toolchainArgs // { }));
