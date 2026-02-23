@@ -154,7 +154,7 @@ pub async fn post_new_post(
             // Close the preview dialog
             div id="post-preview-dialog" ."o-previewDialog" {}
 
-            // Show success notification
+            // Show success notification and re-typeset new content
             div id="ajax-scripts" {
                 script {
                     (PreEscaped(r#"
@@ -163,9 +163,8 @@ pub async fn post_new_post(
                         }));
                     "#))
                 }
+                (re_typeset())
             }
-
-            (re_typeset())
         }));
     }
 
@@ -209,7 +208,7 @@ pub async fn post_new_post(
             }
         }
 
-        // Show success notification
+        // Show success notification and re-typeset new content
         div id="ajax-scripts" {
             script {
                 (PreEscaped(r#"
@@ -218,9 +217,8 @@ pub async fn post_new_post(
                     }));
                 "#))
             }
+            (re_typeset())
         }
-
-        (re_typeset())
     }))
 }
 

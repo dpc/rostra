@@ -95,7 +95,7 @@ pub async fn get_shoutbox(
                     (state.render_shoutbox_post(&client_ref, post).await?)
                 }
             }
-            (re_typeset())
+            div id="ajax-scripts" { (re_typeset()) }
         }));
     }
 
@@ -107,7 +107,7 @@ pub async fn get_shoutbox(
                     (state.render_shoutbox_post(&client_ref, post).await?)
                 }
             }
-            (re_typeset())
+            div id="ajax-scripts" { (re_typeset()) }
         }));
     }
 
