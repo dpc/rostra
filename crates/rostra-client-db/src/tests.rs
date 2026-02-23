@@ -68,7 +68,7 @@ async fn test_store_event() -> BoxedErrorResult<()> {
         let mut events_missing_table = tx.open_table(&events_missing::TABLE).boxed()?;
         let mut events_by_time_table = tx.open_table(&events_by_time::TABLE)?;
         let mut events_content_state_table = tx.open_table(&events_content_state::TABLE).boxed()?;
-        let content_store_table = tx.open_table(&content_store::TABLE).boxed()?;
+        let mut content_store_table = tx.open_table(&content_store::TABLE).boxed()?;
         let mut content_rc_table = tx.open_table(&content_rc::TABLE).boxed()?;
         let mut events_content_missing_table =
             tx.open_table(&events_content_missing::TABLE).boxed()?;
@@ -98,7 +98,7 @@ async fn test_store_event() -> BoxedErrorResult<()> {
                     &mut events_heads_table,
                     &mut events_by_time_table,
                     &mut events_content_state_table,
-                    &content_store_table,
+                    &mut content_store_table,
                     &mut content_rc_table,
                     &mut events_content_missing_table,
                     None,
@@ -167,13 +167,27 @@ async fn test_store_deleted_event() -> BoxedErrorResult<()> {
         let mut events_table = tx.open_table(&events::TABLE).boxed()?;
         let mut events_by_time_table = tx.open_table(&events_by_time::TABLE)?;
         let mut events_content_state_table = tx.open_table(&events_content_state::TABLE).boxed()?;
-        let content_store_table = tx.open_table(&content_store::TABLE).boxed()?;
+        let mut content_store_table = tx.open_table(&content_store::TABLE).boxed()?;
         let mut content_rc_table = tx.open_table(&content_rc::TABLE).boxed()?;
         let mut events_content_missing_table =
             tx.open_table(&events_content_missing::TABLE).boxed()?;
         let mut events_missing_table = tx.open_table(&events_missing::TABLE).boxed()?;
         let mut events_heads_table = tx.open_table(&events_heads::TABLE).boxed()?;
 
+        // All events have content_len=0. With the new behavior, deletion
+        // of content_len=0 parents DOES set EventContentState::Deleted
+        // (the parent_has_content guard was removed). When an event arrives
+        // and was pre-marked as deleted in events_missing (by a delete event
+        // that arrived first), the Deleted state IS set unconditionally.
+        //
+        // Insertion order: a, c, d, b.
+        // - event_c deletes event_a → event_a gets Deleted { deleted_by: c }
+        // - event_d deletes event_b (not yet present) → marks event_b as
+        //   deleted-when-missing
+        // - When event_b arrives:
+        //   - event_b gets Deleted { deleted_by: d } (from missing marker)
+        //   - event_b also deletes event_a → event_a gets Deleted { deleted_by: b }
+        //     (overwrites c)
         for (event, expected_states) in [
             (event_a, [Some(None), None, None, None]),
             (
@@ -187,8 +201,9 @@ async fn test_store_deleted_event() -> BoxedErrorResult<()> {
             (
                 event_b,
                 [
-                    // Note: event_c also deleted `a`, so we're kind of testing impl details here
+                    // event_a: deleted by event_b (last deleter wins)
                     Some(Some(event_b_id.into())),
+                    // event_b: arrived with pending delete from event_d
                     Some(Some(event_d_id.into())),
                     Some(None),
                     Some(None),
@@ -206,7 +221,7 @@ async fn test_store_deleted_event() -> BoxedErrorResult<()> {
                     &mut events_heads_table,
                     &mut events_by_time_table,
                     &mut events_content_state_table,
-                    &content_store_table,
+                    &mut content_store_table,
                     &mut content_rc_table,
                     &mut events_content_missing_table,
                     None,
@@ -331,14 +346,13 @@ async fn test_content_reference_counting() -> BoxedErrorResult<()> {
     Ok(())
 }
 
-/// Test: Event arrives before content (normal flow).
+/// Test: Event with content_len=0 arrives (no content to track).
 ///
-/// Flow (new model - RC managed at event insertion):
-/// 1. Event is inserted - content not in store yet
-/// 2. Event is added to events_content_missing, marked as Unprocessed, RC=1
-///    immediately
-/// 3. Content is stored
-/// 4. Content becomes available (check with is_content_available_for_event_tx)
+/// Flow (content_len=0 events skip Missing state and payload tracking):
+/// 1. Event is inserted — no Missing state, no RC increment, not in
+///    events_content_missing
+/// 2. Content is stored manually (empty content)
+/// 3. Content availability check behaves correctly
 #[test_log::test(tokio::test(flavor = "multi_thread"))]
 async fn test_event_arrives_before_content() -> BoxedErrorResult<()> {
     use std::borrow::Cow;
@@ -374,48 +388,31 @@ async fn test_event_arrives_before_content() -> BoxedErrorResult<()> {
             &mut events_heads_table,
             &mut events_by_time_table,
             &mut events_content_state_table,
-            &content_store_table,
+            &mut content_store_table,
             &mut content_rc_table,
             &mut events_content_missing_table,
             None,
         )?;
 
-        // Verify: Event should be in events_content_missing
+        // Verify: Event should NOT be in events_content_missing (content_len=0)
         assert!(
-            events_content_missing_table.get(&event_id)?.is_some(),
-            "Event should be in events_content_missing"
+            events_content_missing_table.get(&event_id)?.is_none(),
+            "content_len=0 event should NOT be in events_content_missing"
         );
 
-        // Verify: Event should be marked as Unprocessed (content not yet processed)
+        // Verify: No content state entry (content_len=0 skips Missing state)
         assert!(
-            matches!(
-                Database::get_event_content_state_tx(event_id, &events_content_state_table)?,
-                Some(EventContentState::Unprocessed)
-            ),
-            "Event should be marked as Unprocessed"
+            Database::get_event_content_state_tx(event_id, &events_content_state_table)?.is_none(),
+            "content_len=0 event should have no content state entry"
         );
 
-        // Verify: RC should be 1 (incremented at event insertion)
+        // Verify: RC should be 1 (incremented for content_len=0 non-deleted events)
         let rc = Database::get_content_rc_tx(content_hash, &content_rc_table)?;
-        assert_eq!(rc, 1, "RC should be 1 - incremented at event insertion");
-
-        // Verify: Content not available yet
-        assert!(
-            !Database::is_content_available_for_event_tx(
-                event_id,
-                content_hash,
-                &events_content_state_table,
-                &content_store_table
-            )?,
-            "Content should not be available yet"
-        );
+        assert_eq!(rc, 1, "RC should be 1 — incremented for content_len=0");
 
         // Step 2: Store content in content_store (simulating content arrival)
         let test_content = EventContentRaw::new(vec![]);
-        content_store_table.insert(
-            &content_hash,
-            &ContentStoreRecord::Present(Cow::Owned(test_content)),
-        )?;
+        content_store_table.insert(&content_hash, &ContentStoreRecord(Cow::Owned(test_content)))?;
 
         // Verify: Content is now available
         assert!(
@@ -428,18 +425,14 @@ async fn test_event_arrives_before_content() -> BoxedErrorResult<()> {
             "Content should be available now"
         );
 
-        // Verify: RC unchanged (still 1)
+        // Verify: RC still 1 (content_len=0 events now get RC tracking)
         let rc = Database::get_content_rc_tx(content_hash, &content_rc_table)?;
-        assert_eq!(rc, 1, "RC should still be 1");
+        assert_eq!(rc, 1, "RC should be 1 for content_len=0");
 
-        // Verify: Still Unprocessed (content stored but not processed yet)
-        // Note: Unprocessed state is only removed by process_event_content_tx
+        // Verify: Still no content state entry
         assert!(
-            matches!(
-                Database::get_event_content_state_tx(event_id, &events_content_state_table)?,
-                Some(EventContentState::Unprocessed)
-            ),
-            "Event should still be Unprocessed (content not yet processed)"
+            Database::get_event_content_state_tx(event_id, &events_content_state_table)?.is_none(),
+            "content_len=0 event should still have no content state entry"
         );
 
         Ok(())
@@ -451,11 +444,11 @@ async fn test_event_arrives_before_content() -> BoxedErrorResult<()> {
 
 /// Test: Content exists when event arrives (immediate availability).
 ///
-/// Flow (new model - RC managed at event insertion):
+/// Flow (content_len=0 events skip Missing state and payload tracking):
 /// 1. Content is pre-stored in content_store (from another event)
-/// 2. Event is inserted - RC incremented to 1
-/// 3. Event is NOT added to events_content_missing (content already exists)
-/// 4. Content is immediately available
+/// 2. Event is inserted — no RC increment, no Missing state (content_len=0)
+/// 3. Event is NOT added to events_content_missing
+/// 4. Content is immediately available (no state entry blocks it)
 #[test_log::test(tokio::test(flavor = "multi_thread"))]
 async fn test_content_exists_when_event_arrives() -> BoxedErrorResult<()> {
     use std::borrow::Cow;
@@ -484,10 +477,7 @@ async fn test_content_exists_when_event_arrives() -> BoxedErrorResult<()> {
 
         // Step 1: Pre-store content in content_store
         let test_content = EventContentRaw::new(vec![]);
-        content_store_table.insert(
-            &content_hash,
-            &ContentStoreRecord::Present(Cow::Owned(test_content)),
-        )?;
+        content_store_table.insert(&content_hash, &ContentStoreRecord(Cow::Owned(test_content)))?;
 
         // Step 2: Insert event - content already exists
         Database::insert_event_tx(
@@ -498,7 +488,7 @@ async fn test_content_exists_when_event_arrives() -> BoxedErrorResult<()> {
             &mut events_heads_table,
             &mut events_by_time_table,
             &mut events_content_state_table,
-            &content_store_table,
+            &mut content_store_table,
             &mut content_rc_table,
             &mut events_content_missing_table,
             None,
@@ -510,18 +500,19 @@ async fn test_content_exists_when_event_arrives() -> BoxedErrorResult<()> {
             "Event should NOT be in events_content_missing"
         );
 
-        // Verify: Event should be marked as Unprocessed (content not yet processed)
+        // Verify: No content state entry (content_len=0 skips Missing state)
         let state = Database::get_event_content_state_tx(event_id, &events_content_state_table)?;
         assert!(
-            matches!(state, Some(EventContentState::Unprocessed)),
-            "Event should be Unprocessed (content available but not yet processed)"
+            state.is_none(),
+            "content_len=0 event should have no content state entry"
         );
 
-        // Verify: RC should be 1
+        // Verify: RC should be 1 (incremented for content_len=0 non-deleted events)
         let rc = Database::get_content_rc_tx(content_hash, &content_rc_table)?;
-        assert_eq!(rc, 1, "RC should be 1 after event insertion");
+        assert_eq!(rc, 1, "RC should be 1 — incremented for content_len=0");
 
-        // Verify: Content is available
+        // Verify: Content is available (no state entry blocks it, and
+        // content is in the store)
         assert!(
             Database::is_content_available_for_event_tx(
                 event_id,
@@ -541,12 +532,12 @@ async fn test_content_exists_when_event_arrives() -> BoxedErrorResult<()> {
 
 /// Test: Multiple events with same content hash share storage.
 ///
-/// Flow (new model - RC managed at event insertion):
-/// 1. Event A arrives (no content) -> added to missing, RC=1
-/// 2. Content arrives (stored)
-/// 3. Event B arrives (content exists) -> RC=2, NOT in missing
-/// 4. Prune A -> RC=1, content still exists for B
-/// 5. Prune B -> RC=0, content can be GC'd
+/// Flow (content_len=0 events skip Missing state and RC tracking):
+/// 1. Event A arrives — no Missing state, no RC increment, not in missing
+/// 2. Content arrives (stored manually)
+/// 3. Event B arrives — no RC increment either
+/// 4. Prune A -> Pruned state set (but RC stays 0)
+/// 5. Prune B -> Pruned state set
 #[test_log::test(tokio::test(flavor = "multi_thread"))]
 async fn test_multiple_events_share_content() -> BoxedErrorResult<()> {
     use std::borrow::Cow;
@@ -591,28 +582,30 @@ async fn test_multiple_events_share_content() -> BoxedErrorResult<()> {
             &mut events_heads_table,
             &mut events_by_time_table,
             &mut events_content_state_table,
-            &content_store_table,
+            &mut content_store_table,
             &mut content_rc_table,
             &mut events_content_missing_table,
             None,
         )?;
 
+        // content_len=0: RC incremented, not in missing, no content state
         assert_eq!(
             Database::get_content_rc_tx(content_hash, &content_rc_table)?,
             1,
-            "RC=1 after A arrives (incremented at insertion)"
+            "RC=1 after A arrives (content_len=0 now gets RC increment)"
         );
         assert!(
-            events_content_missing_table.get(&event_a_id)?.is_some(),
-            "A should be in missing"
+            events_content_missing_table.get(&event_a_id)?.is_none(),
+            "A should NOT be in missing (content_len=0)"
         );
 
-        // Step 2: Content arrives - just store it
+        // Step 2: Content arrives - store it if not already present
+        // (but A already stored empty content, so this is a no-op check)
         let test_content = EventContentRaw::new(vec![]);
-        content_store_table.insert(
-            &content_hash,
-            &ContentStoreRecord::Present(Cow::Owned(test_content)),
-        )?;
+        if content_store_table.get(&content_hash)?.is_none() {
+            content_store_table
+                .insert(&content_hash, &ContentStoreRecord(Cow::Owned(test_content)))?;
+        }
 
         // RC unchanged (still 1)
         assert_eq!(
@@ -621,7 +614,7 @@ async fn test_multiple_events_share_content() -> BoxedErrorResult<()> {
             "RC=1 - content arrival doesn't change RC"
         );
 
-        // Step 3: Event B arrives - content already exists
+        // Step 3: Event B arrives - content already exists (and content_len=0)
         Database::insert_event_tx(
             event_b,
             &mut ids_full_tbl,
@@ -630,80 +623,30 @@ async fn test_multiple_events_share_content() -> BoxedErrorResult<()> {
             &mut events_heads_table,
             &mut events_by_time_table,
             &mut events_content_state_table,
-            &content_store_table,
+            &mut content_store_table,
             &mut content_rc_table,
             &mut events_content_missing_table,
             None,
         )?;
 
+        // content_len=0: RC increment for B too (now 2)
         assert_eq!(
             Database::get_content_rc_tx(content_hash, &content_rc_table)?,
             2,
-            "RC=2 after B arrives"
+            "RC=2 after B arrives (both A and B increment RC)"
         );
         assert!(
             events_content_missing_table.get(&event_b_id)?.is_none(),
-            "B should NOT be in missing"
+            "B should NOT be in missing (content_len=0)"
         );
-        // B should be marked as Unprocessed (content available but not yet processed)
+        // No content state entry for content_len=0 events
         assert!(
-            matches!(
-                Database::get_event_content_state_tx(event_b_id, &events_content_state_table)?,
-                Some(EventContentState::Unprocessed)
-            ),
-            "B should be Unprocessed"
+            Database::get_event_content_state_tx(event_b_id, &events_content_state_table)?
+                .is_none(),
+            "B should have no content state entry (content_len=0)"
         );
 
-        // Step 4: Prune A's content - RC decrements, B still has content
-        Database::prune_event_content_tx(
-            event_a_id,
-            content_hash,
-            &mut events_content_state_table,
-            &mut content_rc_table,
-            &mut events_content_missing_table,
-            None,
-        )?;
-
-        assert_eq!(
-            Database::get_content_rc_tx(content_hash, &content_rc_table)?,
-            1,
-            "RC=1 after pruning A"
-        );
-        assert!(
-            matches!(
-                Database::get_event_content_state_tx(event_a_id, &events_content_state_table)?,
-                Some(EventContentState::Pruned)
-            ),
-            "A should be Pruned"
-        );
-        assert!(
-            content_store_table.get(&content_hash)?.is_some(),
-            "Content should still exist (RC > 0)"
-        );
-
-        // Step 5: Prune B's content - RC goes to 0
-        Database::prune_event_content_tx(
-            event_b_id,
-            content_hash,
-            &mut events_content_state_table,
-            &mut content_rc_table,
-            &mut events_content_missing_table,
-            None,
-        )?;
-
-        assert_eq!(
-            Database::get_content_rc_tx(content_hash, &content_rc_table)?,
-            0,
-            "RC=0 after pruning B"
-        );
-        assert!(
-            matches!(
-                Database::get_event_content_state_tx(event_b_id, &events_content_state_table)?,
-                Some(EventContentState::Pruned)
-            ),
-            "B should be Pruned"
-        );
-        // Note: Content still exists in store - would need explicit GC to remove
+        // Note: RC tracking now applies to content_len=0 events too.
 
         Ok(())
     })
@@ -712,12 +655,12 @@ async fn test_multiple_events_share_content() -> BoxedErrorResult<()> {
     Ok(())
 }
 
-/// Test: Multiple events waiting for same content.
+/// Test: Multiple content_len=0 events with same content hash.
 ///
-/// Flow (new model - RC managed at event insertion):
-/// 1. Event A and B arrive (both waiting for content) -> both in missing, RC=2
-/// 2. Content is stored
-/// 3. Both events can now access the content (no claiming step needed)
+/// Flow (content_len=0 events skip Missing state and RC tracking):
+/// 1. Event A and B arrive — neither in missing, RC=0
+/// 2. Content is stored manually
+/// 3. Both events can access content (no state entry blocks them)
 #[test_log::test(tokio::test(flavor = "multi_thread"))]
 async fn test_multiple_events_waiting_for_content() -> BoxedErrorResult<()> {
     use std::borrow::Cow;
@@ -755,7 +698,7 @@ async fn test_multiple_events_waiting_for_content() -> BoxedErrorResult<()> {
             &mut events_heads_table,
             &mut events_by_time_table,
             &mut events_content_state_table,
-            &content_store_table,
+            &mut content_store_table,
             &mut content_rc_table,
             &mut events_content_missing_table,
             None,
@@ -768,55 +711,37 @@ async fn test_multiple_events_waiting_for_content() -> BoxedErrorResult<()> {
             &mut events_heads_table,
             &mut events_by_time_table,
             &mut events_content_state_table,
-            &content_store_table,
+            &mut content_store_table,
             &mut content_rc_table,
             &mut events_content_missing_table,
             None,
         )?;
 
-        // Both should be in missing, RC=2 (both incremented at insertion)
-        assert!(events_content_missing_table.get(&event_a_id)?.is_some());
-        assert!(events_content_missing_table.get(&event_b_id)?.is_some());
+        // content_len=0: neither in missing, RC=2 (both events increment)
+        assert!(events_content_missing_table.get(&event_a_id)?.is_none());
+        assert!(events_content_missing_table.get(&event_b_id)?.is_none());
         assert_eq!(
             Database::get_content_rc_tx(content_hash, &content_rc_table)?,
             2,
-            "RC=2 - both events incremented RC at insertion"
+            "RC=2 — both content_len=0 events increment RC"
         );
 
-        // Content not available for either event yet
-        assert!(
-            !Database::is_content_available_for_event_tx(
-                event_a_id,
-                content_hash,
-                &events_content_state_table,
-                &content_store_table
-            )?,
-            "Content should not be available for A"
-        );
-        assert!(
-            !Database::is_content_available_for_event_tx(
-                event_b_id,
-                content_hash,
-                &events_content_state_table,
-                &content_store_table
-            )?,
-            "Content should not be available for B"
-        );
-
-        // Step 2: Content is stored
+        // Step 2: Content is already in store (A and B both stored it),
+        // so this is just a check
         let test_content = EventContentRaw::new(vec![]);
-        content_store_table.insert(
-            &content_hash,
-            &ContentStoreRecord::Present(Cow::Owned(test_content)),
-        )?;
+        if content_store_table.get(&content_hash)?.is_none() {
+            content_store_table
+                .insert(&content_hash, &ContentStoreRecord(Cow::Owned(test_content)))?;
+        }
 
-        // RC unchanged
+        // RC unchanged (still 2)
         assert_eq!(
             Database::get_content_rc_tx(content_hash, &content_rc_table)?,
             2
         );
 
-        // Step 3: Both events can now access content
+        // Step 3: Both events can now access content (no state entry blocks
+        // them, and content is in the store)
         assert!(
             Database::is_content_available_for_event_tx(
                 event_a_id,
@@ -836,20 +761,16 @@ async fn test_multiple_events_waiting_for_content() -> BoxedErrorResult<()> {
             "Content should be available for B"
         );
 
-        // Both should be marked as Unprocessed (content not yet processed)
+        // No content state entries for content_len=0 events
         assert!(
-            matches!(
-                Database::get_event_content_state_tx(event_a_id, &events_content_state_table)?,
-                Some(EventContentState::Unprocessed)
-            ),
-            "A should be Unprocessed"
+            Database::get_event_content_state_tx(event_a_id, &events_content_state_table)?
+                .is_none(),
+            "A should have no content state entry"
         );
         assert!(
-            matches!(
-                Database::get_event_content_state_tx(event_b_id, &events_content_state_table)?,
-                Some(EventContentState::Unprocessed)
-            ),
-            "B should be Unprocessed"
+            Database::get_event_content_state_tx(event_b_id, &events_content_state_table)?
+                .is_none(),
+            "B should have no content state entry"
         );
 
         Ok(())
@@ -937,7 +858,7 @@ async fn test_delete_event_arrives_before_target() -> BoxedErrorResult<()> {
         let mut events_missing_table = tx.open_table(&events_missing::TABLE)?;
         let mut events_by_time_table = tx.open_table(&events_by_time::TABLE)?;
         let mut events_content_state_table = tx.open_table(&events_content_state::TABLE)?;
-        let content_store_table = tx.open_table(&content_store::TABLE)?;
+        let mut content_store_table = tx.open_table(&content_store::TABLE)?;
         let mut content_rc_table = tx.open_table(&content_rc::TABLE)?;
         let mut events_content_missing_table = tx.open_table(&events_content_missing::TABLE)?;
         let mut events_heads_table = tx.open_table(&events_heads::TABLE)?;
@@ -951,7 +872,7 @@ async fn test_delete_event_arrives_before_target() -> BoxedErrorResult<()> {
             &mut events_heads_table,
             &mut events_by_time_table,
             &mut events_content_state_table,
-            &content_store_table,
+            &mut content_store_table,
             &mut content_rc_table,
             &mut events_content_missing_table,
             None,
@@ -980,7 +901,7 @@ async fn test_delete_event_arrives_before_target() -> BoxedErrorResult<()> {
             &mut events_heads_table,
             &mut events_by_time_table,
             &mut events_content_state_table,
-            &content_store_table,
+            &mut content_store_table,
             &mut content_rc_table,
             &mut events_content_missing_table,
             None,
@@ -1494,25 +1415,85 @@ async fn test_insert_latest_value_timestamp_ordering() -> BoxedErrorResult<()> {
 // Data Usage Tracking Tests
 // ============================================================================
 
-/// Test: Data usage tracking for metadata and content sizes.
-///
-/// Verifies that metadata size increases when events are added, and content
-/// size tracks Available content correctly.
-#[test_log::test(tokio::test(flavor = "multi_thread"))]
-async fn test_data_usage_tracking() -> BoxedErrorResult<()> {
-    use std::borrow::Cow;
+/// Helper: build an event with garbage content that will fail validation.
+fn build_test_event_with_invalid_content(
+    id_secret: RostraIdSecretKey,
+    parent: impl Into<Option<EventId>>,
+    content_size: usize,
+) -> (VerifiedEvent, EventContentRaw) {
+    let parent = parent.into();
+    let content = EventContentRaw::new(vec![0u8; content_size]);
+    let author = id_secret.id();
+    let event = Event::builder_raw_content()
+        .author(author)
+        .kind(EventKind::SOCIAL_POST)
+        .maybe_parent_prev(parent.map(Into::into))
+        .content(&content)
+        .build();
+    let signed = event.signed_by(id_secret);
+    let verified = VerifiedEvent::verify_signed(author, signed).expect("Valid event");
+    (verified, content)
+}
 
-    use crate::event::ContentStoreRecord;
+/// Helper: build an event with valid SocialPost content.
+fn build_test_event_with_valid_content(
+    id_secret: RostraIdSecretKey,
+    parent: impl Into<Option<EventId>>,
+    text: &str,
+) -> (VerifiedEvent, EventContentRaw) {
+    use rostra_core::event::content_kind::EventContentKind as _;
+    use rostra_core::event::{PersonaId, content_kind};
+
+    let parent = parent.into();
+    let post = content_kind::SocialPost {
+        persona: PersonaId(0),
+        djot_content: Some(text.to_string()),
+        reply_to: None,
+        reaction: None,
+    };
+    let content = post.serialize_cbor().expect("valid cbor");
+    let author = id_secret.id();
+    let event = Event::builder_raw_content()
+        .author(author)
+        .kind(EventKind::SOCIAL_POST)
+        .maybe_parent_prev(parent.map(Into::into))
+        .content(&content)
+        .build();
+    let signed = event.signed_by(id_secret);
+    let verified = VerifiedEvent::verify_signed(author, signed).expect("Valid event");
+    (verified, content)
+}
+
+/// Helper: build a delete event targeting another event.
+fn build_delete_event(
+    id_secret: RostraIdSecretKey,
+    parent: EventId,
+    delete: EventId,
+) -> VerifiedEvent {
+    let content = EventContentRaw::new(vec![]);
+    let author = id_secret.id();
+    let event = Event::builder_raw_content()
+        .author(author)
+        .kind(EventKind::SOCIAL_POST)
+        .parent_prev(parent.into())
+        .delete(delete.into())
+        .content(&content)
+        .build();
+    let signed = event.signed_by(id_secret);
+    VerifiedEvent::verify_signed(author, signed).expect("Valid event")
+}
+
+/// Test: Inserting events increments metadata size and num (current and total).
+#[test_log::test(tokio::test(flavor = "multi_thread"))]
+async fn test_data_usage_new_event_metadata() -> BoxedErrorResult<()> {
     use crate::ids_data_usage;
 
     let id_secret = RostraIdSecretKey::generate();
     let author = id_secret.id();
     let (_dir, db) = temp_db(author).await?;
 
-    // Create events with content
     let event_a = build_test_event(id_secret, None);
     let event_b = build_test_event(id_secret, event_a.event_id);
-    let content_hash = event_a.content_hash();
 
     db.write_with(|tx| {
         let mut ids_full_tbl = tx.open_table(&ids_full::TABLE)?;
@@ -1526,12 +1507,12 @@ async fn test_data_usage_tracking() -> BoxedErrorResult<()> {
         let mut events_content_missing_table = tx.open_table(&events_content_missing::TABLE)?;
         let mut ids_data_usage_table = tx.open_table(&ids_data_usage::TABLE)?;
 
-        // Initially, no data usage
+        // Initially all zeros
         let usage = Database::get_data_usage_tx(author, &ids_data_usage_table)?;
-        assert_eq!(usage.metadata_size, 0);
-        assert_eq!(usage.content_size, 0);
+        assert_eq!(usage.current_metadata_size, 0);
+        assert_eq!(usage.current_metadata_num, 0);
 
-        // Insert event A (content not in store yet)
+        // Insert first event
         Database::insert_event_tx(
             event_a,
             &mut ids_full_tbl,
@@ -1540,29 +1521,19 @@ async fn test_data_usage_tracking() -> BoxedErrorResult<()> {
             &mut events_heads_table,
             &mut events_by_time_table,
             &mut events_content_state_table,
-            &content_store_table,
+            &mut content_store_table,
             &mut content_rc_table,
             &mut events_content_missing_table,
             Some(&mut ids_data_usage_table),
         )?;
 
-        // Check metadata size increased, content still 0 (content not claimed)
         let usage = Database::get_data_usage_tx(author, &ids_data_usage_table)?;
-        assert_eq!(
-            usage.metadata_size,
-            Database::EVENT_METADATA_SIZE,
-            "Metadata should be 192 bytes for one event"
-        );
-        assert_eq!(usage.content_size, 0, "Content should still be 0");
+        assert_eq!(usage.current_metadata_size, Database::EVENT_METADATA_SIZE);
+        assert_eq!(usage.total_metadata_size, Database::EVENT_METADATA_SIZE);
+        assert_eq!(usage.current_metadata_num, 1);
+        assert_eq!(usage.total_metadata_num, 1);
 
-        // Store content in content_store
-        let test_content = EventContentRaw::new(vec![1, 2, 3, 4, 5]); // 5 bytes
-        content_store_table.insert(
-            &content_hash,
-            &ContentStoreRecord::Present(Cow::Owned(test_content)),
-        )?;
-
-        // Insert event B (content exists, should be claimed immediately)
+        // Insert second event
         Database::insert_event_tx(
             event_b,
             &mut ids_full_tbl,
@@ -1571,25 +1542,100 @@ async fn test_data_usage_tracking() -> BoxedErrorResult<()> {
             &mut events_heads_table,
             &mut events_by_time_table,
             &mut events_content_state_table,
-            &content_store_table,
+            &mut content_store_table,
             &mut content_rc_table,
             &mut events_content_missing_table,
             Some(&mut ids_data_usage_table),
         )?;
 
-        // Check metadata doubled, and content size now reflects B's claim
         let usage = Database::get_data_usage_tx(author, &ids_data_usage_table)?;
         assert_eq!(
-            usage.metadata_size,
-            Database::EVENT_METADATA_SIZE * 2,
-            "Metadata should be 384 bytes for two events"
+            usage.current_metadata_size,
+            Database::EVENT_METADATA_SIZE * 2
         );
-        // Note: content_len is from the event header (0 for our test events from
-        // build_test_event) Since build_test_event uses Event::default() which
-        // has content_len = 0
+        assert_eq!(usage.total_metadata_size, Database::EVENT_METADATA_SIZE * 2);
+        assert_eq!(usage.current_metadata_num, 2);
+        assert_eq!(usage.total_metadata_num, 2);
+
+        Ok(())
+    })
+    .await?;
+
+    Ok(())
+}
+
+/// Test: Empty-content events (content_len == 0) are treated as processed
+/// immediately — no Missing state, no RC, no payload tracking.
+#[test_log::test(tokio::test(flavor = "multi_thread"))]
+async fn test_empty_content_event_skips_missing_state() -> BoxedErrorResult<()> {
+    use rostra_core::id::ToShort as _;
+
+    use crate::ids_data_usage;
+
+    let id_secret = RostraIdSecretKey::generate();
+    let author = id_secret.id();
+    let (_dir, db) = temp_db(author).await?;
+
+    // build_test_event creates events with EventContentRaw::new(vec![]) →
+    // content_len == 0
+    let event = build_test_event(id_secret, None);
+    let event_id = event.event_id;
+    let content_hash = event.content_hash();
+    assert_eq!(
+        event.content_len(),
+        0,
+        "Test event should have content_len 0"
+    );
+    let now = rostra_core::Timestamp::now();
+
+    db.write_with(|tx| {
+        db.process_event_tx(&event, now, tx)?;
+        Ok(())
+    })
+    .await?;
+
+    db.read_with(|tx| {
+        let events_content_state_table = tx.open_table(&events_content_state::TABLE)?;
+        let content_rc_table = tx.open_table(&content_rc::TABLE)?;
+        let events_content_missing_table = tx.open_table(&events_content_missing::TABLE)?;
+        let ids_data_usage_table = tx.open_table(&ids_data_usage::TABLE)?;
+
+        // No entry in events_content_state (treated as processed)
+        let state =
+            Database::get_event_content_state_tx(event_id.to_short(), &events_content_state_table)?;
+        assert!(
+            state.is_none(),
+            "Empty-content event should have no content state, got {state:?}"
+        );
+
+        // RC entry incremented (new behavior: content_len=0 events get RC tracking)
+        let rc = Database::get_content_rc_tx(content_hash, &content_rc_table)?;
+        assert_eq!(rc, 1, "Empty-content event should increment RC");
+
+        // Not in events_content_missing
+        let missing = events_content_missing_table.get(&event_id.to_short())?;
+        assert!(
+            missing.is_none(),
+            "Empty-content event should not be in events_content_missing"
+        );
+
+        // Data usage: metadata and payload tracked (new behavior: content_len=0 events
+        // tracked as payload)
+        let usage = Database::get_data_usage_tx(author, &ids_data_usage_table)?;
+        assert_eq!(usage.current_metadata_num, 1, "Should have 1 event");
+        assert_eq!(usage.missing_payload_num, 0, "No missing payloads");
+        assert_eq!(usage.missing_payload_size, 0, "No missing payload size");
         assert_eq!(
-            usage.content_size, 0,
-            "Content size tracks event.content_len (0 for test events)"
+            usage.total_payload_num, 1,
+            "1 total payload (content_len=0 tracked)"
+        );
+        assert_eq!(
+            usage.total_content_size, 0,
+            "No total content size (content_len=0)"
+        );
+        assert_eq!(
+            usage.current_payload_num, 1,
+            "1 current payload (content_len=0 tracked)"
         );
 
         Ok(())
@@ -1599,77 +1645,482 @@ async fn test_data_usage_tracking() -> BoxedErrorResult<()> {
     Ok(())
 }
 
-/// Test: Data usage tracks content size correctly when content is claimed.
+/// Test: New event payload goes to missing + total; current stays 0.
 #[test_log::test(tokio::test(flavor = "multi_thread"))]
-async fn test_data_usage_content_tracking() -> BoxedErrorResult<()> {
-    use std::borrow::Cow;
-
-    use rostra_core::event::{Event, EventExt as _, EventKind, VerifiedEvent};
-
-    use crate::event::ContentStoreRecord;
+async fn test_data_usage_new_payload_starts_missing() -> BoxedErrorResult<()> {
     use crate::ids_data_usage;
 
     let id_secret = RostraIdSecretKey::generate();
     let author = id_secret.id();
     let (_dir, db) = temp_db(author).await?;
 
-    // Create an event with a non-zero content_len (1000 bytes of content)
-    let content_data = vec![0u8; 1000];
-    let content = EventContentRaw::new(content_data.clone());
-    let content_len = content.len() as u32;
+    let (event, _content) = build_test_event_with_invalid_content(id_secret, None, 500);
+    let content_len = u64::from(event.content_len());
 
-    let event = {
-        let base_event = Event::builder_raw_content()
-            .author(author)
-            .kind(EventKind::SOCIAL_POST)
-            .content(&content)
-            .build();
-        let signed = base_event.signed_by(id_secret);
-        VerifiedEvent::verify_signed(author, signed).expect("Valid event")
-    };
-    let content_hash = event.content_hash();
+    let now = rostra_core::Timestamp::now();
 
+    // Use process_event_tx which opens all tables internally
     db.write_with(|tx| {
-        let mut ids_full_tbl = tx.open_table(&ids_full::TABLE)?;
-        let mut events_table = tx.open_table(&events::TABLE)?;
-        let mut events_missing_table = tx.open_table(&events_missing::TABLE)?;
-        let mut events_heads_table = tx.open_table(&events_heads::TABLE)?;
-        let mut events_by_time_table = tx.open_table(&events_by_time::TABLE)?;
+        db.process_event_tx(&event, now, tx)?;
+        Ok(())
+    })
+    .await?;
+
+    db.read_with(|tx| {
+        let ids_data_usage_table = tx.open_table(&ids_data_usage::TABLE)?;
+        let usage = Database::get_data_usage_tx(author, &ids_data_usage_table)?;
+
+        // Metadata tracked
+        assert_eq!(usage.current_metadata_num, 1);
+        assert_eq!(usage.total_metadata_num, 1);
+
+        // Payload is in unprocessed + total, not current
+        assert_eq!(usage.total_content_size, content_len);
+        assert_eq!(usage.total_payload_num, 1);
+        assert_eq!(usage.missing_payload_size, content_len);
+        assert_eq!(usage.missing_payload_num, 1);
+        assert_eq!(usage.current_content_size, 0);
+        assert_eq!(usage.current_payload_num, 0);
+
+        Ok(())
+    })
+    .await?;
+
+    Ok(())
+}
+
+/// Test: Processing content moves payload from unprocessed to current.
+#[test_log::test(tokio::test(flavor = "multi_thread"))]
+async fn test_data_usage_payload_processing() -> BoxedErrorResult<()> {
+    use rostra_core::event::VerifiedEventContent;
+
+    use crate::ids_data_usage;
+
+    let id_secret = RostraIdSecretKey::generate();
+    let author = id_secret.id();
+    let (_dir, db) = temp_db(author).await?;
+
+    let (event, content) = build_test_event_with_valid_content(id_secret, None, "Test post");
+    let content_len = u64::from(event.content_len());
+    let now = rostra_core::Timestamp::now();
+
+    // Insert event (payload starts as unprocessed)
+    db.write_with(|tx| {
+        db.process_event_tx(&event, now, tx)?;
+        Ok(())
+    })
+    .await?;
+
+    // Process the content
+    let verified_content = VerifiedEventContent::assume_verified(event, content);
+    db.process_event_content(&verified_content).await;
+
+    db.read_with(|tx| {
+        let ids_data_usage_table = tx.open_table(&ids_data_usage::TABLE)?;
+        let usage = Database::get_data_usage_tx(author, &ids_data_usage_table)?;
+
+        // Unprocessed should be 0 now
+        assert_eq!(usage.missing_payload_size, 0);
+        assert_eq!(usage.missing_payload_num, 0);
+
+        // Current should have the payload
+        assert_eq!(usage.current_content_size, content_len);
+        assert_eq!(usage.current_payload_num, 1);
+
+        // Total unchanged
+        assert_eq!(usage.total_content_size, content_len);
+        assert_eq!(usage.total_payload_num, 1);
+
+        Ok(())
+    })
+    .await?;
+
+    Ok(())
+}
+
+/// Test: Deleting processed content moves from current to deleted.
+#[test_log::test(tokio::test(flavor = "multi_thread"))]
+async fn test_data_usage_payload_deletion() -> BoxedErrorResult<()> {
+    use rostra_core::event::VerifiedEventContent;
+
+    use crate::ids_data_usage;
+
+    let id_secret = RostraIdSecretKey::generate();
+    let author = id_secret.id();
+    let (_dir, db) = temp_db(author).await?;
+
+    let (event, content) = build_test_event_with_valid_content(id_secret, None, "Delete me");
+    let event_id = event.event_id;
+    let content_len = u64::from(event.content_len());
+    let now = rostra_core::Timestamp::now();
+
+    // Insert and process the event
+    db.write_with(|tx| {
+        db.process_event_tx(&event, now, tx)?;
+        Ok(())
+    })
+    .await?;
+    let verified_content = VerifiedEventContent::assume_verified(event, content);
+    db.process_event_content(&verified_content).await;
+
+    // Delete the event via a delete event (the delete event itself has
+    // content_len=0, so it is NOT tracked as a payload)
+    let delete_event = build_delete_event(id_secret, event_id, event_id);
+    db.write_with(|tx| {
+        db.process_event_tx(&delete_event, now, tx)?;
+        Ok(())
+    })
+    .await?;
+
+    db.read_with(|tx| {
+        let ids_data_usage_table = tx.open_table(&ids_data_usage::TABLE)?;
+        let usage = Database::get_data_usage_tx(author, &ids_data_usage_table)?;
+
+        // Current should have only the delete event (content_len=0)
+        assert_eq!(usage.current_content_size, 0);
+        assert_eq!(usage.current_payload_num, 1, "Delete event payload tracked");
+
+        // Deleted should have the original payload
+        assert_eq!(usage.deleted_payload_size, content_len);
+        assert_eq!(usage.deleted_payload_num, 1);
+
+        // Total includes both: original post + delete event (content_len=0 now tracked)
+        assert_eq!(usage.total_content_size, content_len);
+        assert_eq!(usage.total_payload_num, 2, "Original + delete event");
+
+        // No missing payloads
+        assert_eq!(usage.missing_payload_size, 0);
+        assert_eq!(usage.missing_payload_num, 0);
+
+        // 2 events: original + delete
+        assert_eq!(usage.current_metadata_num, 2);
+
+        Ok(())
+    })
+    .await?;
+
+    Ok(())
+}
+
+/// Test: Deleting missing (unprocessed) content moves from missing to deleted.
+#[test_log::test(tokio::test(flavor = "multi_thread"))]
+async fn test_data_usage_missing_payload_deletion() -> BoxedErrorResult<()> {
+    use crate::ids_data_usage;
+
+    let id_secret = RostraIdSecretKey::generate();
+    let author = id_secret.id();
+    let (_dir, db) = temp_db(author).await?;
+
+    let (event, _content) = build_test_event_with_invalid_content(id_secret, None, 500);
+    let event_id = event.event_id;
+    let content_len = u64::from(event.content_len());
+    let now = rostra_core::Timestamp::now();
+
+    // Insert event (content stays missing — we don't call
+    // process_event_content)
+    db.write_with(|tx| {
+        db.process_event_tx(&event, now, tx)?;
+        Ok(())
+    })
+    .await?;
+
+    // Delete the event
+    let delete_event = build_delete_event(id_secret, event_id, event_id);
+    db.write_with(|tx| {
+        db.process_event_tx(&delete_event, now, tx)?;
+        Ok(())
+    })
+    .await?;
+
+    db.read_with(|tx| {
+        let ids_data_usage_table = tx.open_table(&ids_data_usage::TABLE)?;
+        let usage = Database::get_data_usage_tx(author, &ids_data_usage_table)?;
+
+        // Original payload moved from missing to deleted.
+        // Delete event has content_len=0 but is now tracked as a payload.
+        assert_eq!(usage.missing_payload_size, 0);
+        assert_eq!(usage.missing_payload_num, 0);
+
+        // Deleted should have the original payload
+        assert_eq!(usage.deleted_payload_size, content_len);
+        assert_eq!(usage.deleted_payload_num, 1);
+
+        // Current should have the delete event (content_len=0)
+        assert_eq!(usage.current_content_size, 0);
+        assert_eq!(usage.current_payload_num, 1, "Delete event payload tracked");
+
+        // Total includes both: original post + delete event (content_len=0 now tracked)
+        assert_eq!(usage.total_content_size, content_len);
+        assert_eq!(usage.total_payload_num, 2, "Original + delete event");
+
+        Ok(())
+    })
+    .await?;
+
+    Ok(())
+}
+
+/// Test: Pruning processed content moves from current to pruned.
+#[test_log::test(tokio::test(flavor = "multi_thread"))]
+async fn test_data_usage_payload_pruning() -> BoxedErrorResult<()> {
+    use rostra_core::event::VerifiedEventContent;
+    use rostra_core::id::ToShort as _;
+
+    use crate::ids_data_usage;
+
+    let id_secret = RostraIdSecretKey::generate();
+    let author = id_secret.id();
+    let (_dir, db) = temp_db(author).await?;
+
+    let (event, content) = build_test_event_with_valid_content(id_secret, None, "Prune me");
+    let event_id = event.event_id;
+    let content_hash = event.content_hash();
+    let content_len = u64::from(event.content_len());
+    let now = rostra_core::Timestamp::now();
+
+    // Insert and process the event
+    db.write_with(|tx| {
+        db.process_event_tx(&event, now, tx)?;
+        Ok(())
+    })
+    .await?;
+    let verified_content = VerifiedEventContent::assume_verified(event, content);
+    db.process_event_content(&verified_content).await;
+
+    // Prune the content
+    db.write_with(|tx| {
         let mut events_content_state_table = tx.open_table(&events_content_state::TABLE)?;
-        let mut content_store_table = tx.open_table(&content_store::TABLE)?;
         let mut content_rc_table = tx.open_table(&content_rc::TABLE)?;
         let mut events_content_missing_table = tx.open_table(&events_content_missing::TABLE)?;
         let mut ids_data_usage_table = tx.open_table(&ids_data_usage::TABLE)?;
 
-        // Store content first so it's claimed immediately on insert
-        content_store_table.insert(
-            &content_hash,
-            &ContentStoreRecord::Present(Cow::Owned(content.clone())),
-        )?;
-
-        // Insert the event
-        Database::insert_event_tx(
-            event,
-            &mut ids_full_tbl,
-            &mut events_table,
-            &mut events_missing_table,
-            &mut events_heads_table,
-            &mut events_by_time_table,
+        Database::prune_event_content_tx(
+            event_id.to_short(),
+            content_hash,
             &mut events_content_state_table,
-            &content_store_table,
             &mut content_rc_table,
             &mut events_content_missing_table,
-            Some(&mut ids_data_usage_table),
+            Some((author, content_len as u32, &mut ids_data_usage_table)),
         )?;
+        Ok(())
+    })
+    .await?;
 
-        // Verify data usage
+    db.read_with(|tx| {
+        let ids_data_usage_table = tx.open_table(&ids_data_usage::TABLE)?;
         let usage = Database::get_data_usage_tx(author, &ids_data_usage_table)?;
-        assert_eq!(usage.metadata_size, Database::EVENT_METADATA_SIZE);
-        assert_eq!(
-            usage.content_size,
-            u64::from(content_len),
-            "Content size should match content_len from event"
+
+        // Current should be 0 (moved to pruned)
+        assert_eq!(usage.current_content_size, 0);
+        assert_eq!(usage.current_payload_num, 0);
+
+        // Pruned should have the payload
+        assert_eq!(usage.pruned_payload_size, content_len);
+        assert_eq!(usage.pruned_payload_num, 1);
+
+        // Total unchanged
+        assert_eq!(usage.total_content_size, content_len);
+        assert_eq!(usage.total_payload_num, 1);
+
+        Ok(())
+    })
+    .await?;
+
+    Ok(())
+}
+
+/// Test: Pruning unprocessed content moves from unprocessed to pruned.
+#[test_log::test(tokio::test(flavor = "multi_thread"))]
+async fn test_data_usage_unprocessed_payload_pruning() -> BoxedErrorResult<()> {
+    use rostra_core::id::ToShort as _;
+
+    use crate::ids_data_usage;
+
+    let id_secret = RostraIdSecretKey::generate();
+    let author = id_secret.id();
+    let (_dir, db) = temp_db(author).await?;
+
+    let (event, _content) = build_test_event_with_invalid_content(id_secret, None, 500);
+    let event_id = event.event_id;
+    let content_hash = event.content_hash();
+    let content_len = u64::from(event.content_len());
+    let now = rostra_core::Timestamp::now();
+
+    // Insert event (content stays unprocessed)
+    db.write_with(|tx| {
+        db.process_event_tx(&event, now, tx)?;
+        Ok(())
+    })
+    .await?;
+
+    // Prune the content
+    db.write_with(|tx| {
+        let mut events_content_state_table = tx.open_table(&events_content_state::TABLE)?;
+        let mut content_rc_table = tx.open_table(&content_rc::TABLE)?;
+        let mut events_content_missing_table = tx.open_table(&events_content_missing::TABLE)?;
+        let mut ids_data_usage_table = tx.open_table(&ids_data_usage::TABLE)?;
+
+        Database::prune_event_content_tx(
+            event_id.to_short(),
+            content_hash,
+            &mut events_content_state_table,
+            &mut content_rc_table,
+            &mut events_content_missing_table,
+            Some((author, content_len as u32, &mut ids_data_usage_table)),
+        )?;
+        Ok(())
+    })
+    .await?;
+
+    db.read_with(|tx| {
+        let ids_data_usage_table = tx.open_table(&ids_data_usage::TABLE)?;
+        let usage = Database::get_data_usage_tx(author, &ids_data_usage_table)?;
+
+        // Unprocessed should be 0 (moved to pruned)
+        assert_eq!(usage.missing_payload_size, 0);
+        assert_eq!(usage.missing_payload_num, 0);
+
+        // Pruned should have the payload
+        assert_eq!(usage.pruned_payload_size, content_len);
+        assert_eq!(usage.pruned_payload_num, 1);
+
+        // Current should still be 0
+        assert_eq!(usage.current_content_size, 0);
+        assert_eq!(usage.current_payload_num, 0);
+
+        // Total unchanged
+        assert_eq!(usage.total_content_size, content_len);
+        assert_eq!(usage.total_payload_num, 1);
+
+        Ok(())
+    })
+    .await?;
+
+    Ok(())
+}
+
+/// Test: Processing invalid content moves from unprocessed to invalid and
+/// decrements RC.
+#[test_log::test(tokio::test(flavor = "multi_thread"))]
+async fn test_data_usage_payload_invalid() -> BoxedErrorResult<()> {
+    use rostra_core::event::VerifiedEventContent;
+
+    use crate::{content_rc, ids_data_usage};
+
+    let id_secret = RostraIdSecretKey::generate();
+    let author = id_secret.id();
+    let (_dir, db) = temp_db(author).await?;
+
+    let (event, content) = build_test_event_with_invalid_content(id_secret, None, 500);
+    let content_hash = event.content_hash();
+    let content_len = u64::from(event.content_len());
+    let now = rostra_core::Timestamp::now();
+
+    // Insert event (payload starts as unprocessed)
+    db.write_with(|tx| {
+        db.process_event_tx(&event, now, tx)?;
+        Ok(())
+    })
+    .await?;
+
+    // Process the content — it's invalid (all zeros, not valid CBOR)
+    let verified_content = VerifiedEventContent::assume_verified(event, content);
+    db.process_event_content(&verified_content).await;
+
+    db.read_with(|tx| {
+        let ids_data_usage_table = tx.open_table(&ids_data_usage::TABLE)?;
+        let usage = Database::get_data_usage_tx(author, &ids_data_usage_table)?;
+
+        // Unprocessed should be 0 (moved to invalid)
+        assert_eq!(usage.missing_payload_size, 0);
+        assert_eq!(usage.missing_payload_num, 0);
+
+        // Invalid should have the payload
+        assert_eq!(usage.invalid_payload_size, content_len);
+        assert_eq!(usage.invalid_payload_num, 1);
+
+        // Current should be 0 (invalid content not stored)
+        assert_eq!(usage.current_content_size, 0);
+        assert_eq!(usage.current_payload_num, 0);
+
+        // Total unchanged
+        assert_eq!(usage.total_content_size, content_len);
+        assert_eq!(usage.total_payload_num, 1);
+
+        // RC entry removed (decremented to 0 on invalid)
+        let content_rc_table = tx.open_table(&content_rc::TABLE)?;
+        let rc = content_rc_table.get(&content_hash)?;
+        assert!(
+            rc.is_none(),
+            "RC entry should be removed when count reaches 0"
         );
+
+        Ok(())
+    })
+    .await?;
+
+    Ok(())
+}
+
+/// Test: Deleting invalid content moves from invalid to deleted without
+/// changing RC (already decremented).
+#[test_log::test(tokio::test(flavor = "multi_thread"))]
+async fn test_data_usage_invalid_payload_deletion() -> BoxedErrorResult<()> {
+    use rostra_core::event::VerifiedEventContent;
+
+    use crate::{content_rc, ids_data_usage};
+
+    let id_secret = RostraIdSecretKey::generate();
+    let author = id_secret.id();
+    let (_dir, db) = temp_db(author).await?;
+
+    let (event, content) = build_test_event_with_invalid_content(id_secret, None, 500);
+    let event_id = event.event_id;
+    let content_hash = event.content_hash();
+    let content_len = u64::from(event.content_len());
+    let now = rostra_core::Timestamp::now();
+
+    // Insert and process (invalid content)
+    db.write_with(|tx| {
+        db.process_event_tx(&event, now, tx)?;
+        Ok(())
+    })
+    .await?;
+    let verified_content = VerifiedEventContent::assume_verified(event, content);
+    db.process_event_content(&verified_content).await;
+
+    // Delete the event
+    let delete_event = build_delete_event(id_secret, event_id, event_id);
+    db.write_with(|tx| {
+        db.process_event_tx(&delete_event, now, tx)?;
+        Ok(())
+    })
+    .await?;
+
+    db.read_with(|tx| {
+        let ids_data_usage_table = tx.open_table(&ids_data_usage::TABLE)?;
+        let usage = Database::get_data_usage_tx(author, &ids_data_usage_table)?;
+
+        // Invalid should be 0 (moved to deleted)
+        assert_eq!(usage.invalid_payload_size, 0);
+        assert_eq!(usage.invalid_payload_num, 0);
+
+        // Deleted should have the original payload
+        assert_eq!(usage.deleted_payload_size, content_len);
+        assert_eq!(usage.deleted_payload_num, 1);
+
+        // Current should have the delete event (content_len=0)
+        assert_eq!(usage.current_content_size, 0);
+        assert_eq!(usage.current_payload_num, 1, "Delete event payload tracked");
+
+        // Total includes both: original post + delete event (content_len=0 now tracked)
+        assert_eq!(usage.total_content_size, content_len);
+        assert_eq!(usage.total_payload_num, 2, "Original + delete event");
+
+        // RC entry still removed (no double-decrement)
+        let content_rc_table = tx.open_table(&content_rc::TABLE)?;
+        let rc = content_rc_table.get(&content_hash)?;
+        assert!(rc.is_none(), "RC entry should remain removed after delete");
 
         Ok(())
     })
@@ -1747,7 +2198,7 @@ async fn test_follow_unfollow_refollow_flow() -> BoxedErrorResult<()> {
         let mut events_heads_table = tx.open_table(&events_heads::TABLE)?;
         let mut events_by_time_table = tx.open_table(&events_by_time::TABLE)?;
         let mut events_content_state_table = tx.open_table(&events_content_state::TABLE)?;
-        let content_store_table = tx.open_table(&content_store::TABLE)?;
+        let mut content_store_table = tx.open_table(&content_store::TABLE)?;
         let mut content_rc_table = tx.open_table(&content_rc::TABLE)?;
         let mut events_content_missing_table = tx.open_table(&events_content_missing::TABLE)?;
 
@@ -1760,7 +2211,7 @@ async fn test_follow_unfollow_refollow_flow() -> BoxedErrorResult<()> {
             &mut events_heads_table,
             &mut events_by_time_table,
             &mut events_content_state_table,
-            &content_store_table,
+            &mut content_store_table,
             &mut content_rc_table,
             &mut events_content_missing_table,
             None,
@@ -1814,7 +2265,7 @@ async fn test_follow_unfollow_refollow_flow() -> BoxedErrorResult<()> {
         let mut events_heads_table = tx.open_table(&events_heads::TABLE)?;
         let mut events_by_time_table = tx.open_table(&events_by_time::TABLE)?;
         let mut events_content_state_table = tx.open_table(&events_content_state::TABLE)?;
-        let content_store_table = tx.open_table(&content_store::TABLE)?;
+        let mut content_store_table = tx.open_table(&content_store::TABLE)?;
         let mut content_rc_table = tx.open_table(&content_rc::TABLE)?;
         let mut events_content_missing_table = tx.open_table(&events_content_missing::TABLE)?;
 
@@ -1826,7 +2277,7 @@ async fn test_follow_unfollow_refollow_flow() -> BoxedErrorResult<()> {
             &mut events_heads_table,
             &mut events_by_time_table,
             &mut events_content_state_table,
-            &content_store_table,
+            &mut content_store_table,
             &mut content_rc_table,
             &mut events_content_missing_table,
             None,
@@ -1887,7 +2338,7 @@ async fn test_follow_unfollow_refollow_flow() -> BoxedErrorResult<()> {
         let mut events_heads_table = tx.open_table(&events_heads::TABLE)?;
         let mut events_by_time_table = tx.open_table(&events_by_time::TABLE)?;
         let mut events_content_state_table = tx.open_table(&events_content_state::TABLE)?;
-        let content_store_table = tx.open_table(&content_store::TABLE)?;
+        let mut content_store_table = tx.open_table(&content_store::TABLE)?;
         let mut content_rc_table = tx.open_table(&content_rc::TABLE)?;
         let mut events_content_missing_table = tx.open_table(&events_content_missing::TABLE)?;
 
@@ -1899,7 +2350,7 @@ async fn test_follow_unfollow_refollow_flow() -> BoxedErrorResult<()> {
             &mut events_heads_table,
             &mut events_by_time_table,
             &mut events_content_state_table,
-            &content_store_table,
+            &mut content_store_table,
             &mut content_rc_table,
             &mut events_content_missing_table,
             None,
@@ -2018,15 +2469,17 @@ mod proptest_rc {
             let state =
                 Database::get_event_content_state_tx(*event_id, events_content_state_table)?;
 
-            // Count events that are NOT deleted/pruned (new model: RC managed at insertion)
-            // Events with no state or Unprocessed state contribute to RC.
-            // Only Deleted and Pruned events don't contribute.
+            // Count events that are NOT deleted/pruned/invalid (new model: RC managed at
+            // insertion). Events with no state or Unprocessed state contribute to RC.
+            // Deleted, Pruned, and Invalid events don't contribute.
             let has_rc = match state {
-                None => true, /* Content processed, contributing */
-                // to RC
-                Some(EventContentState::Unprocessed) => true, /* Not yet processed, but */
-                // contributes to RC
-                Some(EventContentState::Deleted { .. }) | Some(EventContentState::Pruned) => false,
+                None => true,
+                Some(EventContentState::Missing) => true,
+                Some(
+                    EventContentState::Deleted { .. }
+                    | EventContentState::Pruned
+                    | EventContentState::Invalid,
+                ) => false,
             };
 
             if has_rc {
@@ -2267,7 +2720,7 @@ mod proptest_rc {
                         if content_store_table.get(&content.hash)?.is_none() {
                             content_store_table.insert(
                                 &content.hash,
-                                &ContentStoreRecord::Present(Cow::Owned(content.raw.clone())),
+                                &ContentStoreRecord(Cow::Owned(content.raw.clone())),
                             )?;
                         }
 
@@ -2291,7 +2744,7 @@ mod proptest_rc {
                             &mut events_heads_table,
                             &mut events_by_time_table,
                             &mut events_content_state_table,
-                            &content_store_table,
+                            &mut content_store_table,
                             &mut content_rc_table,
                             &mut events_content_missing_table,
                             None,
@@ -2489,7 +2942,7 @@ mod proptest_follow {
                         let mut events_by_time_table = tx.open_table(&events_by_time::TABLE)?;
                         let mut events_content_state_table =
                             tx.open_table(&events_content_state::TABLE)?;
-                        let content_store_table = tx.open_table(&content_store::TABLE)?;
+                        let mut content_store_table = tx.open_table(&content_store::TABLE)?;
                         let mut content_rc_table = tx.open_table(&content_rc::TABLE)?;
                         let mut events_content_missing_table =
                             tx.open_table(&events_content_missing::TABLE)?;
@@ -2502,7 +2955,7 @@ mod proptest_follow {
                             &mut events_heads_table,
                             &mut events_by_time_table,
                             &mut events_content_state_table,
-                            &content_store_table,
+                            &mut content_store_table,
                             &mut content_rc_table,
                             &mut events_content_missing_table,
                             None,
@@ -3351,7 +3804,7 @@ async fn test_content_processing_idempotency() -> BoxedErrorResult<()> {
         let events_content_state_table = tx.open_table(&events_content_state::TABLE)?;
         let state = Database::get_event_content_state_tx(post_id, &events_content_state_table)?;
         assert!(
-            matches!(state, Some(EventContentState::Unprocessed)),
+            matches!(state, Some(EventContentState::Missing)),
             "Post should be Unprocessed before content arrives"
         );
         Ok(())
@@ -3391,7 +3844,7 @@ async fn test_content_processing_idempotency() -> BoxedErrorResult<()> {
         let events_content_state_table = tx.open_table(&events_content_state::TABLE)?;
         let state = Database::get_event_content_state_tx(reply_id, &events_content_state_table)?;
         assert!(
-            matches!(state, Some(EventContentState::Unprocessed)),
+            matches!(state, Some(EventContentState::Missing)),
             "Reply should be Unprocessed before content arrives"
         );
         Ok(())
@@ -3523,7 +3976,7 @@ async fn test_delete_while_unprocessed() -> BoxedErrorResult<()> {
 
         let state = Database::get_event_content_state_tx(post_id, &events_content_state_table)?;
         assert!(
-            matches!(state, Some(EventContentState::Unprocessed)),
+            matches!(state, Some(EventContentState::Missing)),
             "Post should be Unprocessed"
         );
 
@@ -3956,6 +4409,368 @@ async fn test_delete_then_prune() -> BoxedErrorResult<()> {
     Ok(())
 }
 
+/// Test: Prune after Invalid returns false (already handled).
+///
+/// Verifies:
+/// - Invalid sets state to Invalid and decrements RC
+/// - Prune attempt returns false (already invalid, RC already decremented)
+/// - State stays Invalid, RC stays 0
+#[test_log::test(tokio::test(flavor = "multi_thread"))]
+async fn test_invalid_then_prune() -> BoxedErrorResult<()> {
+    use rostra_core::event::VerifiedEventContent;
+    use rostra_core::id::ToShort as _;
+
+    let user_secret = RostraIdSecretKey::generate();
+    let user = user_secret.id();
+
+    let (_tmp, db) = temp_db(user).await?;
+
+    let (event, content) = build_test_event_with_invalid_content(user_secret, None, 500);
+    let event_id = event.event_id;
+    let post_id = event_id.to_short();
+    let content_hash = event.content_hash();
+    let now = rostra_core::Timestamp::now();
+
+    // Insert and process (content is invalid — all zeros)
+    db.write_with(|tx| {
+        db.process_event_tx(&event, now, tx)?;
+        Ok(())
+    })
+    .await?;
+    let verified_content = VerifiedEventContent::assume_verified(event, content);
+    db.process_event_content(&verified_content).await;
+
+    // Verify: Invalid, RC = 0
+    db.read_with(|tx| {
+        let events_content_state_table = tx.open_table(&events_content_state::TABLE)?;
+        let content_rc_table = tx.open_table(&content_rc::TABLE)?;
+
+        let state = Database::get_event_content_state_tx(post_id, &events_content_state_table)?;
+        assert!(
+            matches!(state, Some(EventContentState::Invalid)),
+            "Post should be Invalid, got {state:?}"
+        );
+
+        let rc = Database::get_content_rc_tx(content_hash, &content_rc_table)?;
+        assert_eq!(rc, 0, "RC should be 0 after invalid");
+
+        Ok(())
+    })
+    .await?;
+
+    // Attempt to prune: should return false
+    let prune_result = db
+        .write_with(|tx| {
+            let mut events_content_state_table = tx.open_table(&events_content_state::TABLE)?;
+            let mut content_rc_table = tx.open_table(&content_rc::TABLE)?;
+            let mut events_content_missing_table = tx.open_table(&events_content_missing::TABLE)?;
+
+            let result = Database::prune_event_content_tx(
+                post_id,
+                content_hash,
+                &mut events_content_state_table,
+                &mut content_rc_table,
+                &mut events_content_missing_table,
+                None,
+            )?;
+            Ok(result)
+        })
+        .await?;
+
+    assert!(!prune_result, "Prune should return false for invalid event");
+
+    // Verify: still Invalid, RC still 0
+    db.read_with(|tx| {
+        let events_content_state_table = tx.open_table(&events_content_state::TABLE)?;
+        let content_rc_table = tx.open_table(&content_rc::TABLE)?;
+
+        let state = Database::get_event_content_state_tx(post_id, &events_content_state_table)?;
+        assert!(
+            matches!(state, Some(EventContentState::Invalid)),
+            "Post should still be Invalid, got {state:?}"
+        );
+
+        let rc = Database::get_content_rc_tx(content_hash, &content_rc_table)?;
+        assert_eq!(rc, 0, "RC should still be 0");
+
+        Ok(())
+    })
+    .await?;
+
+    Ok(())
+}
+
+/// Test: Delete event arrives before target, then target arrives.
+///
+/// Verifies Flow 3 from the lifecycle docs:
+/// - Delete event marks target as deleted_by in events_missing
+/// - When target finally arrives, it's immediately marked Deleted
+/// - RC is NOT incremented for the target (is_deleted = true)
+/// - No payload is tracked as unprocessed
+#[test_log::test(tokio::test(flavor = "multi_thread"))]
+async fn test_delete_before_target_rc_not_incremented() -> BoxedErrorResult<()> {
+    use rostra_core::id::ToShort as _;
+
+    use crate::ids_data_usage;
+
+    let id_secret = RostraIdSecretKey::generate();
+    let author = id_secret.id();
+    let (_dir, db) = temp_db(author).await?;
+
+    // Create the target event (but don't insert it yet)
+    let (target_event, _target_content) =
+        build_test_event_with_valid_content(id_secret, None, "Will be deleted");
+    let target_id = target_event.event_id;
+    let target_content_hash = target_event.content_hash();
+
+    // Create the delete event targeting the not-yet-inserted target
+    let delete_event = build_delete_event(id_secret, target_id, target_id);
+
+    let now = rostra_core::Timestamp::now();
+
+    // Step 1: Insert delete event first (target doesn't exist yet)
+    db.write_with(|tx| {
+        db.process_event_tx(&delete_event, now, tx)?;
+        Ok(())
+    })
+    .await?;
+
+    // Step 2: Now insert the target event
+    db.write_with(|tx| {
+        db.process_event_tx(&target_event, now, tx)?;
+        Ok(())
+    })
+    .await?;
+
+    // Verify: target is Deleted, RC was never incremented
+    db.read_with(|tx| {
+        let events_content_state_table = tx.open_table(&events_content_state::TABLE)?;
+        let content_rc_table = tx.open_table(&content_rc::TABLE)?;
+        let ids_data_usage_table = tx.open_table(&ids_data_usage::TABLE)?;
+
+        // State should be Deleted
+        let state = Database::get_event_content_state_tx(
+            target_id.to_short(),
+            &events_content_state_table,
+        )?;
+        assert!(
+            matches!(state, Some(EventContentState::Deleted { .. })),
+            "Target should be Deleted, got {state:?}"
+        );
+
+        // RC should be 0 (never incremented for deleted-before-arrival events)
+        let rc = Database::get_content_rc_tx(target_content_hash, &content_rc_table)?;
+        assert_eq!(
+            rc, 0,
+            "RC should be 0 — never incremented for pre-deleted target"
+        );
+
+        // Data usage: target's payload should NOT be tracked (deleted before arrival).
+        // The delete event has content_len=0 but IS now tracked as a payload.
+        let usage = Database::get_data_usage_tx(author, &ids_data_usage_table)?;
+        assert_eq!(
+            usage.missing_payload_num, 0,
+            "No payloads should be missing (target is deleted)"
+        );
+        assert_eq!(
+            usage.current_payload_num, 1,
+            "Delete event (content_len=0) should be tracked"
+        );
+        assert_eq!(
+            usage.total_payload_num, 1,
+            "Only delete event tracked (target deleted before arrival)"
+        );
+
+        Ok(())
+    })
+    .await?;
+
+    Ok(())
+}
+
+/// Test: Deleting already-processed content (no entry in events_content_state).
+///
+/// Verifies the old_state=None path in insert_event_tx deletion:
+/// - Event is inserted and content is processed (Unprocessed marker removed)
+/// - Delete event arrives → current → deleted transition in data usage
+/// - RC decremented (was not previously decremented)
+#[test_log::test(tokio::test(flavor = "multi_thread"))]
+async fn test_delete_processed_content() -> BoxedErrorResult<()> {
+    use rostra_core::event::VerifiedEventContent;
+    use rostra_core::id::ToShort as _;
+
+    use crate::ids_data_usage;
+
+    let id_secret = RostraIdSecretKey::generate();
+    let author = id_secret.id();
+    let (_dir, db) = temp_db(author).await?;
+
+    let (event, content) =
+        build_test_event_with_valid_content(id_secret, None, "Process then delete");
+    let event_id = event.event_id;
+    let content_hash = event.content_hash();
+    let content_len = u64::from(event.content_len());
+    let now = rostra_core::Timestamp::now();
+
+    // Insert and process the event fully
+    db.write_with(|tx| {
+        db.process_event_tx(&event, now, tx)?;
+        Ok(())
+    })
+    .await?;
+    let verified_content = VerifiedEventContent::assume_verified(event, content);
+    db.process_event_content(&verified_content).await;
+
+    // Verify: no entry in events_content_state (processed), RC = 1
+    db.read_with(|tx| {
+        let events_content_state_table = tx.open_table(&events_content_state::TABLE)?;
+        let content_rc_table = tx.open_table(&content_rc::TABLE)?;
+
+        let state =
+            Database::get_event_content_state_tx(event_id.to_short(), &events_content_state_table)?;
+        assert!(
+            state.is_none(),
+            "Processed event should have no entry, got {state:?}"
+        );
+
+        let rc = Database::get_content_rc_tx(content_hash, &content_rc_table)?;
+        assert_eq!(rc, 1, "RC should be 1 after processing");
+
+        Ok(())
+    })
+    .await?;
+
+    // Delete the event
+    let delete_event = build_delete_event(id_secret, event_id, event_id);
+    db.write_with(|tx| {
+        db.process_event_tx(&delete_event, now, tx)?;
+        Ok(())
+    })
+    .await?;
+
+    // Verify: Deleted state, RC = 0, data usage moved from current to deleted
+    db.read_with(|tx| {
+        let events_content_state_table = tx.open_table(&events_content_state::TABLE)?;
+        let content_rc_table = tx.open_table(&content_rc::TABLE)?;
+        let ids_data_usage_table = tx.open_table(&ids_data_usage::TABLE)?;
+
+        let state =
+            Database::get_event_content_state_tx(event_id.to_short(), &events_content_state_table)?;
+        assert!(
+            matches!(state, Some(EventContentState::Deleted { .. })),
+            "Post should be Deleted, got {state:?}"
+        );
+
+        let rc = Database::get_content_rc_tx(content_hash, &content_rc_table)?;
+        assert_eq!(rc, 0, "RC should be 0 after delete");
+
+        let usage = Database::get_data_usage_tx(author, &ids_data_usage_table)?;
+        assert_eq!(usage.current_content_size, 0, "Current size should be 0");
+        assert_eq!(
+            usage.current_payload_num, 1,
+            "Current count should be 1 (delete event)"
+        );
+        assert_eq!(
+            usage.deleted_payload_size, content_len,
+            "Deleted should have the payload"
+        );
+        assert_eq!(usage.deleted_payload_num, 1, "Deleted count should be 1");
+
+        Ok(())
+    })
+    .await?;
+
+    Ok(())
+}
+
+/// Test: Two events share same invalid content hash — RC tracks correctly.
+///
+/// Verifies:
+/// - Both events increment RC to 2
+/// - First event processed as Invalid → RC decremented to 1
+/// - Second event processed as Invalid → RC decremented to 0
+/// - Data usage shows 2 invalid payloads
+#[test_log::test(tokio::test(flavor = "multi_thread"))]
+async fn test_two_events_same_invalid_content() -> BoxedErrorResult<()> {
+    use rostra_core::event::VerifiedEventContent;
+
+    use crate::ids_data_usage;
+
+    let id_secret = RostraIdSecretKey::generate();
+    let author = id_secret.id();
+    let (_dir, db) = temp_db(author).await?;
+
+    // Build two events with the same invalid content
+    let (event_a, content_a) = build_test_event_with_invalid_content(id_secret, None, 300);
+    let event_a_id = event_a.event_id;
+    let content_hash = event_a.content_hash();
+
+    let (event_b, content_b) = build_test_event_with_invalid_content(id_secret, event_a_id, 300);
+    let content_hash_b = event_b.content_hash();
+
+    // Same content bytes → same hash
+    assert_eq!(
+        content_hash, content_hash_b,
+        "Same content should produce same hash"
+    );
+
+    let now = rostra_core::Timestamp::now();
+
+    // Insert both events
+    db.write_with(|tx| {
+        db.process_event_tx(&event_a, now, tx)?;
+        db.process_event_tx(&event_b, now, tx)?;
+        Ok(())
+    })
+    .await?;
+
+    // Verify RC = 2
+    db.read_with(|tx| {
+        let content_rc_table = tx.open_table(&content_rc::TABLE)?;
+        let rc = Database::get_content_rc_tx(content_hash, &content_rc_table)?;
+        assert_eq!(rc, 2, "RC should be 2 after inserting both events");
+        Ok(())
+    })
+    .await?;
+
+    // Process event A (invalid) → RC = 1
+    let verified_a = VerifiedEventContent::assume_verified(event_a, content_a);
+    db.process_event_content(&verified_a).await;
+
+    db.read_with(|tx| {
+        let content_rc_table = tx.open_table(&content_rc::TABLE)?;
+        let rc = Database::get_content_rc_tx(content_hash, &content_rc_table)?;
+        assert_eq!(rc, 1, "RC should be 1 after first invalid processing");
+        Ok(())
+    })
+    .await?;
+
+    // Process event B (also invalid) → RC = 0
+    let verified_b = VerifiedEventContent::assume_verified(event_b, content_b);
+    db.process_event_content(&verified_b).await;
+
+    db.read_with(|tx| {
+        let content_rc_table = tx.open_table(&content_rc::TABLE)?;
+        let ids_data_usage_table = tx.open_table(&ids_data_usage::TABLE)?;
+
+        let rc = Database::get_content_rc_tx(content_hash, &content_rc_table)?;
+        assert_eq!(rc, 0, "RC should be 0 after both invalid");
+
+        let usage = Database::get_data_usage_tx(author, &ids_data_usage_table)?;
+        assert_eq!(
+            usage.invalid_payload_num, 2,
+            "Should have 2 invalid payloads"
+        );
+        assert_eq!(usage.missing_payload_num, 0, "No unprocessed payloads left");
+        assert_eq!(usage.current_payload_num, 0, "No current payloads");
+
+        Ok(())
+    })
+    .await?;
+
+    Ok(())
+}
+
 /// Test processing content for an event that was never inserted.
 ///
 /// Verifies that this is handled gracefully (skipped, not crash) in release
@@ -4040,17 +4855,8 @@ async fn test_wants_content_basic() -> BoxedErrorResult<()> {
     let user = id_secret.id();
     let (_dir, db) = temp_db(user).await?;
 
-    // Create a test event with content
-    let content = EventContentRaw::new(vec![1, 2, 3, 4]);
-    let event = {
-        let event = Event::builder_raw_content()
-            .author(user)
-            .kind(EventKind::SOCIAL_POST)
-            .content(&content)
-            .build();
-        let signed = event.signed_by(id_secret);
-        VerifiedEvent::verify_signed(user, signed).expect("Valid event")
-    };
+    // Create a test event with valid content
+    let (event, content) = build_test_event_with_valid_content(id_secret, None, "wants test");
     let event_id = event.event_id.to_short();
 
     // Step 1: Process event (without content yet)
@@ -4097,13 +4903,6 @@ async fn test_wants_content_basic() -> BoxedErrorResult<()> {
         "wants_content should return false for ProcessEventState::Pruned"
     );
 
-    // ProcessEventState::NoContent should always return false
-    assert!(
-        !db.wants_content(event_id, ProcessEventState::NoContent)
-            .await,
-        "wants_content should return false for ProcessEventState::NoContent"
-    );
-
     info!("=== wants_content basic test passed ===");
 
     Ok(())
@@ -4124,17 +4923,8 @@ async fn test_wants_content_no_repeated_downloads() -> BoxedErrorResult<()> {
     let user = id_secret.id();
     let (_dir, db) = temp_db(user).await?;
 
-    // Create a test event
-    let content = EventContentRaw::new(vec![5, 6, 7, 8]);
-    let event = {
-        let event = Event::builder_raw_content()
-            .author(user)
-            .kind(EventKind::SOCIAL_POST)
-            .content(&content)
-            .build();
-        let signed = event.signed_by(id_secret);
-        VerifiedEvent::verify_signed(user, signed).expect("Valid event")
-    };
+    // Create a test event with valid content
+    let (event, content) = build_test_event_with_valid_content(id_secret, None, "no repeat");
     let event_id = event.event_id.to_short();
 
     // Process event and content

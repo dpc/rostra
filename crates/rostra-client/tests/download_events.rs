@@ -1,7 +1,7 @@
 use rostra_client::Client;
 use rostra_client_db::Database;
 use rostra_core::event::content_kind::IrohNodeId;
-use rostra_core::event::{Event, EventContentRaw, EventKind, VerifiedEvent, VerifiedEventContent};
+use rostra_core::event::{Event, EventKind, VerifiedEvent, VerifiedEventContent};
 use rostra_core::id::{RostraIdSecretKey, ToShort as _};
 use rostra_core::{ShortEventId, Timestamp};
 use rostra_p2p_api::ROSTRA_P2P_V0_ALPN;
@@ -12,9 +12,17 @@ fn build_test_event(
     id_secret: RostraIdSecretKey,
     parent_prev: impl Into<Option<ShortEventId>>,
 ) -> (VerifiedEvent, VerifiedEventContent) {
+    use rostra_core::event::content_kind::EventContentKind as _;
+    use rostra_core::event::{PersonaId, content_kind};
+
     let parent = parent_prev.into();
-    let content_bytes = b"test content";
-    let content = EventContentRaw::new(content_bytes.to_vec());
+    let post = content_kind::SocialPost {
+        persona: PersonaId(0),
+        djot_content: Some("test content".to_string()),
+        reply_to: None,
+        reaction: None,
+    };
+    let content = post.serialize_cbor().expect("valid cbor");
     let author = id_secret.id();
     let event = Event::builder_raw_content()
         .author(author)

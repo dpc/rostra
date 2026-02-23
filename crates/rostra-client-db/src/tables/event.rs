@@ -15,7 +15,7 @@ use serde::Serialize;
 /// Record for the main `events` table.
 ///
 /// Contains the signed event envelope (metadata + signature). The actual
-/// content is stored separately in `events_content`.
+/// content is stored separately in `content_store`.
 #[derive(Debug, Encode, Decode, Clone, Serialize)]
 pub struct EventRecord {
     /// The signed event (includes event metadata and cryptographic signature)
@@ -35,10 +35,10 @@ impl EventExt for EventRecord {
 /// event.
 #[derive(Decode, Encode, Debug)]
 pub struct EventsMissingRecord {
-    /// If set, a deletion event was received before the actual event.
+    /// If set, a content deletion event was received before the actual event.
     ///
-    /// When the missing event is finally received, it should be marked as
-    /// deleted immediately rather than processed normally.
+    /// When the missing event is finally received, its content should be
+    /// marked as deleted immediately rather than processed normally.
     ///
     /// Note: We only store one `deleted_by` ID. If multiple deletion events
     /// target the same missing event, we arbitrarily keep one.
@@ -75,15 +75,7 @@ pub struct EventSingletonRecord {
 /// This enables content deduplication - identical content (e.g., the same
 /// image posted by multiple users) is stored only once.
 #[derive(Debug, Encode, Decode, Clone, Serialize)]
-pub enum ContentStoreRecord<'a> {
-    /// Content is present and valid
-    Present(Cow<'a, EventContentUnsized>),
-    /// Content is present but was invalid during processing.
-    ///
-    /// We keep invalid content so we don't try to fetch it again, but we
-    /// don't process its effects.
-    Invalid(Cow<'a, EventContentUnsized>),
-}
+pub struct ContentStoreRecord<'a>(pub Cow<'a, EventContentUnsized>);
 
 /// Owned version of [`ContentStoreRecord`].
 pub type ContentStoreRecordOwned = ContentStoreRecord<'static>;
@@ -95,51 +87,61 @@ pub type ContentStoreRecordOwned = ContentStoreRecord<'static>;
 /// ## State Transitions
 ///
 /// ```text
-/// Event inserted ──► Unprocessed ──► (no entry) ──► Deleted/Pruned
-///                         │               │
-///                         │               └─ Content processed successfully
-///                         │                  (side effects applied)
-///                         │
-///                         └─ Can also go directly to Deleted/Pruned
+/// Event inserted ──► Missing ──► (no entry) ──► Deleted/Pruned
+///                       │             │
+///                       │             └─ Content processed successfully
+///                       │                (side effects applied)
+///                       │
+///                       ├─ Can also go directly to Deleted/Pruned
+///                       │
+///                       └─► Invalid ──► Deleted
 /// ```
+///
+/// Note: Events with `content_len == 0` skip the `Missing` state entirely
+/// and go straight to "no entry" (processed).
 ///
 /// ## Interpretation
 ///
 /// - **No entry in table**: Content has been processed for this event. This is
 ///   the normal state after successful content processing. Side effects (reply
-///   counts, follow updates, etc.) have been applied.
+///   counts, follow updates, etc.) have been applied. Also the state for events
+///   with no content (`content_len == 0`).
 ///
-/// - **`Unprocessed`**: Event was inserted but content processing hasn't
-///   happened yet. The event's content side effects have NOT been applied.
+/// - **`Missing`**: Event was inserted but content hasn't been received or
+///   processed yet. The event's content side effects have NOT been applied.
+///
+/// - **`Invalid`**: Content was received but failed validation (e.g. CBOR
+///   deserialization). RC has been decremented. Content bytes are discarded.
 ///
 /// - **`Deleted` / `Pruned`**: Content is unwanted. RC has been decremented.
 ///
 /// ## Idempotency Guarantee
 ///
-/// The `Unprocessed` state ensures content processing is idempotent:
-/// - `process_event_content_tx` checks for `Unprocessed` before processing
-/// - If `Unprocessed` → process content, then remove the marker
+/// The `Missing` state ensures content processing is idempotent:
+/// - `process_event_content_tx` checks for `Missing` before processing
+/// - If `Missing` → process content, then remove the marker
 /// - If no entry → skip (already processed)
-/// - If `Deleted`/`Pruned` → skip (content unwanted)
+/// - If `Deleted`/`Pruned`/`Invalid` → skip (content unwanted or bad)
 ///
 /// This prevents duplicate side effects (e.g., incrementing reply_count twice)
 /// when the same content is received multiple times for the same event.
 #[derive(Debug, Encode, Decode, Clone, Copy, Serialize, PartialEq, Eq)]
 pub enum EventContentState {
-    /// Content has not been processed yet for this event.
+    /// Content has not been received/processed yet for this event.
     ///
-    /// This state is set when an event is inserted (in `insert_event_tx`).
-    /// Content side effects have NOT been applied yet.
+    /// This state is set when an event with `content_len > 0` is inserted
+    /// (in `insert_event_tx`). Events with `content_len == 0` skip this
+    /// state entirely.
     ///
     /// When `process_event_content_tx` runs and sees this state:
     /// 1. It processes the content (applies side effects)
     /// 2. Stores content in `content_store` if not already there
-    /// 3. Removes this `Unprocessed` marker (deletes entry from table)
+    /// 3. Removes this `Missing` marker (deletes entry from table)
     ///
     /// After processing, the event will have NO entry in
     /// `events_content_state`, indicating content was successfully
     /// processed.
-    Unprocessed,
+    Missing,
 
     /// Content was deleted by the author via a deletion event.
     ///
@@ -157,6 +159,13 @@ pub enum EventContentState {
     /// Unlike `Deleted`, this is a local decision, not an author request.
     /// Used when content exceeds size limits or for storage management.
     Pruned,
+
+    /// Content was received but failed validation.
+    ///
+    /// The content bytes could not be deserialized for the event's kind.
+    /// RC has been decremented and content bytes are not stored.
+    /// Like `Deleted`/`Pruned`, this is a terminal state.
+    Invalid,
 }
 
 /// Result of looking up event content.
@@ -167,8 +176,8 @@ pub enum EventContentState {
 pub enum EventContentResult {
     /// Content is present and valid
     Present(EventContentRaw),
-    /// Content is present but was invalid during processing
-    Invalid(EventContentRaw),
+    /// Content was received but failed validation
+    Invalid,
     /// Content was deleted by the author
     Deleted {
         /// The event that requested this content be deleted
@@ -181,10 +190,10 @@ pub enum EventContentResult {
 }
 
 impl EventContentResult {
-    /// Returns the content if present (either valid or invalid).
+    /// Returns the content if present and valid.
     pub fn content(&self) -> Option<&EventContentRaw> {
         match self {
-            EventContentResult::Present(c) | EventContentResult::Invalid(c) => Some(c),
+            EventContentResult::Present(c) => Some(c),
             _ => None,
         }
     }

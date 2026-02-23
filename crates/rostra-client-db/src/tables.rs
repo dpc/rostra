@@ -46,28 +46,32 @@
 //!
 //! **Event Insertion** (via `insert_event_tx`):
 //! 1. Event is added to [`events`] table
-//! 2. RC is incremented in [`content_rc`] for the event's content_hash
-//! 3. Event is marked as [`Unprocessed`](EventContentState::Unprocessed) in
-//!    [`events_content_state`]
-//! 4. If content bytes are not in [`content_store`], event is added to
+//! 2. RC is incremented in [`content_rc`] (for all non-deleted events,
+//!    including `content_len == 0`)
+//! 3. If `content_len > 0`: event is marked as
+//!    [`Missing`](EventContentState::Missing) in [`events_content_state`],
+//!    and if content bytes are not in [`content_store`], event is added to
 //!    [`events_content_missing`]
+//! 4. If `content_len == 0`: empty content stored in [`content_store`],
+//!    event goes straight to "processed" (no entry in
+//!    [`events_content_state`])
 //!
 //! **Content Processing** (via `process_event_content_tx`):
-//! 1. Check if event is `Unprocessed` (if not, skip - already processed)
+//! 1. Check if event is `Missing` (if not, skip - already processed)
 //! 2. Process content side effects (e.g., increment reply counts, update
 //!    follows)
 //! 3. Store content bytes in [`content_store`] if not already there
 //! 4. Remove event from [`events_content_missing`] (if present)
-//! 5. Remove `Unprocessed` marker from [`events_content_state`]
+//! 5. Remove `Missing` marker from [`events_content_state`]
 //!
-//! **Content Deletion** (author requests deletion):
-//! 1. Event state changes to [`Deleted`](EventContentState::Deleted) in
-//!    [`events_content_state`]
+//! **Content Deletion** (author requests content deletion):
+//! 1. Event's content state changes to [`Deleted`](EventContentState::Deleted)
+//!    in [`events_content_state`]
 //! 2. RC is decremented in [`content_rc`]
 //!
 //! **Content Pruning** (local decision, e.g., content too large):
-//! 1. Event state changes to [`Pruned`](EventContentState::Pruned) in
-//!    [`events_content_state`]
+//! 1. Event's content state changes to [`Pruned`](EventContentState::Pruned)
+//!    in [`events_content_state`]
 //! 2. RC is decremented in [`content_rc`]
 //!
 //! **Garbage Collection**:
@@ -75,8 +79,9 @@
 //!
 //! ### Interpreting `events_content_state`
 //!
-//! - **No entry**: Content has been processed for this event (normal state)
-//! - **`Unprocessed`**: Event inserted but content not yet processed
+//! - **No entry**: Content has been processed (or `content_len == 0`)
+//! - **`Missing`**: Event inserted but content not yet received/processed
+//! - **`Invalid`**: Content failed validation (e.g. CBOR deserialization)
 //! - **`Deleted`**: Content deleted by author
 //! - **`Pruned`**: Content pruned locally
 //!
@@ -213,21 +218,72 @@ def_table! {
 
 /// Aggregate data usage record for an identity.
 ///
-/// Tracks both event metadata size (fixed per event) and content size
-/// (variable, based on actual content stored).
+/// Tracks event metadata and content/payload sizes and counts,
+/// broken down by lifecycle state (current, missing, deleted, pruned, invalid).
+///
+/// **Invariants:**
+///
+/// - `current_metadata_{size,num} == total_metadata_{size,num}` (until event
+///   pruning exists)
+/// - `total_content_size == current_content_size + deleted_payload_size +
+///   pruned_payload_size + missing_payload_size + invalid_payload_size`
+/// - `total_payload_num == current_payload_num + deleted_payload_num +
+///   pruned_payload_num + missing_payload_num + invalid_payload_num`
 #[derive(Debug, Encode, Decode, Clone, Copy, Default, Serialize)]
 pub struct IdsDataUsageRecord {
-    /// Total size of event metadata (envelopes) in bytes.
-    ///
-    /// Each event contributes a fixed size (Event struct + signature = 192
-    /// bytes).
-    pub metadata_size: u64,
+    // -- Metadata (event envelopes) --
+    /// Size of event metadata currently stored, in bytes.
+    /// Each event contributes 192 bytes (Event struct + signature).
+    pub current_metadata_size: u64,
 
-    /// Total size of content (payloads) in bytes.
-    ///
-    /// Only content that is neither deleted nor pruned is counted. When content
-    /// is deleted or pruned, this value is decremented accordingly.
-    pub content_size: u64,
+    /// Total metadata size of all events we know about, in bytes.
+    /// Same as `current_metadata_size` until event pruning is implemented.
+    pub total_metadata_size: u64,
+
+    /// Number of events currently stored.
+    pub current_metadata_num: u64,
+
+    /// Total number of events we know about.
+    /// Same as `current_metadata_num` until event pruning is implemented.
+    pub total_metadata_num: u64,
+
+    // -- Content/Payloads --
+    /// Size of payload data currently stored and processed, in bytes.
+    pub current_content_size: u64,
+
+    /// Total payload size of all events we know about, in bytes.
+    /// Includes current + missing + deleted + pruned + invalid.
+    pub total_content_size: u64,
+
+    /// Number of payloads currently stored and processed.
+    pub current_payload_num: u64,
+
+    /// Total number of payloads we know about.
+    pub total_payload_num: u64,
+
+    /// Size of payloads not yet received/processed, in bytes.
+    pub missing_payload_size: u64,
+
+    /// Number of payloads not yet received/processed.
+    pub missing_payload_num: u64,
+
+    /// Size of payloads deleted by their author, in bytes.
+    pub deleted_payload_size: u64,
+
+    /// Number of payloads deleted by their author.
+    pub deleted_payload_num: u64,
+
+    /// Size of payloads pruned locally, in bytes.
+    pub pruned_payload_size: u64,
+
+    /// Number of payloads pruned locally.
+    pub pruned_payload_num: u64,
+
+    /// Size of payloads that failed content validation, in bytes.
+    pub invalid_payload_size: u64,
+
+    /// Number of payloads that failed content validation.
+    pub invalid_payload_num: u64,
 }
 
 // ============================================================================
@@ -286,7 +342,7 @@ def_table! {
     /// Content store - stores content by its hash for deduplication.
     ///
     /// Key: ContentHash (blake3 hash of the content)
-    /// Value: The actual content (Present or Invalid)
+    /// Value: The actual content bytes
     ///
     /// This enables identical content (e.g., same image posted by multiple
     /// users) to be stored only once. Content is removed when its reference
@@ -312,24 +368,25 @@ def_table! {
     /// Per-event content processing state.
     ///
     /// Key: ShortEventId
-    /// Value: [`EventContentState`] (Unprocessed, Deleted, or Pruned)
+    /// Value: [`EventContentState`] (Missing, Deleted, Pruned, or Invalid)
     ///
     /// This table tracks the content processing state for each event:
     ///
-    /// - **No entry**: Content has been processed (side effects applied).
-    ///   This is the normal state after `process_event_content_tx` completes.
-    /// - **`Unprocessed`**: Event was inserted but content hasn't been processed
-    ///   yet. Content side effects (reply counts, follow updates, etc.) have not
-    ///   been applied. `process_event_content_tx` should process these events.
+    /// - **No entry**: Content has been processed (side effects applied), or
+    ///   the event has `content_len == 0`. This is the normal state.
+    /// - **`Missing`**: Event was inserted but content hasn't been received or
+    ///   processed yet. Content side effects (reply counts, follow updates,
+    ///   etc.) have not been applied.
     /// - **`Deleted`**: Content was deleted by the author via a deletion event.
     /// - **`Pruned`**: Content was pruned locally (e.g., too large to store).
+    /// - **`Invalid`**: Content failed validation (e.g. CBOR deserialization).
     ///
-    /// **Idempotency**: The `Unprocessed` state ensures content processing is
+    /// **Idempotency**: The `Missing` state ensures content processing is
     /// idempotent. When `process_event_content_tx` is called, it checks for
-    /// `Unprocessed` state - if present, it processes the content and removes
-    /// the marker. If absent (or Deleted/Pruned), it skips processing. This
-    /// prevents duplicate side effects when the same content arrives multiple
-    /// times.
+    /// `Missing` state - if present, it processes the content and removes
+    /// the marker. If absent (or Deleted/Pruned/Invalid), it skips
+    /// processing. This prevents duplicate side effects when the same
+    /// content arrives multiple times.
     events_content_state: ShortEventId => EventContentState
 }
 

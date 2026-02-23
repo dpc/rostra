@@ -1,6 +1,6 @@
+use rostra_core::Timestamp;
 use rostra_core::event::{EventExt as _, VerifiedEvent, VerifiedEventContent};
 use rostra_core::id::ToShort as _;
-use rostra_core::{ContentHash, Timestamp};
 use rostra_util_error::FmtCompact as _;
 use tracing::{info, warn};
 
@@ -25,7 +25,7 @@ impl Database {
     ) -> DbResult<(InsertEventOutcome, ProcessEventState)> {
         let mut events_tbl = tx.open_table(&events::TABLE)?;
         let mut events_content_state_tbl = tx.open_table(&events_content_state::TABLE)?;
-        let content_store_tbl = tx.open_table(&content_store::TABLE)?;
+        let mut content_store_tbl = tx.open_table(&content_store::TABLE)?;
         let mut content_rc_tbl = tx.open_table(&content_rc::TABLE)?;
         let mut events_content_missing_tbl = tx.open_table(&events_content_missing::TABLE)?;
         let mut events_missing_tbl = tx.open_table(&events_missing::TABLE)?;
@@ -42,7 +42,7 @@ impl Database {
             &mut events_heads_tbl,
             &mut events_by_time_tbl,
             &mut events_content_state_tbl,
-            &content_store_tbl,
+            &mut content_store_tbl,
             &mut content_rc_tbl,
             &mut events_content_missing_tbl,
             Some(&mut ids_data_usage_tbl),
@@ -153,35 +153,34 @@ impl Database {
             }
         }
 
-        let process_event_content_state = if event.event.content_hash() == ContentHash::ZERO {
-            ProcessEventState::NoContent
-        } else if Self::MAX_CONTENT_LEN < u32::from(event.event.content_len) {
-            if Database::prune_event_content_tx(
-                event.event_id,
-                event.content_hash(),
-                &mut events_content_state_tbl,
-                &mut content_rc_tbl,
-                &mut events_content_missing_tbl,
-                Some((event.author(), event.content_len(), &mut ids_data_usage_tbl)),
-            )? {
-                ProcessEventState::Pruned
+        let process_event_content_state =
+            if Self::MAX_CONTENT_LEN < u32::from(event.event.content_len) {
+                if Database::prune_event_content_tx(
+                    event.event_id,
+                    event.content_hash(),
+                    &mut events_content_state_tbl,
+                    &mut content_rc_tbl,
+                    &mut events_content_missing_tbl,
+                    Some((event.author(), event.content_len(), &mut ids_data_usage_tbl)),
+                )? {
+                    ProcessEventState::Pruned
+                } else {
+                    ProcessEventState::Deleted
+                }
             } else {
-                ProcessEventState::Deleted
-            }
-        } else {
-            match insert_event_outcome {
-                InsertEventOutcome::AlreadyPresent => ProcessEventState::Existing,
-                InsertEventOutcome::Inserted { is_deleted, .. } => {
-                    if is_deleted {
-                        ProcessEventState::Deleted
-                    } else {
-                        // If the event was not there, and it wasn't deleted
-                        // it definitely does not have content yet.
-                        ProcessEventState::New
+                match insert_event_outcome {
+                    InsertEventOutcome::AlreadyPresent => ProcessEventState::Existing,
+                    InsertEventOutcome::Inserted { is_deleted, .. } => {
+                        if is_deleted {
+                            ProcessEventState::Deleted
+                        } else {
+                            // If the event was not there, and it wasn't deleted
+                            // it definitely does not have content yet.
+                            ProcessEventState::New
+                        }
                     }
                 }
-            }
-        };
+            };
 
         // Note: events_content_missing and events_content_state are handled in
         // insert_event_tx

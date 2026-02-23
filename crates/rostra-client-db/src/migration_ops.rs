@@ -17,11 +17,10 @@ use rostra_core::event::{
 use rostra_core::id::ToShort as _;
 use tracing::{debug, info};
 
-use crate::event::ContentStoreRecord;
 use crate::id_self::IdSelfAccountRecord;
 use crate::{
-    ContentStoreRecordOwned, Database, DbResult, DbVersionTooHighSnafu, LOG_TARGET,
-    WriteTransactionCtx, content_store, db_version, events, ids_self,
+    Database, DbResult, DbVersionTooHighSnafu, LOG_TARGET, WriteTransactionCtx, content_store,
+    db_version, events, ids_self,
 };
 
 /// Legacy content state from old event-id-based content store.
@@ -50,16 +49,32 @@ pub enum LegacyEventContentState<'a> {
 /// Owned version of legacy content state.
 pub type LegacyEventContentStateOwned = LegacyEventContentState<'static>;
 
+/// Legacy content store record from before ContentStoreRecord became a tuple
+/// struct. Old databases stored this as an enum with a `Present` variant,
+/// which has a different bincode encoding (variant discriminant byte).
+#[derive(Debug, Encode, Decode, Clone)]
+pub enum LegacyContentStoreRecord<'a> {
+    Present(Cow<'a, EventContentUnsized>),
+}
+
+pub type LegacyContentStoreRecordOwned = LegacyContentStoreRecord<'static>;
+
 /// Current schema version.
 ///
 /// Increment this when making schema changes that require migration.
-const DB_VER: u64 = 14;
+const DB_VER: u64 = 17;
 
 /// Versions older than this require a total migration.
 ///
 /// This should be set to the version where we last did a major schema
 /// overhaul. Older databases get rebuilt from scratch.
-const DB_VER_REQUIRES_TOTAL_MIGRATION: u64 = 14;
+const DB_VER_REQUIRES_TOTAL_MIGRATION: u64 = 17;
+
+/// DB version that introduced the tuple struct ContentStoreRecord format.
+///
+/// Versions at or below this used an enum `ContentStoreRecord::Present(...)`.
+/// During total migration, we use `LegacyContentStoreRecord` for older data.
+const DB_VER_LEGACY_CONTENT_STORE_FORMAT: u64 = 17;
 
 /// Prefix used for temporary tables during total migration.
 const MIGRATION_TEMP_PREFIX: &str = "_total_migration_";
@@ -67,6 +82,9 @@ const MIGRATION_TEMP_PREFIX: &str = "_total_migration_";
 /// Name of the temp events table used during total migration.
 /// If this table exists, reprocessing is pending.
 const MIGRATION_EVENTS_TEMP_TABLE: &str = "_total_migration_events";
+
+/// Name of the temp table storing the source DB version during migration.
+const MIGRATION_SOURCE_VER_TEMP_TABLE: &str = "_total_migration_source_ver";
 
 impl Database {
     /// Check if there's a pending migration stash that needs reprocessing.
@@ -171,7 +189,7 @@ impl Database {
                 to_ver = DB_VER,
                 "Database schema very old, preparing total migration"
             );
-            Self::prepare_total_migration(dbtx)?;
+            Self::prepare_total_migration(dbtx, cur_db_ver)?;
         }
 
         // Run incremental migrations
@@ -202,20 +220,26 @@ impl Database {
     /// This copies events/content_store/ids_self to temp tables, deletes all
     /// other tables, and initializes fresh schema. The ids_self is restored
     /// immediately so the Database can be created normally.
-    fn prepare_total_migration(dbtx: &WriteTransactionCtx) -> DbResult<()> {
+    fn prepare_total_migration(
+        dbtx: &WriteTransactionCtx,
+        source_ver: u64,
+    ) -> DbResult<()> {
         // Define temp table definitions
         let events_temp: redb_bincode::TableDefinition<
             '_,
             rostra_core::ShortEventId,
             crate::EventRecord,
         > = redb_bincode::TableDefinition::new("_total_migration_events");
+        // Type param doesn't matter for raw copy — encoding is preserved as-is
         let content_store_temp: redb_bincode::TableDefinition<
             '_,
             rostra_core::ContentHash,
-            ContentStoreRecordOwned,
+            LegacyContentStoreRecordOwned,
         > = redb_bincode::TableDefinition::new("_total_migration_content_store");
         let ids_self_temp: redb_bincode::TableDefinition<'_, (), IdSelfAccountRecord> =
             redb_bincode::TableDefinition::new("_total_migration_ids_self");
+        let source_ver_temp: redb_bincode::TableDefinition<'_, (), u64> =
+            redb_bincode::TableDefinition::new(MIGRATION_SOURCE_VER_TEMP_TABLE);
 
         // Legacy table definition for old event-id-based content store
         let legacy_events_content: redb_bincode::TableDefinition<
@@ -242,6 +266,12 @@ impl Database {
             &legacy_events_content_temp,
         )? {
             info!(target: LOG_TARGET, "Copied legacy events_content table to temp");
+        }
+
+        // Store source DB version so reprocessing knows which format to use
+        {
+            let mut ver_table = dbtx.open_table(&source_ver_temp)?;
+            ver_table.insert(&(), &source_ver)?;
         }
 
         // Step 2: Delete all tables except temp and db_version
@@ -292,13 +322,49 @@ impl Database {
             rostra_core::ShortEventId,
             crate::EventRecord,
         > = redb_bincode::TableDefinition::new("_total_migration_events");
-        let content_store_temp: redb_bincode::TableDefinition<
-            '_,
-            rostra_core::ContentHash,
-            ContentStoreRecordOwned,
-        > = redb_bincode::TableDefinition::new("_total_migration_content_store");
         let ids_self_temp: redb_bincode::TableDefinition<'_, (), IdSelfAccountRecord> =
             redb_bincode::TableDefinition::new("_total_migration_ids_self");
+
+        // Read source DB version to determine content store format
+        let source_ver_temp: redb_bincode::TableDefinition<'_, (), u64> =
+            redb_bincode::TableDefinition::new(MIGRATION_SOURCE_VER_TEMP_TABLE);
+        let source_ver = dbtx
+            .open_table(&source_ver_temp)?
+            .get(&())?
+            .map(|g| g.value())
+            // If no source version stored, assume legacy (pre-tuple-struct)
+            .unwrap_or(0);
+        let use_legacy_content_store = source_ver <= DB_VER_LEGACY_CONTENT_STORE_FORMAT;
+
+        // Content store temp tables — open whichever format matches
+        let legacy_content_store_temp: redb_bincode::TableDefinition<
+            '_,
+            rostra_core::ContentHash,
+            LegacyContentStoreRecordOwned,
+        > = redb_bincode::TableDefinition::new("_total_migration_content_store");
+        let new_content_store_temp: redb_bincode::TableDefinition<
+            '_,
+            rostra_core::ContentHash,
+            crate::ContentStoreRecordOwned,
+        > = redb_bincode::TableDefinition::new("_total_migration_content_store");
+
+        // Helper: look up content by hash from the temp content store
+        let get_content_from_store =
+            |hash: rostra_core::ContentHash| -> DbResult<Option<EventContentRaw>> {
+                if use_legacy_content_store {
+                    let table = dbtx.open_table(&legacy_content_store_temp)?;
+                    Ok(table.get(&hash)?.map(|g| {
+                        let LegacyContentStoreRecord::Present(cow) = g.value();
+                        cow.into_owned()
+                    }))
+                } else {
+                    let table = dbtx.open_table(&new_content_store_temp)?;
+                    Ok(table.get(&hash)?.map(|g| {
+                        let crate::event::ContentStoreRecord(cow) = g.value();
+                        cow.into_owned()
+                    }))
+                }
+            };
 
         // Legacy temp table for old event-id-based content store
         let legacy_events_content_temp: redb_bincode::TableDefinition<
@@ -309,7 +375,6 @@ impl Database {
 
         // Open temp tables for iteration
         let events_temp_table = dbtx.open_table(&events_temp)?;
-        let content_temp_table = dbtx.open_table(&content_store_temp)?;
 
         // Try to open legacy content table (may not exist in newer databases)
         let legacy_content_table_exists = dbtx
@@ -359,8 +424,15 @@ impl Database {
                 "Migration: processed event"
             );
 
+            // Events with content_len==0 have no content to process — insert_event_tx
+            // already handled storing empty content and RC tracking.
+            if event_record.content_len() == 0 {
+                processed_count += 1;
+                continue;
+            }
+
             // Look up content - first try hash-based store, then legacy event-id store
-            let content_record = content_temp_table.get(&content_hash)?.map(|g| g.value());
+            let content_from_store = get_content_from_store(content_hash)?;
 
             // Helper to get content from legacy table
             let legacy_content = || -> Option<EventContentRaw> {
@@ -368,18 +440,16 @@ impl Database {
                 let legacy_record = legacy_table.get(&event_id).ok()?.map(|g| g.value())?;
                 match legacy_record {
                     LegacyEventContentState::Present(cow) => {
-                        // Convert Cow<EventContentUnsized> to EventContentRaw
                         Some(cow.as_ref().to_owned())
                     }
                     LegacyEventContentState::Invalid(cow) => {
-                        // We could try to reprocess invalid content, but skip for now
                         debug!(
                             target: LOG_TARGET,
                             kind = %event_kind,
                             author = %author.to_short(),
                             "Migration: skipping legacy Invalid content"
                         );
-                        let _ = cow; // Suppress unused warning
+                        let _ = cow;
                         None
                     }
                     LegacyEventContentState::Deleted { .. } | LegacyEventContentState::Pruned => {
@@ -388,10 +458,8 @@ impl Database {
                 }
             };
 
-            match content_record {
-                Some(ContentStoreRecord::Present(content_data)) => {
-                    let content_raw = content_data.into_owned();
-
+            match content_from_store {
+                Some(content_raw) => {
                     // Create VerifiedEventContent and process it
                     let verified_content =
                         VerifiedEventContent::assume_verified(verified_event, content_raw);
@@ -399,14 +467,6 @@ impl Database {
                     // Process content using the same function as normal operation.
                     // Use event timestamp as "now" for migration.
                     self.process_event_content_tx(&verified_content, timestamp, dbtx)?;
-                }
-                Some(ContentStoreRecord::Invalid(_)) => {
-                    debug!(
-                        target: LOG_TARGET,
-                        kind = %event_kind,
-                        author = %author.to_short(),
-                        "Migration: skipping event with Invalid content"
-                    );
                 }
                 None => {
                     // Try legacy table
@@ -458,7 +518,6 @@ impl Database {
         }
 
         drop(events_temp_table);
-        drop(content_temp_table);
         drop(legacy_content_temp_table);
 
         // Verify migration results by counting entries in key tables
@@ -496,8 +555,11 @@ impl Database {
         // Clean up temp tables
         info!(target: LOG_TARGET, "Cleaning up temp tables...");
         dbtx.as_raw().delete_table(events_temp.as_raw())?;
-        dbtx.as_raw().delete_table(content_store_temp.as_raw())?;
+        // Both legacy and new temp defs have the same table name
+        dbtx.as_raw()
+            .delete_table(new_content_store_temp.as_raw())?;
         dbtx.as_raw().delete_table(ids_self_temp.as_raw())?;
+        dbtx.as_raw().delete_table(source_ver_temp.as_raw())?;
         // Try to delete legacy temp table (may not exist)
         let _ = dbtx
             .as_raw()

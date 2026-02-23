@@ -1,7 +1,7 @@
 use std::time::Duration;
 
 use rand::Rng as _;
-use rostra_core::event::{EventKind, VerifiedEvent};
+use rostra_core::event::{EventContentRaw, EventKind, VerifiedEvent};
 use rostra_core::id::{RostraId, RostraIdSecretKey, ToShort as _};
 use rostra_core::{Event, ShortEventId};
 use tokio::sync::watch;
@@ -54,18 +54,20 @@ impl HeadMerger {
                 continue;
             };
 
+            let empty_content = EventContentRaw::new(vec![]);
             let signed_event = Event::builder_raw_content()
                 .author(self.id)
                 .kind(EventKind::NULL)
                 .parent_prev(head1)
                 .parent_aux(head2)
+                .content(&empty_content)
                 .build()
                 .signed_by(self.id_secret);
 
             let verified_event = VerifiedEvent::verify_signed(self.id, signed_event)
                 .expect("Can't fail to verify self-created event");
             let verified_event_content =
-                rostra_core::event::VerifiedEventContent::verify(verified_event, None)
+                rostra_core::event::VerifiedEventContent::verify(verified_event, empty_content)
                     .expect("Can't fail to verify self-created content");
             debug!(
                 target: LOG_TARGET,

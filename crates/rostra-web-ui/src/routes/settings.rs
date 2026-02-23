@@ -490,20 +490,76 @@ impl UiState {
 
                     div ."m-eventExplorer__stats" {
                         div ."m-eventExplorer__statItem" {
-                            span ."m-eventExplorer__statLabel" { "Data usage: " }
-                            span ."m-eventExplorer__statValue" {
-                                (rostra_util_fmt::format_bytes(data_usage.metadata_size + data_usage.content_size))
-                                " (metadata: " (rostra_util_fmt::format_bytes(data_usage.metadata_size))
-                                ", content: " (rostra_util_fmt::format_bytes(data_usage.content_size)) ")"
-                            }
-                        }
-                        div ."m-eventExplorer__statItem" {
                             span ."m-eventExplorer__statLabel" { "Missing events: " }
                             span ."m-eventExplorer__statValue" { (missing_events_count) }
                         }
                         div ."m-eventExplorer__statItem" {
                             span ."m-eventExplorer__statLabel" { "Head events: " }
                             span ."m-eventExplorer__statValue" { (heads_count) }
+                        }
+                    }
+
+                    h4 ."o-settingsContent__sectionHeader" { "Events (metadata)" }
+                    div ."m-eventExplorer__stats" {
+                        div ."m-eventExplorer__statItem" {
+                            span ."m-eventExplorer__statLabel" { "Current: " }
+                            span ."m-eventExplorer__statValue" {
+                                (data_usage.current_metadata_num) " events, "
+                                (rostra_util_fmt::format_bytes(data_usage.current_metadata_size))
+                            }
+                        }
+                        div ."m-eventExplorer__statItem" {
+                            span ."m-eventExplorer__statLabel" { "Total: " }
+                            span ."m-eventExplorer__statValue" {
+                                (data_usage.total_metadata_num) " events, "
+                                (rostra_util_fmt::format_bytes(data_usage.total_metadata_size))
+                            }
+                        }
+                    }
+
+                    h4 ."o-settingsContent__sectionHeader" { "Payloads (content)" }
+                    div ."m-eventExplorer__stats" {
+                        div ."m-eventExplorer__statItem" {
+                            span ."m-eventExplorer__statLabel" { "Current: " }
+                            span ."m-eventExplorer__statValue" {
+                                (data_usage.current_payload_num) " payloads, "
+                                (rostra_util_fmt::format_bytes(data_usage.current_content_size))
+                            }
+                        }
+                        div ."m-eventExplorer__statItem" {
+                            span ."m-eventExplorer__statLabel" { "Missing: " }
+                            span ."m-eventExplorer__statValue" {
+                                (data_usage.missing_payload_num) " payloads, "
+                                (rostra_util_fmt::format_bytes(data_usage.missing_payload_size))
+                            }
+                        }
+                        div ."m-eventExplorer__statItem" {
+                            span ."m-eventExplorer__statLabel" { "Deleted: " }
+                            span ."m-eventExplorer__statValue" {
+                                (data_usage.deleted_payload_num) " payloads, "
+                                (rostra_util_fmt::format_bytes(data_usage.deleted_payload_size))
+                            }
+                        }
+                        div ."m-eventExplorer__statItem" {
+                            span ."m-eventExplorer__statLabel" { "Pruned: " }
+                            span ."m-eventExplorer__statValue" {
+                                (data_usage.pruned_payload_num) " payloads, "
+                                (rostra_util_fmt::format_bytes(data_usage.pruned_payload_size))
+                            }
+                        }
+                        div ."m-eventExplorer__statItem" {
+                            span ."m-eventExplorer__statLabel" { "Invalid: " }
+                            span ."m-eventExplorer__statValue" {
+                                (data_usage.invalid_payload_num) " payloads, "
+                                (rostra_util_fmt::format_bytes(data_usage.invalid_payload_size))
+                            }
+                        }
+                        div ."m-eventExplorer__statItem" {
+                            span ."m-eventExplorer__statLabel" { "Total: " }
+                            span ."m-eventExplorer__statValue" {
+                                (data_usage.total_payload_num) " payloads, "
+                                (rostra_util_fmt::format_bytes(data_usage.total_content_size))
+                            }
                         }
                     }
                 }
@@ -558,9 +614,10 @@ impl UiState {
 
         // Format content state
         let content_state_str = match content_state {
-            Some(EventContentState::Unprocessed) => "Unprocessed",
+            Some(EventContentState::Missing) => "Missing",
             Some(EventContentState::Deleted { .. }) => "Deleted",
             Some(EventContentState::Pruned) => "Pruned",
+            Some(EventContentState::Invalid) => "Invalid",
             None => "", // Content is available in content_store
         };
 

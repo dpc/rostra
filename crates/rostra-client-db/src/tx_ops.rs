@@ -1,3 +1,4 @@
+use std::borrow::Cow;
 use std::collections::{HashMap, HashSet};
 
 use ids::{IdsFollowersRecord, IdsUnfollowedRecord};
@@ -104,14 +105,14 @@ impl Database {
     /// 2. **DAG structure**: Updates heads, handles missing parent references
     /// 3. **Content tracking**:
     ///    - Increments RC in `content_rc` for the event's content_hash
-    ///    - Marks the event as `Unprocessed` in `events_content_state`
+    ///    - Marks the event as `Missing` in `events_content_state`
     ///    - If content is not in `content_store`, adds to
     ///      `events_content_missing`
     /// 4. **Deletion handling**: If event is a delete, marks target as deleted
     ///
     /// **Important**: This function does NOT process content side effects (like
     /// incrementing reply counts). That happens in `process_event_content_tx`.
-    /// The `Unprocessed` marker ensures content processing is idempotent - it
+    /// The `Missing` marker ensures content processing is idempotent - it
     /// can be called multiple times for the same event without duplicate
     /// effects.
     ///
@@ -127,7 +128,7 @@ impl Database {
         events_heads_table: &mut events_heads::Table,
         events_by_time_table: &mut events_by_time::Table,
         events_content_state_table: &mut events_content_state::Table,
-        content_store_table: &impl content_store::ReadableTable,
+        content_store_table: &mut content_store::Table,
         content_rc_table: &mut content_rc::Table,
         events_content_missing_table: &mut events_content_missing::Table,
         mut ids_data_usage_table: Option<&mut ids_data_usage::Table>,
@@ -190,7 +191,6 @@ impl Database {
                     deleted_parent = Some(parent_id);
                     events_content_missing_table.remove(&parent_id)?;
 
-                    // Get the old state to potentially return reverted content
                     let parent_content_hash = parent_event_record.content_hash();
                     let old_state = events_content_state_table
                         .insert(
@@ -201,15 +201,21 @@ impl Database {
                         )?
                         .map(|g| g.value());
 
-                    // Content is being deleted - look it up for reverting and decrement RC.
-                    // In the new model, RC was incremented when the parent event was inserted,
-                    // so we always decrement here (unless it was already deleted/pruned).
-                    if !matches!(
+                    // Decrement RC unless already decremented
+                    // (Deleted/Pruned/Invalid all decrement RC on transition).
+                    let rc_already_decremented = matches!(
                         old_state,
-                        Some(EventContentState::Deleted { .. } | EventContentState::Pruned)
-                    ) {
-                        // Look up content from content_store to return for reverting
-                        if let Some(ContentStoreRecord::Present(cow)) = content_store_table
+                        Some(
+                            EventContentState::Deleted { .. }
+                                | EventContentState::Pruned
+                                | EventContentState::Invalid
+                        )
+                    );
+
+                    if !rc_already_decremented {
+                        // Look up content from content_store to return for
+                        // reverting
+                        if let Some(ContentStoreRecord(cow)) = content_store_table
                             .get(&parent_content_hash)?
                             .map(|g| g.value())
                         {
@@ -217,13 +223,19 @@ impl Database {
                         }
                         // Decrement RC for the deleted content
                         Database::decrement_content_rc_tx(parent_content_hash, content_rc_table)?;
+                    }
 
-                        // Decrement content size for the parent's author
+                    // Track payload deletion for the parent's author.
+                    // Already-Deleted is skipped (no bucket change), but
+                    // Pruned/Invalid → Deleted and Missing/Processed →
+                    // Deleted all need tracking.
+                    if !matches!(old_state, Some(EventContentState::Deleted { .. })) {
                         if let Some(ref mut usage_table) = ids_data_usage_table {
                             let parent_author = parent_event_record.author();
-                            Database::decrement_content_size_tx(
+                            Database::track_payload_deletion_tx(
                                 parent_author,
                                 parent_event_record.content_len(),
+                                old_state.as_ref(),
                                 usage_table,
                             )?;
                         }
@@ -253,30 +265,41 @@ impl Database {
         )?;
         events_by_time_table.insert(&(event.timestamp(), event_id), &())?;
 
-        // Track metadata size for this event
+        // Track metadata for this event
         if let Some(ref mut usage_table) = ids_data_usage_table {
-            Database::increment_metadata_size_tx(author, usage_table)?;
+            Database::track_new_event_tx(author, usage_table)?;
         }
 
-        // Handle content RC for this event.
-        // In the new model, RC is always incremented when event is inserted (if not
-        // deleted). This is decremented when the event is marked as deleted.
+        // Handle content RC and state for this event.
         let content_hash = event.content_hash();
         if !is_deleted {
-            // Always increment RC for the content hash
+            // Increment RC for the content hash (including empty content)
             Database::increment_content_rc_tx(content_hash, content_rc_table)?;
 
-            // Track content size
+            // Track new payload (starts as missing)
             if let Some(ref mut usage_table) = ids_data_usage_table {
-                Database::increment_content_size_tx(author, event.content_len(), usage_table)?;
+                Database::track_new_payload_tx(author, event.content_len(), usage_table)?;
             }
 
-            // Mark event as Unprocessed - content processing hasn't happened yet
-            events_content_state_table.insert(&event_id, &EventContentState::Unprocessed)?;
+            if 0 < event.content_len() {
+                // Regular content: mark as Missing, check content_missing
+                events_content_state_table.insert(&event_id, &EventContentState::Missing)?;
 
-            // If content is not in store yet, also add to missing list
-            if content_store_table.get(&content_hash)?.is_none() {
-                events_content_missing_table.insert(&event_id, &())?;
+                if content_store_table.get(&content_hash)?.is_none() {
+                    events_content_missing_table.insert(&event_id, &())?;
+                }
+            } else {
+                // Empty content: store it immediately, go straight to "processed"
+                if content_store_table.get(&content_hash)?.is_none() {
+                    content_store_table.insert(
+                        &content_hash,
+                        &ContentStoreRecord(Cow::Owned(EventContentRaw::new(vec![]))),
+                    )?;
+                }
+                // Move from missing to current (was tracked as missing above)
+                if let Some(ref mut usage_table) = ids_data_usage_table {
+                    Database::track_payload_processed_tx(author, event.content_len(), usage_table)?;
+                }
             }
         }
 
@@ -295,14 +318,14 @@ impl Database {
     /// This function ensures idempotent content processing by checking the
     /// event's state in `events_content_state`:
     ///
-    /// - **`Unprocessed`** → `true`: Event was inserted but content hasn't been
+    /// - **`Missing`** → `true`: Event was inserted but content hasn't been
     ///   processed yet. Side effects should be applied.
     /// - **No entry** → `false`: Content was already processed. Returning false
     ///   prevents duplicate side effects (e.g., incrementing reply_count
     ///   twice).
     /// - **`Deleted`/`Pruned`** → `false`: Content is unwanted.
     ///
-    /// After processing content, callers should remove the `Unprocessed` marker
+    /// After processing content, callers should remove the `Missing` marker
     /// from `events_content_state` to indicate processing is complete.
     pub fn can_insert_event_content_tx(
         VerifiedEventContent { event, .. }: &VerifiedEventContent,
@@ -316,12 +339,14 @@ impl Database {
             .map(|g| g.value())
         {
             match state {
-                EventContentState::Unprocessed => {
+                EventContentState::Missing => {
                     // Content not yet processed, can insert
                     return Ok(true);
                 }
-                EventContentState::Deleted { .. } | EventContentState::Pruned => {
-                    // Content deleted or pruned, cannot insert
+                EventContentState::Deleted { .. }
+                | EventContentState::Pruned
+                | EventContentState::Invalid => {
+                    // Content deleted, pruned, or invalid — cannot insert
                     return Ok(false);
                 }
             }
@@ -347,31 +372,39 @@ impl Database {
         let event_id = event_id.into();
 
         // Check current state - if already deleted or pruned, handle appropriately
-        if let Some(existing_state) = events_content_state_table
+        let old_state = events_content_state_table
             .get(&event_id)?
-            .map(|g| g.value())
-        {
-            match existing_state {
-                EventContentState::Unprocessed => {
-                    // Content never processed, can proceed to prune
-                }
-                EventContentState::Deleted { .. } => {
-                    // Already deleted, can't prune
-                    return Ok(false);
-                }
-                EventContentState::Pruned => {
-                    // Already pruned, nothing to do
-                    return Ok(true);
-                }
+            .map(|g| g.value());
+
+        match old_state {
+            Some(EventContentState::Deleted { .. }) => {
+                // Already deleted, can't prune
+                return Ok(false);
+            }
+            Some(EventContentState::Invalid) => {
+                // Already invalid (RC already decremented), can't prune
+                return Ok(false);
+            }
+            Some(EventContentState::Pruned) => {
+                // Already pruned, nothing to do
+                return Ok(true);
+            }
+            Some(EventContentState::Missing) | None => {
+                // Can proceed to prune
             }
         }
 
         // Not yet deleted/pruned - decrement RC and mark as pruned
         Database::decrement_content_rc_tx(content_hash, content_rc_table)?;
 
-        // Decrement content size for the author
+        // Track payload pruning
         if let Some((author, content_len, usage_table)) = data_usage_info {
-            Database::decrement_content_size_tx(author, content_len, usage_table)?;
+            Database::track_payload_pruning_tx(
+                author,
+                content_len,
+                old_state.as_ref(),
+                usage_table,
+            )?;
         }
 
         events_content_state_table.insert(&event_id, &EventContentState::Pruned)?;
@@ -476,7 +509,7 @@ impl Database {
             .map(|r| r.value())
         {
             match state {
-                EventContentState::Unprocessed => {
+                EventContentState::Missing => {
                     // Content not yet processed - fall through to check
                     // content_store
                 }
@@ -486,17 +519,17 @@ impl Database {
                 EventContentState::Pruned => {
                     return Ok(Some(EventContentResult::Pruned));
                 }
+                EventContentState::Invalid => {
+                    return Ok(Some(EventContentResult::Invalid));
+                }
             }
         }
 
-        // Not deleted/pruned - look up content from content_store
+        // Not deleted/pruned/invalid - look up content from content_store
         Ok(Some(
             match content_store_table.get(&content_hash)?.map(|r| r.value()) {
-                Some(ContentStoreRecord::Present(content)) => {
+                Some(ContentStoreRecord(content)) => {
                     EventContentResult::Present(content.into_owned())
-                }
-                Some(ContentStoreRecord::Invalid(content)) => {
-                    EventContentResult::Invalid(content.into_owned())
                 }
                 None => EventContentResult::Missing,
             },
@@ -550,11 +583,13 @@ impl Database {
             .map(|g| g.value())
         {
             match state {
-                // Unprocessed means content wasn't in store at event insertion,
+                // Missing means content wasn't in store at event insertion,
                 // but it might be now - check the store
-                EventContentState::Unprocessed => {}
-                // Deleted or pruned means content is not available
-                EventContentState::Deleted { .. } | EventContentState::Pruned => {
+                EventContentState::Missing => {}
+                // Deleted, pruned, or invalid means content is not available
+                EventContentState::Deleted { .. }
+                | EventContentState::Pruned
+                | EventContentState::Invalid => {
                     return Ok(false);
                 }
             }
@@ -866,55 +901,170 @@ impl Database {
     /// See rostra_core::event::Event documentation.
     pub const EVENT_METADATA_SIZE: u64 = 192;
 
-    /// Increment the metadata size for an identity.
+    fn get_usage_mut(
+        author: RostraId,
+        ids_data_usage_table: &mut ids_data_usage::Table,
+    ) -> DbResult<IdsDataUsageRecord> {
+        Ok(ids_data_usage_table
+            .get(&author)?
+            .map(|g| g.value())
+            .unwrap_or_default())
+    }
+
+    /// Track a newly inserted event (metadata only).
     ///
-    /// Called when a new event is inserted.
-    pub fn increment_metadata_size_tx(
+    /// Called once per event in `insert_event_tx`.
+    pub fn track_new_event_tx(
         author: RostraId,
         ids_data_usage_table: &mut ids_data_usage::Table,
     ) -> DbResult<()> {
-        let mut usage = ids_data_usage_table
-            .get(&author)?
-            .map(|g| g.value())
-            .unwrap_or_default();
+        let mut usage = Self::get_usage_mut(author, ids_data_usage_table)?;
 
-        usage.metadata_size += Self::EVENT_METADATA_SIZE;
+        usage.current_metadata_size += Self::EVENT_METADATA_SIZE;
+        usage.total_metadata_size += Self::EVENT_METADATA_SIZE;
+        usage.current_metadata_num += 1;
+        usage.total_metadata_num += 1;
+
         ids_data_usage_table.insert(&author, &usage)?;
         Ok(())
     }
 
-    /// Increment the content size for an identity.
+    /// Track a newly inserted payload (starts as missing).
     ///
-    /// Called when content transitions to Available state.
-    pub fn increment_content_size_tx(
+    /// Called in `insert_event_tx` when an event with `content_len > 0` is
+    /// inserted and not deleted. The payload is counted in total and missing
+    /// until content is received and processed.
+    pub fn track_new_payload_tx(
         author: RostraId,
         content_len: u32,
         ids_data_usage_table: &mut ids_data_usage::Table,
     ) -> DbResult<()> {
-        let mut usage = ids_data_usage_table
-            .get(&author)?
-            .map(|g| g.value())
-            .unwrap_or_default();
+        let len = u64::from(content_len);
+        let mut usage = Self::get_usage_mut(author, ids_data_usage_table)?;
 
-        usage.content_size += u64::from(content_len);
+        usage.total_content_size += len;
+        usage.total_payload_num += 1;
+        usage.missing_payload_size += len;
+        usage.missing_payload_num += 1;
+
         ids_data_usage_table.insert(&author, &usage)?;
         Ok(())
     }
 
-    /// Decrement the content size for an identity.
+    /// Track a payload that has been processed (missing → current).
     ///
-    /// Called when content transitions from Available to Pruned/Deleted.
-    pub fn decrement_content_size_tx(
+    /// Called in `process_event_content_tx` when content transitions from
+    /// `Missing` to processed.
+    pub fn track_payload_processed_tx(
         author: RostraId,
         content_len: u32,
         ids_data_usage_table: &mut ids_data_usage::Table,
     ) -> DbResult<()> {
-        let mut usage = ids_data_usage_table
-            .get(&author)?
-            .map(|g| g.value())
-            .unwrap_or_default();
+        let len = u64::from(content_len);
+        let mut usage = Self::get_usage_mut(author, ids_data_usage_table)?;
 
-        usage.content_size = usage.content_size.saturating_sub(u64::from(content_len));
+        usage.missing_payload_size = usage.missing_payload_size.saturating_sub(len);
+        usage.missing_payload_num = usage.missing_payload_num.saturating_sub(1);
+        usage.current_content_size += len;
+        usage.current_payload_num += 1;
+
+        ids_data_usage_table.insert(&author, &usage)?;
+        Ok(())
+    }
+
+    /// Track a payload that failed validation (missing → invalid).
+    ///
+    /// Called in `process_event_content_tx` when content fails deserialization.
+    pub fn track_payload_invalid_tx(
+        author: RostraId,
+        content_len: u32,
+        ids_data_usage_table: &mut ids_data_usage::Table,
+    ) -> DbResult<()> {
+        let len = u64::from(content_len);
+        let mut usage = Self::get_usage_mut(author, ids_data_usage_table)?;
+
+        usage.missing_payload_size = usage.missing_payload_size.saturating_sub(len);
+        usage.missing_payload_num = usage.missing_payload_num.saturating_sub(1);
+        usage.invalid_payload_size += len;
+        usage.invalid_payload_num += 1;
+
+        ids_data_usage_table.insert(&author, &usage)?;
+        Ok(())
+    }
+
+    /// Track a payload deletion (missing/current/invalid/pruned → deleted).
+    ///
+    /// `old_state` determines which bucket the payload moves from:
+    /// - `Some(Missing)` → moves from missing to deleted
+    /// - `Some(Invalid)` → moves from invalid to deleted
+    /// - `Some(Pruned)` → moves from pruned to deleted
+    /// - `None` (processed) → moves from current to deleted
+    pub fn track_payload_deletion_tx(
+        author: RostraId,
+        content_len: u32,
+        old_state: Option<&EventContentState>,
+        ids_data_usage_table: &mut ids_data_usage::Table,
+    ) -> DbResult<()> {
+        let len = u64::from(content_len);
+        let mut usage = Self::get_usage_mut(author, ids_data_usage_table)?;
+
+        match old_state {
+            Some(EventContentState::Missing) => {
+                usage.missing_payload_size = usage.missing_payload_size.saturating_sub(len);
+                usage.missing_payload_num = usage.missing_payload_num.saturating_sub(1);
+            }
+            Some(EventContentState::Invalid) => {
+                usage.invalid_payload_size = usage.invalid_payload_size.saturating_sub(len);
+                usage.invalid_payload_num = usage.invalid_payload_num.saturating_sub(1);
+            }
+            Some(EventContentState::Pruned) => {
+                usage.pruned_payload_size = usage.pruned_payload_size.saturating_sub(len);
+                usage.pruned_payload_num = usage.pruned_payload_num.saturating_sub(1);
+            }
+            None => {
+                usage.current_content_size = usage.current_content_size.saturating_sub(len);
+                usage.current_payload_num = usage.current_payload_num.saturating_sub(1);
+            }
+            // Already deleted — should not happen (caller guards against it)
+            Some(EventContentState::Deleted { .. }) => {}
+        }
+
+        usage.deleted_payload_size += len;
+        usage.deleted_payload_num += 1;
+
+        ids_data_usage_table.insert(&author, &usage)?;
+        Ok(())
+    }
+
+    /// Track a payload pruning (missing or current → pruned).
+    ///
+    /// `old_state` determines which bucket the payload moves from:
+    /// - `Some(Missing)` → moves from missing to pruned
+    /// - `None` (processed) → moves from current to pruned
+    pub fn track_payload_pruning_tx(
+        author: RostraId,
+        content_len: u32,
+        old_state: Option<&EventContentState>,
+        ids_data_usage_table: &mut ids_data_usage::Table,
+    ) -> DbResult<()> {
+        let len = u64::from(content_len);
+        let mut usage = Self::get_usage_mut(author, ids_data_usage_table)?;
+
+        match old_state {
+            Some(EventContentState::Missing) => {
+                usage.missing_payload_size = usage.missing_payload_size.saturating_sub(len);
+                usage.missing_payload_num = usage.missing_payload_num.saturating_sub(1);
+            }
+            None => {
+                usage.current_content_size = usage.current_content_size.saturating_sub(len);
+                usage.current_payload_num = usage.current_payload_num.saturating_sub(1);
+            }
+            _ => {}
+        }
+
+        usage.pruned_payload_size += len;
+        usage.pruned_payload_num += 1;
+
         ids_data_usage_table.insert(&author, &usage)?;
         Ok(())
     }

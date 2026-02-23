@@ -646,8 +646,10 @@ impl Database {
         let events_table = tx.open_table(&events::TABLE)?;
         let mut events_content_state_table = tx.open_table(&events_content_state::TABLE)?;
         let mut content_store_table = tx.open_table(&content_store::TABLE)?;
+        let mut content_rc_table = tx.open_table(&tables::content_rc::TABLE)?;
         let mut events_content_missing_table =
             tx.open_table(&tables::events_content_missing::TABLE)?;
+        let mut ids_data_usage_table = tx.open_table(&tables::ids_data_usage::TABLE)?;
 
         let has_event = Database::has_event_tx(event_content.event.event_id, &events_table)?;
         if !has_event {
@@ -666,7 +668,7 @@ impl Database {
         // Remove from missing list
         events_content_missing_table.remove(&event_content.event_id().to_short())?;
 
-        // Check if content should be processed (not deleted/pruned, is Unprocessed)
+        // Check if content should be processed (not deleted/pruned, is Missing)
         let can_insert = if u32::from(event_content.event.event.content_len) < Self::MAX_CONTENT_LEN
         {
             Database::can_insert_event_content_tx(event_content, &events_content_state_table)?
@@ -677,6 +679,7 @@ impl Database {
         if can_insert {
             if let Some(content) = event_content.content.as_ref() {
                 let content_hash = event_content.content_hash();
+                let event_short_id = event_content.event_id().to_short();
 
                 // Process side effects
                 let is_valid = match self.process_event_content_inserted_tx(event_content, now, tx)
@@ -684,7 +687,7 @@ impl Database {
                     Ok(()) => {
                         info!(target: LOG_TARGET,
                             kind = %event_content.kind(),
-                            event_id = %event_content.event_id().to_short(),
+                            event_id = %event_short_id,
                             author = %event_content.author().to_short(),
                             len = %event_content.content_len(),
                             "New event content inserted"
@@ -705,27 +708,47 @@ impl Database {
                     }
                 };
 
-                // Store content in content_store if not already there
-                if content_store_table.get(&content_hash)?.is_none() {
-                    let store_record = if is_valid {
-                        ContentStoreRecord::Present(Cow::Owned(content.clone()))
-                    } else {
-                        ContentStoreRecord::Invalid(Cow::Owned(content.clone()))
-                    };
-                    content_store_table.insert(&content_hash, &store_record)?;
-                }
-
-                // Remove the Unprocessed marker now that content is processed
-                events_content_state_table.remove(&event_content.event_id().to_short())?;
-
-                // Notify about new content
-                tx.on_commit({
-                    let new_content_tx = self.new_content_tx.clone();
-                    let event_content = event_content.clone();
-                    move || {
-                        let _ = new_content_tx.send(event_content);
+                if is_valid {
+                    // Store content in content_store if not already there
+                    if content_store_table.get(&content_hash)?.is_none() {
+                        content_store_table.insert(
+                            &content_hash,
+                            &ContentStoreRecord(Cow::Owned(content.clone())),
+                        )?;
                     }
-                });
+
+                    // Remove the Missing marker now that content is processed
+                    events_content_state_table.remove(&event_short_id)?;
+
+                    // Track payload as processed (missing → current)
+                    Database::track_payload_processed_tx(
+                        event_content.author(),
+                        event_content.content_len(),
+                        &mut ids_data_usage_table,
+                    )?;
+
+                    // Notify about new content
+                    tx.on_commit({
+                        let new_content_tx = self.new_content_tx.clone();
+                        let event_content = event_content.clone();
+                        move || {
+                            let _ = new_content_tx.send(event_content);
+                        }
+                    });
+                } else {
+                    // Content failed validation — mark as Invalid, decrement RC,
+                    // discard content bytes
+                    events_content_state_table
+                        .insert(&event_short_id, &EventContentState::Invalid)?;
+                    Database::decrement_content_rc_tx(content_hash, &mut content_rc_table)?;
+
+                    // Track payload as invalid (missing → invalid)
+                    Database::track_payload_invalid_tx(
+                        event_content.author(),
+                        event_content.content_len(),
+                        &mut ids_data_usage_table,
+                    )?;
+                }
             }
         }
         Ok(())
@@ -1077,7 +1100,6 @@ pub enum ProcessEventState {
     Existing,
     Pruned,
     Deleted,
-    NoContent,
 }
 
 pub enum ContentWantState {
@@ -1093,7 +1115,6 @@ impl ProcessEventState {
             ProcessEventState::Existing => ContentWantState::MaybeWants,
             ProcessEventState::Pruned => ContentWantState::DoesNotWant,
             ProcessEventState::Deleted => ContentWantState::DoesNotWant,
-            ProcessEventState::NoContent => ContentWantState::DoesNotWant,
         }
     }
 }

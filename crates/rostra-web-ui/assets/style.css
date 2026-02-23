@@ -1980,6 +1980,10 @@ input:checked+.slider:before {
   color: var(--color-text-muted);
 }
 
+h4.o-settingsContent__sectionHeader {
+  margin-top: 1rem;
+}
+
 .o-settingsContent__empty {
   color: var(--color-text-muted);
   font-style: italic;

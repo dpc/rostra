@@ -146,9 +146,7 @@ impl Database {
                 else {
                     return Ok(None);
                 };
-                let ContentStoreRecord::Present(content) = store_record else {
-                    return Ok(None);
-                };
+                let ContentStoreRecord(content) = store_record;
 
                 let Ok(social_post) = content.deserialize_cbor::<content_kind::SocialPost>() else {
                     debug!(target: LOG_TARGET, %event_id, "Content invalid");
@@ -223,9 +221,7 @@ impl Database {
                 else {
                     return Ok(None);
                 };
-                let ContentStoreRecord::Present(content) = store_record else {
-                    return Ok(None);
-                };
+                let ContentStoreRecord(content) = store_record;
 
                 let Ok(social_post) = content.deserialize_cbor::<content_kind::SocialPost>() else {
                     debug!(target: LOG_TARGET, %event_id, "Content invalid");
@@ -326,9 +322,7 @@ impl Database {
                     else {
                         return Ok(None);
                     };
-                    let ContentStoreRecord::Present(content) = store_record else {
-                        return Ok(None);
-                    };
+                    let ContentStoreRecord(content) = store_record;
 
                     let Ok(social_post) = content.deserialize_cbor::<content_kind::SocialPost>()
                     else {
@@ -413,9 +407,7 @@ impl Database {
                     else {
                         return Ok(None);
                     };
-                    let ContentStoreRecord::Present(content) = store_record else {
-                        return Ok(None);
-                    };
+                    let ContentStoreRecord(content) = store_record;
 
                     let Ok(social_post) = content.deserialize_cbor::<content_kind::SocialPost>()
                     else {
@@ -500,9 +492,7 @@ impl Database {
                     debug!(target: LOG_TARGET, %event_id, "Skipping comment without content present");
                     return Ok(None);
                 };
-                let ContentStoreRecord::Present(content) = store_record else {
-                    return Ok(None);
-                };
+                let ContentStoreRecord(content) = store_record;
 
                 let Ok(social_post) = content.deserialize_cbor::<content_kind::SocialPost>() else {
                     debug!(target: LOG_TARGET, %event_id, "Skpping comment with invalid content");
@@ -569,9 +559,7 @@ impl Database {
                     debug!(target: LOG_TARGET, %event_id, "Skipping comment without content present");
                     return Ok(None);
                 };
-                let ContentStoreRecord::Present(content) = store_record else {
-                    return Ok(None);
-                };
+                let ContentStoreRecord(content) = store_record;
 
                 let Ok(social_post) = content.deserialize_cbor::<content_kind::SocialPost>() else {
                     debug!(target: LOG_TARGET, %event_id, "Skpping comment with invalid content");
@@ -747,9 +735,7 @@ impl Database {
             return Ok(None);
         };
 
-        let ContentStoreRecord::Present(content) = store_record else {
-            return Ok(None);
-        };
+        let ContentStoreRecord(content) = store_record;
 
         let Ok(social_post) = content.deserialize_cbor::<content_kind::SocialPost>() else {
             debug!(target: LOG_TARGET, %event_id, "Content invalid");
@@ -855,9 +841,7 @@ impl Database {
                     else {
                         return Ok(None);
                     };
-                    let ContentStoreRecord::Present(content) = store_record else {
-                        return Ok(None);
-                    };
+                    let ContentStoreRecord(content) = store_record;
 
                     let Ok(shoutbox) = content.deserialize_cbor::<content_kind::Shoutbox>() else {
                         debug!(target: LOG_TARGET, %event_id, "Shoutbox content invalid");

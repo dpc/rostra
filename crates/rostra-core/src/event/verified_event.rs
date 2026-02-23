@@ -2,11 +2,9 @@ use convi::CastFrom;
 use ed25519_dalek::SignatureError;
 use snafu::{ResultExt as _, Snafu};
 
-use super::{
-    Event, EventContentRaw, EventExt, EventKind, EventSignature, SignedEvent, SignedEventExt,
-};
+use super::{Event, EventContentRaw, EventExt, EventSignature, SignedEvent, SignedEventExt};
 use crate::id::RostraId;
-use crate::{ContentHash, EventId, ShortEventId};
+use crate::{EventId, ShortEventId};
 
 /// An event with all the external invariants verified
 ///
@@ -135,13 +133,8 @@ impl VerifiedEventContent {
                 return ContentMismatchSnafu.fail();
             }
         } else {
-            if event.kind() != EventKind::NULL {
-                return ContentMismatchSnafu.fail();
-            }
+            // No content provided — only valid for events with content_len == 0.
             if event.content_len() != 0 {
-                return ContentMismatchSnafu.fail();
-            }
-            if event.event.content_hash != ContentHash::ZERO {
                 return ContentMismatchSnafu.fail();
             }
         }
