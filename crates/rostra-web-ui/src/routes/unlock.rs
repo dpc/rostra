@@ -2,6 +2,7 @@ pub mod session;
 
 use axum::Form;
 use axum::extract::{Query, State};
+use axum::http::StatusCode;
 use axum::response::{IntoResponse, Redirect, Response};
 use maud::{Markup, html};
 use rostra_core::id::{RostraId, RostraIdSecretKey};
@@ -11,7 +12,9 @@ use snafu::ResultExt as _;
 use tower_sessions::Session;
 
 use super::{Maud, fragment};
-use crate::error::{OtherSnafu, PublicKeyMissingSnafu, RequestResult, UnlockResult, UnlockSnafu};
+use crate::error::{
+    OtherSnafu, PublicKeyMissingSnafu, RequestResult, UnlockResult, UnlockSnafu, UserErrorResponse,
+};
 use crate::serde_util::empty_string_as_none;
 use crate::util::extractors::AjaxRequest;
 use crate::{SessionToken, SharedState, UiState};
@@ -27,17 +30,19 @@ pub async fn get(
     AjaxRequest(is_ajax): AjaxRequest,
     Query(query): Query<RedirectQuery>,
 ) -> RequestResult<impl IntoResponse> {
-    // If we're called due to an AJAX request, that probably means something failed
-    // or required auth, and was redirected here. We don't want to respond with
-    // a page that Alpine-ajax will interpret as a partial. We want it to reload
-    // the page altogether. Use a standard HTTP redirect which Alpine-ajax will
-    // follow with a full page reload.
+    // AJAX requests arrive here after fetch() auto-follows a 303 redirect
+    // from an auth-required route. Returning another 303 would cause an
+    // infinite loop (the X-Alpine-Request header is preserved across
+    // redirects). Instead, return 401 JSON so the JS error handler can
+    // show a toast and navigate to the login page.
     if is_ajax {
-        let url = match &query.redirect {
-            Some(path) => format!("/unlock?redirect={}", urlencoding::encode(path)),
-            None => "/unlock".to_string(),
-        };
-        return Ok(Redirect::to(&url).into_response());
+        return Ok((
+            StatusCode::UNAUTHORIZED,
+            super::AppJson(UserErrorResponse {
+                message: "Session expired. Please log in again.".to_string(),
+            }),
+        )
+            .into_response());
     }
 
     // Pre-populate the RostraId field if we have existing session data

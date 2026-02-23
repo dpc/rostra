@@ -287,6 +287,14 @@ document.addEventListener("alpine:init", () => {
         if (message) {
           this.addNotification("error", message);
         }
+
+        // Session expired — navigate to login page after a brief
+        // delay so the user can see the toast notification.
+        if (status === 401) {
+          setTimeout(() => {
+            window.location.href = "/unlock";
+          }, 1500);
+        }
       });
       // Clear error notifications on successful AJAX
       window.addEventListener("ajax:success", () => {

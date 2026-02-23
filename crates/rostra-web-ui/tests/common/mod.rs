@@ -154,6 +154,16 @@ impl UiDriver {
             .expect("GET request failed")
     }
 
+    /// Send a GET request with the `X-Alpine-Request` header (simulates AJAX).
+    pub async fn ajax_get(&self, path: &str) -> reqwest::Response {
+        self.client
+            .get(self.url(path))
+            .header("X-Alpine-Request", "true")
+            .send()
+            .await
+            .expect("AJAX GET request failed")
+    }
+
     /// Send a form POST to the given path.
     pub async fn post_form(&self, path: &str, form: &[(&str, &str)]) -> reqwest::Response {
         self.client

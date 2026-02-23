@@ -76,3 +76,22 @@ async fn preview_nonempty_post_returns_200() {
         "Preview should contain the post content"
     );
 }
+
+#[test_log::test(tokio::test(flavor = "multi_thread"))]
+async fn ajax_request_to_unlock_returns_401_not_redirect_loop() {
+    let server = TestServer::start().await;
+    let driver = server.driver();
+
+    // Simulate what happens after fetch auto-follows a 303 from an
+    // auth-required route: an AJAX GET to /unlock without a session.
+    // Previously this returned another 303 (infinite loop).
+    // Now it should return 401 JSON.
+    let resp = driver.ajax_get("/unlock").await;
+    assert_eq!(resp.status(), 401);
+
+    let body = resp.text().await.unwrap();
+    assert!(
+        body.contains("Session expired"),
+        "Expected session expired message, got: {body}"
+    );
+}
