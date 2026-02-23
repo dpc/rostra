@@ -14,7 +14,7 @@ use super::cookies::CookiesExt as _;
 use super::unlock::session::UserSession;
 use super::{Maud, fragment};
 use crate::UiState;
-use crate::html_utils::re_typeset_mathjax;
+use crate::html_utils::re_typeset;
 use crate::layout::FeedLinks;
 use crate::util::extractors::AjaxRequest;
 use crate::util::time::format_timestamp;
@@ -95,7 +95,7 @@ pub async fn get_shoutbox(
                     (state.render_shoutbox_post(&client_ref, post).await?)
                 }
             }
-            (re_typeset_mathjax())
+            (re_typeset())
         }));
     }
 
@@ -107,7 +107,7 @@ pub async fn get_shoutbox(
                     (state.render_shoutbox_post(&client_ref, post).await?)
                 }
             }
-            (re_typeset_mathjax())
+            (re_typeset())
         }));
     }
 
@@ -213,7 +213,7 @@ pub async fn get_shoutbox(
                 }
             }
         }
-        (re_typeset_mathjax())
+        (re_typeset())
         // Auto-scroll to bottom on initial load
         script {
             (PreEscaped(r#"

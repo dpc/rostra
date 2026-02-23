@@ -23,7 +23,7 @@ use super::super::error::RequestResult;
 use super::cookies::CookiesExt as _;
 use super::unlock::session::UserSession;
 use super::{Maud, fragment};
-use crate::html_utils::re_typeset_mathjax;
+use crate::html_utils::re_typeset;
 use crate::layout::FeedLinks;
 use crate::util::extractors::AjaxRequest;
 use crate::{LOG_TARGET, SharedState, UiState};
@@ -476,7 +476,7 @@ impl UiState {
             script type="module" src="/assets/emoji-init.js" {}
 
 
-            (re_typeset_mathjax())
+            (re_typeset())
 
         };
 
@@ -660,7 +660,7 @@ impl UiState {
                     }
                 }
 
-                (re_typeset_mathjax())
+                (re_typeset())
             }
         })
     }

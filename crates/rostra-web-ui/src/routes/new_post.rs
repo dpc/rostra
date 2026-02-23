@@ -19,7 +19,7 @@ use super::post::{
 use super::unlock::session::{RoMode, UserSession};
 use super::{Maud, fragment};
 use crate::UiState;
-use crate::html_utils::re_typeset_mathjax;
+use crate::html_utils::re_typeset;
 use crate::util::extractors::ajax_request::AjaxRequest;
 
 #[derive(Deserialize)]
@@ -165,7 +165,7 @@ pub async fn post_new_post(
                 }
             }
 
-            (re_typeset_mathjax())
+            (re_typeset())
         }));
     }
 
@@ -220,7 +220,7 @@ pub async fn post_new_post(
             }
         }
 
-        (re_typeset_mathjax())
+        (re_typeset())
     }))
 }
 
@@ -331,7 +331,7 @@ pub async fn post_post_preview_dialog(
                         }
                     }
                 }
-                (re_typeset_mathjax())
+                (re_typeset())
             }
         }));
     }
@@ -403,7 +403,7 @@ pub async fn get_new_post_preview(
                 )
                 (scroll_new_post_preview_into_view())
                 (focus_on_new_post_content_input())
-                (re_typeset_mathjax())
+                (re_typeset())
             }
         } @else {
             div id="new-post-preview" ."o-mainBarTimeline__item -preview -empty" { }
@@ -480,7 +480,7 @@ pub async fn get_inline_reply(
                     }
                 }
 
-                (re_typeset_mathjax())
+                (re_typeset())
             }
         }));
     }
@@ -592,7 +592,7 @@ pub async fn post_inline_reply_preview(
                     .ro(state.ro_mode(session.session_token()))
                     .call().await?
                 )
-                (re_typeset_mathjax())
+                (re_typeset())
             }
         } @else {
             div id=(preview_id) ."m-inlineReply__preview" { }
