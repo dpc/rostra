@@ -733,11 +733,17 @@ impl UiState {
                 {
                     a ."o-mainBarTimeline__back" href="/" onclick="history.back(); return false;" { "<" }
 
-                    @if let TimelineMode::Profile(_) = mode {
+                    @if let TimelineMode::Profile(profile_id) = mode {
                         a ."o-mainBarTimeline__profile"
                             ."-active"[mode.is_profile()]
                             href=(mode.to_path())
                         { "Profile" }
+                        a ."o-mainBarTimeline__feedLink"
+                            href=(format!("/profile/{profile_id}/atom.xml"))
+                            title="Atom feed"
+                        {
+                            span ."o-mainBarTimeline__feedLinkIcon" {}
+                        }
 
                     } @else {
 

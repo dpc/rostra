@@ -1281,6 +1281,31 @@ emoji-picker {
   background-color: var(--color-timeline-bg);
 }
 
+.o-mainBarTimeline__feedLink {
+  display: inline-flex;
+  align-items: center;
+  margin-left: auto;
+  padding: 0 0.75rem;
+  opacity: 0.5;
+  background-image: none;
+}
+
+.o-mainBarTimeline__feedLink:hover {
+  background-image: none;
+}
+
+.o-mainBarTimeline__feedLink:hover {
+  opacity: 1;
+}
+
+.o-mainBarTimeline__feedLinkIcon {
+  display: inline-block;
+  width: 17px;
+  height: 17px;
+  background: url('/assets/icons/rss.svg') center/contain no-repeat;
+  filter: invert(var(--invert));
+}
+
 .o-previewDialog {
   display: none;
   position: fixed;
