@@ -15,7 +15,7 @@ use rostra_core::Timestamp;
 use snafu::{ResultExt, Snafu};
 use tokio::time::{Duration, interval};
 use tracing::level_filters::LevelFilter;
-use tracing::{error, info, warn};
+use tracing::{debug, error, info, warn};
 use tracing_subscriber::EnvFilter;
 
 use crate::database::BotDatabase;
@@ -24,6 +24,7 @@ use crate::scraper::{Scraper, ScraperError, create_scrapers};
 
 pub const PROJECT_NAME: &str = "rostra-bot";
 pub const LOG_TARGET: &str = "rostra_bot::main";
+const MAX_ARTICLE_AGE_SECS: u64 = 30 * 24 * 60 * 60; // ~1 month
 
 #[derive(Debug, Snafu)]
 pub enum BotError {
@@ -279,9 +280,23 @@ async fn run_bot_loop(
                 Ok(articles) => {
                     info!(target: LOG_TARGET, count = articles.len(), "Scraped articles from source");
 
-                    // Filter articles by per-source score and add to database
+                    // Filter articles by age and per-source score, then add to database
+                    let now = Timestamp::now();
                     let mut added_count = 0;
                     for article in articles {
+                        // Skip articles older than ~1 month (when publication date is known)
+                        if let Some(published_at) = article.published_at {
+                            if MAX_ARTICLE_AGE_SECS < now.secs_since(published_at) {
+                                debug!(
+                                    target: LOG_TARGET,
+                                    article_id = %article.id,
+                                    title = %article.title,
+                                    "Skipping old article"
+                                );
+                                continue;
+                            }
+                        }
+
                         let min_score = get_min_score_for_article(opts, &article);
                         if article.score >= min_score {
                             match db.add_unpublished_article(&article).await {
