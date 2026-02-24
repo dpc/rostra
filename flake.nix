@@ -95,6 +95,9 @@
 
                 tests = craneLib.cargoNextest {
                   cargoArtifacts = workspace;
+                  env = {
+                    NEXTEST_SHOW_PROGRESS = "none";
+                  };
                 };
 
                 clippy = craneLib.cargoClippy {
