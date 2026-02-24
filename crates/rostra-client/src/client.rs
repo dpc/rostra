@@ -394,6 +394,7 @@ impl Client {
             client.start_new_head_fetcher();
             client.start_poll_follower_head_updates();
             client.start_poll_followee_head_updates();
+            client.start_wot_head_sync();
         }
 
         if let Some(secret) = secret {
@@ -541,6 +542,10 @@ impl Client {
         tokio::spawn(
             crate::task::poll_followee_head_updates::PollFolloweeHeadUpdates::new(self).run(),
         );
+    }
+
+    pub(crate) fn start_wot_head_sync(&self) {
+        tokio::spawn(crate::task::wot_head_sync::WotHeadSync::new(self).run());
     }
 
     pub(crate) async fn iroh_address(&self) -> WhateverResult<EndpointAddr> {
