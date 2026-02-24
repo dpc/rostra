@@ -89,8 +89,34 @@ pub async fn run_one_cycle(
     // Publish unpublished articles
     match db.get_unpublished_articles().await {
         Ok(articles) => {
-            let articles_to_publish: Vec<_> =
-                articles.into_iter().take(max_articles_per_run).collect();
+            // Filter out old articles already sitting in the queue.
+            // This is a workaround for articles that were enqueued before the
+            // scraping-time age filter was added, and can be removed once all
+            // deployed databases have been drained of stale entries.
+            let now = Timestamp::now();
+            let mut articles_filtered = Vec::new();
+            for article in articles {
+                if let Some(published_at) = article.published_at {
+                    if MAX_ARTICLE_AGE_SECS < now.secs_since(published_at) {
+                        debug!(
+                            target: LOG_TARGET,
+                            article_id = %article.id,
+                            title = %article.title,
+                            "Discarding old article from unpublished queue"
+                        );
+                        if let Err(e) = db.remove_unpublished_article(&article.id).await {
+                            warn!(target: LOG_TARGET, error = %e, article_id = %article.id, "Failed to remove old article from queue");
+                        }
+                        continue;
+                    }
+                }
+                articles_filtered.push(article);
+            }
+
+            let articles_to_publish: Vec<_> = articles_filtered
+                .into_iter()
+                .take(max_articles_per_run)
+                .collect();
 
             if !articles_to_publish.is_empty() {
                 info!(target: LOG_TARGET, count = articles_to_publish.len(), "Publishing articles to Rostra");

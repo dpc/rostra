@@ -258,6 +258,23 @@ impl BotDatabase {
             .await
     }
 
+    /// Remove an article from the unpublished queue without marking it as
+    /// published.
+    ///
+    /// Workaround for draining stale entries that were enqueued before the
+    /// scraping-time age filter existed. Can be removed once all deployed
+    /// databases have been drained.
+    pub async fn remove_unpublished_article(&self, article_id: &str) -> DbResult<()> {
+        let article_id = article_id.to_string();
+        self.client_db
+            .write_with(move |tx| {
+                let mut unpublished_table = tx.open_table(&articles_unpublished::TABLE)?;
+                unpublished_table.remove(&article_id)?;
+                Ok(())
+            })
+            .await
+    }
+
     /// Get count of unpublished articles
     pub async fn get_unpublished_count(&self) -> DbResult<usize> {
         self.client_db
