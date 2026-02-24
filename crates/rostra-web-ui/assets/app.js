@@ -99,6 +99,70 @@ window.uploadMediaFile = function (inputEl) {
   const file = inputEl.files[0];
   if (!file) return;
 
+  const dialog = document.getElementById("media-list");
+  const previewEl = document.getElementById("media-upload-preview");
+  if (!previewEl || !dialog) return;
+
+  // Show client-side preview before uploading
+  const blobUrl = URL.createObjectURL(file);
+  const mediaEl = previewEl.querySelector(".o-mediaList__previewMedia");
+  const nameEl = previewEl.querySelector(".o-mediaList__previewName");
+
+  mediaEl.innerHTML = "";
+  if (file.type.startsWith("image/")) {
+    const img = document.createElement("img");
+    img.src = blobUrl;
+    mediaEl.appendChild(img);
+  } else if (file.type.startsWith("video/")) {
+    const video = document.createElement("video");
+    video.src = blobUrl;
+    video.controls = true;
+    video.muted = true;
+    mediaEl.appendChild(video);
+  } else if (file.type.startsWith("audio/")) {
+    const audio = document.createElement("audio");
+    audio.src = blobUrl;
+    audio.controls = true;
+    mediaEl.appendChild(audio);
+  }
+  nameEl.textContent = file.name;
+
+  // Switch dialog to preview mode: hide items, swap title & buttons
+  const titleEl = dialog.querySelector(".o-mediaList__title");
+  const itemsEl = dialog.querySelector(".o-mediaList__items");
+  const uploadBtn = dialog.querySelector(".o-mediaList__uploadButton");
+  const closeBtn = dialog.querySelector(".o-mediaList__closeButton");
+
+  const origTitle = titleEl.textContent;
+  const origUploadClick = uploadBtn.onclick;
+  const origCloseClick = closeBtn.onclick;
+
+  titleEl.textContent = "Preview media to upload";
+  if (itemsEl) itemsEl.style.display = "none";
+  previewEl.classList.add("-active");
+  closeBtn.lastChild.textContent = "Cancel";
+
+  const cleanup = () => {
+    previewEl.classList.remove("-active");
+    if (itemsEl) itemsEl.style.display = "";
+    titleEl.textContent = origTitle;
+    closeBtn.lastChild.textContent = "Close";
+    uploadBtn.onclick = origUploadClick;
+    closeBtn.onclick = origCloseClick;
+    URL.revokeObjectURL(blobUrl);
+  };
+
+  uploadBtn.onclick = () => {
+    cleanup();
+    doMediaUpload(inputEl, file);
+  };
+  closeBtn.onclick = () => {
+    cleanup();
+    inputEl.value = "";
+  };
+};
+
+function doMediaUpload(inputEl, file) {
   const formData = new FormData();
   formData.append("media_file", file);
 
@@ -162,7 +226,7 @@ window.uploadMediaFile = function (inputEl) {
   xhr.open("POST", "/media/publish");
   xhr.setRequestHeader("X-Alpine-Request", "true");
   xhr.send(formData);
-};
+}
 
 // =============================================================================
 // DOMContentLoaded handlers

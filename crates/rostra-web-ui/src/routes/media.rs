@@ -256,6 +256,13 @@ pub async fn list(
                         }
                     }
                 }
+                div id="media-upload-preview" ."o-mediaList__preview" {
+                    p ."o-mediaList__previewWarning" {
+                        "Media published via Rostra will be publicly available."
+                    }
+                    div ."o-mediaList__previewMedia" {}
+                    div ."o-mediaList__previewName" {}
+                }
                 div id="upload-progress" ."o-mediaList__progress" {
                     div ."o-mediaList__progressBar" {
                         div id="upload-progress-fill" ."o-mediaList__progressFill" {}

@@ -57,6 +57,8 @@ impl UiState {
                 }
                 // Hide elements with x-cloak until Alpine initializes
                 style { "[x-cloak] { display: none !important; }" }
+                // Hide JS-only elements when JS is disabled
+                noscript { style { ".u-requiresJs { display: none !important; }" } }
                 // Load Alpine.js right away so it's immediately available, use defer to make it
                 // non-blocking. ALL plugins must load BEFORE Alpine core.
                 script defer src="/assets/libs/alpinejs-persist@3.14.3.js" {}

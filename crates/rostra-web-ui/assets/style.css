@@ -1747,6 +1747,46 @@ input:checked+.slider:before {
   margin-top: 4px;
 }
 
+/* Media Upload Preview */
+.o-mediaList__preview {
+  display: none;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 1rem 0;
+}
+
+.o-mediaList__preview.-active {
+  display: flex;
+}
+
+.o-mediaList__previewMedia img,
+.o-mediaList__previewMedia video {
+  max-width: 100%;
+  max-height: 40vh;
+  border-radius: var(--border-radius-std);
+}
+
+.o-mediaList__previewMedia audio {
+  max-width: 100%;
+}
+
+.o-mediaList__previewWarning {
+  font-size: 0.85rem;
+  color: var(--color-text-default);
+  opacity: 0.8;
+  text-align: center;
+  margin: 0;
+}
+
+.o-mediaList__previewName {
+  font-size: 0.85rem;
+  color: var(--color-text-default);
+  opacity: 0.7;
+  word-break: break-all;
+  text-align: center;
+}
+
 /* Media Upload Progress Bar */
 .o-mediaList__progress {
   display: none;

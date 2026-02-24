@@ -739,13 +739,13 @@ impl UiState {
                             {
                                 span ."m-inlineReply__helpButtonIcon" {}
                             }
-                            a ."m-inlineReply__emojiButton"
+                            a ."m-inlineReply__emojiButton u-requiresJs"
                                 href="#"
                                 title="Insert emoji"
                                 onclick=(emoji_onclick)
                             { "😀" }
                             button
-                                ."m-inlineReply__attachButton"
+                                ."m-inlineReply__attachButton u-requiresJs"
                                 type="submit"
                                 form=(attach_form_id)
                                 title="Attach media"
@@ -932,13 +932,13 @@ impl UiState {
                             span ."m-newPostForm__helpButtonIcon" {}
                         }
                         a
-                            ."m-newPostForm__emojiButton"
+                            ."m-newPostForm__emojiButton u-requiresJs"
                             href="#"
                             onclick="toggleEmojiPicker('emoji-picker-container', event)"
                         { "😀" }
                         @if user_id.is_some() {
                             button
-                                ."m-newPostForm__attachButton"
+                                ."m-newPostForm__attachButton u-requiresJs"
                                 type="submit"
                                 form="media-attach-form"
                                 title="Attach media"
@@ -948,7 +948,7 @@ impl UiState {
                             }
                         } @else {
                             button
-                                ."m-newPostForm__attachButton"
+                                ."m-newPostForm__attachButton u-requiresJs"
                                 type="button"
                                 title="Attach media"
                                 disabled
