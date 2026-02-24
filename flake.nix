@@ -4,7 +4,7 @@
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-25.11";
     flake-utils.url = "github:numtide/flake-utils";
-    flakebox.url = "github:rustshop/flakebox";
+    flakebox.url = "github:rustshop/flakebox?rev=9a9e59ca13f67a17f77addeebc054e3cdedfd179";
 
     bundlers = {
       url = "github:NixOS/bundlers";
@@ -95,9 +95,6 @@
 
                 tests = craneLib.cargoNextest {
                   cargoArtifacts = workspace;
-                  env = {
-                    NEXTEST_SHOW_PROGRESS = "none";
-                  };
                 };
 
                 clippy = craneLib.cargoClippy {
