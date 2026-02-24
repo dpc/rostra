@@ -113,9 +113,22 @@ pub struct UiState {
     secrets: secrets::SecretStore,
     /// Session store for checking session validity during GC.
     session_store: RedbSessionStore,
+    /// External origin URL (from `--cors-origin`) for absolute links in meta
+    /// tags.
+    origin_url: Option<String>,
 }
 
 impl UiState {
+    /// Make a relative path absolute by prepending the origin URL (from
+    /// `--cors-origin`), if configured. Returns the path unchanged when no
+    /// origin is set.
+    pub fn absolute_url(&self, path: &str) -> String {
+        match self.origin_url {
+            Some(ref origin) => format!("{}{path}", origin.trim_end_matches('/')),
+            None => path.to_string(),
+        }
+    }
+
     pub async fn client(&self, id: RostraId) -> UiStateClientResult<ClientHandle> {
         match self.clients.get(id).await {
             Some(handle) => Ok(handle),
@@ -333,6 +346,7 @@ async fn build_state_and_session(
         welcome_redirect: opts.welcome_redirect.clone(),
         secrets: secrets::SecretStore::new(),
         session_store: session_store.clone(),
+        origin_url: opts.cors_origin.clone(),
     });
 
     let session_layer = SessionManagerLayer::new(session_store)

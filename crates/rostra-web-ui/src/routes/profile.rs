@@ -36,8 +36,8 @@ pub async fn get_profile(
     let og = OpenGraphMeta {
         title: profile.display_name.clone(),
         description: truncate_at_word_boundary(&profile.bio, 200),
-        url: format!("/profile/{profile_id}"),
-        image: Some(state.avatar_url(profile_id, profile.event_id)),
+        url: state.absolute_url(&format!("/profile/{profile_id}")),
+        image: Some(state.absolute_url(&state.avatar_url(profile_id, profile.event_id))),
     };
 
     Ok(Maud(

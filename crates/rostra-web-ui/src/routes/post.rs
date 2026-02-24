@@ -140,8 +140,8 @@ pub async fn get_single_post(
             Some(OpenGraphMeta {
                 title,
                 description,
-                url: format!("/post/{author}/{event_id}"),
-                image: Some(state.avatar_url(author, og_event_id)),
+                url: state.absolute_url(&format!("/post/{author}/{event_id}")),
+                image: Some(state.absolute_url(&state.avatar_url(author, og_event_id))),
             })
         } else {
             None
