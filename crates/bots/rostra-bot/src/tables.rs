@@ -55,6 +55,13 @@ impl From<HnArticle> for Article {
     }
 }
 
+/// Stored alongside normalized title for temporal proximity check
+#[derive(Debug, Encode, Decode, Clone)]
+pub struct TitleEntry {
+    pub normalized_title: String,
+    pub article_timestamp: Timestamp,
+}
+
 // Tables for generic articles
 def_table! {
     /// Articles waiting to be published
@@ -64,6 +71,16 @@ def_table! {
 def_table! {
     /// Articles that have been published
     articles_published: String => Timestamp
+}
+
+def_table! {
+    /// Normalized URL → original article ID (for O(1) URL dedup lookup)
+    articles_published_urls: String => String
+}
+
+def_table! {
+    /// Article ID → TitleEntry (scanned for Jaccard + temporal proximity check)
+    articles_published_titles: String => TitleEntry
 }
 
 // Legacy HN tables for backward compatibility

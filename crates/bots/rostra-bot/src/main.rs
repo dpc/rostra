@@ -1,4 +1,5 @@
 mod database;
+mod dedup;
 mod publisher;
 mod scraper;
 mod tables;
@@ -340,10 +341,14 @@ async fn run_bot_loop(
                     for (article_id, result) in results {
                         match result {
                             Ok(()) => {
-                                if let Err(e) =
-                                    db.mark_article_published(&article_id, published_at).await
+                                if let Some(article) =
+                                    articles_to_publish.iter().find(|a| a.id == article_id)
                                 {
-                                    error!(target: LOG_TARGET, error = %e, article_id = %article_id, "Failed to mark article as published in database");
+                                    if let Err(e) =
+                                        db.mark_article_published(article, published_at).await
+                                    {
+                                        error!(target: LOG_TARGET, error = %e, article_id = %article_id, "Failed to mark article as published in database");
+                                    }
                                 }
                             }
                             Err(e) => {
