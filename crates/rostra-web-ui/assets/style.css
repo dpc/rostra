@@ -115,6 +115,7 @@ body {
 
   height: 100%;
   overflow: auto;
+  scrollbar-gutter: stable;
   -webkit-overflow-scrolling: touch;
   overscroll-behavior: none;
 }
