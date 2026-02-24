@@ -54,7 +54,7 @@ fn default_rostra_assets_dir() -> PathBuf {
 #[derive(Clone, Debug)]
 pub struct Opts {
     pub listen: BindAddr,
-    pub cors_origin: Option<String>,
+    pub origin: Option<url::Url>,
     assets_dir: PathBuf,
     pub reuseport: bool,
     pub data_dir: PathBuf,
@@ -63,11 +63,24 @@ pub struct Opts {
     pub welcome_redirect: Option<String>,
 }
 
+/// Parse an origin string into a [`url::Url`].
+///
+/// Accepts bare domains (e.g. `rostra.me`) and full URLs
+/// (`https://rostra.me`). Defaults to `https://` when no scheme is provided.
+fn parse_origin(raw: &str) -> url::Url {
+    let with_scheme = if raw.starts_with("http://") || raw.starts_with("https://") {
+        raw.to_string()
+    } else {
+        format!("https://{raw}")
+    };
+    url::Url::parse(&with_scheme).expect("--origin must be a valid URL")
+}
+
 impl Opts {
     #[allow(clippy::too_many_arguments)]
     pub fn new(
         listen: BindAddr,
-        cors_origin: Option<String>,
+        origin: Option<String>,
         assets_dir: Option<PathBuf>,
         reuseport: bool,
         data_dir: PathBuf,
@@ -77,7 +90,7 @@ impl Opts {
     ) -> Self {
         Self {
             listen,
-            cors_origin,
+            origin: origin.map(|o| parse_origin(&o)),
             assets_dir: assets_dir.unwrap_or_else(default_rostra_assets_dir),
             reuseport,
             data_dir,
@@ -113,18 +126,17 @@ pub struct UiState {
     secrets: secrets::SecretStore,
     /// Session store for checking session validity during GC.
     session_store: RedbSessionStore,
-    /// External origin URL (from `--cors-origin`) for absolute links in meta
-    /// tags.
-    origin_url: Option<String>,
+    /// External origin URL (from `--origin`) for absolute links in meta tags.
+    origin_url: Option<url::Url>,
 }
 
 impl UiState {
     /// Make a relative path absolute by prepending the origin URL (from
-    /// `--cors-origin`), if configured. Returns the path unchanged when no
-    /// origin is set.
+    /// `--origin`), if configured. Returns the path unchanged when no origin
+    /// is set.
     pub fn absolute_url(&self, path: &str) -> String {
         match self.origin_url {
-            Some(ref origin) => format!("{}{path}", origin.trim_end_matches('/')),
+            Some(ref origin) => format!("{}{path}", origin.as_str().trim_end_matches('/')),
             None => path.to_string(),
         }
     }
@@ -346,7 +358,7 @@ async fn build_state_and_session(
         welcome_redirect: opts.welcome_redirect.clone(),
         secrets: secrets::SecretStore::new(),
         session_store: session_store.clone(),
-        origin_url: opts.cors_origin.clone(),
+        origin_url: opts.origin.clone(),
     });
 
     let session_layer = SessionManagerLayer::new(session_store)
@@ -387,7 +399,7 @@ pub async fn start_ui(opts: Opts, clients: MultiClient) -> ServerResult<UiServer
     info!(
         target: LOG_TARGET,
         listen = %local_addr,
-        origin = %opts.cors_origin_url_str(local_addr),
+        origin = %opts.origin_url_str(local_addr),
         "Starting TCP server"
     );
 
@@ -471,7 +483,7 @@ fn cors_layer(opts: &Opts, listen: SocketAddr) -> ServerResult<CorsLayer> {
         .allow_credentials(true)
         .allow_headers([ACCEPT, CONTENT_TYPE, HeaderName::from_static("csrf-token")])
         .max_age(Duration::from_secs(86400))
-        .allow_origin(opts.cors_origin_url_header(listen).context(CorsSnafu)?)
+        .allow_origin(opts.origin_url_header(listen).context(CorsSnafu)?)
         .allow_methods([
             Method::GET,
             Method::POST,
@@ -484,20 +496,22 @@ fn cors_layer(opts: &Opts, listen: SocketAddr) -> ServerResult<CorsLayer> {
 }
 
 impl Opts {
-    pub fn cors_origin_url_str(&self, listen: SocketAddr) -> String {
-        self.cors_origin
-            .clone()
+    pub fn origin_url_str(&self, listen: SocketAddr) -> String {
+        self.origin
+            .as_ref()
+            .map(|u| u.as_str().trim_end_matches('/').to_string())
             .unwrap_or_else(|| format!("http://{listen}"))
     }
-    pub fn cors_origin_domain_str(&self, listen: SocketAddr) -> String {
-        self.cors_origin
-            .clone()
+    pub fn origin_domain_str(&self, listen: SocketAddr) -> String {
+        self.origin
+            .as_ref()
+            .and_then(|u| u.host_str().map(|h| h.to_string()))
             .unwrap_or_else(|| format!("{listen}"))
     }
-    pub fn cors_origin_url_header(&self, listen: SocketAddr) -> WhateverResult<HeaderValue> {
-        self.cors_origin_url_str(listen)
+    pub fn origin_url_header(&self, listen: SocketAddr) -> WhateverResult<HeaderValue> {
+        self.origin_url_str(listen)
             .parse()
-            .whatever_context("cors_origin does not parse as an http value")
+            .whatever_context("origin does not parse as an http value")
     }
 }
 

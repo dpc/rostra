@@ -108,9 +108,16 @@ pub struct WebUiOpts {
     #[arg(long, env = "ROSTRA_REUSEPORT", default_value = "true")]
     pub reuseport: bool,
 
-    /// Cors origin settings
-    #[arg(long, env = "ROSTRA_CORS_ORIGIN")]
-    pub cors_origin: Option<String>,
+    /// Public origin URL (e.g. "rostra.me" or "https://rostra.me").
+    /// Used for CORS and absolute URLs in meta tags.
+    /// If no scheme is provided, https:// is assumed.
+    #[arg(
+        long,
+        env = "ROSTRA_ORIGIN",
+        alias = "cors-origin",
+        hide_long_help = false
+    )]
+    pub origin: Option<String>,
 
     /// Enable public mode - allows direct IP connections (exposes your IP
     /// address). By default, Rostra uses relay-only mode for privacy.
@@ -130,7 +137,7 @@ pub struct WebUiOpts {
 pub fn make_web_opts(data_dir: &Path, opts: &WebUiOpts) -> rostra_web_ui::Opts {
     rostra_web_ui::Opts::new(
         opts.listen.clone(),
-        opts.cors_origin.clone(),
+        opts.origin.clone(),
         opts.assets_dir.clone(),
         opts.reuseport,
         data_dir.to_owned(),

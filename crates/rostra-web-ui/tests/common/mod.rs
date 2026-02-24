@@ -33,7 +33,7 @@ impl TestServer {
 
         let opts = Opts::new(
             rostra_util_bind_addr::BindAddr::Tcp(SocketAddr::from(([127, 0, 0, 1], 0))),
-            None,  // cors_origin
+            None,  // origin
             None,  // assets_dir (uses default)
             false, // reuseport
             data_dir,
