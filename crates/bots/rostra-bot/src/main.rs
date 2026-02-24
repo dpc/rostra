@@ -1,31 +1,19 @@
-mod database;
-mod dedup;
-mod publisher;
-mod scraper;
-mod tables;
-
 use std::io;
 use std::path::PathBuf;
-use std::time::{SystemTime, UNIX_EPOCH};
 
 use clap::Parser;
+use rostra_bot::database::BotDatabase;
+use rostra_bot::publisher::{Publisher, PublisherError};
+use rostra_bot::scraper::{ScraperError, create_scrapers};
+use rostra_bot::{LOG_TARGET, run_one_cycle};
 use rostra_client::Client;
 use rostra_client::error::{IdSecretReadError, InitError};
 use rostra_client_db::Database;
-use rostra_core::Timestamp;
 use snafu::{ResultExt, Snafu};
 use tokio::time::{Duration, interval};
+use tracing::info;
 use tracing::level_filters::LevelFilter;
-use tracing::{debug, error, info, warn};
 use tracing_subscriber::EnvFilter;
-
-use crate::database::BotDatabase;
-use crate::publisher::{Publisher, PublisherError};
-use crate::scraper::{Scraper, ScraperError, create_scrapers};
-
-pub const PROJECT_NAME: &str = "rostra-bot";
-pub const LOG_TARGET: &str = "rostra_bot::main";
-const MAX_ARTICLE_AGE_SECS: u64 = 30 * 24 * 60 * 60; // ~1 month
 
 #[derive(Debug, Snafu)]
 pub enum BotError {
@@ -48,6 +36,10 @@ pub enum BotError {
     MissingSecretFile,
     #[snafu(display("At least one source is required (--hn, --lobsters, or --atom-feed-url)"))]
     NoSourcesSpecified,
+    #[snafu(display("Run cycle error: {source}"))]
+    RunCycle {
+        source: Box<dyn std::error::Error + Send + Sync>,
+    },
 }
 
 pub type BotResult<T> = std::result::Result<T, BotError>;
@@ -266,109 +258,22 @@ async fn handle_dev_command(dev_command: DevCommand) -> BotResult<()> {
 async fn run_bot_loop(
     opts: &Opts,
     db: &BotDatabase,
-    scrapers: &[Box<dyn Scraper + Send + Sync>],
+    scrapers: &[Box<dyn rostra_bot::scraper::Scraper + Send + Sync>],
     publisher: &Publisher,
 ) -> BotResult<()> {
     let mut interval = interval(Duration::from_secs(opts.scrape_interval_minutes * 60));
 
     loop {
-        info!(target: LOG_TARGET, "Starting scraping and publishing cycle");
-
-        // Scrape articles from all sources
-        let mut total_added = 0;
-        for scraper in scrapers {
-            match scraper.scrape_frontpage().await {
-                Ok(articles) => {
-                    info!(target: LOG_TARGET, count = articles.len(), "Scraped articles from source");
-
-                    // Filter articles by age and per-source score, then add to database
-                    let now = Timestamp::now();
-                    let mut added_count = 0;
-                    for article in articles {
-                        // Skip articles older than ~1 month (when publication date is known)
-                        if let Some(published_at) = article.published_at {
-                            if MAX_ARTICLE_AGE_SECS < now.secs_since(published_at) {
-                                debug!(
-                                    target: LOG_TARGET,
-                                    article_id = %article.id,
-                                    title = %article.title,
-                                    "Skipping old article"
-                                );
-                                continue;
-                            }
-                        }
-
-                        let min_score = get_min_score_for_article(opts, &article);
-                        if article.score >= min_score {
-                            match db.add_unpublished_article(&article).await {
-                                Ok(true) => added_count += 1,
-                                Ok(false) => {}
-                                Err(e) => {
-                                    warn!(target: LOG_TARGET, error = %e, article_id = %article.id, "Failed to add article to database")
-                                }
-                            }
-                        }
-                    }
-                    total_added += added_count;
-                }
-                Err(e) => {
-                    error!(target: LOG_TARGET, error = %e, "Failed to scrape frontpage");
-                }
-            }
-        }
-        info!(target: LOG_TARGET, added = total_added, "Added new articles to unpublished queue");
-
-        // Publish unpublished articles
-        match db.get_unpublished_articles().await {
-            Ok(articles) => {
-                let articles_to_publish: Vec<_> = articles
-                    .into_iter()
-                    .take(opts.max_articles_per_run)
-                    .collect();
-
-                if !articles_to_publish.is_empty() {
-                    info!(target: LOG_TARGET, count = articles_to_publish.len(), "Publishing articles to Rostra");
-
-                    let results = publisher.publish_articles(&articles_to_publish).await;
-
-                    // Mark successful publications as published
-                    let published_at = Timestamp::from(
-                        SystemTime::now()
-                            .duration_since(UNIX_EPOCH)
-                            .expect("Time went backwards")
-                            .as_secs(),
-                    );
-                    for (article_id, result) in results {
-                        match result {
-                            Ok(()) => {
-                                if let Some(article) =
-                                    articles_to_publish.iter().find(|a| a.id == article_id)
-                                {
-                                    if let Err(e) =
-                                        db.mark_article_published(article, published_at).await
-                                    {
-                                        error!(target: LOG_TARGET, error = %e, article_id = %article_id, "Failed to mark article as published in database");
-                                    }
-                                }
-                            }
-                            Err(e) => {
-                                error!(target: LOG_TARGET, error = %e, article_id = %article_id, "Failed to publish article");
-                            }
-                        }
-                    }
-                } else {
-                    info!(target: LOG_TARGET, "No articles to publish");
-                }
-            }
-            Err(e) => {
-                error!(target: LOG_TARGET, error = %e, "Failed to get unpublished articles from database");
-            }
-        }
-
-        // Show current queue status
-        if let Ok(unpublished_count) = db.get_unpublished_count().await {
-            info!(target: LOG_TARGET, queue_size = unpublished_count, "Articles in unpublished queue");
-        }
+        run_one_cycle(
+            opts.hn_min_score,
+            opts.lobsters_min_score,
+            opts.max_articles_per_run,
+            db,
+            scrapers,
+            publisher,
+        )
+        .await
+        .map_err(|source| BotError::RunCycle { source })?;
 
         info!(target: LOG_TARGET,
               next_run_in_minutes = opts.scrape_interval_minutes,
@@ -376,16 +281,6 @@ async fn run_bot_loop(
         );
 
         interval.tick().await;
-    }
-}
-
-fn get_min_score_for_article(opts: &Opts, article: &crate::tables::Article) -> u32 {
-    if article.source == "hn" {
-        opts.hn_min_score
-    } else if article.source == "lobsters" {
-        opts.lobsters_min_score
-    } else {
-        0
     }
 }
 
@@ -417,7 +312,7 @@ fn build_test_sources_description(hn: bool, lobsters: bool, atom_feed_urls: &[St
     sources.join(", ")
 }
 
-pub fn init_logging() -> BotResult<()> {
+fn init_logging() -> BotResult<()> {
     tracing_subscriber::fmt()
         .with_writer(io::stderr)
         .with_env_filter(

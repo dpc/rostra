@@ -76,6 +76,12 @@ impl Scraper for HnScraper {
     }
 }
 
+impl Default for HnScraper {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl HnScraper {
     pub fn new() -> Self {
         let client = Client::builder()
@@ -195,6 +201,12 @@ impl HnScraper {
 
 pub struct LobstersScraper {
     client: Client,
+}
+
+impl Default for LobstersScraper {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl LobstersScraper {
