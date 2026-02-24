@@ -74,7 +74,16 @@ impl<C> bincode::Decode<C> for RpcId {
 
 impl fmt::Display for RpcId {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        self.0.fmt(f)
+        match *self {
+            Self::PING => f.write_str("PING"),
+            Self::FEED_EVENT => f.write_str("FEED_EVENT"),
+            Self::GET_EVENT => f.write_str("GET_EVENT"),
+            Self::GET_EVENT_CONTENT => f.write_str("GET_EVENT_CONTENT"),
+            Self::WAIT_HEAD_UPDATE => f.write_str("WAIT_HEAD_UPDATE"),
+            Self::GET_HEAD => f.write_str("GET_HEAD"),
+            Self::WAIT_FOLLOWERS_NEW_HEADS => f.write_str("WAIT_FOLLOWERS_NEW_HEADS"),
+            _ => write!(f, "UNKNOWN({})", self.0),
+        }
     }
 }
 
