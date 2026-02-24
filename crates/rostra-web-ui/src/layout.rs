@@ -54,6 +54,13 @@ impl UiState {
                     @if let Some(ref image) = og.image {
                         meta property="og:image" content=(image);
                     }
+                    // Twitter Card meta tags
+                    meta name="twitter:card" content="summary";
+                    meta name="twitter:title" content=(og.title);
+                    meta name="twitter:description" content=(og.description);
+                    @if let Some(ref image) = og.image {
+                        meta name="twitter:image" content=(image);
+                    }
                 }
                 // Hide elements with x-cloak until Alpine initializes
                 style { "[x-cloak] { display: none !important; }" }

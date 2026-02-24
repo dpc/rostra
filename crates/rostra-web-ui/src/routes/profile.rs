@@ -12,6 +12,7 @@ use super::timeline::{TimelineCursor, TimelineMode, TimelinePaginationInput};
 use super::unlock::session::{RoMode, UserSession};
 use super::{Maud, fragment};
 use crate::error::{ReadOnlyModeSnafu, RequestResult};
+use crate::layout::{OpenGraphMeta, truncate_at_word_boundary};
 use crate::util::extractors::AjaxRequest;
 use crate::{SharedState, UiState};
 
@@ -28,6 +29,17 @@ pub async fn get_profile(
             .map(|event_id| TimelineCursor::ByEventTime(EventPaginationCursor { ts, event_id }))
     });
 
+    let client = state.client(session.id()).await?;
+    let client_ref = client.client_ref()?;
+    let profile = state.get_social_profile(profile_id, &client_ref).await;
+
+    let og = OpenGraphMeta {
+        title: profile.display_name.clone(),
+        description: truncate_at_word_boundary(&profile.bio, 200),
+        url: format!("/profile/{profile_id}"),
+        image: Some(state.avatar_url(profile_id, profile.event_id)),
+    };
+
     Ok(Maud(
         state
             .render_timeline_page(
@@ -37,7 +49,7 @@ pub async fn get_profile(
                 &mut cookies,
                 TimelineMode::Profile(profile_id),
                 is_ajax,
-                None,
+                Some(&og),
             )
             .await?,
     ))
