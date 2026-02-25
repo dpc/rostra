@@ -14,10 +14,10 @@ use serde::Deserialize;
 use tower_cookies::Cookies;
 use tracing::debug;
 
-use super::timeline::TimelineMode;
 use super::unlock::session::{RoMode, UserSession};
 use super::{Maud, fragment};
 use crate::error::{ReadOnlyModeSnafu, RequestResult};
+use crate::html_utils::re_typeset;
 use crate::layout::{OpenGraphMeta, truncate_at_word_boundary};
 use crate::util::extractors::AjaxRequest;
 use crate::util::time::format_timestamp;
@@ -75,7 +75,7 @@ pub struct SinglePostQuery {
 pub async fn get_single_post(
     state: State<SharedState>,
     session: UserSession,
-    mut cookies: Cookies,
+    _cookies: Cookies,
     AjaxRequest(is_ajax): AjaxRequest,
     Query(query): Query<SinglePostQuery>,
     Path((author, event_id)): Path<(RostraId, ShortEventId)>,
@@ -104,7 +104,7 @@ pub async fn get_single_post(
         ));
     }
 
-    // Full page: if we have the post record with content, use the timeline page
+    // Full page: if we have the post record with content, render post + replies
     if let Some(post_record) = post_record
         .as_ref()
         .filter(|r| r.content.djot_content.is_some())
@@ -147,18 +147,60 @@ pub async fn get_single_post(
             None
         };
 
+        // Load replies
+        let (comments, _) = client_ref
+            .db()
+            .paginate_social_post_comments_rev(event_id, None, 100)
+            .await;
+
+        let ro = state.ro_mode(session.session_token());
+
+        let body = html! {
+            // Parent post
+            div ."o-mainBarTimeline__item" {
+                (state.render_post_context(
+                    &client_ref,
+                    post_record.author
+                    ).event_id(post_record.event_id)
+                    .post_thread_id(event_id)
+                    .maybe_content(post_record.content.djot_content.as_deref())
+                    .timestamp(post_record.ts)
+                    .ro(ro)
+                    .call().await?)
+            }
+
+            // Replies
+            @for comment in &comments {
+                @if comment.content.djot_content.is_some() {
+                    div ."o-mainBarTimeline__item -reply" style="margin-left: 1rem;" {
+                        (state.render_post_context(
+                            &client_ref,
+                            comment.author
+                            ).event_id(comment.event_id)
+                            .post_thread_id(event_id)
+                            .maybe_content(comment.content.djot_content.as_deref())
+                            .reply_count(comment.reply_count)
+                            .timestamp(comment.ts)
+                            .ro(ro)
+                            .call().await?)
+                    }
+                }
+            }
+
+            (re_typeset())
+        };
+
         let navbar = state.render_navbar(author, &session).await?;
+        let main_content = html! {
+            div ."o-mainBarTimeline" {
+                (crate::UiState::render_page_tab_bar("Post"))
+                (body)
+            }
+        };
+        let page_layout = state.render_page_layout(navbar, main_content);
         return Ok(Maud(
             state
-                .render_timeline_page(
-                    navbar,
-                    None,
-                    &session,
-                    &mut cookies,
-                    TimelineMode::ProfileSingle(author, event_id),
-                    is_ajax,
-                    og.as_ref(),
-                )
+                .render_html_page("Post", page_layout, None, og.as_ref())
                 .await?,
         ));
     }

@@ -17,7 +17,7 @@ use rostra_core::{ShortEventId, Timestamp};
 use rostra_util_error::FmtCompact as _;
 use serde::Deserialize;
 use tower_cookies::Cookies;
-use tracing::{debug, warn};
+use tracing::debug;
 
 use super::super::error::RequestResult;
 use super::cookies::CookiesExt as _;
@@ -205,7 +205,6 @@ pub async fn get_post_replies(
                     ).event_id(parent.event_id)
                     .post_thread_id(post_thread_id)
                     .maybe_content(parent.content.djot_content.as_deref())
-                    .reply_count(parent.reply_count)
                     .timestamp(parent.ts)
                     .ro(state.ro_mode(session.session_token()))
                     .call().await?)
@@ -516,7 +515,7 @@ impl UiState {
         }
 
         match mode {
-            TimelineMode::Profile(_) | TimelineMode::ProfileSingle(_, _) => {
+            TimelineMode::Profile(_) => {
                 Ok((PendingCounts::default(), NotificationDebugInfo::default()))
             }
             TimelineMode::Followees | TimelineMode::Network | TimelineMode::Notifications => {
@@ -733,7 +732,7 @@ impl UiState {
                 {
                     a ."o-mainBarTimeline__back" href="/" onclick="history.back(); return false;" { "<" }
 
-                    @if let TimelineMode::Profile(profile_id) | TimelineMode::ProfileSingle(profile_id, _) = mode {
+                    @if let TimelineMode::Profile(profile_id) = mode {
                         a ."o-mainBarTimeline__profile"
                             ."-active"[mode.is_profile()]
                             href=(mode.to_path())
@@ -914,7 +913,6 @@ pub(crate) enum TimelineMode {
     Network,
     Notifications,
     Profile(RostraId),
-    ProfileSingle(RostraId, ShortEventId),
 }
 
 impl TimelineMode {
@@ -924,7 +922,6 @@ impl TimelineMode {
             TimelineMode::Network => "/network".to_string(),
             TimelineMode::Notifications => "/notifications".to_string(),
             TimelineMode::Profile(rostra_id) => format!("/profile/{rostra_id}"),
-            TimelineMode::ProfileSingle(rostra_id, _) => format!("/profile/{rostra_id}"),
         }
     }
 
@@ -946,42 +943,30 @@ impl TimelineMode {
         client: &ClientRef<'_>,
         pagination: Option<TimelineCursor>,
     ) -> (Vec<SocialPostRecord<SocialPost>>, Option<TimelineCursor>) {
-        if let Self::ProfileSingle(_author, event_id) = self {
-            (
-                client
-                    .db()
-                    .get_social_post(event_id)
-                    .await
-                    .into_iter()
-                    .collect(),
-                None,
-            )
-        } else {
-            let filter_fn = self.to_filter_fn(client).await;
+        let filter_fn = self.to_filter_fn(client).await;
 
-            // For Notifications, order by when we received posts rather than when
-            // they were authored. This ensures new notifications appear at the top.
-            if matches!(self, Self::Notifications) {
-                let cursor = pagination.and_then(|c| match c {
-                    TimelineCursor::ByReceivedTime(c) => Some(c),
-                    _ => None,
-                });
-                let (posts, next) = client
-                    .db()
-                    .paginate_social_posts_by_received_at_rev(cursor, 20, filter_fn)
-                    .await;
-                (posts, next.map(TimelineCursor::ByReceivedTime))
-            } else {
-                let cursor = pagination.and_then(|c| match c {
-                    TimelineCursor::ByEventTime(c) => Some(c),
-                    _ => None,
-                });
-                let (posts, next) = client
-                    .db()
-                    .paginate_social_posts_rev(cursor, 20, filter_fn)
-                    .await;
-                (posts, next.map(TimelineCursor::ByEventTime))
-            }
+        // For Notifications, order by when we received posts rather than when
+        // they were authored. This ensures new notifications appear at the top.
+        if matches!(self, Self::Notifications) {
+            let cursor = pagination.and_then(|c| match c {
+                TimelineCursor::ByReceivedTime(c) => Some(c),
+                _ => None,
+            });
+            let (posts, next) = client
+                .db()
+                .paginate_social_posts_by_received_at_rev(cursor, 20, filter_fn)
+                .await;
+            (posts, next.map(TimelineCursor::ByReceivedTime))
+        } else {
+            let cursor = pagination.and_then(|c| match c {
+                TimelineCursor::ByEventTime(c) => Some(c),
+                _ => None,
+            });
+            let (posts, next) = client
+                .db()
+                .paginate_social_posts_rev(cursor, 20, filter_fn)
+                .await;
+            (posts, next.map(TimelineCursor::ByEventTime))
         }
     }
 
@@ -1019,10 +1004,6 @@ impl TimelineMode {
                 })
             }
             TimelineMode::Profile(rostra_id) => Box::new(move |post| post.author == rostra_id),
-            TimelineMode::ProfileSingle(_, _) => {
-                warn!(target: LOG_TARGET, "Should not be here");
-                Box::new(move |_post| false)
-            }
         }
     }
 }
