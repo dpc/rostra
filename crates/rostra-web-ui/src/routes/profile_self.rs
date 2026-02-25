@@ -95,14 +95,6 @@ impl UiState {
                             .data_value(&self_id.to_string())
                             .onclick("copyIdToClipboard(event)")
                             .call())
-
-                        form
-                            action="/unlock/logout"
-                            method="post"
-                            style="display: inline;"
-                        {
-                            (fragment::button("m-profileSummary__logoutButton", "Logout").call())
-                        }
                     }
                 }
             }

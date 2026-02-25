@@ -381,7 +381,12 @@ impl UiState {
 
         Ok(html! {
             div ."o-settingsContent" {
-                h2 ."o-settingsContent__header" { "My Profile" }
+                div ."m-profileSettings__headerRow" {
+                    h2 ."o-settingsContent__header" { "My Profile" }
+                    form action="/unlock/logout" method="post" {
+                        (fragment::button("m-profileSettings__logoutButton", "Logout").call())
+                    }
+                }
 
                 // Hidden form for live preview
                 form id="profile-preview-form"

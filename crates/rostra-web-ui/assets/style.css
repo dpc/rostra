@@ -446,6 +446,7 @@ img.u-userImage {
   background: url('/assets/icons/gear.svg') center/contain no-repeat;
 }
 
+
 .o-mainBar {
   flex-grow: 1;
   max-width: 50rem;
@@ -981,15 +982,6 @@ emoji-picker {
   padding: clamp(0.06rem, 0.185vw, 0.185rem) clamp(0.5rem, 1.5vw, 1.5rem);
 }
 
-.m-profileSummary__bioEdit {
-  flex-basis: 100%;
-  width: 100%;
-  height: 10rem;
-  border: 1px solid var(--color-button-border);
-  border-radius: var(--border-radius-std);
-  padding: 5pt;
-}
-
 .m-profileSummary__buttons {
   display: flex;
   flex-direction: row;
@@ -1023,47 +1015,6 @@ emoji-picker {
   background-image: url('/assets/icons/circle-check.svg') !important;
 }
 
-.m-profileSummary__editButton {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  position: relative;
-  padding-left: 2rem;
-}
-
-.m-profileSummary__editButtonIcon {
-  background: url('/assets/icons/pen-to-square.svg') center/contain no-repeat;
-  position: absolute;
-  left: 0.5rem;
-  top: 50%;
-  transform: translateY(-50%);
-}
-
-.m-profileSummary__saveButton {
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
-}
-
-.m-profileSummary__saveButtonIcon {
-  background: url('/assets/icons/upload.svg') center/contain no-repeat;
-}
-
-.m-profileSummary__logoutButton {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  position: relative;
-  padding-left: 2rem;
-}
-
-.m-profileSummary__logoutButtonIcon {
-  background: url('/assets/icons/arrow-right-from-bracket.svg') center/contain no-repeat;
-  position: absolute;
-  left: 0.5rem;
-  top: 50%;
-  transform: translateY(-50%);
-}
 
 .m-newPostForm {
   display: flex;
@@ -2084,6 +2035,21 @@ h4.o-settingsContent__sectionHeader {
 }
 
 /* Profile Settings */
+.m-profileSettings__headerRow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 1rem;
+}
+
+.m-profileSettings__headerRow .o-settingsContent__header {
+  margin-bottom: 0;
+}
+
+.m-profileSettings__logoutButtonIcon {
+  background: url('/assets/icons/arrow-right-from-bracket.svg') center/contain no-repeat;
+}
+
 .m-profileSettings {
   display: flex;
   flex-direction: column;
