@@ -259,7 +259,7 @@ impl UiState {
                 (self.render_top_nav())
 
                 div ."o-navBar__profileSummary" {
-                    (self.render_self_profile_summary(session, ro_mode).await?)
+                    (self.render_self_profile_summary(session).await?)
                 }
 
                 @if !hide_new_post_form {

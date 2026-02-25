@@ -9,7 +9,7 @@ mod media;
 mod new_post;
 mod post;
 mod profile;
-mod profile_self;
+pub(crate) mod profile_self;
 mod search;
 mod settings;
 mod shoutbox;
@@ -178,12 +178,17 @@ pub fn route_handler(state: SharedState) -> Router<Arc<UiState>> {
             "/replies/{post_thread_id}/{event_id}",
             get(timeline::get_post_replies),
         )
-        .route(
-            "/self/edit",
-            get(profile_self::get_self_account_edit).post(profile_self::post_self_account_edit),
-        )
+        .route("/self/edit", post(profile_self::post_self_account_edit))
         .route("/search/profiles", get(search::search_profiles))
         .route("/settings", get(settings::get_settings))
+        .route(
+            "/settings/profile",
+            get(settings::get_settings_profile).post(settings::post_settings_profile),
+        )
+        .route(
+            "/settings/profile/preview",
+            post(settings::post_settings_profile_preview),
+        )
         .route("/settings/following", get(settings::get_settings_following))
         .route("/settings/followers", get(settings::get_settings_followers))
         .route("/settings/events", get(settings::get_settings_events))

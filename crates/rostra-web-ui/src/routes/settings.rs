@@ -1,6 +1,7 @@
 use std::collections::BTreeMap;
 use std::str::FromStr as _;
 
+use axum::Form;
 use axum::extract::{Query, State};
 use axum::response::{IntoResponse, Redirect};
 use maud::{Markup, html};
@@ -12,9 +13,10 @@ use rostra_core::id::RostraId;
 use rostra_core::{ShortEventId, Timestamp};
 use serde::Deserialize;
 
+use super::profile_self::extractor;
 use super::unlock::session::UserSession;
 use super::{Maud, fragment};
-use crate::error::RequestResult;
+use crate::error::{ReadOnlyModeSnafu, RequestResult};
 use crate::util::time::format_timestamp;
 use crate::{SharedState, UiState};
 
@@ -22,7 +24,96 @@ use crate::{SharedState, UiState};
 const DPC_ROSTRA_ID: &str = "rse1okfyp4yj75i6riwbz86mpmbgna3f7qr66aj1njceqoigjabegy";
 
 pub async fn get_settings() -> impl IntoResponse {
-    Redirect::to("/settings/following")
+    Redirect::to("/settings/profile")
+}
+
+pub async fn get_settings_profile(
+    state: State<SharedState>,
+    session: UserSession,
+) -> RequestResult<impl IntoResponse> {
+    let navbar = state.render_settings_navbar(&session, "profile").await?;
+    let content = state.render_profile_settings(&session).await?;
+
+    Ok(Maud(
+        state
+            .render_settings_page(&session, navbar, content)
+            .await?,
+    ))
+}
+
+pub async fn post_settings_profile(
+    state: State<SharedState>,
+    session: UserSession,
+    form: extractor::InputForm,
+) -> RequestResult<impl IntoResponse> {
+    let id_secret = state
+        .id_secret(session.session_token())
+        .ok_or_else(|| ReadOnlyModeSnafu.build())?;
+
+    let existing = state
+        .client(session.id())
+        .await?
+        .client_ref()?
+        .db()
+        .get_social_profile(session.id())
+        .await;
+
+    state
+        .client(session.id())
+        .await?
+        .client_ref()?
+        .post_social_profile_update(
+            id_secret,
+            form.name,
+            form.bio,
+            form.avatar.or_else(|| existing.and_then(|e| e.avatar)),
+        )
+        .await?;
+
+    let content = state.render_profile_settings(&session).await?;
+
+    Ok(Maud(content))
+}
+
+#[derive(Deserialize)]
+pub struct ProfilePreviewInput {
+    name: String,
+    bio: String,
+}
+
+pub async fn post_settings_profile_preview(
+    state: State<SharedState>,
+    session: UserSession,
+    Form(form): Form<ProfilePreviewInput>,
+) -> RequestResult<impl IntoResponse> {
+    let client = state.client(session.id()).await?;
+    let client_ref = client.client_ref()?;
+    let self_id = client_ref.rostra_id();
+    let self_profile = state.get_social_profile(self_id, &client_ref).await;
+    let rendered_bio = state.render_bio(client_ref, &form.bio).await;
+
+    Ok(Maud(html! {
+        div id="profile-preview" ."m-profileSettings__preview" {
+            h3 ."m-profileSettings__previewLabel" { "Preview" }
+            div ."m-profileSummary" {
+                (fragment::avatar(
+                    "m-profileSummary__userImage",
+                    state.avatar_url(self_id, self_profile.event_id),
+                    "Avatar preview",
+                ))
+
+                div ."m-profileSummary__content" {
+                    span ."m-profileSummary__displayName u-displayName" {
+                        (form.name)
+                    }
+                }
+
+                @if !form.bio.is_empty() {
+                    div ."m-profileSummary__bio" { (rendered_bio) }
+                }
+            }
+        }
+    }))
 }
 
 pub async fn get_settings_following(
@@ -232,6 +323,12 @@ impl UiState {
                     div ."o-settingsNav__group" {
                         h3 ."o-settingsNav__groupHeader" { "Social" }
                         a ."o-settingsNav__item"
+                            ."-active"[active_category == "profile"]
+                            href="/settings/profile"
+                        {
+                            "My Profile"
+                        }
+                        a ."o-settingsNav__item"
                             ."-active"[active_category == "following"]
                             href="/settings/following"
                         {
@@ -259,6 +356,117 @@ impl UiState {
                         {
                             "P2P Explorer"
                         }
+                    }
+                }
+            }
+        })
+    }
+
+    pub async fn render_profile_settings(&self, session: &UserSession) -> RequestResult<Markup> {
+        let client = self.client(session.id()).await?;
+        let client_ref = client.client_ref()?;
+        let self_id = client_ref.rostra_id();
+        let self_profile = self.get_social_profile(self_id, &client_ref).await;
+        let ro = self.ro_mode(session.session_token());
+        let ajax_attrs = fragment::AjaxLoadingAttrs::for_class("m-profileSettings__saveButton");
+
+        let rendered_bio = self.render_bio(client_ref, &self_profile.bio).await;
+
+        let input_handler = r#"
+            const previewForm = document.getElementById('profile-preview-form');
+            previewForm.querySelector('input[name=name]').value = document.getElementById('profile-name').value;
+            previewForm.querySelector('input[name=bio]').value = document.getElementById('profile-bio').value;
+            previewForm.requestSubmit();
+        "#;
+
+        Ok(html! {
+            div ."o-settingsContent" {
+                h2 ."o-settingsContent__header" { "My Profile" }
+
+                // Hidden form for live preview
+                form id="profile-preview-form"
+                    action="/settings/profile/preview"
+                    method="post"
+                    style="display: none;"
+                    x-target="profile-preview"
+                    x-autofocus
+                {
+                    input type="hidden" name="name" value="" {}
+                    input type="hidden" name="bio" value="" {}
+                }
+
+                form id="profile-settings-form" ."m-profileSettings"
+                    action="/settings/profile"
+                    method="post"
+                    x-target="profile-settings-form"
+                    enctype="multipart/form-data"
+                    "@ajax:before"=(ajax_attrs.before)
+                    "@ajax:after"=(ajax_attrs.after)
+                {
+                    div ."m-profileSettings__avatarSection" {
+                        label for="avatar-upload" ."m-profileSettings__avatarLabel" {
+                            (fragment::avatar("m-profileSettings__avatar", self.avatar_url(self_id, self_profile.event_id), "Your avatar"))
+                            span ."m-profileSettings__avatarHint" { "Click to change" }
+                        }
+                        input # "avatar-upload"
+                            type="file"
+                            name="avatar"
+                            accept="image/*"
+                            style="display: none;"
+                            onchange="previewAvatar(event)"
+                        {}
+                    }
+
+                    div ."m-profileSettings__field" {
+                        label ."m-profileSettings__label" for="profile-name" { "Display Name" }
+                        input # "profile-name" ."m-profileSettings__input"
+                            type="text"
+                            name="name"
+                            value=(self_profile.display_name)
+                            "@input"=(input_handler)
+                        {}
+                    }
+
+                    div ."m-profileSettings__field" {
+                        label ."m-profileSettings__label" for="profile-bio" { "Bio" }
+                        textarea id="profile-bio" ."m-profileSettings__textarea"
+                            placeholder="Tell others about yourself..."
+                            rows="6"
+                            dir="auto"
+                            name="bio"
+                            "x-on:keyup.enter.ctrl"="$el.form.requestSubmit()"
+                            "@input"=(input_handler)
+                        {
+                            (self_profile.bio)
+                        }
+                    }
+
+                    // Live preview
+                    div id="profile-preview" ."m-profileSettings__preview" {
+                        h3 ."m-profileSettings__previewLabel" { "Preview" }
+                        div ."m-profileSummary" {
+                            (fragment::avatar(
+                                "m-profileSummary__userImage",
+                                self.avatar_url(self_id, self_profile.event_id),
+                                "Avatar preview",
+                            ))
+
+                            div ."m-profileSummary__content" {
+                                span ."m-profileSummary__displayName u-displayName" {
+                                    (self_profile.display_name)
+                                }
+                            }
+
+                            @if !self_profile.bio.is_empty() {
+                                div ."m-profileSummary__bio" { (rendered_bio) }
+                            }
+                        }
+                    }
+
+                    div ."m-profileSettings__actions" {
+                        (fragment::button("m-profileSettings__saveButton", "Publish")
+                            .disabled(ro.to_disabled())
+                            .call())
                     }
                 }
             }

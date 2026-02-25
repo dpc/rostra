@@ -976,6 +976,9 @@ emoji-picker {
 .m-profileSummary__bio {
   flex-basis: 100%;
   width: 100%;
+  background-color: var(--color-timeline-bg);
+  border: 1px solid var(--color-timeline-item-border);
+  padding: clamp(0.06rem, 0.185vw, 0.185rem) clamp(0.5rem, 1.5vw, 1.5rem);
 }
 
 .m-profileSummary__bioEdit {
@@ -2078,6 +2081,87 @@ h4.o-settingsContent__sectionHeader {
 
 .o-settingsContent__note a {
   color: var(--color-link);
+}
+
+/* Profile Settings */
+.m-profileSettings {
+  display: flex;
+  flex-direction: column;
+  gap: 1.25rem;
+}
+
+.m-profileSettings__avatarSection {
+  display: flex;
+  align-items: center;
+}
+
+.m-profileSettings__avatarLabel {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  cursor: pointer;
+}
+
+.m-profileSettings__avatar {
+  width: 64px;
+  height: 64px;
+  border-radius: 50%;
+  object-fit: cover;
+}
+
+.m-profileSettings__avatarHint {
+  font-size: 0.85rem;
+  color: var(--color-text-muted);
+}
+
+.m-profileSettings__field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+
+.m-profileSettings__label {
+  font-weight: 600;
+  font-size: 0.9rem;
+}
+
+.m-profileSettings__input {
+  padding: 0.4rem 0.6rem;
+  border: 1px solid var(--color-button-border);
+  border-radius: var(--border-radius-std);
+  font-size: 1rem;
+  background: var(--color-post-bg);
+  color: var(--color-text);
+}
+
+.m-profileSettings__textarea {
+  padding: 0.4rem 0.6rem;
+  border: 1px solid var(--color-button-border);
+  border-radius: var(--border-radius-std);
+  font-size: 1rem;
+  background: var(--color-post-bg);
+  color: var(--color-text);
+  resize: vertical;
+  font-family: inherit;
+  min-height: 10rem;
+}
+
+.m-profileSettings__preview {
+}
+
+.m-profileSettings__previewLabel {
+  margin: 0 0 0.5rem 0;
+  font-size: 0.9rem;
+  color: var(--color-text-muted);
+}
+
+.m-profileSettings__actions {
+  display: flex;
+  gap: 0.5rem;
+}
+
+.m-profileSettings__saveButtonIcon {
+  background: url('/assets/icons/upload.svg') center/contain no-repeat;
 }
 
 .m-followeeList {
