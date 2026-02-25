@@ -147,6 +147,16 @@ pub async fn get_single_post(
             None
         };
 
+        // Load parent post if this is a reply
+        let parent_post = if let Some(reply_to) = post_record.reply_to {
+            client_ref
+                .db()
+                .get_social_post(reply_to.event_id().to_short())
+                .await
+        } else {
+            None
+        };
+
         // Load replies
         let (comments, _) = client_ref
             .db()
@@ -156,7 +166,7 @@ pub async fn get_single_post(
         let ro = state.ro_mode(session.session_token());
 
         let body = html! {
-            // Parent post
+            // This post (with parent context if it's a reply)
             div ."o-mainBarTimeline__item" {
                 (state.render_post_context(
                     &client_ref,
@@ -164,6 +174,14 @@ pub async fn get_single_post(
                     ).event_id(post_record.event_id)
                     .post_thread_id(event_id)
                     .maybe_content(post_record.content.djot_content.as_deref())
+                    .maybe_reply_to(
+                        post_record.reply_to
+                            .map(|reply_to| (
+                                reply_to.rostra_id(),
+                                reply_to.event_id(),
+                                parent_post.as_ref(),
+                            ))
+                    )
                     .timestamp(post_record.ts)
                     .ro(ro)
                     .call().await?)
