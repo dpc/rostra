@@ -404,9 +404,14 @@ img.u-userImage {
     position: sticky;
     top: 0;
     align-self: start;
+    min-width: 250px;
     max-width: 400px;
     padding: 10pt;
     padding-right: 5pt;
+  }
+
+  .o-mainBar {
+    max-width: min(50rem, calc(100% - 250px));
   }
 }
 
@@ -515,7 +520,7 @@ img.u-userImage {
 }
 
 .o-mainBarTimeline__item {
-  padding: clamp(0.1rem, 1vw, 1rem) clamp(0.1rem, 1.5vw, 1.5rem)
+  padding: clamp(0.1rem, 1vw, 1rem) clamp(0.1rem, 2vw, 3rem)
 }
 
 .o-mainBarTimeline__item {
@@ -596,11 +601,6 @@ img.u-userImage {
   & img {
     width: 100%;
   }
-}
-
-.m-postContext__postParent {
-  margin-left: -0.5em;
-  margin-top: -0.5em;
 }
 
 /* Unexpanded (folded) reply-parent's should be truncated, so the response itself is uncluttered */
