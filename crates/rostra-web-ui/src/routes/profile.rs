@@ -214,8 +214,6 @@ impl UiState {
                     div ."o-navBar__userAccount" {
                         (self.render_profile_summary(profile_id, session, ro_mode).await?)
                     }
-
-                    (self.new_post_form(None, ro_mode, Some(session.id())))
                 }
         })
     }

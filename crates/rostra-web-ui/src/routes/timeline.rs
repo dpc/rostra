@@ -733,7 +733,7 @@ impl UiState {
                 {
                     a ."o-mainBarTimeline__back" href="/" onclick="history.back(); return false;" { "<" }
 
-                    @if let TimelineMode::Profile(profile_id) = mode {
+                    @if let TimelineMode::Profile(profile_id) | TimelineMode::ProfileSingle(profile_id, _) = mode {
                         a ."o-mainBarTimeline__profile"
                             ."-active"[mode.is_profile()]
                             href=(mode.to_path())

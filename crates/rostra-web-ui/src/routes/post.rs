@@ -147,11 +147,7 @@ pub async fn get_single_post(
             None
         };
 
-        let navbar = state
-            .timeline_common_navbar()
-            .session(&session)
-            .call()
-            .await?;
+        let navbar = state.render_navbar(author, &session).await?;
         return Ok(Maud(
             state
                 .render_timeline_page(
