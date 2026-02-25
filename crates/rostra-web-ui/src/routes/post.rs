@@ -491,15 +491,15 @@ impl UiState {
                         header ."m-postView__header" {
                             span ."m-postView__userHandle" {
                                 (self.render_user_handle(event_id, author, user_profile.as_ref()))
-                                @if let Some(persona_display_name) = persona_display_name {
-                                    span ."m-postView__personaDisplayName" {
-                                        (format!("({})", persona_display_name))
-                                    }
-                                }
                                 @if let Some(ts) = timestamp {
                                     span ."m-postView__timestamp" {
                                         (format_timestamp(ts))
                                     }
+                                }
+                            }
+                            @if let Some(persona_display_name) = persona_display_name {
+                                span ."m-postView__personaDisplayName" {
+                                    (persona_display_name)
                                 }
                             }
                         }

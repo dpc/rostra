@@ -643,14 +643,13 @@ img.u-userImage {
 .m-postView__userHandle {
   display: flex;
   gap: 2pt;
-  justify-content: space-between;
   align-items: center;
 }
 
 .m-postView__header {
   display: flex;
+  flex-direction: column;
   gap: 2pt;
-  justify-content: space-between;
 }
 
 .m-postView__timestamp {
@@ -664,11 +663,11 @@ img.u-userImage {
 }
 
 .m-postView__personaDisplayName {
-  display: none;
-}
-
-.m-postView__header:hover .m-postView__personaDisplayName {
-  display: inline-block;
+  display: block;
+  font-size: 0.8rem;
+  color: oklch(60% 0 0);
+  opacity: 0.7;
+  line-height: 1;
 }
 
 .m-postView__replies {
