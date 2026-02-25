@@ -296,6 +296,7 @@ impl UiState {
         #[builder(start_fn)] client: &ClientRef<'_>,
         #[builder(start_fn)] author: RostraId,
         persona_display_name: Option<&str>,
+        reply_to_persona_display_name: Option<&str>,
         reply_to: Option<(
             RostraId,
             ShortEventId,
@@ -376,6 +377,7 @@ impl UiState {
                             client,
                             reply_to_author,
                             )
+                            .maybe_persona_display_name(reply_to_persona_display_name)
                             .event_id(reply_to_event_id)
                             .maybe_post_thread_id(post_thread_id)
                             .ro(ro)

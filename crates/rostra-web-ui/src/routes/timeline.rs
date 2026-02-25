@@ -808,6 +808,13 @@ impl UiState {
                                     ).maybe_persona_display_name(
                                         author_personas.get(&(post.author, post.content.persona)).map(AsRef::as_ref)
                                     )
+                                    .maybe_reply_to_persona_display_name(
+                                        post.reply_to.and_then(|reply_to|
+                                            parents.get(&reply_to.event_id().to_short())
+                                                .and_then(|p| author_personas.get(&(p.author, p.content.persona)))
+                                                .map(AsRef::as_ref)
+                                        )
+                                    )
                                     .maybe_reply_to(
                                         post.reply_to
                                             .map(|reply_to| (
