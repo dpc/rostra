@@ -568,10 +568,14 @@ img.u-userImage {
 
 .m-postView__main {
   display: flex;
-  /* min-width: 20rem; */
+  flex-direction: column;
   max-width: 50rem;
 }
 
+.m-postView__topRow {
+  display: flex;
+  align-items: center;
+}
 
 .m-postView__userImage {
   margin: 2pt;
@@ -581,14 +585,22 @@ img.u-userImage {
   padding-left: 10pt;
   width: 100%;
   min-width: 0;
+  align-self: flex-start;
 }
 
 .m-postView__content {
   position: relative;
+  padding-left: .1em;
+  padding-right: .1em;
 
   & img {
     width: 100%;
   }
+}
+
+.m-postContext__postParent {
+  margin-left: -0.5em;
+  margin-top: -0.5em;
 }
 
 /* Unexpanded (folded) reply-parent's should be truncated, so the response itself is uncluttered */
@@ -611,8 +623,8 @@ img.u-userImage {
   height: 10rem;
   /* top: 40%; */
   background: linear-gradient(to bottom,
-      rgba(59, 59, 59, 0%) 20%,
-      var(--color-timeline-bg) 70%);
+      rgba(59, 59, 59, 0%) 0%,
+      var(--color-timeline-bg) 50%);
   z-index: 1;
 }
 
@@ -2112,8 +2124,7 @@ h4.o-settingsContent__sectionHeader {
   min-height: 10rem;
 }
 
-.m-profileSettings__preview {
-}
+.m-profileSettings__preview {}
 
 .m-profileSettings__previewLabel {
   margin: 0 0 0.5rem 0;
@@ -2707,7 +2718,8 @@ h4.o-settingsContent__sectionHeader {
   flex-direction: column;
   /* Use flex-grow to fill available space in parent */
   flex: 1;
-  min-height: 0; /* Allow shrinking in flex context */
+  min-height: 0;
+  /* Allow shrinking in flex context */
   background-color: var(--color-timeline-bg);
   border: 1px solid var(--color-timeline-item-border);
   border-top: 0;
@@ -2727,7 +2739,8 @@ h4.o-settingsContent__sectionHeader {
   padding: 0;
   display: flex;
   flex-direction: column;
-  min-height: 0; /* Critical for nested flex scroll */
+  min-height: 0;
+  /* Critical for nested flex scroll */
 }
 
 .o-shoutbox__loadOlder {
@@ -2782,6 +2795,7 @@ h4.o-settingsContent__sectionHeader {
   from {
     background-color: var(--color-post-highlight-bg);
   }
+
   to {
     background-color: transparent;
   }
@@ -2878,4 +2892,3 @@ h4.o-settingsContent__sectionHeader {
 .o-shoutbox__submitButtonIcon {
   background: url('/assets/icons/arrow-right.svg') center/contain no-repeat;
 }
-

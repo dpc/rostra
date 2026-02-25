@@ -483,62 +483,64 @@ impl UiState {
         let post_main = html! {
             div ."m-postView__main"
             {
-                (fragment::avatar("m-postView__userImage", self.avatar_url(author, user_profile.as_ref().map(|p| p.event_id).unwrap_or(ShortEventId::ZERO)), &format!("{display_name}'s avatar")))
+                div ."m-postView__topRow" {
+                    (fragment::avatar("m-postView__userImage", self.avatar_url(author, user_profile.as_ref().map(|p| p.event_id).unwrap_or(ShortEventId::ZERO)), &format!("{display_name}'s avatar")))
 
-                div ."m-postView__contentSide" {
+                    div ."m-postView__contentSide" {
 
-                    header ."m-postView__header" {
-                        span ."m-postView__userHandle" {
-                            (self.render_user_handle(event_id, author, user_profile.as_ref()))
-                            @if let Some(persona_display_name) = persona_display_name {
-                                span ."m-postView__personaDisplayName" {
-                                    (format!("({})", persona_display_name))
-                                }
-                            }
-                            @if let Some(ts) = timestamp {
-                                span ."m-postView__timestamp" {
-                                    (format_timestamp(ts))
-                                }
-                            }
-                        }
-                        @if let Some(event_id) = event_id {
-                            details ."m-postView__actionMenu" {
-                                summary ."m-postView__actionMenuTrigger" { "\u{22EE}" }
-                                div ."m-postView__actionMenuDropdown" {
-                                    a ."m-postView__actionMenuItem" href=(format!("/post/{}/{}", author, event_id)) {
-                                        "Share..."
+                        header ."m-postView__header" {
+                            span ."m-postView__userHandle" {
+                                (self.render_user_handle(event_id, author, user_profile.as_ref()))
+                                @if let Some(persona_display_name) = persona_display_name {
+                                    span ."m-postView__personaDisplayName" {
+                                        (format!("({})", persona_display_name))
                                     }
-                                    @if author == client.rostra_id() {
-                                        @if let Some(ctx) = post_thread_id {
-                                            @let post_target = post_html_id(ctx, event_id);
-                                            (fragment::ajax_button(
-                                                &format!("/post/{author}/{event_id}/delete"),
-                                                "post",
-                                                &post_target,
-                                                "m-postView__deleteMenuItem",
-                                                "Delete",
-                                            )
-                                            .disabled(ro.to_disabled())
-                                            .variant("--danger")
-                                            .before_js("if (!confirm('Are you sure you want to delete this post?')) { $event.preventDefault(); return; }")
-                                            .call())
-                                        }
+                                }
+                                @if let Some(ts) = timestamp {
+                                    span ."m-postView__timestamp" {
+                                        (format_timestamp(ts))
                                     }
                                 }
                             }
                         }
                     }
-
-                    div."m-postView__content"
-                        ."-missing"[post_content_rendered.is_none()]
-                        ."-present"[post_content_rendered.is_some()]
-                        id=[post_thread_id.zip(event_id).map(|(ctx, id)| post_content_html_id(ctx, id))]
-                    {
-                        @if let Some(post_content_rendered) = post_content_rendered {
-                            (post_content_rendered)
-                        } @else {
-                            p { "Post missing" }
+                    @if let Some(event_id) = event_id {
+                        details ."m-postView__actionMenu" {
+                            summary ."m-postView__actionMenuTrigger" { "\u{22EE}" }
+                            div ."m-postView__actionMenuDropdown" {
+                                a ."m-postView__actionMenuItem" href=(format!("/post/{}/{}", author, event_id)) {
+                                    "Share..."
+                                }
+                                @if author == client.rostra_id() {
+                                    @if let Some(ctx) = post_thread_id {
+                                        @let post_target = post_html_id(ctx, event_id);
+                                        (fragment::ajax_button(
+                                            &format!("/post/{author}/{event_id}/delete"),
+                                            "post",
+                                            &post_target,
+                                            "m-postView__deleteMenuItem",
+                                            "Delete",
+                                        )
+                                        .disabled(ro.to_disabled())
+                                        .variant("--danger")
+                                        .before_js("if (!confirm('Are you sure you want to delete this post?')) { $event.preventDefault(); return; }")
+                                        .call())
+                                    }
+                                }
+                            }
                         }
+                    }
+                }
+
+                div."m-postView__content"
+                    ."-missing"[post_content_rendered.is_none()]
+                    ."-present"[post_content_rendered.is_some()]
+                    id=[post_thread_id.zip(event_id).map(|(ctx, id)| post_content_html_id(ctx, id))]
+                {
+                    @if let Some(post_content_rendered) = post_content_rendered {
+                        (post_content_rendered)
+                    } @else {
+                        p { "Post missing" }
                     }
                 }
             }
