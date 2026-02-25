@@ -1,4 +1,5 @@
 use maud::{DOCTYPE, Markup, html};
+use rostra_util::is_rostra_dev_mode_set;
 
 use crate::UiState;
 use crate::error::RequestResult;
@@ -38,7 +39,11 @@ impl UiState {
                 link rel="stylesheet" type="text/css" href="/assets/libs/prismjs/prism.min.css" media="(prefers-color-scheme: light)";
                 link rel="stylesheet" type="text/css" href="/assets/libs/prismjs/prism-tomorrow.min.css" media="(prefers-color-scheme: dark)";
                 link rel="stylesheet" type="text/css" href="/assets/libs/prismjs/prism-toolbar.min.css";
-                link rel="icon" type="image/png" href="/assets/favicon.svg";
+                @if is_rostra_dev_mode_set() {
+                    link rel="icon" type="image/svg+xml" href="/assets/favicon-dev.svg";
+                } @else {
+                    link rel="icon" type="image/svg+xml" href="/assets/favicon.svg";
+                }
                 title { (page_title) }
                 // Feed discovery links
                 @if let Some(links) = feed_links {
