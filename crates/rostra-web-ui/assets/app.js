@@ -243,6 +243,15 @@ document.addEventListener("DOMContentLoaded", () => {
     }
   });
 
+  // Close action menus on click outside
+  document.addEventListener("click", (e) => {
+    document.querySelectorAll(".m-postView__actionMenu[open]").forEach((menu) => {
+      if (!menu.contains(e.target)) {
+        menu.removeAttribute("open");
+      }
+    });
+  });
+
   // Trigger Prism.js highlighting
   if (window.Prism) {
     Prism.highlightAll();
