@@ -763,10 +763,19 @@ impl UiState {
                                 span ."m-inlineReply__cancelButtonIcon" {}
                             }
                         }
-                        (fragment::button("m-inlineReply__previewButton", "Preview")
-                            .disabled(ro.to_disabled())
-                            .call())
+                        @if ro.is_ro() {
+                            (fragment::button("m-inlineReply__logoutButton", "Logout")
+                                .form("ro-logout-form")
+                                .call())
+                        } @else {
+                            (fragment::button("m-inlineReply__previewButton", "Preview")
+                                .call())
+                        }
                     }
+                }
+
+                @if ro.is_ro() {
+                    form id="ro-logout-form" action="/unlock/logout" method="post" style="display: none;" {}
                 }
 
                 // Cancel form (outside main form to avoid nesting)
@@ -956,11 +965,20 @@ impl UiState {
                                 span ."m-newPostForm__attachButtonIcon" {}
                             }
                         }
-                        (fragment::button("m-newPostForm__previewButton", "Preview")
-                            .disabled(ro.to_disabled())
-                            .call())
+                        @if ro.is_ro() {
+                            (fragment::button("m-newPostForm__logoutButton", "Logout")
+                                .form("ro-logout-form")
+                                .call())
+                        } @else {
+                            (fragment::button("m-newPostForm__previewButton", "Preview")
+                                .call())
+                        }
                     }
                 }
+            }
+
+            @if ro.is_ro() {
+                form id="ro-logout-form" action="/unlock/logout" method="post" style="display: none;" {}
             }
 
             // Separate forms for media operations (outside main form to avoid nesting)

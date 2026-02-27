@@ -1079,6 +1079,17 @@ emoji-picker {
   background: url('/assets/icons/arrow-right.svg') center/contain no-repeat;
 }
 
+.m-newPostForm__logoutButton {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-left: auto;
+}
+
+.m-newPostForm__logoutButtonIcon {
+  background: url('/assets/icons/arrow-right-from-bracket.svg') center/contain no-repeat;
+}
+
 .m-newPostForm__attachButtonIcon {
   background: url('/assets/icons/paperclip.svg') center/contain no-repeat;
 }
@@ -2693,6 +2704,16 @@ h4.o-settingsContent__sectionHeader {
 
 .m-inlineReply__previewButtonIcon {
   background: url('/assets/icons/arrow-right.svg') center/contain no-repeat;
+}
+
+.m-inlineReply__logoutButton {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.m-inlineReply__logoutButtonIcon {
+  background: url('/assets/icons/arrow-right-from-bracket.svg') center/contain no-repeat;
 }
 
 
