@@ -1,8 +1,9 @@
+use std::collections::BTreeSet;
 use std::sync::Arc;
 
 use rostra_client::Client;
 use rostra_client::error::PostError;
-use rostra_core::event::PersonaId;
+use rostra_core::event::PersonaTag;
 use rostra_core::id::RostraIdSecretKey;
 use snafu::{ResultExt, Snafu};
 use tracing::{info, warn};
@@ -35,7 +36,7 @@ pub type PublisherResult<T> = std::result::Result<T, PublisherError>;
 pub struct Publisher {
     client: Arc<Client>,
     secret: RostraIdSecretKey,
-    persona_id: PersonaId,
+    persona_tags: BTreeSet<PersonaTag>,
 }
 
 impl Publisher {
@@ -43,7 +44,7 @@ impl Publisher {
         Self {
             client,
             secret,
-            persona_id: PersonaId(0), // Default persona
+            persona_tags: BTreeSet::new(),
         }
     }
 
@@ -126,7 +127,7 @@ impl Publisher {
                 self.secret,
                 body,
                 None, // No reply to
-                self.persona_id,
+                self.persona_tags.clone(),
             )
             .await
             .context(PostSnafu)?;

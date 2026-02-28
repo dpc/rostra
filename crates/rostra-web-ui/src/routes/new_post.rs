@@ -1,9 +1,11 @@
-use axum::Form;
+use std::collections::BTreeSet;
+
 use axum::extract::{Query, State};
 use axum::http::HeaderMap;
 use axum::response::IntoResponse;
+use axum_extra::extract::Form;
 use maud::{Markup, PreEscaped, html};
-use rostra_core::event::PersonaId;
+use rostra_core::event::PersonaTag;
 use rostra_core::id::{RostraId, ToShort as _};
 use rostra_core::{ExternalEventId, ShortEventId};
 use serde::Deserialize;
@@ -26,7 +28,8 @@ use crate::util::extractors::ajax_request::AjaxRequest;
 pub struct PostInput {
     reply_to: Option<ExternalEventId>,
     content: String,
-    persona: Option<u8>,
+    #[serde(default)]
+    persona_tags: Vec<String>,
     /// For inline reply mode: the post thread context ID
     post_thread_id: Option<ShortEventId>,
     /// Where to redirect after posting (no-JS fallback)
@@ -85,20 +88,22 @@ pub async fn post_new_post(
     let client_handle = state.client(session.id()).await?;
     let client_ref = client_handle.client_ref()?;
 
-    // Save the selected persona in a cookie
-    if let Some(persona_id) = form.persona {
-        cookies.save_persona(client_ref.rostra_id(), persona_id);
+    // Convert form persona_tags to BTreeSet<PersonaTag>
+    let persona_tags: BTreeSet<PersonaTag> = form
+        .persona_tags
+        .iter()
+        .filter_map(|s| PersonaTag::new(s).ok())
+        .collect();
+
+    // Save the selected persona tags in a cookie
+    if !persona_tags.is_empty() {
+        cookies.save_persona_tags(client_ref.rostra_id(), &persona_tags);
     }
 
     let redirect_to = form.redirect.clone();
 
     let event = client_ref
-        .social_post(
-            id_secret,
-            form.content.clone(),
-            form.reply_to,
-            PersonaId(form.persona.unwrap_or_default()),
-        )
+        .social_post(id_secret, form.content.clone(), form.reply_to, persona_tags)
         .await?;
 
     // No-JS: redirect back to the page the user was on
@@ -251,8 +256,16 @@ pub async fn post_post_preview_dialog(
         });
     }
 
-    let personas = client_ref.db().get_personas_for_id(self_id).await;
-    let saved_persona = cookies.get_persona(self_id);
+    let mut persona_tags_for_id = client_ref.db().get_persona_tags_for_id(self_id).await;
+    persona_tags_for_id.extend(PersonaTag::defaults());
+    let saved_persona_tags = {
+        let tags = cookies.get_persona_tags(self_id);
+        if tags.is_empty() {
+            BTreeSet::from([PersonaTag::personal()])
+        } else {
+            tags
+        }
+    };
 
     let preview_content = state
         .render_post_context(&client.client_ref()?, self_id)
@@ -302,19 +315,11 @@ pub async fn post_post_preview_dialog(
 
                             div ."o-previewDialog__actionContainer" {
                                 div ."o-previewDialog__personaContainer" {
-                                    select
-                                        name="persona"
-                                        id="persona-select"
-                                        ."o-previewDialog__personaSelect"
-                                        x-autofocus
-                                    {
-                                        @for (persona_id, persona_display_name) in &personas {
-                                            option
-                                                value=(persona_id)
-                                                selected[saved_persona.map_or(false, |id| PersonaId(id) == *persona_id)]
-                                            { (persona_display_name) }
-                                        }
-                                    }
+                                    (fragment::persona_tag_select("persona_tags")
+                                        .available_tags(&persona_tags_for_id)
+                                        .selected_tags(&saved_persona_tags)
+                                        .id("post-persona-tags")
+                                        .call())
                                 }
 
                                 div ."o-previewDialog__actionButtons" {
@@ -354,14 +359,11 @@ pub async fn post_post_preview_dialog(
 
                 div ."o-previewDialog__actionContainer" {
                     div ."o-previewDialog__personaContainer" {
-                        select name="persona" ."o-previewDialog__personaSelect" {
-                            @for (persona_id, persona_display_name) in &personas {
-                                option
-                                    value=(persona_id)
-                                    selected[saved_persona.map_or(false, |id| PersonaId(id) == *persona_id)]
-                                { (persona_display_name) }
-                            }
-                        }
+                        (fragment::persona_tag_select("persona_tags")
+                            .available_tags(&persona_tags_for_id)
+                            .selected_tags(&saved_persona_tags)
+                            .id("post-persona-tags-nojs")
+                            .call())
                     }
 
                     (fragment::button("o-previewDialog__submitButton", "Post").call())

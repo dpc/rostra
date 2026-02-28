@@ -482,7 +482,10 @@ impl UiState {
         &self,
         session: &UserSession,
         _user_id: RostraId,
-        followees: Vec<(RostraId, rostra_core::event::PersonaSelector)>,
+        followees: Vec<(
+            RostraId,
+            rostra_core::event::content_kind::PersonasTagsSelector,
+        )>,
     ) -> RequestResult<Markup> {
         Ok(html! {
             div ."o-settingsContent" {
@@ -524,7 +527,10 @@ impl UiState {
     pub async fn render_followee_list(
         &self,
         session: &UserSession,
-        followees: Vec<(RostraId, rostra_core::event::PersonaSelector)>,
+        followees: Vec<(
+            RostraId,
+            rostra_core::event::content_kind::PersonasTagsSelector,
+        )>,
     ) -> RequestResult<Markup> {
         let client = self.client(session.id()).await?;
         let client_ref = client.client_ref()?;

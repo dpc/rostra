@@ -1,6 +1,9 @@
 //! Reusable HTML fragments for the web UI.
 
+use std::collections::BTreeSet;
+
 use maud::{Markup, html};
+use rostra_core::event::PersonaTag;
 
 /// Renders a user avatar image.
 pub fn avatar(class: &str, src: impl maud::Render, alt: &str) -> Markup {
@@ -262,6 +265,74 @@ pub fn dialog_escape_handler(dialog_id: &str) -> Markup {
                     document.addEventListener('keydown', window.{handler_name});
                 }}
             "#)))
+        }
+    }
+}
+
+/// Renders a persona tag multi-select combobox widget.
+///
+/// Without JS, the checkboxes are displayed as a plain visible list.
+/// With JS, they are wrapped in a dropdown toggled by a button.
+#[bon::builder]
+pub fn persona_tag_select(
+    /// HTML name attribute for the checkboxes (e.g., "persona_tags" or
+    /// "personas")
+    #[builder(start_fn)]
+    name: &str,
+    /// Available tags to show as options
+    available_tags: &BTreeSet<PersonaTag>,
+    /// Tags that should be pre-checked
+    selected_tags: &BTreeSet<PersonaTag>,
+    /// Unique HTML id prefix for this instance
+    id: &str,
+    /// Label to show when no tags are selected (defaults to "Select tags")
+    empty_label: Option<&str>,
+) -> Markup {
+    let empty_label = empty_label.unwrap_or("Select tags");
+    let checked_labels: Vec<&str> = available_tags
+        .iter()
+        .filter(|t| selected_tags.contains(t))
+        .map(PersonaTag::as_str)
+        .collect();
+    let toggle_label = if checked_labels.is_empty() {
+        empty_label.to_string()
+    } else {
+        checked_labels.join(", ")
+    };
+
+    html! {
+        div ."m-personaTagSelect" data-id=(id) data-empty-label=(empty_label) {
+            // Toggle button — hidden by default, shown when JS adds .-initialized
+            div ."m-personaTagSelect__toggle"
+                onclick="personaTagSelectToggle(this)"
+            {
+                span ."m-personaTagSelect__toggleLabel" { (toggle_label) }
+                span ."m-personaTagSelect__toggleArrow" { "\u{25be}" }
+            }
+
+            div ."m-personaTagSelect__dropdown" {
+                div ."m-personaTagSelect__options" {
+                    @for tag in available_tags {
+                        label ."m-personaTagSelect__option" {
+                            input
+                                type="checkbox"
+                                name=(name)
+                                value=(tag.as_str())
+                                checked[selected_tags.contains(tag)]
+                                onchange="personaTagSelectChanged(this)"
+                            {}
+                            span { (tag.as_str()) }
+                        }
+                    }
+                }
+
+                input
+                    ."m-personaTagSelect__addInput"
+                    type="text"
+                    placeholder="custom"
+                    maxlength="32"
+                {}
+            }
         }
     }
 }

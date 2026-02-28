@@ -1,6 +1,7 @@
 pub mod content;
 pub mod content_kind;
 
+use std::collections::BTreeSet;
 use std::{fmt, str};
 
 pub use content::*;
@@ -27,6 +28,9 @@ use crate::{
     array_type_define, array_type_impl_base64_str, array_type_impl_serde,
     array_type_impl_zero_default,
 };
+
+/// Max length for a persona tag string
+const PERSONA_TAG_MAX_LEN: usize = 32;
 
 /// Convenience extension trait to unify getting event data from all versions
 /// of [`Event`].
@@ -228,6 +232,97 @@ impl str::FromStr for PersonaId {
         Ok(PersonaId(u8::from_str(s)?))
     }
 }
+
+/// A persona tag — a short lowercase string used to categorize posts.
+///
+/// Tags replace the old numeric `PersonaId` system. Posts can have multiple
+/// tags, and followers can filter by tags.
+#[cfg_attr(feature = "serde", derive(::serde::Serialize, ::serde::Deserialize))]
+#[cfg_attr(feature = "serde", serde(transparent))]
+#[cfg_attr(feature = "bincode", derive(::bincode::Encode, ::bincode::Decode))]
+#[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
+pub struct PersonaTag(String);
+
+impl PersonaTag {
+    /// The three default persona tags, corresponding to the legacy
+    /// `PersonaId(0)`, `PersonaId(1)`, `PersonaId(2)`.
+    pub fn defaults() -> BTreeSet<Self> {
+        BTreeSet::from([Self::personal(), Self::professional(), Self::civic()])
+    }
+
+    pub fn personal() -> Self {
+        Self("personal".into())
+    }
+
+    pub fn professional() -> Self {
+        Self("professional".into())
+    }
+
+    pub fn civic() -> Self {
+        Self("civic".into())
+    }
+
+    /// Convert a legacy `PersonaId` to a `PersonaTag`.
+    pub fn from_persona_id(id: PersonaId) -> Option<Self> {
+        match id.0 {
+            0 => Some(Self::personal()),
+            1 => Some(Self::professional()),
+            2 => Some(Self::civic()),
+            _ => None,
+        }
+    }
+
+    /// Create a new persona tag, validating and lowercasing the input.
+    pub fn new(s: impl Into<String>) -> Result<Self, PersonaTagError> {
+        let s = s.into().to_lowercase();
+        if s.is_empty() {
+            return Err(PersonaTagError::Empty);
+        }
+        if PERSONA_TAG_MAX_LEN < s.len() {
+            return Err(PersonaTagError::TooLong);
+        }
+        Ok(Self(s))
+    }
+
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+#[derive(Debug, Clone)]
+pub enum PersonaTagError {
+    Empty,
+    TooLong,
+}
+
+impl fmt::Display for PersonaTagError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            PersonaTagError::Empty => write!(f, "Persona tag cannot be empty"),
+            PersonaTagError::TooLong => write!(
+                f,
+                "Persona tag too long (max {PERSONA_TAG_MAX_LEN} characters)"
+            ),
+        }
+    }
+}
+
+impl std::error::Error for PersonaTagError {}
+
+impl fmt::Display for PersonaTag {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(&self.0)
+    }
+}
+
+impl str::FromStr for PersonaTag {
+    type Err = PersonaTagError;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        Self::new(s)
+    }
+}
+
 pub trait SignedEventExt: EventExt {
     fn sig(&self) -> EventSignature;
 }

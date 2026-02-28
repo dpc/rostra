@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{BTreeSet, HashMap};
 use std::marker::PhantomData;
 use std::net::Ipv4Addr;
 use std::ops;
@@ -16,7 +16,7 @@ use iroh::address_lookup::pkarr::PkarrPublisher;
 use iroh_base::EndpointAddr;
 use rostra_client_db::{Database, DbResult, IdsFolloweesRecord, IdsFollowersRecord, WotData};
 use rostra_core::event::{
-    Event, EventContentRaw, IrohNodeId, PersonaId, PersonaSelector, SignedEvent, SocialPost,
+    Event, EventContentRaw, IrohNodeId, PersonaTag, PersonasTagsSelector, SignedEvent, SocialPost,
     VerifiedEvent, VerifiedEventContent, content_kind,
 };
 use rostra_core::id::{RostraId, RostraIdSecretKey};
@@ -778,22 +778,11 @@ impl Client {
         id_secret: RostraIdSecretKey,
         body: String,
         reply_to: Option<ExternalEventId>,
-        persona: PersonaId,
+        persona_tags: BTreeSet<PersonaTag>,
     ) -> PostResult<VerifiedEvent> {
-        let (content, reaction) =
-            if let Some(reaction) = content_kind::SocialPost::is_reaction(&reply_to, &body) {
-                (None, Some(reaction.to_owned()))
-            } else {
-                (Some(body), None)
-            };
         self.publish_event(
             id_secret,
-            content_kind::SocialPost {
-                djot_content: content,
-                persona,
-                reply_to,
-                reaction,
-            },
+            content_kind::SocialPost::new(body, reply_to, persona_tags),
         )
         .call()
         .await
@@ -827,14 +816,15 @@ impl Client {
         &self,
         id_secret: RostraIdSecretKey,
         followee_id: RostraId,
-        selector: PersonaSelector,
+        tags_selector: PersonasTagsSelector,
     ) -> PostResult<VerifiedEvent> {
         self.publish_event(
             id_secret,
             content_kind::Follow {
                 followee: followee_id,
-                selector: Some(selector),
+                selector: None,
                 persona: None,
+                persona_tags_selector: Some(tags_selector),
             },
         )
         .call()
@@ -852,6 +842,7 @@ impl Client {
                 followee,
                 persona: None,
                 selector: None,
+                persona_tags_selector: None,
             },
         )
         .call()
@@ -899,12 +890,11 @@ impl Client {
 
                     if event_and_content.is_none() {
                         event_and_content = Some({
-                            let (event, content) = Event::builder(&SocialPost {
-                                djot_content: Some(body.clone()),
-                                persona: PersonaId(0),
-                                reply_to: None,
-                                reaction: None,
-                            })
+                            let (event, content) = Event::builder(&SocialPost::new(
+                                body.clone(),
+                                None,
+                                BTreeSet::new(),
+                            ))
                             .author(self.id)
                             .build()?;
 

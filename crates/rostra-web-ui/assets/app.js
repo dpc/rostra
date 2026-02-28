@@ -229,10 +229,112 @@ function doMediaUpload(inputEl, file) {
 }
 
 // =============================================================================
+// Persona Tag Multi-Select Combobox
+// =============================================================================
+
+function initPersonaTagSelects() {
+  document
+    .querySelectorAll(".m-personaTagSelect:not(.-initialized)")
+    .forEach((el) => {
+      el.classList.add("-initialized");
+      updatePersonaTagSelectLabel(el);
+    });
+}
+
+function personaTagSelectToggle(toggleEl) {
+  const widget = toggleEl.closest(".m-personaTagSelect");
+  const wasOpen = widget.classList.contains("-open");
+  widget.classList.toggle("-open");
+
+  // Position the fixed dropdown relative to the toggle button
+  if (!wasOpen) {
+    const dropdown = widget.querySelector(".m-personaTagSelect__dropdown");
+    const rect = toggleEl.getBoundingClientRect();
+    dropdown.style.top = rect.bottom + "px";
+    dropdown.style.left = rect.left + "px";
+    dropdown.style.width = Math.max(rect.width, 160) + "px";
+  }
+}
+
+function updatePersonaTagSelectLabel(widget) {
+  const checked = [
+    ...widget.querySelectorAll("input[type=checkbox]:checked"),
+  ].map((cb) => cb.value);
+  const label = widget.querySelector(".m-personaTagSelect__toggleLabel");
+  const emptyLabel = widget.dataset.emptyLabel || "Select tags";
+  label.textContent =
+    checked.length > 0 ? checked.join(", ") : emptyLabel;
+}
+
+function personaTagSelectChanged(checkbox) {
+  const widget = checkbox.closest(".m-personaTagSelect");
+  updatePersonaTagSelectLabel(widget);
+}
+
+function personaTagSelectAddFromInput(input) {
+  const tag = input.value.trim().toLowerCase();
+  if (!tag || tag.length > 32) return;
+
+  const widget = input.closest(".m-personaTagSelect");
+
+  // Check if tag already exists
+  const existing = widget.querySelector(
+    `input[type=checkbox][value="${CSS.escape(tag)}"]`,
+  );
+  if (existing) {
+    existing.checked = true;
+  } else {
+    const name =
+      widget.querySelector("input[type=checkbox]")?.name || "persona_tags";
+    const options = widget.querySelector(".m-personaTagSelect__options");
+    const label = document.createElement("label");
+    label.className = "m-personaTagSelect__option";
+    label.innerHTML =
+      `<input type="checkbox" name="${name}" value="${tag}" checked onchange="personaTagSelectChanged(this)">` +
+      `<span>${tag}</span>`;
+    options.appendChild(label);
+  }
+  input.value = "";
+  updatePersonaTagSelectLabel(widget);
+}
+
+// Close persona tag selects on outside click
+document.addEventListener("click", (e) => {
+  document.querySelectorAll(".m-personaTagSelect.-open").forEach((el) => {
+    if (!el.contains(e.target)) el.classList.remove("-open");
+  });
+});
+
+// Enter in add-input: add the tag, prevent form submit
+document.addEventListener("keydown", (e) => {
+  if (
+    e.key === "Enter" &&
+    e.target.matches(".m-personaTagSelect__addInput")
+  ) {
+    e.preventDefault();
+    personaTagSelectAddFromInput(e.target);
+  }
+});
+
+// Blur on add-input: add the tag if non-empty
+document.addEventListener(
+  "focusout",
+  (e) => {
+    if (e.target.matches(".m-personaTagSelect__addInput")) {
+      personaTagSelectAddFromInput(e.target);
+    }
+  },
+  true,
+);
+
+// =============================================================================
 // DOMContentLoaded handlers
 // =============================================================================
 
 document.addEventListener("DOMContentLoaded", () => {
+  // Initialize persona tag select widgets
+  initPersonaTagSelects();
+
   // Prevent flickering of images when they are already in the cache
   const images = document.querySelectorAll('img[loading="lazy"]');
   images.forEach((img) => {
@@ -298,6 +400,11 @@ document.addEventListener("DOMContentLoaded", () => {
 // =============================================================================
 // Window event listeners
 // =============================================================================
+
+// Re-initialize persona tag selects after AJAX swaps (e.g. preview dialog)
+window.addEventListener("ajax:after", () => {
+  initPersonaTagSelects();
+});
 
 // Suppress unhandled promise rejections from TypeErrors — these are typically
 // transient (e.g. emoji-picker background updates, clicking during page load)

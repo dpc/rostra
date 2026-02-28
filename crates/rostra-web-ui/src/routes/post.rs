@@ -1,4 +1,4 @@
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeSet, HashMap, HashSet};
 
 use axum::extract::{Path, Query, State};
 use axum::response::IntoResponse;
@@ -7,7 +7,7 @@ use rostra_client::ClientRef;
 use rostra_client::util::rpc::get_event_content_from_followers;
 use rostra_client_db::IdSocialProfileRecord;
 use rostra_client_db::social::SocialPostRecord;
-use rostra_core::event::SocialPost;
+use rostra_core::event::{PersonaTag, SocialPost};
 use rostra_core::id::{RostraId, ToShort as _};
 use rostra_core::{ExternalEventId, ShortEventId, Timestamp};
 use serde::Deserialize;
@@ -268,12 +268,7 @@ pub async fn delete_post(
     client
         .publish_event(
             id_secret,
-            rostra_core::event::SocialPost {
-                djot_content: None,
-                persona: rostra_core::event::PersonaId(0),
-                reply_to: None,
-                reaction: None,
-            },
+            rostra_core::event::SocialPost::new(String::new(), None, Default::default()),
         )
         .replace(event_id)
         .call()
@@ -355,8 +350,7 @@ impl UiState {
         &self,
         #[builder(start_fn)] client: &ClientRef<'_>,
         #[builder(start_fn)] author: RostraId,
-        persona_display_name: Option<&str>,
-        reply_to_persona_display_name: Option<&str>,
+        persona_tags: Option<&BTreeSet<PersonaTag>>,
         reply_to: Option<(
             RostraId,
             ShortEventId,
@@ -414,7 +408,7 @@ impl UiState {
         };
         let post_view = self
             .render_post_view(client, author)
-            .maybe_persona_display_name(persona_display_name)
+            .maybe_persona_tags(persona_tags)
             .maybe_event_id(event_id)
             .maybe_post_thread_id(post_thread_id)
             .maybe_content(content)
@@ -433,11 +427,12 @@ impl UiState {
                     div ."m-postContext__postParent"
                         onclick="this.classList.add('-expanded')"
                     {
+                        @let reply_to_tags = reply_to_post.map(|r| r.content.persona_tags());
                         (Box::pin(self.render_post_view(
                             client,
                             reply_to_author,
                             )
-                            .maybe_persona_display_name(reply_to_persona_display_name)
+                            .maybe_persona_tags(reply_to_tags.as_ref())
                             .event_id(reply_to_event_id)
                             .maybe_post_thread_id(post_thread_id)
                             .ro(ro)
@@ -463,7 +458,7 @@ impl UiState {
         &self,
         #[builder(start_fn)] client: &ClientRef<'_>,
         #[builder(start_fn)] author: RostraId,
-        persona_display_name: Option<&str>,
+        persona_tags: Option<&BTreeSet<PersonaTag>>,
         event_id: Option<ShortEventId>,
         /// Post thread ID for HTML element IDs (to disambiguate same post in
         /// multiple places). If not provided, defaults to event_id.
@@ -559,9 +554,13 @@ impl UiState {
                                     }
                                 }
                             }
-                            @if let Some(persona_display_name) = persona_display_name {
-                                span ."m-postView__personaDisplayName" {
-                                    (persona_display_name)
+                            @if let Some(tags) = persona_tags {
+                                @if !tags.is_empty() {
+                                    div ."m-postView__personaTags" {
+                                        @for tag in tags.iter() {
+                                            span ."m-postView__personaTag" { (tag.as_str()) }
+                                        }
+                                    }
                                 }
                             }
                         }

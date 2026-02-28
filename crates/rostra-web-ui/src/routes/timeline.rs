@@ -1,4 +1,4 @@
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::time::Duration;
 
 use axum::Form;
@@ -11,7 +11,7 @@ use rostra_client_db::IdSocialProfileRecord;
 use rostra_client_db::social::{
     EventPaginationCursor, ReceivedAtPaginationCursor, SocialPostRecord,
 };
-use rostra_core::event::{EventKind, PersonaId, PersonaSelector, SocialPost, content_kind};
+use rostra_core::event::{EventKind, PersonasTagsSelector, SocialPost, content_kind};
 use rostra_core::id::{RostraId, ToShort as _};
 use rostra_core::{ShortEventId, Timestamp};
 use rostra_util_error::FmtCompact as _;
@@ -281,7 +281,7 @@ impl UiState {
         let mut new_posts = client_ref.new_posts_subscribe();
         let mut new_shoutbox = client_ref.new_shoutbox_subscribe();
 
-        let followees: HashMap<RostraId, PersonaSelector> = client_ref
+        let followees: HashMap<RostraId, PersonasTagsSelector> = client_ref
             .db()
             .get_followees(self_id)
             .await
@@ -317,7 +317,13 @@ impl UiState {
 
                     if followees
                         .get(&author)
-                        .is_some_and(|selector| selector.matches(social_post.persona))
+                        .is_some_and(|selector| {
+                            let tags = social_post.persona_tags();
+                            if tags.is_empty() {
+                                return true;
+                            }
+                            selector.matches_tags(&tags)
+                        })
                     {
                         followees_count += 1;
                     }
@@ -695,17 +701,8 @@ impl UiState {
             )
             .await;
 
-        let author_personas: HashSet<(RostraId, PersonaId)> = filtered_posts
-            .iter()
-            .map(|post| (post.author, post.content.persona))
-            .chain(
-                parents
-                    .iter()
-                    .map(|post| (post.1.author, post.1.content.persona)),
-            )
-            .collect();
-
-        let author_personas = client.db()?.get_personas(author_personas.into_iter()).await;
+        // Persona tags are embedded in post content, no batch lookup needed.
+        // We just pass them through directly to the render functions.
 
         let ws_url = format!(
             "websocket('/updates?followees={f}&network={n}&notifications={no}&shoutbox={s}')",
@@ -796,6 +793,7 @@ impl UiState {
                 div id="timeline-posts" x-merge="append" {
                     @for post in &filtered_posts {
                         @if let Some(djot_content) = post.content.djot_content.as_ref() {
+                            @let effective_tags = post.content.persona_tags();
                             div ."o-mainBarTimeline__item"
                             ."-reply"[post.reply_to.is_some()]
                             ."-post"[post.reply_to.is_none()]
@@ -804,16 +802,7 @@ impl UiState {
                                     self.render_post_context(
                                         &client_ref,
                                         post.author,
-                                    ).maybe_persona_display_name(
-                                        author_personas.get(&(post.author, post.content.persona)).map(AsRef::as_ref)
-                                    )
-                                    .maybe_reply_to_persona_display_name(
-                                        post.reply_to.and_then(|reply_to|
-                                            parents.get(&reply_to.event_id().to_short())
-                                                .and_then(|p| author_personas.get(&(p.author, p.content.persona)))
-                                                .map(AsRef::as_ref)
-                                        )
-                                    )
+                                    ).persona_tags(&effective_tags)
                                     .maybe_reply_to(
                                         post.reply_to
                                             .map(|reply_to| (
@@ -978,7 +967,7 @@ impl TimelineMode {
         let self_id = client.rostra_id();
         match self {
             TimelineMode::Followees => {
-                let followees: HashMap<RostraId, PersonaSelector> = client
+                let followees: HashMap<RostraId, PersonasTagsSelector> = client
                     .db()
                     .get_followees(self_id)
                     .await
@@ -986,9 +975,13 @@ impl TimelineMode {
                     .collect();
                 Box::new(move |post: &SocialPostRecord<SocialPost>| {
                     post.author != self_id
-                        && followees
-                            .get(&post.author)
-                            .is_some_and(|selector| selector.matches(post.content.persona))
+                        && followees.get(&post.author).is_some_and(|selector| {
+                            let tags = post.content.persona_tags();
+                            if tags.is_empty() {
+                                return true;
+                            }
+                            selector.matches_tags(&tags)
+                        })
                 })
             }
             TimelineMode::Network => Box::new(

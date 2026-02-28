@@ -1,12 +1,13 @@
+use std::collections::BTreeSet;
 #[cfg(feature = "serde")]
 use std::str::FromStr as _;
 
 use snafu::Snafu;
 use unicode_segmentation::UnicodeSegmentation as _;
 
-use super::PersonaId;
 #[cfg(feature = "serde")]
 use super::{EventAuxKey, EventContentRaw, EventKind};
+use super::{PersonaId, PersonaTag};
 use crate::id::RostraId;
 #[cfg(feature = "serde")]
 use crate::id::ToShort as _;
@@ -57,13 +58,19 @@ pub trait EventContentKind: ::serde::Serialize + ::serde::de::DeserializeOwned {
 pub struct Follow {
     #[cfg_attr(feature = "serde", serde(rename = "i"))]
     pub followee: RostraId,
+    /// Legacy persona field — kept for deserialization of old events
     #[cfg_attr(feature = "serde", serde(rename = "p"))]
     pub persona: Option<PersonaId>,
+    /// Legacy persona selector — kept for deserialization of old events
     #[cfg_attr(feature = "serde", serde(rename = "s"))]
     pub selector: Option<PersonaSelector>,
+    /// New tag-based selector
+    #[cfg_attr(feature = "serde", serde(rename = "t", default))]
+    pub persona_tags_selector: Option<PersonasTagsSelector>,
 }
 
 impl Follow {
+    /// Get the legacy persona selector, for backward compat.
     pub fn selector(self) -> Option<PersonaSelector> {
         if let Some(selector) = self.selector {
             return Some(selector);
@@ -75,7 +82,7 @@ impl Follow {
     }
 
     pub fn is_unfollow(&self) -> bool {
-        self.persona.is_none() && self.selector.is_none()
+        self.persona.is_none() && self.selector.is_none() && self.persona_tags_selector.is_none()
     }
 }
 #[cfg(feature = "serde")]
@@ -171,8 +178,10 @@ impl<'de> ::serde::de::Deserialize<'de> for NodeAnnouncement {
 #[cfg_attr(feature = "serde", derive(::serde::Serialize, ::serde::Deserialize))]
 #[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
 pub struct SocialPost {
-    #[cfg_attr(feature = "serde", serde(rename = "p"))]
-    pub persona: PersonaId,
+    /// Legacy persona field — hardcoded to 0 for new posts, kept for backward
+    /// compat with old clients. Will be dropped in the future.
+    #[cfg_attr(feature = "serde", serde(rename = "p", default))]
+    persona: Option<PersonaId>,
     #[cfg_attr(feature = "serde", serde(rename = "c"))]
     pub djot_content: Option<String>,
     #[cfg_attr(feature = "serde", serde(rename = "r"))]
@@ -180,9 +189,52 @@ pub struct SocialPost {
     // "e" for "emoji"
     #[cfg_attr(feature = "serde", serde(rename = "e"))]
     pub reaction: Option<String>,
+    /// Persona tags for this post
+    #[cfg_attr(feature = "serde", serde(rename = "t", default))]
+    persona_tags: BTreeSet<PersonaTag>,
 }
 
 impl SocialPost {
+    /// Create a new `SocialPost`.
+    ///
+    /// If the body is a single-emoji reply, it's stored as a reaction (with
+    /// `djot_content` set to `None`). Sets legacy `persona` to
+    /// `Some(PersonaId(0))` for backward compat.
+    pub fn new(
+        body: String,
+        reply_to: Option<ExternalEventId>,
+        persona_tags: BTreeSet<PersonaTag>,
+    ) -> Self {
+        let (djot_content, reaction) = if let Some(reaction) = Self::is_reaction(&reply_to, &body) {
+            (None, Some(reaction.to_owned()))
+        } else {
+            (Some(body), None)
+        };
+        Self {
+            persona: Some(PersonaId(0)),
+            djot_content,
+            reply_to,
+            reaction,
+            persona_tags,
+        }
+    }
+
+    /// Get the effective persona tags for this post.
+    ///
+    /// If `persona_tags` is non-empty, returns those. Otherwise falls back to
+    /// converting the legacy `persona` field to a tag (0=personal,
+    /// 1=professional, 2=civic).
+    pub fn persona_tags(&self) -> BTreeSet<PersonaTag> {
+        if !self.persona_tags.is_empty() {
+            return self.persona_tags.clone();
+        }
+        if let Some(tag) = self.persona.and_then(PersonaTag::from_persona_id) {
+            BTreeSet::from([tag])
+        } else {
+            BTreeSet::new()
+        }
+    }
+
     pub fn is_reaction<'t>(
         reply_to: &'_ Option<ExternalEventId>,
         text: &'t str,
@@ -387,6 +439,43 @@ impl PersonaSelector {
 impl Default for PersonaSelector {
     fn default() -> Self {
         Self::Except { ids: vec![] }
+    }
+}
+
+/// Tag-based selector for filtering posts by persona tags.
+///
+/// Replaces the old `PersonaSelector` for new follow events.
+#[cfg_attr(feature = "serde", derive(::serde::Serialize, ::serde::Deserialize))]
+#[cfg_attr(feature = "bincode", derive(::bincode::Encode, ::bincode::Decode))]
+#[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
+pub enum PersonasTagsSelector {
+    /// Only show posts that have at least one of these tags
+    Only { ids: BTreeSet<PersonaTag> },
+    /// Show all posts except those that have any of these tags
+    Except { ids: BTreeSet<PersonaTag> },
+}
+
+impl PersonasTagsSelector {
+    /// Check whether a set of tags on a post matches this selector.
+    pub fn matches_tags(&self, tags: &BTreeSet<PersonaTag>) -> bool {
+        match self {
+            PersonasTagsSelector::Only { ids } => {
+                // Post matches if it has at least one of the selected tags
+                tags.iter().any(|t| ids.contains(t))
+            }
+            PersonasTagsSelector::Except { ids } => {
+                // Post matches if it has none of the excluded tags
+                !tags.iter().any(|t| ids.contains(t))
+            }
+        }
+    }
+}
+
+impl Default for PersonasTagsSelector {
+    fn default() -> Self {
+        Self::Except {
+            ids: BTreeSet::new(),
+        }
     }
 }
 

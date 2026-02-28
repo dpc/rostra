@@ -3,7 +3,8 @@ use axum::extract::{Path, Query, State};
 use axum::response::IntoResponse;
 use maud::{Markup, html};
 use rostra_client_db::social::EventPaginationCursor;
-use rostra_core::event::PersonaId;
+use rostra_core::event::PersonaTag;
+use rostra_core::event::content_kind::PersonasTagsSelector;
 use rostra_core::id::RostraId;
 use serde::Deserialize;
 use tower_cookies::Cookies;
@@ -69,7 +70,8 @@ pub async fn get_follow_dialog(
     let client = state.client(session.id()).await?;
     let client_ref = client.client_ref()?;
     let profile = state.get_social_profile(profile_id, &client_ref).await;
-    let personas = client_ref.db().get_personas_for_id(profile_id).await;
+    let mut persona_tags = client_ref.db().get_persona_tags_for_id(profile_id).await;
+    persona_tags.extend(PersonaTag::defaults());
     let ajax_attrs = fragment::AjaxLoadingAttrs::for_class("o-followDialog__submitButton");
     Ok(Maud(html! {
         div id="follow-dialog-content" ."o-followDialog -active" {
@@ -111,20 +113,12 @@ pub async fn get_follow_dialog(
                     }
 
                     div ."o-followDialog__personaList" ."-visible"[!params.following] {
-                        @for (persona_id, persona_display_name) in personas {
-                            div ."o-followDialog__personaOption" {
-                                input
-                                    type="checkbox"
-                                    id=(format!("persona_{}", persona_id))
-                                    name="personas"
-                                    value=(persona_id)
-                                {}
-                                label
-                                    for=(format!("persona_{}", persona_id))
-                                    ."o-followDialog__personaLabel"
-                                { (persona_display_name) }
-                            }
-                        }
+                        (fragment::persona_tag_select("personas")
+                            .available_tags(&persona_tags)
+                            .selected_tags(&std::collections::BTreeSet::new())
+                            .id("follow-persona-tags")
+                            .empty_label("none")
+                            .call())
                     }
                 }
 
@@ -146,7 +140,7 @@ pub async fn get_follow_dialog(
 pub struct FollowFormData {
     follow_type: String,
     #[serde(default)]
-    personas: Vec<PersonaId>,
+    personas: Vec<String>,
 }
 
 pub async fn post_follow(
@@ -167,14 +161,18 @@ pub async fn post_follow(
             client_ref.unfollow(id_secret, profile_id).await?;
         }
         "follow_all" | "follow_only" => {
-            let ids = form.personas;
+            let ids: std::collections::BTreeSet<PersonaTag> = form
+                .personas
+                .iter()
+                .filter_map(|s| PersonaTag::new(s).ok())
+                .collect();
             client_ref
                 .follow(
                     id_secret,
                     profile_id,
                     match form.follow_type.as_str() {
-                        "follow_all" => rostra_core::event::PersonaSelector::Except { ids },
-                        "follow_only" => rostra_core::event::PersonaSelector::Only { ids },
+                        "follow_all" => PersonasTagsSelector::Except { ids },
+                        "follow_only" => PersonasTagsSelector::Only { ids },
                         _ => unreachable!(),
                     },
                 )

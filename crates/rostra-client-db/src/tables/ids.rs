@@ -5,7 +5,7 @@
 
 use bincode::{Decode, Encode};
 use rostra_core::Timestamp;
-use rostra_core::event::PersonaSelector;
+use rostra_core::event::{PersonaSelector, PersonasTagsSelector};
 
 /// Record for the `ids_followees` table.
 ///
@@ -15,12 +15,17 @@ use rostra_core::event::PersonaSelector;
 pub struct IdsFolloweesRecord {
     /// Timestamp of the follow/unfollow event that established this state
     pub ts: Timestamp,
-    /// Which personas from the followee to show.
+    /// Legacy persona selector — kept for backward compat with old follow
+    /// events.
     ///
     /// - `Some(selector)`: Active follow with the given persona filter
     /// - `None`: Pending unfollow - entry kept to track timestamp but follow is
     ///   inactive
     pub selector: Option<PersonaSelector>,
+    /// New tag-based selector.
+    ///
+    /// When present, this takes priority over the legacy `selector`.
+    pub tags_selector: Option<PersonasTagsSelector>,
 }
 
 /// Record for the `ids_followers` table.

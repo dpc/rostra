@@ -980,6 +980,7 @@ async fn test_follow_unfollow_timestamp_ordering() -> BoxedErrorResult<()> {
             followee,
             persona: None,
             selector: None,
+            persona_tags_selector: None,
         };
         let result = Database::insert_follow_tx(
             author,
@@ -1065,6 +1066,7 @@ async fn test_follow_unfollow_timestamp_ordering() -> BoxedErrorResult<()> {
             followee,
             persona: None,
             selector: None,
+            persona_tags_selector: None,
         };
         let result = Database::insert_follow_tx(
             author,
@@ -1461,16 +1463,15 @@ fn build_test_event_with_valid_content(
     parent: impl Into<Option<EventId>>,
     text: &str,
 ) -> (VerifiedEvent, EventContentRaw) {
+    use rostra_core::event::content_kind;
     use rostra_core::event::content_kind::EventContentKind as _;
-    use rostra_core::event::{PersonaId, content_kind};
 
     let parent = parent.into();
-    let post = content_kind::SocialPost {
-        persona: PersonaId(0),
-        djot_content: Some(text.to_string()),
-        reply_to: None,
-        reaction: None,
-    };
+    let post = content_kind::SocialPost::new(
+        text.to_string(),
+        None,               // reply_to
+        Default::default(), // persona_tags
+    );
     let content = post.serialize_cbor().expect("valid cbor");
     let author = id_secret.id();
     let event = Event::builder_raw_content()
@@ -2184,6 +2185,7 @@ async fn test_follow_unfollow_refollow_flow() -> BoxedErrorResult<()> {
             followee,
             persona: None,
             selector,
+            persona_tags_selector: None,
         };
         let content = follow.serialize_cbor().expect("valid");
         let event = Event::builder_raw_content()
@@ -2910,6 +2912,7 @@ mod proptest_follow {
                 followee: user_b,
                 persona: None,
                 selector,
+                persona_tags_selector: None,
             };
             let content = follow.serialize_cbor().expect("valid");
             let event = Event::builder_raw_content()
@@ -3077,7 +3080,7 @@ mod proptest_follow {
 /// 2. Pagination functions return posts in the expected order
 #[test_log::test(tokio::test(flavor = "multi_thread"))]
 async fn test_social_posts_by_received_at_pagination() -> BoxedErrorResult<()> {
-    use rostra_core::event::{PersonaId, VerifiedEventContent, content_kind};
+    use rostra_core::event::{VerifiedEventContent, content_kind};
     use rostra_core::{ExternalEventId, Timestamp};
 
     let user_a_secret = RostraIdSecretKey::generate();
@@ -3096,12 +3099,11 @@ async fn test_social_posts_by_received_at_pagination() -> BoxedErrorResult<()> {
                                    reply_to: Option<ExternalEventId>|
      -> (VerifiedEvent, EventContentRaw) {
         use rostra_core::event::content_kind::EventContentKind as _;
-        let content = content_kind::SocialPost {
-            persona: PersonaId(0),
-            djot_content: Some(djot_content.to_string()),
+        let content = content_kind::SocialPost::new(
+            djot_content.to_string(),
             reply_to,
-            reaction: None,
-        };
+            Default::default(), // persona_tags
+        );
         let content_raw = content.serialize_cbor().unwrap();
         let author = id_secret.id();
         let event = Event::builder_raw_content()
@@ -3227,7 +3229,7 @@ async fn test_social_posts_by_received_at_pagination() -> BoxedErrorResult<()> {
 async fn test_total_migration() -> BoxedErrorResult<()> {
     use rostra_core::Timestamp;
     use rostra_core::event::content_kind::PersonaSelector;
-    use rostra_core::event::{PersonaId, VerifiedEventContent, content_kind};
+    use rostra_core::event::{VerifiedEventContent, content_kind};
 
     use crate::{db_version, ids_followees, ids_followers, social_posts_by_time};
 
@@ -3250,6 +3252,7 @@ async fn test_total_migration() -> BoxedErrorResult<()> {
             followee: user_b,
             persona: None,
             selector: Some(PersonaSelector::default()), // Follow all personas
+            persona_tags_selector: None,
         };
         let follow_content_raw = {
             use rostra_core::event::content_kind::EventContentKind as _;
@@ -3270,6 +3273,7 @@ async fn test_total_migration() -> BoxedErrorResult<()> {
             followee: user_a,
             persona: None,
             selector: Some(PersonaSelector::default()),
+            persona_tags_selector: None,
         };
         let reverse_follow_content_raw = {
             use rostra_core::event::content_kind::EventContentKind as _;
@@ -3286,12 +3290,11 @@ async fn test_total_migration() -> BoxedErrorResult<()> {
         };
 
         // Create a social post
-        let post_content = content_kind::SocialPost {
-            persona: PersonaId(0),
-            djot_content: Some("Hello world!".to_string()),
-            reply_to: None,
-            reaction: None,
-        };
+        let post_content = content_kind::SocialPost::new(
+            "Hello world!".to_string(),
+            None,               // reply_to
+            Default::default(), // persona_tags
+        );
         let post_content_raw = {
             use rostra_core::event::content_kind::EventContentKind as _;
             post_content.serialize_cbor().unwrap()
@@ -3594,7 +3597,7 @@ async fn test_total_migration() -> BoxedErrorResult<()> {
 #[test_log::test(tokio::test(flavor = "multi_thread"))]
 async fn test_self_mention_detection() -> BoxedErrorResult<()> {
     use rostra_core::ExternalEventId;
-    use rostra_core::event::{PersonaId, VerifiedEventContent, content_kind};
+    use rostra_core::event::{VerifiedEventContent, content_kind};
 
     let user_a_secret = RostraIdSecretKey::generate();
     let user_a = user_a_secret.id();
@@ -3612,12 +3615,11 @@ async fn test_self_mention_detection() -> BoxedErrorResult<()> {
                                    reply_to: Option<ExternalEventId>|
      -> (VerifiedEvent, EventContentRaw) {
         use rostra_core::event::content_kind::EventContentKind as _;
-        let content = content_kind::SocialPost {
-            persona: PersonaId(0),
-            djot_content: Some(djot_content.to_string()),
+        let content = content_kind::SocialPost::new(
+            djot_content.to_string(),
             reply_to,
-            reaction: None,
-        };
+            Default::default(), // persona_tags
+        );
         let content_raw = content.serialize_cbor().unwrap();
         let author = id_secret.id();
         let event = Event::builder_raw_content()
@@ -3760,8 +3762,8 @@ async fn test_self_mention_detection() -> BoxedErrorResult<()> {
 #[test_log::test(tokio::test(flavor = "multi_thread"))]
 async fn test_content_processing_idempotency() -> BoxedErrorResult<()> {
     use rostra_core::ExternalEventId;
+    use rostra_core::event::content_kind;
     use rostra_core::event::content_kind::EventContentKind as _;
-    use rostra_core::event::{PersonaId, content_kind};
     use rostra_core::id::ToShort as _;
 
     let _ = tracing_subscriber::fmt::try_init();
@@ -3775,12 +3777,11 @@ async fn test_content_processing_idempotency() -> BoxedErrorResult<()> {
     let (_tmp, db) = temp_db(user_a).await?;
 
     // Create a post from user A
-    let post_content = content_kind::SocialPost {
-        persona: PersonaId(0),
-        djot_content: Some("Test post".to_string()),
-        reply_to: None,
-        reaction: None,
-    };
+    let post_content = content_kind::SocialPost::new(
+        "Test post".to_string(),
+        None,               // reply_to
+        Default::default(), // persona_tags
+    );
     let post_raw = post_content.serialize_cbor().unwrap();
     let post_event = {
         let event = Event::builder_raw_content()
@@ -3795,12 +3796,11 @@ async fn test_content_processing_idempotency() -> BoxedErrorResult<()> {
     let post_id = post_event_id.to_short();
 
     // Create a reply from user B
-    let reply_content = content_kind::SocialPost {
-        persona: PersonaId(0),
-        djot_content: Some("Reply".to_string()),
-        reply_to: Some(ExternalEventId::new(user_a, post_event_id)),
-        reaction: None,
-    };
+    let reply_content = content_kind::SocialPost::new(
+        "Reply".to_string(),
+        Some(ExternalEventId::new(user_a, post_event_id)),
+        Default::default(), // persona_tags
+    );
     let reply_raw = reply_content.serialize_cbor().unwrap();
     let reply_event = {
         let event = Event::builder_raw_content()
@@ -3942,8 +3942,8 @@ async fn test_content_processing_idempotency() -> BoxedErrorResult<()> {
 /// 3. Content processing is skipped for deleted events
 #[test_log::test(tokio::test(flavor = "multi_thread"))]
 async fn test_delete_while_unprocessed() -> BoxedErrorResult<()> {
+    use rostra_core::event::content_kind;
     use rostra_core::event::content_kind::EventContentKind as _;
-    use rostra_core::event::{PersonaId, content_kind};
     use rostra_core::id::ToShort as _;
 
     let user_secret = RostraIdSecretKey::generate();
@@ -3952,12 +3952,11 @@ async fn test_delete_while_unprocessed() -> BoxedErrorResult<()> {
     let (_tmp, db) = temp_db(user).await?;
 
     // Create a post
-    let post_content = content_kind::SocialPost {
-        persona: PersonaId(0),
-        djot_content: Some("Test post".to_string()),
-        reply_to: None,
-        reaction: None,
-    };
+    let post_content = content_kind::SocialPost::new(
+        "Test post".to_string(),
+        None,               // reply_to
+        Default::default(), // persona_tags
+    );
     let post_raw = post_content.serialize_cbor().unwrap();
     let post_event = {
         let event = Event::builder_raw_content()
@@ -4077,8 +4076,8 @@ async fn test_delete_while_unprocessed() -> BoxedErrorResult<()> {
 /// RC.
 #[test_log::test(tokio::test(flavor = "multi_thread"))]
 async fn test_two_deletes_same_target() -> BoxedErrorResult<()> {
+    use rostra_core::event::content_kind;
     use rostra_core::event::content_kind::EventContentKind as _;
-    use rostra_core::event::{PersonaId, content_kind};
     use rostra_core::id::ToShort as _;
 
     let user_secret = RostraIdSecretKey::generate();
@@ -4087,12 +4086,11 @@ async fn test_two_deletes_same_target() -> BoxedErrorResult<()> {
     let (_tmp, db) = temp_db(user).await?;
 
     // Create a post
-    let post_content = content_kind::SocialPost {
-        persona: PersonaId(0),
-        djot_content: Some("Test post".to_string()),
-        reply_to: None,
-        reaction: None,
-    };
+    let post_content = content_kind::SocialPost::new(
+        "Test post".to_string(),
+        None,               // reply_to
+        Default::default(), // persona_tags
+    );
     let post_raw = post_content.serialize_cbor().unwrap();
     let post_event = {
         let event = Event::builder_raw_content()
@@ -4195,8 +4193,8 @@ async fn test_two_deletes_same_target() -> BoxedErrorResult<()> {
 /// - Delete changes state to Deleted but doesn't decrement RC again
 #[test_log::test(tokio::test(flavor = "multi_thread"))]
 async fn test_prune_then_delete() -> BoxedErrorResult<()> {
+    use rostra_core::event::content_kind;
     use rostra_core::event::content_kind::EventContentKind as _;
-    use rostra_core::event::{PersonaId, content_kind};
     use rostra_core::id::ToShort as _;
 
     let user_secret = RostraIdSecretKey::generate();
@@ -4205,12 +4203,11 @@ async fn test_prune_then_delete() -> BoxedErrorResult<()> {
     let (_tmp, db) = temp_db(user).await?;
 
     // Create a post
-    let post_content = content_kind::SocialPost {
-        persona: PersonaId(0),
-        djot_content: Some("Test post".to_string()),
-        reply_to: None,
-        reaction: None,
-    };
+    let post_content = content_kind::SocialPost::new(
+        "Test post".to_string(),
+        None,               // reply_to
+        Default::default(), // persona_tags
+    );
     let post_raw = post_content.serialize_cbor().unwrap();
     let post_event = {
         let event = Event::builder_raw_content()
@@ -4319,8 +4316,8 @@ async fn test_prune_then_delete() -> BoxedErrorResult<()> {
 /// - Prune attempt returns false (already deleted)
 #[test_log::test(tokio::test(flavor = "multi_thread"))]
 async fn test_delete_then_prune() -> BoxedErrorResult<()> {
+    use rostra_core::event::content_kind;
     use rostra_core::event::content_kind::EventContentKind as _;
-    use rostra_core::event::{PersonaId, content_kind};
     use rostra_core::id::ToShort as _;
 
     let user_secret = RostraIdSecretKey::generate();
@@ -4329,12 +4326,11 @@ async fn test_delete_then_prune() -> BoxedErrorResult<()> {
     let (_tmp, db) = temp_db(user).await?;
 
     // Create a post
-    let post_content = content_kind::SocialPost {
-        persona: PersonaId(0),
-        djot_content: Some("Test post".to_string()),
-        reply_to: None,
-        reaction: None,
-    };
+    let post_content = content_kind::SocialPost::new(
+        "Test post".to_string(),
+        None,               // reply_to
+        Default::default(), // persona_tags
+    );
     let post_raw = post_content.serialize_cbor().unwrap();
     let post_event = {
         let event = Event::builder_raw_content()
@@ -4803,7 +4799,7 @@ async fn test_two_events_same_invalid_content() -> BoxedErrorResult<()> {
 #[test_log::test(tokio::test(flavor = "multi_thread"))]
 async fn test_process_content_for_nonexistent_event() -> BoxedErrorResult<()> {
     use rostra_core::event::content_kind::EventContentKind as _;
-    use rostra_core::event::{PersonaId, VerifiedEventContent, content_kind};
+    use rostra_core::event::{VerifiedEventContent, content_kind};
     use rostra_core::id::ToShort as _;
 
     let user_secret = RostraIdSecretKey::generate();
@@ -4812,12 +4808,11 @@ async fn test_process_content_for_nonexistent_event() -> BoxedErrorResult<()> {
     let (_tmp, db) = temp_db(user).await?;
 
     // Create a post event but DON'T insert it
-    let post_content = content_kind::SocialPost {
-        persona: PersonaId(0),
-        djot_content: Some("Test post".to_string()),
-        reply_to: None,
-        reaction: None,
-    };
+    let post_content = content_kind::SocialPost::new(
+        "Test post".to_string(),
+        None,               // reply_to
+        Default::default(), // persona_tags
+    );
     let post_raw = post_content.serialize_cbor().unwrap();
     let post_event = {
         let event = Event::builder_raw_content()
@@ -5037,12 +5032,11 @@ async fn test_new_heads_broadcast() -> BoxedErrorResult<()> {
     let mut new_heads_rx = db.new_heads_subscribe();
 
     // Create and insert an event (will be a head since no children)
-    let content = content_kind::SocialPost {
-        persona: rostra_core::event::PersonaId(0),
-        djot_content: Some("Test post".to_string()),
-        reply_to: None,
-        reaction: None,
-    };
+    let content = content_kind::SocialPost::new(
+        "Test post".to_string(),
+        None,               // reply_to
+        Default::default(), // persona_tags
+    );
     let content_raw = content.serialize_cbor().unwrap();
     let event = Event::builder_raw_content()
         .author(author)
@@ -5078,12 +5072,11 @@ async fn test_new_heads_broadcast_not_for_non_head() -> BoxedErrorResult<()> {
     let (_dir, db) = temp_db(author).await?;
 
     // Create parent and child events
-    let content = content_kind::SocialPost {
-        persona: rostra_core::event::PersonaId(0),
-        djot_content: Some("Parent post".to_string()),
-        reply_to: None,
-        reaction: None,
-    };
+    let content = content_kind::SocialPost::new(
+        "Parent post".to_string(),
+        None,               // reply_to
+        Default::default(), // persona_tags
+    );
     let content_raw = content.serialize_cbor().unwrap();
     let parent_event = Event::builder_raw_content()
         .author(author)
@@ -5094,12 +5087,11 @@ async fn test_new_heads_broadcast_not_for_non_head() -> BoxedErrorResult<()> {
     let parent_verified = VerifiedEvent::verify_signed(author, parent_signed).expect("Valid event");
     let parent_id = parent_verified.event_id;
 
-    let child_content = content_kind::SocialPost {
-        persona: rostra_core::event::PersonaId(0),
-        djot_content: Some("Child post".to_string()),
-        reply_to: None,
-        reaction: None,
-    };
+    let child_content = content_kind::SocialPost::new(
+        "Child post".to_string(),
+        None,               // reply_to
+        Default::default(), // persona_tags
+    );
     let child_content_raw = child_content.serialize_cbor().unwrap();
     let child_event = Event::builder_raw_content()
         .author(author)
@@ -5145,12 +5137,11 @@ async fn test_self_head_updated_broadcast() -> BoxedErrorResult<()> {
     let mut self_head_rx = db.self_head_subscribe();
 
     // Create and insert an event from self
-    let content = content_kind::SocialPost {
-        persona: rostra_core::event::PersonaId(0),
-        djot_content: Some("Self post".to_string()),
-        reply_to: None,
-        reaction: None,
-    };
+    let content = content_kind::SocialPost::new(
+        "Self post".to_string(),
+        None,               // reply_to
+        Default::default(), // persona_tags
+    );
     let content_raw = content.serialize_cbor().unwrap();
     let event = Event::builder_raw_content()
         .author(author)
@@ -5196,12 +5187,11 @@ async fn test_self_head_updated_not_for_others() -> BoxedErrorResult<()> {
     let mut self_head_rx = db.self_head_subscribe();
 
     // Create and insert an event from OTHER user
-    let content = content_kind::SocialPost {
-        persona: rostra_core::event::PersonaId(0),
-        djot_content: Some("Other user post".to_string()),
-        reply_to: None,
-        reaction: None,
-    };
+    let content = content_kind::SocialPost::new(
+        "Other user post".to_string(),
+        None,               // reply_to
+        Default::default(), // persona_tags
+    );
     let content_raw = content.serialize_cbor().unwrap();
     let event = Event::builder_raw_content()
         .author(other_id)
@@ -5240,12 +5230,11 @@ async fn test_new_content_broadcast() -> BoxedErrorResult<()> {
     let mut new_content_rx = db.new_content_subscribe();
 
     // Create event with content
-    let content = content_kind::SocialPost {
-        persona: rostra_core::event::PersonaId(0),
-        djot_content: Some("Test content".to_string()),
-        reply_to: None,
-        reaction: None,
-    };
+    let content = content_kind::SocialPost::new(
+        "Test content".to_string(),
+        None,               // reply_to
+        Default::default(), // persona_tags
+    );
     let content_raw = content.serialize_cbor().unwrap();
     let event = Event::builder_raw_content()
         .author(author)
@@ -5288,12 +5277,11 @@ async fn test_new_posts_broadcast() -> BoxedErrorResult<()> {
 
     // Create a social post
     let post_text = "Test social post";
-    let content = content_kind::SocialPost {
-        persona: rostra_core::event::PersonaId(0),
-        djot_content: Some(post_text.to_string()),
-        reply_to: None,
-        reaction: None,
-    };
+    let content = content_kind::SocialPost::new(
+        post_text.to_string(),
+        None,               // reply_to
+        Default::default(), // persona_tags
+    );
     let content_raw = content.serialize_cbor().unwrap();
     let event = Event::builder_raw_content()
         .author(author)
@@ -5349,6 +5337,7 @@ async fn test_self_followees_watch_channel() -> BoxedErrorResult<()> {
         followee,
         persona: None,
         selector: Some(rostra_core::event::PersonaSelector::Except { ids: vec![] }),
+        persona_tags_selector: None,
     };
     let content_raw = follow_content.serialize_cbor().unwrap();
     let event = Event::builder_raw_content()
@@ -5412,6 +5401,7 @@ async fn test_self_followers_watch_channel() -> BoxedErrorResult<()> {
         followee: self_id,
         persona: None,
         selector: Some(rostra_core::event::PersonaSelector::Except { ids: vec![] }),
+        persona_tags_selector: None,
     };
     let content_raw = follow_content.serialize_cbor().unwrap();
     let event = Event::builder_raw_content()
@@ -5471,6 +5461,7 @@ async fn test_self_wot_watch_channel() -> BoxedErrorResult<()> {
         followee: followee_a,
         persona: None,
         selector: Some(rostra_core::event::PersonaSelector::Except { ids: vec![] }),
+        persona_tags_selector: None,
     };
     let content_raw = follow_a_content.serialize_cbor().unwrap();
     let event = Event::builder_raw_content()
@@ -5527,6 +5518,7 @@ async fn test_wot_contains() -> BoxedErrorResult<()> {
         followee,
         persona: None,
         selector: Some(rostra_core::event::PersonaSelector::Except { ids: vec![] }),
+        persona_tags_selector: None,
     };
     let content_raw = follow_content.serialize_cbor().unwrap();
     let event = Event::builder_raw_content()

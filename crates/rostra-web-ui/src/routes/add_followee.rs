@@ -2,7 +2,7 @@ use axum::Form;
 use axum::extract::State;
 use axum::response::IntoResponse;
 use maud::{Markup, html};
-use rostra_core::event::PersonaSelector;
+use rostra_core::event::PersonasTagsSelector;
 use rostra_core::id::RostraId;
 use serde::Deserialize;
 
@@ -28,11 +28,7 @@ pub async fn add_followee(
         .client(session.id())
         .await?
         .client_ref()?
-        .follow(
-            id_secret,
-            form.rostra_id,
-            PersonaSelector::Except { ids: vec![] },
-        )
+        .follow(id_secret, form.rostra_id, PersonasTagsSelector::default())
         .await?;
     Ok(Maud(state.render_add_followee_form(html! {
         span { "Followed!" }

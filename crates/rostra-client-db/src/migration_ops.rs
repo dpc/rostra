@@ -62,13 +62,13 @@ pub type LegacyContentStoreRecordOwned = LegacyContentStoreRecord<'static>;
 /// Current schema version.
 ///
 /// Increment this when making schema changes that require migration.
-const DB_VER: u64 = 19;
+const DB_VER: u64 = 20;
 
 /// Versions older than this require a total migration.
 ///
 /// This should be set to the version where we last did a major schema
 /// overhaul. Older databases get rebuilt from scratch.
-const DB_VER_REQUIRES_TOTAL_MIGRATION: u64 = 19;
+const DB_VER_REQUIRES_TOTAL_MIGRATION: u64 = 20;
 
 /// Last DB version that used the legacy enum `ContentStoreRecord::Present(...)`
 /// format.

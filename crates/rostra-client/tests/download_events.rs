@@ -12,16 +12,11 @@ fn build_test_event(
     id_secret: RostraIdSecretKey,
     parent_prev: impl Into<Option<ShortEventId>>,
 ) -> (VerifiedEvent, VerifiedEventContent) {
+    use rostra_core::event::content_kind;
     use rostra_core::event::content_kind::EventContentKind as _;
-    use rostra_core::event::{PersonaId, content_kind};
 
     let parent = parent_prev.into();
-    let post = content_kind::SocialPost {
-        persona: PersonaId(0),
-        djot_content: Some("test content".to_string()),
-        reply_to: None,
-        reaction: None,
-    };
+    let post = content_kind::SocialPost::new("test content".to_string(), None, Default::default());
     let content = post.serialize_cbor().expect("valid cbor");
     let author = id_secret.id();
     let event = Event::builder_raw_content()

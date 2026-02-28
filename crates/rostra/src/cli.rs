@@ -2,7 +2,6 @@ use std::path::{Path, PathBuf};
 use std::sync::LazyLock;
 
 use clap::{Args, Parser, Subcommand};
-use rostra_core::event::PersonaId;
 use rostra_core::id::RostraId;
 use rostra_util_bind_addr::BindAddr;
 
@@ -74,9 +73,6 @@ pub enum OptsCmd {
         /// Path to the secret file for authentication
         #[arg(long)]
         secret_file: PathBuf,
-
-        #[arg(long)]
-        persona_id: Option<PersonaId>,
     },
 }
 

@@ -638,8 +638,9 @@ impl Database {
             }
         }
 
+        let tags_selector = content.persona_tags_selector.clone();
         let selector = content.selector();
-        if selector.is_some() {
+        if selector.is_some() || tags_selector.is_some() {
             unfollowed_table.remove(&db_key)?;
         }
         followees_table.insert(
@@ -647,6 +648,7 @@ impl Database {
             &IdsFolloweesRecord {
                 ts: timestamp,
                 selector,
+                tags_selector,
             },
         )?;
         followers_table.insert(&(followee, author), &IdsFollowersRecord {})?;

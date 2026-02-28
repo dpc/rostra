@@ -1,7 +1,7 @@
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 
 use bincode::{Decode, Encode};
-use rostra_core::event::{EventExt as _, PersonaId, SocialPost, content_kind};
+use rostra_core::event::{EventExt as _, PersonaId, PersonaTag, SocialPost, content_kind};
 use rostra_core::id::RostraId;
 use rostra_core::{ExternalEventId, ShortEventId, Timestamp};
 use serde::{Deserialize, Serialize};
@@ -625,6 +625,60 @@ impl Database {
         .await
         .expect("Storage error")
     }
+    /// Get all persona tags used by an identity, with usage counts > 0.
+    pub async fn get_persona_tags_for_id(&self, id: RostraId) -> BTreeSet<PersonaTag> {
+        self.read_with(|tx| {
+            let social_posts_by_time_table = tx.open_table(&social_posts_by_time::TABLE)?;
+            let events_table = tx.open_table(&events::TABLE)?;
+            let events_content_state_table = tx.open_table(&events_content_state::TABLE)?;
+            let content_store_table = tx.open_table(&content_store::TABLE)?;
+
+            let mut tags = BTreeSet::new();
+
+            // Scan posts by this author and collect all persona tags
+            for entry in social_posts_by_time_table.range(..)?.rev() {
+                let entry = entry?;
+                let (_ts, event_id) = entry.0.value();
+
+                let Some(event) = Database::get_event_tx(event_id, &events_table)? else {
+                    continue;
+                };
+
+                if event.author() != id {
+                    continue;
+                }
+
+                let content_hash = event.content_hash();
+
+                if Database::get_event_content_state_tx(event_id, &events_content_state_table)?
+                    .is_some()
+                {
+                    continue;
+                }
+
+                let Some(store_record) = content_store_table.get(&content_hash)?.map(|g| g.value())
+                else {
+                    continue;
+                };
+                let crate::event::ContentStoreRecord(content) = store_record;
+
+                if let Ok(social_post) = content.deserialize_cbor::<content_kind::SocialPost>() {
+                    tags.extend(social_post.persona_tags());
+                }
+
+                // Limit scan to avoid excessive reads; 500 posts is enough
+                // to discover tags
+                if 500 < tags.len() {
+                    break;
+                }
+            }
+
+            Ok(tags)
+        })
+        .await
+        .expect("Storage error")
+    }
+
     pub async fn get_personas_for_id(&self, id: RostraId) -> BTreeMap<PersonaId, String> {
         self.read_with(|tx| {
             let personas = tx.open_table(&tables::ids_personas::TABLE)?;

@@ -22,7 +22,7 @@ use itertools::Itertools as _;
 use process_event_content_ops::ProcessEventError;
 use redb_bincode::{ReadTransaction, ReadableTable, WriteTransaction};
 use rostra_core::event::{
-    EventAuxKey, EventContentRaw, EventExt as _, EventKind, IrohNodeId, PersonaSelector,
+    EventAuxKey, EventContentRaw, EventExt as _, EventKind, IrohNodeId, PersonasTagsSelector,
     VerifiedEvent, VerifiedEventContent, content_kind,
 };
 use rostra_core::id::{RostraId, ToShort as _};
@@ -486,16 +486,27 @@ impl Database {
         .expect("Database panic")
     }
 
-    pub async fn get_self_followees(&self) -> Vec<(RostraId, PersonaSelector)> {
+    pub async fn get_self_followees(&self) -> Vec<(RostraId, PersonasTagsSelector)> {
         self.get_followees(self.self_id).await
     }
 
-    pub async fn get_followees(&self, id: RostraId) -> Vec<(RostraId, PersonaSelector)> {
+    pub async fn get_followees(&self, id: RostraId) -> Vec<(RostraId, PersonasTagsSelector)> {
         self.read_with(|tx| {
             let ids_followees_table = tx.open_table(&ids_followees::TABLE)?;
             Ok(Database::read_followees_tx(id, &ids_followees_table)?
                 .into_iter()
-                .filter_map(|(id, record)| record.selector.map(|selector| (id, selector)))
+                .filter_map(|(id, record)| {
+                    // Active follow: has tags_selector or legacy selector
+                    if record.tags_selector.is_some() || record.selector.is_some() {
+                        // Prefer tags_selector; fall back to match-all for old follows
+                        let selector = record
+                            .tags_selector
+                            .unwrap_or_else(PersonasTagsSelector::default);
+                        Some((id, selector))
+                    } else {
+                        None
+                    }
+                })
                 .collect())
         })
         .await
@@ -505,12 +516,21 @@ impl Database {
     pub async fn get_followees_extended(
         &self,
         id: RostraId,
-    ) -> (HashMap<RostraId, PersonaSelector>, HashSet<RostraId>) {
+    ) -> (HashMap<RostraId, PersonasTagsSelector>, HashSet<RostraId>) {
         self.read_with(|tx| {
             let ids_followees_table = tx.open_table(&ids_followees::TABLE)?;
-            let followees: HashMap<RostraId, PersonaSelector> =
+            let followees: HashMap<RostraId, PersonasTagsSelector> =
                 Database::read_followees_tx_iter(id, &ids_followees_table)?
-                    .filter_map_ok(|(id, record)| record.selector.map(|selector| (id, selector)))
+                    .filter_map_ok(|(id, record)| {
+                        if record.tags_selector.is_some() || record.selector.is_some() {
+                            let selector = record
+                                .tags_selector
+                                .unwrap_or_else(PersonasTagsSelector::default);
+                            Some((id, selector))
+                        } else {
+                            None
+                        }
+                    })
                     .collect::<Result<_, _>>()?;
 
             let mut extended = HashSet::new();

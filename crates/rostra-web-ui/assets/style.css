@@ -670,6 +670,23 @@ img.u-userImage {
   line-height: 1;
 }
 
+.m-postView__personaTags {
+  display: inline;
+  font-size: 0.8rem;
+  color: oklch(60% 0 0);
+  opacity: 0.7;
+  line-height: 1;
+}
+
+.m-postView__personaTag {
+  font-size: inherit;
+  color: inherit;
+}
+
+.m-postView__personaTag:not(:last-child)::after {
+  content: ", ";
+}
+
 .m-postView__replies {
   padding-left: 1rem;
 }
@@ -1539,6 +1556,97 @@ emoji-picker {
 
 .o-previewDialog__submitButton {
   background-color: var(--color-button-bg);
+}
+
+/* Persona Tag Multi-Select Combobox */
+.m-personaTagSelect {
+  position: relative;
+}
+
+/* Toggle button — hidden without JS, shown when .-initialized */
+.m-personaTagSelect__toggle {
+  display: none;
+  border: 1px solid var(--color-button-border);
+  padding: 4px 8px;
+  cursor: pointer;
+  background: var(--color-text-input-bg);
+  color: var(--color-text-default);
+  border-radius: var(--border-radius-std);
+  user-select: none;
+  font-size: 0.85rem;
+  max-width: 220px;
+}
+
+.m-personaTagSelect__toggleLabel {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.m-personaTagSelect__toggleArrow {
+  margin-left: auto;
+  flex-shrink: 0;
+}
+
+/* When JS initializes: show toggle as flex row */
+.m-personaTagSelect.-initialized .m-personaTagSelect__toggle {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.m-personaTagSelect.-initialized .m-personaTagSelect__dropdown {
+  display: none;
+}
+
+/* Open state */
+.m-personaTagSelect.-open .m-personaTagSelect__dropdown {
+  display: block;
+}
+
+/* Dropdown panel — static by default (no-JS fallback) */
+.m-personaTagSelect__dropdown {
+  background: var(--color-post-bg);
+  border: 1px solid var(--color-border);
+  border-radius: var(--border-radius-std);
+  max-height: 200px;
+  overflow-y: auto;
+  min-width: 160px;
+}
+
+/* With JS: use position:fixed so it escapes overflow containers */
+.m-personaTagSelect.-initialized .m-personaTagSelect__dropdown {
+  position: fixed;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
+  z-index: 1001;
+}
+
+/* Individual option row */
+.m-personaTagSelect__option {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  cursor: pointer;
+}
+
+.m-personaTagSelect__option:hover {
+  background: var(--color-button-bg-hover);
+}
+
+/* Add-new-tag input at bottom of dropdown */
+.m-personaTagSelect__addInput {
+  display: block;
+  width: 100%;
+  box-sizing: border-box;
+  padding: 4px 10px;
+  font-size: 0.85rem;
+  border: none;
+  border-top: 1px solid var(--color-border);
+  border-radius: 0;
+  background: var(--color-text-input-bg);
+  color: var(--color-text-default);
+  outline: none;
 }
 
 /* TOGGLE SWITCH CHECKBOXES */

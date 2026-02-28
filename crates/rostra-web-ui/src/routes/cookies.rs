@@ -1,4 +1,7 @@
+use std::collections::BTreeSet;
+
 use rostra_client_db::social::ReceivedAtPaginationCursor;
+use rostra_core::event::PersonaTag;
 use rostra_core::id::ShortRostraId;
 use rostra_util_error::FmtCompact as _;
 use tower_cookies::{Cookie, Cookies};
@@ -10,7 +13,7 @@ const NOTIFICATIONS_LAST_SEEN_COOKIE_NAME: &str = "notifications-last-seen";
 const FOLLOWEES_LAST_SEEN_COOKIE_NAME: &str = "followees-last-seen";
 const NETWORK_LAST_SEEN_COOKIE_NAME: &str = "network-last-seen";
 const SHOUTBOX_LAST_SEEN_COOKIE_NAME: &str = "shoutbox-last-seen";
-const PERSONA_COOKIE_NAME: &str = "persona";
+const PERSONA_TAGS_COOKIE_NAME: &str = "persona-tags";
 
 pub(crate) trait CookiesExt {
     fn get_notifications_last_seen(
@@ -57,9 +60,9 @@ pub(crate) trait CookiesExt {
         pagination: ReceivedAtPaginationCursor,
     );
 
-    fn get_persona(&self, self_id: impl Into<ShortRostraId>) -> Option<u8>;
+    fn get_persona_tags(&self, self_id: impl Into<ShortRostraId>) -> BTreeSet<PersonaTag>;
 
-    fn save_persona(&mut self, self_id: impl Into<ShortRostraId>, persona_id: u8);
+    fn save_persona_tags(&mut self, self_id: impl Into<ShortRostraId>, tags: &BTreeSet<PersonaTag>);
 }
 
 fn get_cursor(
@@ -161,25 +164,33 @@ impl CookiesExt for Cookies {
         save_cursor(self, self_id, SHOUTBOX_LAST_SEEN_COOKIE_NAME, pagination);
     }
 
-    fn get_persona(&self, self_id: impl Into<ShortRostraId>) -> Option<u8> {
+    fn get_persona_tags(&self, self_id: impl Into<ShortRostraId>) -> BTreeSet<PersonaTag> {
         let self_id = self_id.into();
-        if let Some(s) = self.get(&format!("{self_id}-{PERSONA_COOKIE_NAME}")) {
-            s.value()
-                .parse::<u8>()
+        if let Some(s) = self.get(&format!("{self_id}-{PERSONA_TAGS_COOKIE_NAME}")) {
+            let tag_strings: Vec<String> = serde_json::from_str(s.value())
                 .inspect_err(|err| {
-                    debug!(target: LOG_TARGET, err = %err.fmt_compact(), "Invalid persona cookie value");
+                    debug!(target: LOG_TARGET, err = %err.fmt_compact(), "Invalid persona-tags cookie value");
                 })
-                .ok()
+                .unwrap_or_default();
+            tag_strings
+                .into_iter()
+                .filter_map(|s| PersonaTag::new(s).ok())
+                .collect()
         } else {
-            None
+            BTreeSet::new()
         }
     }
 
-    fn save_persona(&mut self, self_id: impl Into<ShortRostraId>, persona_id: u8) {
+    fn save_persona_tags(
+        &mut self,
+        self_id: impl Into<ShortRostraId>,
+        tags: &BTreeSet<PersonaTag>,
+    ) {
         let self_id = self_id.into();
+        let tag_strings: Vec<&str> = tags.iter().map(|t| t.as_str()).collect();
         let mut cookie = Cookie::new(
-            format!("{self_id}-{PERSONA_COOKIE_NAME}"),
-            persona_id.to_string(),
+            format!("{self_id}-{PERSONA_TAGS_COOKIE_NAME}"),
+            serde_json::to_string(&tag_strings).expect("can't fail"),
         );
         cookie.set_path("/");
         cookie.set_max_age(time::Duration::weeks(50));

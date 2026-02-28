@@ -12,7 +12,6 @@ use rostra_client::Client;
 use rostra_client::error::{ConnectError, IdResolveError, IdSecretReadError, InitError, PostError};
 use rostra_client::multiclient::MultiClient;
 use rostra_client_db::{Database, DbError};
-use rostra_core::event::PersonaId;
 use rostra_core::id::RostraIdSecretKey;
 use rostra_p2p::RpcError;
 use rostra_p2p::connection::Connection;
@@ -249,11 +248,7 @@ async fn handle_cmd(opts: Opts) -> CliResult<serde_json::Value> {
             }))
             .expect("Can't fail")
         }
-        cli::OptsCmd::Post {
-            body,
-            secret_file,
-            persona_id,
-        } => {
+        cli::OptsCmd::Post { body, secret_file } => {
             let id_secret = Client::read_id_secret(&secret_file)
                 .await
                 .context(SecretSnafu)?;
@@ -265,7 +260,7 @@ async fn handle_cmd(opts: Opts) -> CliResult<serde_json::Value> {
                 .context(InitSnafu)?;
 
             client
-                .social_post(id_secret, body, None, persona_id.unwrap_or(PersonaId(0)))
+                .social_post(id_secret, body, None, Default::default())
                 .await?;
 
             serde_json::Value::Bool(true)
