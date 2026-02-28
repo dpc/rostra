@@ -1,6 +1,7 @@
 mod common;
 
 use common::TestServer;
+use rostra_core::id::RostraIdSecretKey;
 
 /// Helper: generate an identity via the API and return (rostra_id, secret).
 async fn generate_identity(driver: &common::UiDriver) -> (String, String) {
@@ -586,5 +587,259 @@ async fn notifications_does_not_include_own_posts() {
     assert!(
         notifications.is_empty(),
         "Own posts should not appear in notifications"
+    );
+}
+
+// -- Secretless publish tests --
+
+/// Helper: call prepare, sign client-side, call publish, return (event_id,
+/// heads).
+async fn prepare_sign_publish(
+    driver: &common::UiDriver,
+    rostra_id: &str,
+    secret: &RostraIdSecretKey,
+    parent_head_id: Option<&str>,
+    content: &str,
+) -> (String, Vec<String>) {
+    // 1. Prepare
+    let body = serde_json::json!({
+        "parent_head_id": parent_head_id,
+        "content": content,
+    });
+    let resp = driver
+        .api_post_json(
+            &format!("/api/{rostra_id}/publish-social-post-prepare"),
+            None,
+            &body,
+        )
+        .await;
+    assert_eq!(resp.status(), 200, "Prepare should succeed");
+    let prepare: serde_json::Value = resp.json().await.unwrap();
+
+    // 2. Sign client-side
+    let event: rostra_core::event::Event =
+        serde_json::from_value(prepare["event"].clone()).unwrap();
+    let sig = event.sign_by(*secret);
+
+    let content_hex = prepare["content"].as_str().unwrap();
+
+    // 3. Publish
+    let publish_body = serde_json::json!({
+        "event": prepare["event"],
+        "sig": serde_json::to_value(sig).unwrap(),
+        "content": content_hex,
+    });
+    let resp = driver
+        .api_post_json(&format!("/api/{rostra_id}/publish"), None, &publish_body)
+        .await;
+    assert_eq!(resp.status(), 200, "Publish should succeed");
+    let result: serde_json::Value = resp.json().await.unwrap();
+    let event_id = result["event_id"].as_str().unwrap().to_string();
+    let heads: Vec<String> = result["heads"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|h| h.as_str().unwrap().to_string())
+        .collect();
+    (event_id, heads)
+}
+
+#[test_log::test(tokio::test(flavor = "multi_thread"))]
+async fn prepare_and_publish_round_trip() {
+    let server = TestServer::start().await;
+    let driver = server.driver();
+
+    // Generate identity
+    let resp = driver.api_get("/api/generate-id").await;
+    let id_info: serde_json::Value = resp.json().await.unwrap();
+    let rostra_id = id_info["rostra_id"].as_str().unwrap();
+    let secret_str = id_info["rostra_id_secret"].as_str().unwrap();
+    let secret: RostraIdSecretKey = secret_str.parse().unwrap();
+
+    // First post (no parent head)
+    let (event_id, heads) =
+        prepare_sign_publish(&driver, rostra_id, &secret, None, "Hello secretless!").await;
+
+    assert!(!event_id.is_empty(), "Should return an event_id");
+    assert!(!heads.is_empty(), "Should have heads after posting");
+
+    // Second post using a head from the first
+    let head = &heads[0];
+    let (event_id_2, heads_2) =
+        prepare_sign_publish(&driver, rostra_id, &secret, Some(head), "Second post!").await;
+
+    assert!(!event_id_2.is_empty());
+    assert!(!heads_2.is_empty());
+    assert_ne!(
+        event_id, event_id_2,
+        "Different posts should have different event IDs"
+    );
+}
+
+#[test_log::test(tokio::test(flavor = "multi_thread"))]
+async fn publish_with_wrong_author_returns_403() {
+    let server = TestServer::start().await;
+    let driver = server.driver();
+
+    // Generate two identities
+    let resp = driver.api_get("/api/generate-id").await;
+    let id_info_1: serde_json::Value = resp.json().await.unwrap();
+    let rostra_id_1 = id_info_1["rostra_id"].as_str().unwrap();
+    let secret_1: RostraIdSecretKey = id_info_1["rostra_id_secret"]
+        .as_str()
+        .unwrap()
+        .parse()
+        .unwrap();
+
+    let resp = driver.api_get("/api/generate-id").await;
+    let id_info_2: serde_json::Value = resp.json().await.unwrap();
+    let rostra_id_2 = id_info_2["rostra_id"].as_str().unwrap();
+
+    // Prepare an event for identity 1
+    let resp = driver
+        .api_post_json(
+            &format!("/api/{rostra_id_1}/publish-social-post-prepare"),
+            None,
+            &serde_json::json!({
+                "parent_head_id": null,
+                "content": "test",
+            }),
+        )
+        .await;
+    assert_eq!(resp.status(), 200);
+    let prepare: serde_json::Value = resp.json().await.unwrap();
+
+    let event: rostra_core::event::Event =
+        serde_json::from_value(prepare["event"].clone()).unwrap();
+    let sig = event.sign_by(secret_1);
+
+    // Try to publish to identity 2's URL (author mismatch)
+    let publish_body = serde_json::json!({
+        "event": prepare["event"],
+        "sig": serde_json::to_value(sig).unwrap(),
+        "content": prepare["content"],
+    });
+    let resp = driver
+        .api_post_json(&format!("/api/{rostra_id_2}/publish"), None, &publish_body)
+        .await;
+    assert_eq!(
+        resp.status(),
+        403,
+        "Publishing to wrong identity should return 403"
+    );
+}
+
+#[test_log::test(tokio::test(flavor = "multi_thread"))]
+async fn publish_with_bad_signature_returns_400() {
+    let server = TestServer::start().await;
+    let driver = server.driver();
+
+    let resp = driver.api_get("/api/generate-id").await;
+    let id_info: serde_json::Value = resp.json().await.unwrap();
+    let rostra_id = id_info["rostra_id"].as_str().unwrap();
+
+    // Prepare an event
+    let resp = driver
+        .api_post_json(
+            &format!("/api/{rostra_id}/publish-social-post-prepare"),
+            None,
+            &serde_json::json!({
+                "parent_head_id": null,
+                "content": "test",
+            }),
+        )
+        .await;
+    assert_eq!(resp.status(), 200);
+    let prepare: serde_json::Value = resp.json().await.unwrap();
+
+    // Use a garbage signature (64 zero bytes, hex-encoded)
+    let bad_sig = "0".repeat(128);
+
+    let publish_body = serde_json::json!({
+        "event": prepare["event"],
+        "sig": bad_sig,
+        "content": prepare["content"],
+    });
+    let resp = driver
+        .api_post_json(&format!("/api/{rostra_id}/publish"), None, &publish_body)
+        .await;
+    assert_eq!(resp.status(), 400, "Bad signature should return 400");
+}
+
+#[test_log::test(tokio::test(flavor = "multi_thread"))]
+async fn publish_with_mismatched_content_returns_400() {
+    let server = TestServer::start().await;
+    let driver = server.driver();
+
+    let resp = driver.api_get("/api/generate-id").await;
+    let id_info: serde_json::Value = resp.json().await.unwrap();
+    let rostra_id = id_info["rostra_id"].as_str().unwrap();
+    let secret: RostraIdSecretKey = id_info["rostra_id_secret"]
+        .as_str()
+        .unwrap()
+        .parse()
+        .unwrap();
+
+    // Prepare an event
+    let resp = driver
+        .api_post_json(
+            &format!("/api/{rostra_id}/publish-social-post-prepare"),
+            None,
+            &serde_json::json!({
+                "parent_head_id": null,
+                "content": "test",
+            }),
+        )
+        .await;
+    assert_eq!(resp.status(), 200);
+    let prepare: serde_json::Value = resp.json().await.unwrap();
+
+    let event: rostra_core::event::Event =
+        serde_json::from_value(prepare["event"].clone()).unwrap();
+    let sig = event.sign_by(secret);
+
+    // Send with tampered content (different hex bytes)
+    let publish_body = serde_json::json!({
+        "event": prepare["event"],
+        "sig": serde_json::to_value(sig).unwrap(),
+        "content": "deadbeef",
+    });
+    let resp = driver
+        .api_post_json(&format!("/api/{rostra_id}/publish"), None, &publish_body)
+        .await;
+    assert_eq!(resp.status(), 400, "Mismatched content should return 400");
+}
+
+#[test_log::test(tokio::test(flavor = "multi_thread"))]
+async fn prepare_does_not_require_secret() {
+    let server = TestServer::start().await;
+    let driver = server.driver();
+
+    let resp = driver.api_get("/api/generate-id").await;
+    let id_info: serde_json::Value = resp.json().await.unwrap();
+    let rostra_id = id_info["rostra_id"].as_str().unwrap();
+
+    // Prepare without any secret header — should succeed
+    let resp = driver
+        .api_post_json(
+            &format!("/api/{rostra_id}/publish-social-post-prepare"),
+            None,
+            &serde_json::json!({
+                "parent_head_id": null,
+                "content": "No secret needed!",
+            }),
+        )
+        .await;
+    assert_eq!(
+        resp.status(),
+        200,
+        "Prepare should not require a secret header"
+    );
+
+    let body: serde_json::Value = resp.json().await.unwrap();
+    assert!(body["event"].is_object(), "Should return event object");
+    assert!(
+        body["content"].as_str().is_some_and(|s| !s.is_empty()),
+        "Should return hex-encoded content"
     );
 }

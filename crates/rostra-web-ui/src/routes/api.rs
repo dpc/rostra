@@ -7,7 +7,10 @@ use axum::http::request::Parts;
 use axum::routing::{get, post};
 use axum::{Json, Router};
 use rostra_client_db::social::ReceivedAtPaginationCursor;
-use rostra_core::event::PersonaTag;
+use rostra_core::event::{
+    Event, EventContentRaw, EventSignature, PersonaTag, SignedEvent, SocialPost, VerifiedEvent,
+    VerifiedEventContent,
+};
 use rostra_core::id::{ExternalEventId, RostraId, RostraIdSecretKey};
 use rostra_core::{ShortEventId, Timestamp};
 use serde::{Deserialize, Serialize};
@@ -113,6 +116,11 @@ pub fn api_router() -> Router<Arc<UiState>> {
             "/{rostra_id}/update-social-profile-managed",
             post(update_social_profile_managed),
         )
+        .route(
+            "/{rostra_id}/publish-social-post-prepare",
+            post(publish_social_post_prepare),
+        )
+        .route("/{rostra_id}/publish", post(publish_signed_event))
         .route("/{rostra_id}/notifications", get(get_notifications))
 }
 
@@ -413,6 +421,192 @@ async fn update_social_profile_managed(
 
     Ok(Json(UpdateSocialProfileResponse {
         event_id: ShortEventId::from(verified_event.event_id).to_string(),
+        heads,
+    }))
+}
+
+// -- Secretless publish --
+
+#[derive(Serialize)]
+struct PublishSocialPostPrepareResponse {
+    event: Event,
+    content: EventContentRaw,
+}
+
+async fn publish_social_post_prepare(
+    State(state): State<SharedState>,
+    _version: ApiVersion,
+    Path(rostra_id): Path<RostraId>,
+    Json(req): Json<PublishSocialPostRequest>,
+) -> ApiResult<Json<PublishSocialPostPrepareResponse>> {
+    // Load client
+    state.load_client(rostra_id).await.map_err(|e| {
+        api_error(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("Failed to load client: {e}"),
+        )
+    })?;
+
+    let client = state.client(rostra_id).await.map_err(|e| {
+        api_error(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("Client error: {e}"),
+        )
+    })?;
+    let client_ref = client.client_ref().map_err(|e| {
+        api_error(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("Client ref error: {e}"),
+        )
+    })?;
+
+    // Idempotency check (same pattern as managed endpoint)
+    let current_heads = client_ref.db().get_heads_events_for_id(rostra_id).await;
+
+    match &req.parent_head_id {
+        None => {
+            if !current_heads.is_empty() {
+                return Err(api_error(
+                    StatusCode::CONFLICT,
+                    "parent_head_id is null but identity has existing heads. \
+                     Call GET /api/{id}/heads to get current heads and pass one as parent_head_id.",
+                ));
+            }
+        }
+        Some(head_str) => {
+            let head: ShortEventId = head_str
+                .parse()
+                .map_err(|_| api_error(StatusCode::BAD_REQUEST, "Invalid parent_head_id format"))?;
+            if !current_heads.contains(&head) {
+                return Err(api_error(
+                    StatusCode::CONFLICT,
+                    "parent_head_id is not among current heads. \
+                     The post may have already been published, or the state is stale. \
+                     Call GET /api/{id}/heads to verify.",
+                ));
+            }
+        }
+    }
+
+    // Fetch DAG state
+    let current_head = client_ref.db().get_self_current_head().await;
+    let aux_event = client_ref.db().get_self_random_eventid().await;
+
+    // Parse persona tags
+    let persona_tags: BTreeSet<PersonaTag> = req
+        .persona_tags
+        .iter()
+        .filter_map(|s| PersonaTag::new(s).ok())
+        .collect();
+
+    // Parse reply_to
+    let reply_to: Option<ExternalEventId> = req
+        .reply_to
+        .as_deref()
+        .map(|s| s.parse())
+        .transpose()
+        .map_err(|_| api_error(StatusCode::BAD_REQUEST, "Invalid reply_to format"))?;
+
+    // Build unsigned event + content
+    let social_post = SocialPost::new(req.content, reply_to, persona_tags);
+    let (event, content) = Event::builder(&social_post)
+        .author(rostra_id)
+        .maybe_parent_prev(current_head)
+        .maybe_parent_aux(aux_event)
+        .build()
+        .map_err(|e| {
+            api_error(
+                StatusCode::BAD_REQUEST,
+                format!("Content validation failed: {e}"),
+            )
+        })?;
+
+    Ok(Json(PublishSocialPostPrepareResponse { event, content }))
+}
+
+#[derive(Deserialize)]
+struct PublishSignedEventRequest {
+    event: Event,
+    sig: EventSignature,
+    content: EventContentRaw,
+}
+
+#[derive(Serialize)]
+struct PublishSignedEventResponse {
+    event_id: String,
+    heads: Vec<String>,
+}
+
+async fn publish_signed_event(
+    State(state): State<SharedState>,
+    _version: ApiVersion,
+    Path(rostra_id): Path<RostraId>,
+    Json(req): Json<PublishSignedEventRequest>,
+) -> ApiResult<Json<PublishSignedEventResponse>> {
+    // Verify author matches the path
+    if req.event.author != rostra_id {
+        return Err(api_error(
+            StatusCode::FORBIDDEN,
+            "Event author does not match the rostra_id in the URL",
+        ));
+    }
+
+    // Verify signature
+    let signed_event = SignedEvent::unverified(req.event, req.sig);
+    let verified_event = VerifiedEvent::verify_received_as_is(signed_event).map_err(|e| {
+        api_error(
+            StatusCode::BAD_REQUEST,
+            format!("Signature verification failed: {e}"),
+        )
+    })?;
+
+    // Verify content matches event hash/len
+    let verified_event_content = VerifiedEventContent::verify(verified_event, req.content)
+        .map_err(|e| {
+            api_error(
+                StatusCode::BAD_REQUEST,
+                format!("Content verification failed: {e}"),
+            )
+        })?;
+
+    // Load client and store
+    state.load_client(rostra_id).await.map_err(|e| {
+        api_error(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("Failed to load client: {e}"),
+        )
+    })?;
+
+    let client = state.client(rostra_id).await.map_err(|e| {
+        api_error(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("Client error: {e}"),
+        )
+    })?;
+    let client_ref = client.client_ref().map_err(|e| {
+        api_error(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("Client ref error: {e}"),
+        )
+    })?;
+
+    client_ref
+        .db()
+        .process_event_with_content(&verified_event_content)
+        .await;
+
+    // Get updated heads
+    let mut heads: Vec<String> = client_ref
+        .db()
+        .get_heads_events_for_id(rostra_id)
+        .await
+        .into_iter()
+        .map(|h| h.to_string())
+        .collect();
+    heads.sort();
+
+    Ok(Json(PublishSignedEventResponse {
+        event_id: ShortEventId::from(verified_event_content.event_id()).to_string(),
         heads,
     }))
 }
