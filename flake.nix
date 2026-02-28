@@ -89,28 +89,31 @@
               rec {
                 workspaceDeps = craneLib.buildWorkspaceDepsOnly { };
 
-                rostraCoreFeatureCheck =
-                  name: featuresArg:
-                  craneLib.mkCargoDerivation {
-                    pname = "rostra-core-${name}";
-                    cargoArtifacts = workspaceDeps;
-                    installArtifacts = false;
-                    buildPhaseCargoCommand = "cargo check --profile $CARGO_PROFILE --package rostra-core ${featuresArg}";
-                  };
-
                 workspace = craneLib.buildWorkspace {
                   cargoArtifacts = workspaceDeps;
                 };
 
-                # rostra-core feature combination checks
-                rostraCoreNoFeatures = rostraCoreFeatureCheck "no-features" "--no-default-features";
-                rostraCoreBincode = rostraCoreFeatureCheck "bincode" "--no-default-features --features bincode";
-                rostraCoreEd25519 = rostraCoreFeatureCheck "ed25519" "--no-default-features --features ed25519-dalek";
-                rostraCoreSerde = rostraCoreFeatureCheck "serde" "--no-default-features --features serde";
-                rostraCoreEd25519Bincode = rostraCoreFeatureCheck "ed25519-bincode" "--no-default-features --features ed25519-dalek,bincode";
-                rostraCoreEd25519Serde = rostraCoreFeatureCheck "ed25519-serde" "--no-default-features --features ed25519-dalek,serde";
-                rostraCoreSerdeBincode = rostraCoreFeatureCheck "serde-bincode" "--no-default-features --features serde,bincode";
-                rostraCoreAllFeatures = rostraCoreFeatureCheck "all-features" "--all-features";
+                rostraCoreFeatures = craneLib.mkCargoDerivation {
+                  pname = "rostra-core-features";
+                  cargoArtifacts = workspaceDeps;
+                  installArtifacts = false;
+                  buildPhaseCargoCommand = ''
+                    for combo in \
+                      "--no-default-features" \
+                      "--no-default-features --features bincode" \
+                      "--no-default-features --features ed25519-dalek" \
+                      "--no-default-features --features serde" \
+                      "--no-default-features --features ed25519-dalek,bincode" \
+                      "--no-default-features --features ed25519-dalek,serde" \
+                      "--no-default-features --features serde,bincode" \
+                      "--no-default-features --features ed25519-dalek,serde,bincode" \
+                      "--all-features" \
+                    ; do
+                      >&2 echo "Checking rostra-core $combo ..."
+                      cargo check --profile $CARGO_PROFILE --package rostra-core $combo
+                    done
+                  '';
+                };
 
                 tests = craneLib.cargoNextest {
                   cargoArtifacts = workspace;
