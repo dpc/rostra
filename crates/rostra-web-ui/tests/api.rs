@@ -2,6 +2,51 @@ mod common;
 
 use common::TestServer;
 
+/// Helper: generate an identity via the API and return (rostra_id, secret).
+async fn generate_identity(driver: &common::UiDriver) -> (String, String) {
+    let resp = driver.api_get("/api/generate-id").await;
+    let body: serde_json::Value = resp.json().await.unwrap();
+    (
+        body["rostra_id"].as_str().unwrap().to_string(),
+        body["rostra_id_secret"].as_str().unwrap().to_string(),
+    )
+}
+
+/// Helper: publish a post and return (event_id, heads).
+async fn publish_post(
+    driver: &common::UiDriver,
+    rostra_id: &str,
+    secret: &str,
+    parent_head_id: Option<&str>,
+    content: &str,
+    reply_to: Option<&str>,
+) -> (String, Vec<String>) {
+    let mut body = serde_json::json!({
+        "parent_head_id": parent_head_id,
+        "content": content,
+    });
+    if let Some(rt) = reply_to {
+        body["reply_to"] = serde_json::Value::String(rt.to_string());
+    }
+    let resp = driver
+        .api_post_json(
+            &format!("/api/{rostra_id}/publish-social-post-managed"),
+            Some(secret),
+            &body,
+        )
+        .await;
+    assert_eq!(resp.status(), 200, "Post should succeed");
+    let result: serde_json::Value = resp.json().await.unwrap();
+    let event_id = result["event_id"].as_str().unwrap().to_string();
+    let heads: Vec<String> = result["heads"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|h| h.as_str().unwrap().to_string())
+        .collect();
+    (event_id, heads)
+}
+
 #[test_log::test(tokio::test(flavor = "multi_thread"))]
 async fn generate_id_returns_keypair() {
     let server = TestServer::start().await;
@@ -478,4 +523,68 @@ async fn update_profile_without_secret_returns_401() {
         )
         .await;
     assert_eq!(resp.status(), 401);
+}
+
+// -- Notifications tests --
+
+#[test_log::test(tokio::test(flavor = "multi_thread"))]
+async fn notifications_empty_for_fresh_identity() {
+    let server = TestServer::start().await;
+    let driver = server.driver();
+
+    let (rostra_id, _secret) = generate_identity(&driver).await;
+
+    let resp = driver
+        .api_get(&format!("/api/{rostra_id}/notifications"))
+        .await;
+    assert_eq!(resp.status(), 200);
+
+    let body: serde_json::Value = resp.json().await.unwrap();
+    assert_eq!(body["notifications"], serde_json::json!([]));
+    assert!(body["next_cursor"].is_null());
+}
+
+#[test_log::test(tokio::test(flavor = "multi_thread"))]
+async fn notifications_response_structure() {
+    let server = TestServer::start().await;
+    let driver = server.driver();
+
+    // Each identity has its own database in MultiClient, so cross-identity
+    // notifications require p2p propagation (not available in tests).
+    // This test validates the response structure and cursor fields.
+    let (rostra_id, _secret) = generate_identity(&driver).await;
+
+    let resp = driver
+        .api_get(&format!("/api/{rostra_id}/notifications"))
+        .await;
+    assert_eq!(resp.status(), 200);
+
+    let body: serde_json::Value = resp.json().await.unwrap();
+    assert!(body["notifications"].is_array());
+    assert!(
+        body["next_cursor"].is_null(),
+        "next_cursor should be null when there are no more pages"
+    );
+}
+
+#[test_log::test(tokio::test(flavor = "multi_thread"))]
+async fn notifications_does_not_include_own_posts() {
+    let server = TestServer::start().await;
+    let driver = server.driver();
+
+    // Identity A posts
+    let (id_a, secret_a) = generate_identity(&driver).await;
+    let (_event_id_a, _heads_a) =
+        publish_post(&driver, &id_a, &secret_a, None, "My post", None).await;
+
+    // A's notifications should NOT include A's own post
+    let resp = driver.api_get(&format!("/api/{id_a}/notifications")).await;
+    assert_eq!(resp.status(), 200);
+
+    let body: serde_json::Value = resp.json().await.unwrap();
+    let notifications = body["notifications"].as_array().unwrap();
+    assert!(
+        notifications.is_empty(),
+        "Own posts should not appear in notifications"
+    );
 }

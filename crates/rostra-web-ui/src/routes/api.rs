@@ -1,14 +1,15 @@
 use std::collections::BTreeSet;
 use std::sync::Arc;
 
-use axum::extract::{FromRequestParts, Path, State};
+use axum::extract::{FromRequestParts, Path, Query, State};
 use axum::http::StatusCode;
 use axum::http::request::Parts;
 use axum::routing::{get, post};
 use axum::{Json, Router};
-use rostra_core::ShortEventId;
+use rostra_client_db::social::ReceivedAtPaginationCursor;
 use rostra_core::event::PersonaTag;
 use rostra_core::id::{ExternalEventId, RostraId, RostraIdSecretKey};
+use rostra_core::{ShortEventId, Timestamp};
 use serde::{Deserialize, Serialize};
 
 use crate::{SharedState, UiState};
@@ -112,6 +113,7 @@ pub fn api_router() -> Router<Arc<UiState>> {
             "/{rostra_id}/update-social-profile-managed",
             post(update_social_profile_managed),
         )
+        .route("/{rostra_id}/notifications", get(get_notifications))
 }
 
 // -- Endpoints --
@@ -412,5 +414,110 @@ async fn update_social_profile_managed(
     Ok(Json(UpdateSocialProfileResponse {
         event_id: ShortEventId::from(verified_event.event_id).to_string(),
         heads,
+    }))
+}
+
+// -- Notifications --
+
+#[derive(Deserialize)]
+struct NotificationsQuery {
+    ts: Option<Timestamp>,
+    seq: Option<u64>,
+}
+
+#[derive(Serialize)]
+struct NotificationItem {
+    event_id: String,
+    author: String,
+    ts: u64,
+    content: Option<String>,
+    reply_to: Option<String>,
+    persona_tags: Vec<String>,
+    reply_count: u64,
+}
+
+#[derive(Serialize)]
+struct NotificationsResponse {
+    notifications: Vec<NotificationItem>,
+    next_cursor: Option<NotificationsCursor>,
+}
+
+#[derive(Serialize)]
+struct NotificationsCursor {
+    ts: u64,
+    seq: u64,
+}
+
+async fn get_notifications(
+    State(state): State<SharedState>,
+    _version: ApiVersion,
+    Path(rostra_id): Path<RostraId>,
+    Query(query): Query<NotificationsQuery>,
+) -> ApiResult<Json<NotificationsResponse>> {
+    state.load_client(rostra_id).await.map_err(|e| {
+        api_error(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("Failed to load client: {e}"),
+        )
+    })?;
+
+    let client = state.client(rostra_id).await.map_err(|e| {
+        api_error(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("Client error: {e}"),
+        )
+    })?;
+    let client_ref = client.client_ref().map_err(|e| {
+        api_error(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("Client ref error: {e}"),
+        )
+    })?;
+
+    let cursor = query
+        .ts
+        .and_then(|ts| query.seq.map(|seq| ReceivedAtPaginationCursor { ts, seq }));
+
+    let self_id = rostra_id;
+    let self_mentions = client_ref.db().get_self_mentions().await;
+
+    let (posts, next) = client_ref
+        .db()
+        .paginate_social_posts_by_received_at_rev(cursor, 20, move |post| {
+            post.author != self_id
+                && (post.reply_to.map(|ext_id| ext_id.rostra_id()) == Some(self_id)
+                    || self_mentions.contains(&post.event_id))
+        })
+        .await;
+
+    let notifications = posts
+        .into_iter()
+        .map(|post| {
+            let persona_tags = post
+                .content
+                .persona_tags()
+                .into_iter()
+                .map(|t| t.to_string())
+                .collect();
+            NotificationItem {
+                event_id: post.event_id.to_string(),
+                author: post.author.to_string(),
+                ts: post.ts.as_u64(),
+                content: post.content.djot_content,
+                reply_to: post.reply_to.map(|r| r.to_string()),
+                persona_tags,
+                reply_count: post.reply_count,
+            }
+        })
+        .collect();
+
+    let next_cursor = next.map(|c| NotificationsCursor {
+        ts: c.ts.as_u64(),
+        seq: c.seq,
+    });
+
+    Ok(Json(NotificationsResponse {
+        notifications,
+        next_cursor,
     }))
 }

@@ -220,6 +220,71 @@ Profile updates are singleton events — each update replaces the previous one.
 | 401    | Missing `X-Rostra-Id-Secret` header               |
 | 403    | Secret does not match `{rostra_id}`               |
 
+### `GET /api/{rostra_id}/notifications`
+
+Get notifications for an identity — posts by others that are either direct
+replies to the identity or @mentions. Results are ordered by reception time
+(newest first) and paginated with cursor-based pagination.
+
+**Headers:** `X-Rostra-Api-Version: 0`
+
+**Path parameters:**
+
+- `rostra_id` — the identity to query notifications for
+
+**Query parameters (optional, for pagination):**
+
+| Parameter | Type  | Description                                  |
+| --------- | ----- | -------------------------------------------- |
+| `ts`      | `u64` | Cursor timestamp (seconds since Unix epoch)  |
+| `seq`     | `u64` | Cursor sequence number                       |
+
+Both `ts` and `seq` must be provided together to paginate. They come from the
+`next_cursor` field of a previous response. Omit both for the first page.
+
+**Response (200):**
+
+```json
+{
+  "notifications": [
+    {
+      "event_id": "BASE32ENCODED...",
+      "author": "rs...",
+      "ts": 1700000000,
+      "content": "Reply text in djot format",
+      "reply_to": "rsABCD...-EVENTID...",
+      "persona_tags": ["bot"],
+      "reply_count": 0
+    }
+  ],
+  "next_cursor": {
+    "ts": 1699999999,
+    "seq": 0
+  }
+}
+```
+
+| Field                 | Type              | Description                                  |
+| --------------------- | ----------------- | -------------------------------------------- |
+| `notifications`       | `array`           | List of notification items (up to 20)        |
+| `notifications[].event_id` | `string`    | `ShortEventId` of the notification post      |
+| `notifications[].author`   | `string`    | `RostraId` of the post author                |
+| `notifications[].ts`       | `u64`       | Author timestamp (seconds since Unix epoch)  |
+| `notifications[].content`  | `string?`   | Post content in [djot](https://djot.net) format (null for reactions) |
+| `notifications[].reply_to` | `string?`   | `ExternalEventId` this post replies to       |
+| `notifications[].persona_tags` | `string[]` | Tags on the post                          |
+| `notifications[].reply_count`  | `u64`   | Number of replies to this post               |
+| `next_cursor`         | `object?`         | Cursor for the next page, or `null` if no more pages |
+| `next_cursor.ts`      | `u64`             | Pass as `?ts=` query parameter               |
+| `next_cursor.seq`     | `u64`             | Pass as `?seq=` query parameter              |
+
+**Pagination flow:**
+
+1. First request: `GET /api/{id}/notifications` (no query parameters).
+2. If `next_cursor` is not null, fetch the next page:
+   `GET /api/{id}/notifications?ts={next_cursor.ts}&seq={next_cursor.seq}`
+3. Repeat until `next_cursor` is `null`.
+
 ## Example: curl
 
 ```bash
@@ -244,4 +309,12 @@ curl -s -X POST \
   -H "Content-Type: application/json" \
   -d '{"display_name": "Bot", "bio": "I am a bot."}' \
   http://localhost:2345/api/$ID/update-social-profile-managed
+
+# Get notifications (first page)
+curl -s -H "X-Rostra-Api-Version: 0" \
+  http://localhost:2345/api/$ID/notifications
+
+# Get next page (using cursor from previous response)
+curl -s -H "X-Rostra-Api-Version: 0" \
+  "http://localhost:2345/api/$ID/notifications?ts=1700000000&seq=0"
 ```
