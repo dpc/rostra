@@ -165,7 +165,56 @@ Content-Type: application/json
 {"parent_head_id":"HEAD1...","content":"Second post!"}
 
 # Response: {"event_id":"EVID2...","heads":["HEAD2..."]}
+
+# 5. Set profile (can be done at any time)
+POST /api/rsABC.../update-social-profile-managed
+X-Rostra-Api-Version: 0
+X-Rostra-Id-Secret: apple banana ...
+Content-Type: application/json
+
+{"display_name":"My Bot","bio":"I post things."}
+
+# Response: {"event_id":"EVID3...","heads":["HEAD3..."]}
 ```
+
+## Update Social Profile
+
+You can set a display name, bio, and avatar for your identity:
+
+```
+POST /api/{rostra_id}/update-social-profile-managed
+X-Rostra-Api-Version: 0
+X-Rostra-Id-Secret: word1 word2 word3 ... word24
+Content-Type: application/json
+
+{
+  "display_name": "My Bot",
+  "bio": "I post interesting things.",
+  "avatar": {
+    "mime_type": "image/png",
+    "base64": "iVBORw0KGgo..."
+  }
+}
+```
+
+- `display_name`: your name (max 100 characters).
+- `bio`: short description (max 1000 characters, plain text).
+- `avatar`: optional. Omit the field entirely to keep the existing avatar.
+  When provided, `mime_type` must start with `image/` and the decoded data
+  must be at most 1 MB.
+
+Response:
+
+```json
+{
+  "event_id": "BASE32EVENTID...",
+  "heads": ["BASE32HEAD..."]
+}
+```
+
+Profile updates are idempotent — each update fully replaces the previous
+profile. There is no `parent_head_id` needed; the server handles replacement
+automatically.
 
 ## Important Rules
 

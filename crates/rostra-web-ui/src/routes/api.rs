@@ -108,6 +108,10 @@ pub fn api_router() -> Router<Arc<UiState>> {
             "/{rostra_id}/publish-social-post-managed",
             post(publish_social_post_managed),
         )
+        .route(
+            "/{rostra_id}/update-social-profile-managed",
+            post(update_social_profile_managed),
+        )
 }
 
 // -- Endpoints --
@@ -296,6 +300,116 @@ async fn publish_social_post_managed(
     heads.sort();
 
     Ok(Json(PublishSocialPostResponse {
+        event_id: ShortEventId::from(verified_event.event_id).to_string(),
+        heads,
+    }))
+}
+
+// -- Update Social Profile --
+
+#[derive(Deserialize)]
+struct AvatarData {
+    mime_type: String,
+    base64: String,
+}
+
+#[derive(Deserialize)]
+struct UpdateSocialProfileRequest {
+    display_name: String,
+    bio: String,
+    avatar: Option<AvatarData>,
+}
+
+#[derive(Serialize)]
+struct UpdateSocialProfileResponse {
+    event_id: String,
+    heads: Vec<String>,
+}
+
+async fn update_social_profile_managed(
+    State(state): State<SharedState>,
+    _version: ApiVersion,
+    ApiIdSecret(id_secret): ApiIdSecret,
+    Path(rostra_id): Path<RostraId>,
+    Json(req): Json<UpdateSocialProfileRequest>,
+) -> ApiResult<Json<UpdateSocialProfileResponse>> {
+    // Verify secret matches the rostra_id
+    if id_secret.id() != rostra_id {
+        return Err(api_error(
+            StatusCode::FORBIDDEN,
+            "Secret key does not match the rostra_id",
+        ));
+    }
+
+    // Load and unlock client
+    state.load_client(rostra_id).await.map_err(|e| {
+        api_error(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("Failed to load client: {e}"),
+        )
+    })?;
+
+    let client = state.client(rostra_id).await.map_err(|e| {
+        api_error(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("Client error: {e}"),
+        )
+    })?;
+    let client_ref = client.client_ref().map_err(|e| {
+        api_error(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("Client ref error: {e}"),
+        )
+    })?;
+
+    client_ref.unlock_active(id_secret).await.map_err(|e| {
+        api_error(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("Unlock error: {e}"),
+        )
+    })?;
+
+    // Decode avatar if provided
+    let avatar = match req.avatar {
+        Some(avatar_data) => {
+            let bytes = data_encoding::BASE64
+                .decode(avatar_data.base64.as_bytes())
+                .or_else(|_| data_encoding::BASE64_NOPAD.decode(avatar_data.base64.as_bytes()))
+                .map_err(|_| api_error(StatusCode::BAD_REQUEST, "Invalid base64 in avatar data"))?;
+            Some((avatar_data.mime_type, bytes))
+        }
+        None => {
+            // Preserve existing avatar when not provided
+            client_ref
+                .db()
+                .get_social_profile(rostra_id)
+                .await
+                .and_then(|p| p.avatar)
+        }
+    };
+
+    // Publish profile update
+    let verified_event = client_ref
+        .post_social_profile_update(id_secret, req.display_name, req.bio, avatar)
+        .await
+        .map_err(|e| {
+            api_error(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                format!("Failed to update profile: {e}"),
+            )
+        })?;
+
+    // Get updated heads
+    let mut heads: Vec<String> = client_ref
+        .db()
+        .get_heads_events_for_id(rostra_id)
+        .await
+        .into_iter()
+        .map(|h| h.to_string())
+        .collect();
+    heads.sort();
+
+    Ok(Json(UpdateSocialProfileResponse {
         event_id: ShortEventId::from(verified_event.event_id).to_string(),
         heads,
     }))

@@ -333,3 +333,149 @@ async fn publish_without_secret_returns_401() {
         "Missing secret should return 401 Unauthorized"
     );
 }
+
+// -- Profile update tests --
+
+#[test_log::test(tokio::test(flavor = "multi_thread"))]
+async fn update_profile_basic() {
+    let server = TestServer::start().await;
+    let driver = server.driver();
+
+    let resp = driver.api_get("/api/generate-id").await;
+    let id_info: serde_json::Value = resp.json().await.unwrap();
+    let rostra_id = id_info["rostra_id"].as_str().unwrap();
+    let secret = id_info["rostra_id_secret"].as_str().unwrap();
+
+    let resp = driver
+        .api_post_json(
+            &format!("/api/{rostra_id}/update-social-profile-managed"),
+            Some(secret),
+            &serde_json::json!({
+                "display_name": "Bot McBotface",
+                "bio": "I am a test bot.",
+            }),
+        )
+        .await;
+    assert_eq!(
+        resp.status(),
+        200,
+        "Profile update should succeed: {}",
+        resp.text().await.unwrap()
+    );
+}
+
+#[test_log::test(tokio::test(flavor = "multi_thread"))]
+async fn update_profile_returns_event_id_and_heads() {
+    let server = TestServer::start().await;
+    let driver = server.driver();
+
+    let resp = driver.api_get("/api/generate-id").await;
+    let id_info: serde_json::Value = resp.json().await.unwrap();
+    let rostra_id = id_info["rostra_id"].as_str().unwrap();
+    let secret = id_info["rostra_id_secret"].as_str().unwrap();
+
+    let resp = driver
+        .api_post_json(
+            &format!("/api/{rostra_id}/update-social-profile-managed"),
+            Some(secret),
+            &serde_json::json!({
+                "display_name": "Test Name",
+                "bio": "Test bio",
+            }),
+        )
+        .await;
+    assert_eq!(resp.status(), 200);
+
+    let body: serde_json::Value = resp.json().await.unwrap();
+    assert!(
+        body["event_id"].as_str().is_some_and(|s| !s.is_empty()),
+        "Should return an event_id"
+    );
+    assert!(
+        !body["heads"].as_array().unwrap().is_empty(),
+        "Should have heads after profile update"
+    );
+}
+
+#[test_log::test(tokio::test(flavor = "multi_thread"))]
+async fn update_profile_with_avatar() {
+    let server = TestServer::start().await;
+    let driver = server.driver();
+
+    let resp = driver.api_get("/api/generate-id").await;
+    let id_info: serde_json::Value = resp.json().await.unwrap();
+    let rostra_id = id_info["rostra_id"].as_str().unwrap();
+    let secret = id_info["rostra_id_secret"].as_str().unwrap();
+
+    // A few bytes of fake image data, base64-encoded
+    let tiny_png_base64 = data_encoding::BASE64.encode(b"\x89PNG fake image data");
+
+    let resp = driver
+        .api_post_json(
+            &format!("/api/{rostra_id}/update-social-profile-managed"),
+            Some(secret),
+            &serde_json::json!({
+                "display_name": "Avatar Bot",
+                "bio": "I have a face!",
+                "avatar": {
+                    "mime_type": "image/png",
+                    "base64": &tiny_png_base64,
+                },
+            }),
+        )
+        .await;
+    assert_eq!(
+        resp.status(),
+        200,
+        "Profile update with avatar should succeed: {}",
+        resp.text().await.unwrap()
+    );
+}
+
+#[test_log::test(tokio::test(flavor = "multi_thread"))]
+async fn update_profile_wrong_secret_returns_403() {
+    let server = TestServer::start().await;
+    let driver = server.driver();
+
+    let resp = driver.api_get("/api/generate-id").await;
+    let id_info_1: serde_json::Value = resp.json().await.unwrap();
+    let rostra_id_1 = id_info_1["rostra_id"].as_str().unwrap();
+
+    let resp = driver.api_get("/api/generate-id").await;
+    let id_info_2: serde_json::Value = resp.json().await.unwrap();
+    let secret_2 = id_info_2["rostra_id_secret"].as_str().unwrap();
+
+    let resp = driver
+        .api_post_json(
+            &format!("/api/{rostra_id_1}/update-social-profile-managed"),
+            Some(secret_2),
+            &serde_json::json!({
+                "display_name": "Impersonator",
+                "bio": "Not really me",
+            }),
+        )
+        .await;
+    assert_eq!(resp.status(), 403);
+}
+
+#[test_log::test(tokio::test(flavor = "multi_thread"))]
+async fn update_profile_without_secret_returns_401() {
+    let server = TestServer::start().await;
+    let driver = server.driver();
+
+    let resp = driver.api_get("/api/generate-id").await;
+    let id_info: serde_json::Value = resp.json().await.unwrap();
+    let rostra_id = id_info["rostra_id"].as_str().unwrap();
+
+    let resp = driver
+        .api_post_json(
+            &format!("/api/{rostra_id}/update-social-profile-managed"),
+            None,
+            &serde_json::json!({
+                "display_name": "No Auth",
+                "bio": "Should fail",
+            }),
+        )
+        .await;
+    assert_eq!(resp.status(), 401);
+}

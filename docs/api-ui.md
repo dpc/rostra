@@ -163,6 +163,63 @@ This guarantees at-most-once delivery: if a caller retries the same request
 after a network timeout, the second attempt will fail with 409 because the
 head has already changed.
 
+### `POST /api/{rostra_id}/update-social-profile-managed`
+
+Update the social profile (display name, bio, avatar). The server signs the
+event on behalf of the caller (see the note on `-managed` above).
+
+Profile updates are singleton events — each update replaces the previous one.
+
+**Headers:**
+
+- `X-Rostra-Api-Version: 0`
+- `X-Rostra-Id-Secret: <BIP39 mnemonic>` (must match `{rostra_id}`)
+- `Content-Type: application/json`
+
+**Path parameters:**
+
+- `rostra_id` — the identity to update
+
+**Request body:**
+
+```json
+{
+  "display_name": "My Name",
+  "bio": "A short bio about me.",
+  "avatar": {
+    "mime_type": "image/png",
+    "base64": "iVBORw0KGgo..."
+  }
+}
+```
+
+| Field          | Type             | Required | Description                                    |
+| -------------- | ---------------- | -------- | ---------------------------------------------- |
+| `display_name` | `string`         | yes      | Display name (max 100 characters)              |
+| `bio`          | `string`         | yes      | Biography in plain text (max 1000 characters)  |
+| `avatar`       | `object` or omit | no       | Avatar image; omit to preserve existing avatar |
+| `avatar.mime_type` | `string`     | yes*     | MIME type (must start with `image/`)           |
+| `avatar.base64`    | `string`     | yes*     | Base64-encoded image data (max 1 MB decoded)   |
+
+\* Required when `avatar` is present.
+
+**Response (200):**
+
+```json
+{
+  "event_id": "BASE32ENCODED...",
+  "heads": ["BASE32ENCODED...", ...]
+}
+```
+
+**Errors:**
+
+| Status | Condition                                         |
+| ------ | ------------------------------------------------- |
+| 400    | Invalid request body, bad base64, name/bio too long, avatar too large or not an image |
+| 401    | Missing `X-Rostra-Id-Secret` header               |
+| 403    | Secret does not match `{rostra_id}`               |
+
 ## Example: curl
 
 ```bash
@@ -179,4 +236,12 @@ curl -s -X POST \
   -H "Content-Type: application/json" \
   -d '{"parent_head_id": null, "content": "Hello from API!"}' \
   http://localhost:2345/api/$ID/publish-social-post-managed
+
+# Update profile
+curl -s -X POST \
+  -H "X-Rostra-Api-Version: 0" \
+  -H "X-Rostra-Id-Secret: word1 word2 ... word24" \
+  -H "Content-Type: application/json" \
+  -d '{"display_name": "Bot", "bio": "I am a bot."}' \
+  http://localhost:2345/api/$ID/update-social-profile-managed
 ```

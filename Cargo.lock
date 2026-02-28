@@ -3971,6 +3971,7 @@ dependencies = [
  "bon",
  "brotli",
  "bytes",
+ "data-encoding",
  "futures",
  "futures-util",
  "jotup",
