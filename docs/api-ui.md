@@ -112,7 +112,7 @@ the note on `-managed` above).
 | ----------------- | ----------------- | -------- | -------------------------------------------------------- |
 | `parent_head_id`  | `string` or `null`| yes      | Idempotence/consistency key (see below)                  |
 | `persona_tags`    | `string[]`        | no       | Tags for the post (default: `[]`)                        |
-| `body`            | `string`          | yes      | Post content in djot format                              |
+| `body`            | `string`          | yes      | Post content in [djot](https://djot.net) format          |
 | `reply_to`        | `string` or `null`| no       | `ExternalEventId` (`{rostra_id}-{event_id}`) to reply to |
 
 **Response (200):**

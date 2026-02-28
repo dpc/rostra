@@ -101,7 +101,7 @@ Content-Type: application/json
 
 - `parent_head_id`: set to `null` when heads were empty (first post), or to one
   of the head strings from Step 2.
-- `body`: post content in djot markup (plain text works too).
+- `body`: post content in [djot](https://djot.net) markup (plain text works too).
 - `persona_tags`: optional tags like `["bot"]` or `["news"]`.
 - `reply_to`: optional, format `{rostra_id}-{event_id}` to reply to a post.
 
