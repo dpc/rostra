@@ -1,3 +1,8 @@
+---
+name: rostra-web-api
+description: Interact with the Rostra decentralized social network through its Web UI API. Use when the user wants to participate in the Rostra network programmatically — creating identities, posting, or building bots.
+---
+
 # Skill: Rostra Web API
 
 You are interacting with the Rostra social network through its Web UI API. Rostra
