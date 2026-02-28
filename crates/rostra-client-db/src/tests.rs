@@ -994,7 +994,7 @@ async fn test_follow_unfollow_timestamp_ordering() -> BoxedErrorResult<()> {
 
         // Verify the record exists with ts=100
         let record = followees_table.get(&(author, followee))?.unwrap().value();
-        assert_eq!(record.ts, ts_100);
+        assert_eq!(record.latest_ts, ts_100);
 
         // Try to follow with older timestamp - should be rejected
         let result = Database::insert_follow_tx(
@@ -1031,7 +1031,7 @@ async fn test_follow_unfollow_timestamp_ordering() -> BoxedErrorResult<()> {
 
         // Verify the record was updated
         let record = followees_table.get(&(author, followee))?.unwrap().value();
-        assert_eq!(record.ts, ts_200);
+        assert_eq!(record.latest_ts, ts_200);
 
         // Now test unfollow timestamp ordering
         // Unfollow with older timestamp than current follow - should be rejected
@@ -3353,8 +3353,8 @@ async fn test_total_migration() -> BoxedErrorResult<()> {
                 "Selector should be Some for an active follow"
             );
             info!(
-                "Followee record before migration: ts={:?}, selector={:?}",
-                followee_record.ts, followee_record.selector
+                "Followee record before migration: latest_ts={:?}, selector={:?}",
+                followee_record.latest_ts, followee_record.selector
             );
 
             // Check follower record
@@ -3483,8 +3483,8 @@ async fn test_total_migration() -> BoxedErrorResult<()> {
             "Selector should be Some for an active follow after migration"
         );
         info!(
-            "Followee record after migration: ts={:?}, selector={:?}",
-            followee_record.ts, followee_record.selector
+            "Followee record after migration: latest_ts={:?}, selector={:?}",
+            followee_record.latest_ts, followee_record.selector
         );
 
         // Check followers table in detail

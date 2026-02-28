@@ -13,8 +13,15 @@ use rostra_core::event::{PersonaSelector, PersonasTagsSelector};
 /// follows and which of their personas they want to see.
 #[derive(Debug, Encode, Decode, Clone)]
 pub struct IdsFolloweesRecord {
-    /// Timestamp of the follow/unfollow event that established this state
-    pub ts: Timestamp,
+    /// Timestamp of the latest follow/unfollow event (used as idempotency
+    /// guard)
+    pub latest_ts: Timestamp,
+    /// Timestamp of the first follow event that established this relationship.
+    ///
+    /// Used for notification timestamp heuristics: posts from before this
+    /// time are likely historical syncs and should not appear as "just
+    /// received".
+    pub first_ts: Timestamp,
     /// Legacy persona selector — kept for backward compat with old follow
     /// events.
     ///

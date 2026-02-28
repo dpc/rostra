@@ -143,6 +143,15 @@ def_table! {
     db_version: () => u64
 }
 
+def_table! {
+    /// Tracks when the database was first created.
+    ///
+    /// Used as a heuristic for notification timestamps: posts with author
+    /// timestamps older than the DB init time are likely historical syncs
+    /// and should not appear as "just received" in notifications.
+    db_init_time: () => Timestamp
+}
+
 // ============================================================================
 // IDENTITY TABLES
 // ============================================================================

@@ -627,8 +627,9 @@ impl Database {
     ) -> DbResult<bool> {
         let followee = content.followee;
         let db_key = (author, followee);
-        if let Some(followees) = followees_table.get(&db_key)?.map(|v| v.value()) {
-            if timestamp <= followees.ts {
+        let existing = followees_table.get(&db_key)?.map(|v| v.value());
+        if let Some(ref followees) = existing {
+            if timestamp <= followees.latest_ts {
                 return Ok(false);
             }
         }
@@ -638,6 +639,10 @@ impl Database {
             }
         }
 
+        let first_ts = existing
+            .map(|r| std::cmp::min(r.first_ts, timestamp))
+            .unwrap_or(timestamp);
+
         let tags_selector = content.persona_tags_selector.clone();
         let selector = content.selector();
         if selector.is_some() || tags_selector.is_some() {
@@ -646,7 +651,8 @@ impl Database {
         followees_table.insert(
             &db_key,
             &IdsFolloweesRecord {
-                ts: timestamp,
+                latest_ts: timestamp,
+                first_ts,
                 selector,
                 tags_selector,
             },
@@ -669,7 +675,7 @@ impl Database {
     ) -> DbResult<bool> {
         let db_key = (author, followee);
         if let Some(followees) = followees_table.get(&db_key)?.map(|v| v.value()) {
-            if timestamp <= followees.ts {
+            if timestamp <= followees.latest_ts {
                 return Ok(false);
             }
         }

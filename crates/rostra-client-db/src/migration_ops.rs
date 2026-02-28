@@ -9,12 +9,12 @@ use std::borrow::Cow;
 
 use bincode::{Decode, Encode};
 use redb::{ReadableTable as _, ReadableTableMetadata as _, TableHandle as _};
-use rostra_core::ShortEventId;
 use rostra_core::event::{
     EventContentRaw, EventContentUnsized, EventExt as _, SignedEvent, VerifiedEvent,
     VerifiedEventContent,
 };
 use rostra_core::id::ToShort as _;
+use rostra_core::{ShortEventId, Timestamp};
 use tracing::{debug, info};
 
 use crate::id_self::IdSelfAccountRecord;
@@ -62,13 +62,13 @@ pub type LegacyContentStoreRecordOwned = LegacyContentStoreRecord<'static>;
 /// Current schema version.
 ///
 /// Increment this when making schema changes that require migration.
-const DB_VER: u64 = 20;
+const DB_VER: u64 = 22;
 
 /// Versions older than this require a total migration.
 ///
 /// This should be set to the version where we last did a major schema
 /// overhaul. Older databases get rebuilt from scratch.
-const DB_VER_REQUIRES_TOTAL_MIGRATION: u64 = 20;
+const DB_VER_REQUIRES_TOTAL_MIGRATION: u64 = 22;
 
 /// Last DB version that used the legacy enum `ContentStoreRecord::Present(...)`
 /// format.
@@ -114,6 +114,7 @@ impl Database {
     /// Initialize all current schema tables.
     pub(crate) fn init_tables_tx(tx: &WriteTransactionCtx) -> DbResult<()> {
         tx.open_table(&db_version::TABLE)?;
+        tx.open_table(&crate::db_init_time::TABLE)?;
 
         tx.open_table(&crate::ids_self::TABLE)?;
         tx.open_table(&crate::ids_full::TABLE)?;
@@ -166,6 +167,9 @@ impl Database {
         let Some(cur_db_ver) = table_db_ver.first()?.map(|g| g.1.value()) else {
             info!(target: LOG_TARGET, "Initializing new database");
             table_db_ver.insert(&(), &DB_VER)?;
+            drop(table_db_ver);
+            let mut init_time_table = dbtx.open_table(&crate::db_init_time::TABLE)?;
+            init_time_table.insert(&(), &Timestamp::now())?;
             return Ok(());
         };
 
@@ -204,10 +208,13 @@ impl Database {
                 "Running incremental migrations"
             );
 
-            // Future incremental migrations go here, e.g.:
-            // if cur_db_ver < 8 {
-            //     Self::migrate_v7_to_v8(dbtx)?;
-            // }
+            if cur_db_ver < 21 {
+                // Set db_init_time for existing databases that don't have it yet
+                let mut init_time_table = dbtx.open_table(&crate::db_init_time::TABLE)?;
+                if init_time_table.get(&())?.is_none() {
+                    init_time_table.insert(&(), &Timestamp::now())?;
+                }
+            }
         }
 
         // Update version

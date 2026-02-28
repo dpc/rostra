@@ -3,7 +3,7 @@ use std::sync::Arc;
 
 use rostra_core::Timestamp;
 use rostra_core::event::{EventExt as _, EventKind, VerifiedEventContent, content_kind};
-use rostra_core::id::ToShort as _;
+use rostra_core::id::{RostraId, ToShort as _};
 use rostra_util_error::{BoxedError, FmtCompact as _};
 use snafu::{Location, OptionExt as _, ResultExt as _, Snafu};
 use tracing::debug;
@@ -12,7 +12,7 @@ use crate::event::EventSingletonRecord;
 use crate::{
     Database, DbError, IdSocialProfileRecord, IrohNodeRecord, LOG_TARGET, OverflowSnafu,
     SocialPostsReactionsRecord, SocialPostsRepliesRecord, WriteTransactionCtx,
-    events_singletons_new, shoutbox_posts_by_received_at, social_posts,
+    events_singletons_new, ids_followees, shoutbox_posts_by_received_at, social_posts,
     social_posts_by_received_at, social_posts_by_time, social_posts_reactions,
     social_posts_replies, social_posts_self_mention,
 };
@@ -30,6 +30,50 @@ pub enum ProcessEventError {
 pub type ProcessEventResult<T> = std::result::Result<T, ProcessEventError>;
 
 impl Database {
+    /// Compute the effective received-at timestamp for notification ordering.
+    ///
+    /// For posts whose author timestamp predates both the database creation
+    /// time and the time we first followed the author, use the event's own
+    /// timestamp instead of `now`. This pushes old synced posts to the
+    /// bottom of the notification timeline instead of showing them all as
+    /// "just received".
+    fn effective_received_at(
+        &self,
+        author: RostraId,
+        event_ts: Timestamp,
+        now: Timestamp,
+        ids_followees_table: &impl ids_followees::ReadableTable,
+    ) -> Timestamp {
+        // Own posts always appear as fresh
+        if author == self.self_id {
+            return now;
+        }
+
+        // Post is newer than (or same age as) DB — not a historical sync
+        if self.db_init_time <= event_ts {
+            return now;
+        }
+
+        // Look up when we first followed this author
+        let record = ids_followees_table
+            .get(&(self.self_id, author))
+            .ok()
+            .flatten()
+            .map(|g| g.value());
+
+        let Some(record) = record else {
+            // Not following this author — use default
+            return now;
+        };
+
+        // Post predates when we first followed — it's historical
+        if event_ts < record.first_ts {
+            return event_ts;
+        }
+
+        now
+    }
+
     /// After an event content was inserted process special kinds of event
     /// content, like follows/unfollows.
     ///
@@ -204,12 +248,23 @@ impl Database {
                         .map_err(DbError::from)?;
 
                     // Also insert into received_at index for notification ordering.
-                    // Use the same `now` timestamp that was used for events_received_at.
+                    // Use effective_received_at to push old synced posts to the
+                    // bottom of notifications.
+                    let ids_followees_tbl = tx
+                        .open_table(&ids_followees::TABLE)
+                        .map_err(DbError::from)?;
+                    let received_at = self.effective_received_at(
+                        author,
+                        event_content.timestamp(),
+                        now,
+                        &ids_followees_tbl,
+                    );
+                    drop(ids_followees_tbl);
                     let mut social_post_by_received_at_tbl = tx
                         .open_table(&social_posts_by_received_at::TABLE)
                         .map_err(DbError::from)?;
                     let reception_order = self.next_reception_order();
-                    let key = (now, reception_order);
+                    let key = (received_at, reception_order);
                     // Assert key uniqueness - reception_order is monotonic so this should never
                     // fail
                     let prev = social_post_by_received_at_tbl
@@ -308,11 +363,23 @@ impl Database {
                         .context(InvalidSnafu)?;
 
                     // Insert into shoutbox_posts_by_received_at
+                    // Use effective_received_at to push old synced posts to the
+                    // bottom of notifications.
+                    let ids_followees_tbl = tx
+                        .open_table(&ids_followees::TABLE)
+                        .map_err(DbError::from)?;
+                    let received_at = self.effective_received_at(
+                        author,
+                        event_content.timestamp(),
+                        now,
+                        &ids_followees_tbl,
+                    );
+                    drop(ids_followees_tbl);
                     let mut shoutbox_by_received_at_tbl = tx
                         .open_table(&shoutbox_posts_by_received_at::TABLE)
                         .map_err(DbError::from)?;
                     let reception_order = self.next_reception_order();
-                    let key = (now, reception_order);
+                    let key = (received_at, reception_order);
                     // Assert key uniqueness - reception_order is monotonic so this should never
                     // fail
                     let prev = shoutbox_by_received_at_tbl

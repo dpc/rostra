@@ -193,6 +193,13 @@ pub struct Database {
     self_id: RostraId,
     iroh_secret: iroh::SecretKey,
 
+    /// Timestamp when this database was first created.
+    ///
+    /// Used as a heuristic for notification timestamps: posts with author
+    /// timestamps older than this are likely historical syncs and should
+    /// not appear as "just received" in notifications.
+    db_init_time: Timestamp,
+
     /// Monotonically increasing counter for strict ordering of received events.
     /// Used in `events_received_at` and `social_posts_by_received_at` tables
     /// to ensure events received at the same timestamp are ordered correctly.
@@ -284,18 +291,24 @@ impl Database {
         let needs_reprocessing =
             Self::write_with_inner(&inner, Self::has_pending_migration_stash).await?;
 
-        let (self_head, iroh_secret, self_followees, self_followers, self_wot) =
+        let (self_head, iroh_secret, self_followees, self_followers, self_wot, db_init_time) =
             Self::read_with_inner(&inner, |tx| {
                 let ids_followees_table = tx.open_table(&ids_followees::TABLE)?;
                 let self_followees = Self::read_followees_tx(self_id, &ids_followees_table)?;
                 let self_wot =
                     Self::compute_wot_tx(self_id, &self_followees, &ids_followees_table)?;
+                let db_init_time = tx
+                    .open_table(&db_init_time::TABLE)?
+                    .get(&())?
+                    .map(|g| g.value())
+                    .unwrap_or(Timestamp::ZERO);
                 Ok((
                     Self::read_head_tx(self_id, &tx.open_table(&events_heads::TABLE)?)?,
                     Self::read_iroh_secret_tx(&tx.open_table(&ids_self::TABLE)?)?,
                     self_followees,
                     Self::read_followers_tx(self_id, &tx.open_table(&ids_followers::TABLE)?)?,
                     self_wot,
+                    db_init_time,
                 ))
             })
             .await?;
@@ -313,6 +326,7 @@ impl Database {
             inner,
             self_id,
             iroh_secret,
+            db_init_time,
             reception_order_counter: std::sync::atomic::AtomicU64::new(0),
             self_followees_updated,
             self_followers_updated,
@@ -837,6 +851,10 @@ impl Database {
         })
         .await
         .expect("Storage error")
+    }
+
+    pub fn db_init_time(&self) -> Timestamp {
+        self.db_init_time
     }
 
     pub fn iroh_secret(&self) -> iroh::SecretKey {
