@@ -103,7 +103,12 @@ pub async fn post_new_post(
     let redirect_to = form.redirect.clone();
 
     let event = client_ref
-        .social_post(id_secret, form.content.clone(), form.reply_to, persona_tags)
+        .social_post(
+            id_secret,
+            form.content.clone(),
+            form.reply_to,
+            persona_tags.clone(),
+        )
         .await?;
 
     // No-JS: redirect back to the page the user was on
@@ -146,6 +151,7 @@ pub async fn post_new_post(
                         &client_ref,
                         self_id
                         )
+                        .persona_tags(&persona_tags)
                         .event_id(event_id)
                         .post_thread_id(post_thread_id)
                         .content(&form.content)
@@ -203,6 +209,7 @@ pub async fn post_new_post(
                     &client_ref,
                     self_id
                     )
+                    .persona_tags(&persona_tags)
                     .event_id(event_id)
                     .post_thread_id(event_id)
                     .content(&form.content)
@@ -301,7 +308,7 @@ pub async fn post_post_preview_dialog(
                             action="/post"
                             method="post"
                             x-target=(x_target)
-                            "x-on:keyup.enter.ctrl.shift"="$el.requestSubmit()"
+                            "x-on:keydown.enter.ctrl.shift.window"="$el.requestSubmit()"
                             "@ajax:before"=(ajax_attrs.before)
                             "@ajax:after"=(ajax_attrs.after)
                         {
