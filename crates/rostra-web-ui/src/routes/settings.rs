@@ -1,4 +1,4 @@
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashSet};
 use std::str::FromStr as _;
 
 use axum::Form;
@@ -332,7 +332,7 @@ impl UiState {
                             ."-active"[active_category == "following"]
                             href="/settings/following"
                         {
-                            "Followees"
+                            "Following"
                         }
                         a ."o-settingsNav__item"
                             ."-active"[active_category == "followers"]
@@ -520,6 +520,9 @@ impl UiState {
                     h3 ."o-settingsContent__sectionHeader" { "People Who Follow You" }
                     (self.render_follower_list(session, followers).await?)
                 }
+
+                // Follow dialog container (shared by all follower items)
+                div id="follow-dialog-content" {}
             }
         })
     }
@@ -614,6 +617,15 @@ impl UiState {
         let client = self.client(session.id()).await?;
         let client_ref = client.client_ref()?;
 
+        // Get the set of people we follow, to show correct button state
+        let followee_ids: HashSet<RostraId> = client_ref
+            .db()
+            .get_followees(session.id())
+            .await
+            .into_iter()
+            .map(|(id, _)| id)
+            .collect();
+
         let mut follower_items = Vec::new();
         for follower_id in followers {
             let profile = self.get_social_profile_opt(follower_id, &client_ref).await;
@@ -631,8 +643,10 @@ impl UiState {
         // Sort by display name
         follower_items.sort_by_cached_key(|a| a.1.to_lowercase());
 
+        let ro = self.ro_mode(session.session_token());
+
         Ok(html! {
-            div ."m-followeeList" {
+            div id="follower-list" ."m-followeeList" {
                 @if follower_items.is_empty() {
                     p ."o-settingsContent__empty" {
                         "No one is following you yet (that you know of)."
@@ -651,6 +665,8 @@ impl UiState {
                     }
                 } @else {
                     @for (follower_id, display_name, event_id) in &follower_items {
+                        @let following = followee_ids.contains(follower_id);
+                        @let label = if following { "Following..." } else { "Follow..." };
                         div ."m-followeeList__item" {
                             (fragment::avatar("m-followeeList__avatar", self.avatar_url(*follower_id, *event_id), "Avatar"))
                             a ."m-followeeList__name"
@@ -658,6 +674,17 @@ impl UiState {
                             {
                                 (display_name)
                             }
+                            (fragment::ajax_button(
+                                &format!("/profile/{follower_id}/follow"),
+                                "get",
+                                "follow-dialog-content",
+                                "m-followeeList__followButton",
+                                label,
+                            )
+                            .disabled(ro.to_disabled())
+                            .hidden_inputs(html! { input type="hidden" name="following" value=(following) {} })
+                            .form_class("m-followeeList__actions")
+                            .call())
                         }
                     }
                 }

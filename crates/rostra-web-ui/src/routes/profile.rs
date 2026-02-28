@@ -72,19 +72,41 @@ pub async fn get_follow_dialog(
     let profile = state.get_social_profile(profile_id, &client_ref).await;
     let mut persona_tags = client_ref.db().get_persona_tags_for_id(profile_id).await;
     persona_tags.extend(PersonaTag::defaults());
+
+    // Look up the current follow relationship to pre-populate the dialog
+    let current_selector = if params.following {
+        client_ref
+            .db()
+            .get_followees(session.id())
+            .await
+            .into_iter()
+            .find(|(id, _)| *id == profile_id)
+            .map(|(_, sel)| sel)
+    } else {
+        None
+    };
+
+    // Determine current follow type and selected tags
+    let (follow_type, selected_tags) = match &current_selector {
+        Some(PersonasTagsSelector::Except { ids }) => ("follow_all", ids.clone()),
+        Some(PersonasTagsSelector::Only { ids }) => ("follow_only", ids.clone()),
+        None => ("follow_all", std::collections::BTreeSet::new()),
+    };
+    let show_persona_list = follow_type != "unfollow";
+
     let ajax_attrs = fragment::AjaxLoadingAttrs::for_class("o-followDialog__submitButton");
     Ok(Maud(html! {
         div id="follow-dialog-content" ."o-followDialog -active" {
             (fragment::dialog_escape_handler("follow-dialog-content"))
             div ."o-followDialog__content" {
                 h4 ."o-followDialog__title" {
-                    "Following "
+                    "Following: "
                     (profile.display_name)
                 }
                 form ."o-followDialog__form"
                     action=(format!("/profile/{}/follow", profile_id))
                     method="post"
-                    x-target="profile-summary followee-list follow-dialog-content"
+                    x-target="profile-summary followee-list follower-list follow-dialog-content"
                     "@ajax:before"=(ajax_attrs.before)
                     "@ajax:after"=(ajax_attrs.after)
             {
@@ -98,24 +120,24 @@ pub async fn get_follow_dialog(
                         {
                             option
                                 value="unfollow"
-                                selected[params.following]
                             { "Unfollow" }
 
                             option
                                 value="follow_all"
-                                selected[!params.following]
+                                selected[follow_type == "follow_all"]
                             { "Follow All (except selected)" }
 
                             option
                                 value="follow_only"
+                                selected[follow_type == "follow_only"]
                             { "Follow Only (selected)" }
                         }
                     }
 
-                    div ."o-followDialog__personaList" ."-visible"[!params.following] {
+                    div ."o-followDialog__personaList" ."-visible"[show_persona_list] {
                         (fragment::persona_tag_select("personas")
                             .available_tags(&persona_tags)
-                            .selected_tags(&std::collections::BTreeSet::new())
+                            .selected_tags(&selected_tags)
                             .id("follow-persona-tags")
                             .empty_label("none")
                             .call())
@@ -181,8 +203,9 @@ pub async fn post_follow(
         _ => {}
     }
 
-    // Get updated followees list for settings page
+    // Get updated lists for settings pages
     let followees = client_ref.db().get_followees(session.id()).await;
+    let followers = client_ref.db().get_followers(session.id()).await;
 
     Ok(Maud(html! {
         // Update the profile summary (for profile page)
@@ -190,8 +213,11 @@ pub async fn post_follow(
             .render_profile_summary(profile_id, &session, state.ro_mode(session.session_token()))
             .await?)
 
-        // Update the followee list (for settings page)
+        // Update the followee list (for settings/following page)
         (state.render_followee_list(&session, followees).await?)
+
+        // Update the follower list (for settings/followers page)
+        (state.render_follower_list(&session, followers).await?)
 
         // Close the follow dialog by replacing with empty non-active version
         div id="follow-dialog-content" {}

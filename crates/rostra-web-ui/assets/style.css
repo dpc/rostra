@@ -1431,10 +1431,8 @@ emoji-picker {
 
 .o-followDialog__title {
   margin-top: 0;
-  margin-bottom: 16px;
-  font-size: 1.1rem;
-  font-weight: bold;
-  text-align: center;
+  margin-bottom: 0.75rem;
+  color: var(--color-link);
 }
 
 .o-followDialog__form {
