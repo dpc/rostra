@@ -55,7 +55,7 @@ urlencoding = { workspace = true }
 rand = { workspace = true }
 
 [dev-dependencies]
-reqwest = { workspace = true, features = ["cookies"] }
+reqwest = { workspace = true, features = ["cookies", "json"] }
 tempfile = { workspace = true }
 test-log = { workspace = true }
 tokio = { workspace = true, features = ["macros"] }

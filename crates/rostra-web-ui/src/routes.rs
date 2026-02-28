@@ -1,4 +1,5 @@
 mod add_followee;
+pub(crate) mod api;
 mod avatar;
 mod content;
 mod cookies;
@@ -125,6 +126,7 @@ pub async fn not_found(_state: State<SharedState>, _req: Request<Body>) -> impl 
 
 pub fn route_handler(state: SharedState) -> Router<Arc<UiState>> {
     Router::new()
+        .nest("/api", api::api_router())
         .route("/", get(welcome::get_landing))
         .route("/home", get(welcome::get_home))
         .route("/followees", get(timeline::get_followees))

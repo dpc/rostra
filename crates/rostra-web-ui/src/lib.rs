@@ -24,7 +24,7 @@ use error::{IdMismatchSnafu, UnlockError, UnlockResult};
 use listenfd::ListenFd;
 use rostra_client::error::IdSecretReadError;
 use rostra_client::multiclient::MultiClient;
-use rostra_client::{ClientHandle, ClientRefError};
+use rostra_client::{Client, ClientHandle, ClientRefError};
 use rostra_core::id::{RostraId, RostraIdSecretKey};
 use rostra_util::is_rostra_dev_mode_set;
 use rostra_util_bind_addr::BindAddr;
@@ -119,6 +119,7 @@ pub type UiStateClientResult<T> = result::Result<T, UiStateClientError>;
 
 pub struct UiState {
     clients: MultiClient,
+    clients_api: MultiClient,
     default_profile: Option<RostraId>,
     welcome_redirect: Option<String>,
     /// In-memory storage for secret keys.
@@ -198,6 +199,20 @@ impl UiState {
     /// Use this for default_profile or read-only unlock.
     pub async fn load_client(&self, rostra_id: RostraId) -> UnlockResult<()> {
         self.clients.load(rostra_id).await?;
+        Ok(())
+    }
+
+    /// Get a client handle from the API client pool.
+    pub async fn client_api(&self, id: RostraId) -> UiStateClientResult<ClientHandle> {
+        match self.clients_api.get(id).await {
+            Some(handle) => Ok(handle),
+            _ => ClientNotLoadedSnafu.fail(),
+        }
+    }
+
+    /// Load a client into the API client pool (read-only, no secret key).
+    pub async fn load_client_api(&self, rostra_id: RostraId) -> UnlockResult<()> {
+        self.clients_api.load(rostra_id).await?;
         Ok(())
     }
 
@@ -352,8 +367,17 @@ async fn build_state_and_session(
 
     let session_store = RedbSessionStore::new(session_db.clone()).context(SessionStoreSnafu)?;
 
+    let pkarr_client_api = Client::make_pkarr_client().expect("Failed to create pkarr client");
+    let clients_api = MultiClient::new(
+        opts.data_dir.clone(),
+        opts.max_clients,
+        false,
+        pkarr_client_api,
+    );
+
     let state = Arc::new(UiState {
         clients,
+        clients_api,
         default_profile: opts.default_profile,
         welcome_redirect: opts.welcome_redirect.clone(),
         secrets: secrets::SecretStore::new(),

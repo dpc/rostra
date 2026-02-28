@@ -196,4 +196,52 @@ impl UiDriver {
         self.post_form("/post/preview_dialog", &[("content", content)])
             .await
     }
+
+    /// Send a GET to an API endpoint with the version header.
+    pub async fn api_get(&self, path: &str) -> reqwest::Response {
+        self.client
+            .get(self.url(path))
+            .header("x-rostra-api-version", "0")
+            .send()
+            .await
+            .expect("API GET request failed")
+    }
+
+    /// Send a GET without the version header (for negative tests).
+    pub async fn api_get_no_version(&self, path: &str) -> reqwest::Response {
+        self.client
+            .get(self.url(path))
+            .send()
+            .await
+            .expect("API GET request failed")
+    }
+
+    /// Send a POST to an API endpoint with JSON body, version header,
+    /// and optional secret header.
+    pub async fn api_post_json(
+        &self,
+        path: &str,
+        secret: Option<&str>,
+        body: &serde_json::Value,
+    ) -> reqwest::Response {
+        let mut req = self
+            .client
+            .post(self.url(path))
+            .header("x-rostra-api-version", "0")
+            .json(body);
+        if let Some(s) = secret {
+            req = req.header("x-rostra-id-secret", s);
+        }
+        req.send().await.expect("API POST request failed")
+    }
+
+    /// Send a GET to an API endpoint with a custom version header value.
+    pub async fn api_get_with_version(&self, path: &str, version: &str) -> reqwest::Response {
+        self.client
+            .get(self.url(path))
+            .header("x-rostra-api-version", version)
+            .send()
+            .await
+            .expect("API GET request failed")
+    }
 }
