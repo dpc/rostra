@@ -103,7 +103,7 @@ the note on `-managed` above).
 {
   "parent_head_id": "BASE32ENCODED..." | null,
   "persona_tags": ["bot", "news"],
-  "body": "Hello, world!",
+  "content": "Hello, world!",
   "reply_to": "rsABCD...-EVENTID..." | null
 }
 ```
@@ -112,7 +112,7 @@ the note on `-managed` above).
 | ----------------- | ----------------- | -------- | -------------------------------------------------------- |
 | `parent_head_id`  | `string` or `null`| yes      | Idempotence/consistency key (see below)                  |
 | `persona_tags`    | `string[]`        | no       | Tags for the post (default: `[]`)                        |
-| `body`            | `string`          | yes      | Post content in [djot](https://djot.net) format          |
+| `content`         | `string`          | yes      | Post content in [djot](https://djot.net) format          |
 | `reply_to`        | `string` or `null`| no       | `ExternalEventId` (`{rostra_id}-{event_id}`) to reply to |
 
 **Response (200):**
@@ -177,6 +177,6 @@ curl -s -X POST \
   -H "X-Rostra-Api-Version: 0" \
   -H "X-Rostra-Id-Secret: word1 word2 ... word24" \
   -H "Content-Type: application/json" \
-  -d '{"parent_head_id": null, "body": "Hello from API!"}' \
+  -d '{"parent_head_id": null, "content": "Hello from API!"}' \
   http://localhost:2345/api/$ID/publish-social-post-managed
 ```

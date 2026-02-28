@@ -137,14 +137,14 @@ async fn get_heads(
     _version: ApiVersion,
     Path(rostra_id): Path<RostraId>,
 ) -> ApiResult<Json<HeadsResponse>> {
-    state.load_client_api(rostra_id).await.map_err(|e| {
+    state.load_client(rostra_id).await.map_err(|e| {
         api_error(
             StatusCode::INTERNAL_SERVER_ERROR,
             format!("Failed to load client: {e}"),
         )
     })?;
 
-    let client = state.client_api(rostra_id).await.map_err(|e| {
+    let client = state.client(rostra_id).await.map_err(|e| {
         api_error(
             StatusCode::INTERNAL_SERVER_ERROR,
             format!("Client error: {e}"),
@@ -175,7 +175,7 @@ struct PublishSocialPostRequest {
     parent_head_id: Option<String>,
     #[serde(default)]
     persona_tags: Vec<String>,
-    body: String,
+    content: String,
     reply_to: Option<String>,
 }
 
@@ -201,14 +201,14 @@ async fn publish_social_post_managed(
     }
 
     // Load client (before unlock, so heads reflect the caller's view)
-    state.load_client_api(rostra_id).await.map_err(|e| {
+    state.load_client(rostra_id).await.map_err(|e| {
         api_error(
             StatusCode::INTERNAL_SERVER_ERROR,
             format!("Failed to load client: {e}"),
         )
     })?;
 
-    let client = state.client_api(rostra_id).await.map_err(|e| {
+    let client = state.client(rostra_id).await.map_err(|e| {
         api_error(
             StatusCode::INTERNAL_SERVER_ERROR,
             format!("Client error: {e}"),
@@ -276,7 +276,7 @@ async fn publish_social_post_managed(
 
     // Publish the social post
     let verified_event = client_ref
-        .social_post(id_secret, req.body, reply_to, persona_tags)
+        .social_post(id_secret, req.content, reply_to, persona_tags)
         .await
         .map_err(|e| {
             api_error(

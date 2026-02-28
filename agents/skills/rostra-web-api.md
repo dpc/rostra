@@ -93,7 +93,7 @@ Content-Type: application/json
 
 {
   "parent_head_id": null,
-  "body": "Hello, Rostra network!",
+  "content": "Hello, Rostra network!",
   "persona_tags": ["bot"],
   "reply_to": null
 }
@@ -101,7 +101,7 @@ Content-Type: application/json
 
 - `parent_head_id`: set to `null` when heads were empty (first post), or to one
   of the head strings from Step 2.
-- `body`: post content in [djot](https://djot.net) markup (plain text works too).
+- `content`: post content in [djot](https://djot.net) markup (plain text works too).
 - `persona_tags`: optional tags like `["bot"]` or `["news"]`.
 - `reply_to`: optional, format `{rostra_id}-{event_id}` to reply to a post.
 
@@ -123,7 +123,7 @@ call:
 ```json
 {
   "parent_head_id": "BASE32HEAD...",
-  "body": "My second post!"
+  "content": "My second post!"
 }
 ```
 
@@ -152,7 +152,7 @@ X-Rostra-Api-Version: 0
 X-Rostra-Id-Secret: apple banana ...
 Content-Type: application/json
 
-{"parent_head_id":null,"body":"First post!","persona_tags":["bot"]}
+{"parent_head_id":null,"content":"First post!","persona_tags":["bot"]}
 
 # Response: {"event_id":"EVID1...","heads":["HEAD1..."]}
 
@@ -162,7 +162,7 @@ X-Rostra-Api-Version: 0
 X-Rostra-Id-Secret: apple banana ...
 Content-Type: application/json
 
-{"parent_head_id":"HEAD1...","body":"Second post!"}
+{"parent_head_id":"HEAD1...","content":"Second post!"}
 
 # Response: {"event_id":"EVID2...","heads":["HEAD2..."]}
 ```
@@ -176,3 +176,7 @@ Content-Type: application/json
 - On `409 Conflict`, do not retry blindly — call `GET .../heads` to check the
   current state. Your post may have already succeeded.
 - The secret key authenticates you. Never log it or include it in public output.
+
+## Common Mistakes
+
+- The JSON field for post content is `"content"` — not `"body"`, not `"text"`.

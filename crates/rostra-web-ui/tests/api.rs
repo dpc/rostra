@@ -93,7 +93,7 @@ async fn publish_post_and_verify_heads() {
             Some(secret),
             &serde_json::json!({
                 "parent_head_id": null,
-                "body": "Hello from the API!",
+                "content": "Hello from the API!",
             }),
         )
         .await;
@@ -128,7 +128,7 @@ async fn publish_post_full_flow() {
             Some(secret),
             &serde_json::json!({
                 "parent_head_id": null,
-                "body": "First post!",
+                "content": "First post!",
                 "persona_tags": ["bot"],
             }),
         )
@@ -158,7 +158,7 @@ async fn publish_post_full_flow() {
             Some(secret),
             &serde_json::json!({
                 "parent_head_id": head,
-                "body": "Second post!",
+                "content": "Second post!",
             }),
         )
         .await;
@@ -188,7 +188,7 @@ async fn publish_twice_with_same_head_is_rejected() {
             Some(secret),
             &serde_json::json!({
                 "parent_head_id": null,
-                "body": "Post one",
+                "content": "Post one",
             }),
         )
         .await;
@@ -203,7 +203,7 @@ async fn publish_twice_with_same_head_is_rejected() {
             Some(secret),
             &serde_json::json!({
                 "parent_head_id": head_after_first,
-                "body": "Post two",
+                "content": "Post two",
             }),
         )
         .await;
@@ -217,7 +217,7 @@ async fn publish_twice_with_same_head_is_rejected() {
             Some(secret),
             &serde_json::json!({
                 "parent_head_id": head_after_first,
-                "body": "Post three (duplicate)",
+                "content": "Post three (duplicate)",
             }),
         )
         .await;
@@ -252,7 +252,7 @@ async fn publish_null_parent_rejected_when_heads_exist() {
             Some(secret),
             &serde_json::json!({
                 "parent_head_id": null,
-                "body": "First!",
+                "content": "First!",
             }),
         )
         .await;
@@ -265,7 +265,7 @@ async fn publish_null_parent_rejected_when_heads_exist() {
             Some(secret),
             &serde_json::json!({
                 "parent_head_id": null,
-                "body": "Second without parent",
+                "content": "Second without parent",
             }),
         )
         .await;
@@ -297,7 +297,7 @@ async fn publish_with_wrong_secret_returns_403() {
             Some(secret_2),
             &serde_json::json!({
                 "parent_head_id": null,
-                "body": "Trying to impersonate",
+                "content": "Trying to impersonate",
             }),
         )
         .await;
@@ -323,7 +323,7 @@ async fn publish_without_secret_returns_401() {
             None,
             &serde_json::json!({
                 "parent_head_id": null,
-                "body": "No secret",
+                "content": "No secret",
             }),
         )
         .await;
