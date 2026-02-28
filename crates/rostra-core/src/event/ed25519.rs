@@ -1,31 +1,35 @@
-use ed25519_dalek::{SignatureError, Signer, VerifyingKey};
+use ed25519_dalek::{SignatureError, VerifyingKey};
 
-use super::{Event, EventSignature, SignedEvent};
-use crate::bincode::STD_BINCODE_CONFIG;
-use crate::id::{RostraId, RostraIdSecretKey};
+use super::{Event, EventSignature};
+use crate::id::RostraId;
 
+#[cfg(feature = "bincode")]
 impl Event {
-    pub fn sign_by(&self, secret_key: RostraIdSecretKey) -> EventSignature {
-        let encoded =
-            bincode::encode_to_vec(self, STD_BINCODE_CONFIG).expect("Can't fail to encode");
+    pub fn sign_by(&self, secret_key: crate::id::RostraIdSecretKey) -> EventSignature {
+        use ed25519_dalek::Signer as _;
+
+        let encoded = bincode::encode_to_vec(self, crate::bincode::STD_BINCODE_CONFIG)
+            .expect("Can't fail to encode");
 
         ed25519_dalek::SigningKey::from(secret_key)
             .sign(&encoded)
             .into()
     }
 
-    pub fn signed_by(self, secret_key: RostraIdSecretKey) -> SignedEvent {
+    pub fn signed_by(self, secret_key: crate::id::RostraIdSecretKey) -> super::SignedEvent {
         let sig = self.sign_by(secret_key);
-        SignedEvent { event: self, sig }
+        super::SignedEvent { event: self, sig }
     }
 
     pub fn verify_signature(&self, sig: EventSignature) -> Result<(), SignatureError> {
-        let encoded =
-            bincode::encode_to_vec(self, STD_BINCODE_CONFIG).expect("Can't fail to encode");
+        let encoded = bincode::encode_to_vec(self, crate::bincode::STD_BINCODE_CONFIG)
+            .expect("Can't fail to encode");
 
         Self::verify_signature_raw(&encoded, sig, self.author)
     }
+}
 
+impl Event {
     pub fn verify_signature_raw(
         bytes: &[u8],
         sig: EventSignature,

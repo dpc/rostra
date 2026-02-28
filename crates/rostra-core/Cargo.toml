@@ -19,7 +19,7 @@ serde = [
   "cbor4ii/serde1",
   "cbor4ii/use_std",
 ]
-rand = ["dep:rand"]
+rand = ["dep:rand", "ed25519-dalek?/rand_core"]
 
 [[bench]]
 name = "event"
@@ -35,7 +35,7 @@ convi = { workspace = true }
 data-encoding = { workspace = true }
 ed25519-dalek = { workspace = true, optional = true }
 rand = { workspace = true, optional = true }
-serde = { workspace = true, optional = true }
+serde = { workspace = true, optional = true, features = ["derive"] }
 serde_bytes = { workspace = true, optional = true }
 # ciborium = { workspace = true, optional = true }
 cbor4ii = { workspace = true, optional = true, features = ["serde1"] }

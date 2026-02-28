@@ -3,6 +3,7 @@ use ed25519_dalek::{SigningKey, VerifyingKey};
 use super::{RostraId, RostraIdSecretKey};
 
 impl RostraIdSecretKey {
+    #[cfg(feature = "rand")]
     pub fn generate() -> Self {
         SigningKey::generate(&mut rand::rng()).into()
     }

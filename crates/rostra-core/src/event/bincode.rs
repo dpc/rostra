@@ -1,9 +1,6 @@
 use convi::ExpectInto as _;
 
-use super::{
-    ContentValidationError, Event, EventAuxKey, EventContentKind, EventContentRaw,
-    EventContentUnsized, EventKind, SignedEvent,
-};
+use super::{Event, EventAuxKey, EventContentRaw, EventContentUnsized, EventKind, SignedEvent};
 use crate::bincode::STD_BINCODE_CONFIG;
 use crate::id::RostraId;
 use crate::{ContentHash, EventId, MsgLen, ShortEventId};
@@ -60,6 +57,20 @@ impl Event {
         }
     }
 
+    pub fn compute_id(&self) -> EventId {
+        let encoded =
+            ::bincode::encode_to_vec(self, STD_BINCODE_CONFIG).expect("Can't fail encoding");
+        blake3::hash(&encoded).into()
+    }
+
+    pub fn compute_short_id(&self) -> ShortEventId {
+        self.compute_id().into()
+    }
+}
+
+#[cfg(feature = "serde")]
+#[bon::bon]
+impl Event {
     #[builder(start_fn = builder)]
     pub fn new<C>(
         #[builder(start_fn)] content: &C,
@@ -68,9 +79,9 @@ impl Event {
         parent_prev: Option<ShortEventId>,
         parent_aux: Option<ShortEventId>,
         timestamp: Option<time::OffsetDateTime>,
-    ) -> Result<(Self, EventContentRaw), ContentValidationError>
+    ) -> Result<(Self, EventContentRaw), super::ContentValidationError>
     where
-        C: EventContentKind,
+        C: super::EventContentKind,
     {
         let content_raw = content.serialize_cbor()?;
 
@@ -87,16 +98,6 @@ impl Event {
             ),
             content_raw,
         ))
-    }
-
-    pub fn compute_id(&self) -> EventId {
-        let encoded =
-            ::bincode::encode_to_vec(self, STD_BINCODE_CONFIG).expect("Can't fail encoding");
-        blake3::hash(&encoded).into()
-    }
-
-    pub fn compute_short_id(&self) -> ShortEventId {
-        self.compute_id().into()
     }
 }
 

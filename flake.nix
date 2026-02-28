@@ -89,9 +89,28 @@
               rec {
                 workspaceDeps = craneLib.buildWorkspaceDepsOnly { };
 
+                rostraCoreFeatureCheck =
+                  name: featuresArg:
+                  craneLib.mkCargoDerivation {
+                    pname = "rostra-core-${name}";
+                    cargoArtifacts = workspaceDeps;
+                    installArtifacts = false;
+                    buildPhaseCargoCommand = "cargo check --profile $CARGO_PROFILE --package rostra-core ${featuresArg}";
+                  };
+
                 workspace = craneLib.buildWorkspace {
                   cargoArtifacts = workspaceDeps;
                 };
+
+                # rostra-core feature combination checks
+                rostraCoreNoFeatures = rostraCoreFeatureCheck "no-features" "--no-default-features";
+                rostraCoreBincode = rostraCoreFeatureCheck "bincode" "--no-default-features --features bincode";
+                rostraCoreEd25519 = rostraCoreFeatureCheck "ed25519" "--no-default-features --features ed25519-dalek";
+                rostraCoreSerde = rostraCoreFeatureCheck "serde" "--no-default-features --features serde";
+                rostraCoreEd25519Bincode = rostraCoreFeatureCheck "ed25519-bincode" "--no-default-features --features ed25519-dalek,bincode";
+                rostraCoreEd25519Serde = rostraCoreFeatureCheck "ed25519-serde" "--no-default-features --features ed25519-dalek,serde";
+                rostraCoreSerdeBincode = rostraCoreFeatureCheck "serde-bincode" "--no-default-features --features serde,bincode";
+                rostraCoreAllFeatures = rostraCoreFeatureCheck "all-features" "--all-features";
 
                 tests = craneLib.cargoNextest {
                   cargoArtifacts = workspace;

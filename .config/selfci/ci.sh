@@ -34,14 +34,45 @@ function job_cargo() {
     fi
 }
 
+function job_core_features() {
+    selfci step start "rostra-core no-features"
+    nix build -L .#ci.rostraCoreNoFeatures
+
+    selfci step start "rostra-core bincode"
+    nix build -L .#ci.rostraCoreBincode
+
+    selfci step start "rostra-core ed25519"
+    nix build -L .#ci.rostraCoreEd25519
+
+    selfci step start "rostra-core serde"
+    nix build -L .#ci.rostraCoreSerde
+
+    selfci step start "rostra-core ed25519+bincode"
+    nix build -L .#ci.rostraCoreEd25519Bincode
+
+    selfci step start "rostra-core ed25519+serde"
+    nix build -L .#ci.rostraCoreEd25519Serde
+
+    selfci step start "rostra-core serde+bincode"
+    nix build -L .#ci.rostraCoreSerdeBincode
+
+    selfci step start "rostra-core all-features"
+    nix build -L .#ci.rostraCoreAllFeatures
+}
+
 case "$SELFCI_JOB_NAME" in
   main)
     selfci job start "lint"
     selfci job start "cargo"
+    selfci job start "core-features"
     ;;
 
   cargo)
     job_cargo
+    ;;
+
+  core-features)
+    job_core_features
     ;;
 
   lint)

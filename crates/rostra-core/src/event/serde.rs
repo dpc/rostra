@@ -5,7 +5,7 @@ use snafu::Snafu;
 
 use super::{
     ContentValidationError, EventContentKind, EventContentRaw, EventContentUnsized, EventKind,
-    EventSignature, VerifiedEventContent,
+    EventSignature,
 };
 
 impl serde::Serialize for EventSignature {
@@ -129,14 +129,12 @@ impl EventContentUnsized {
     }
 }
 
-impl VerifiedEventContent {
+#[cfg(all(feature = "ed25519-dalek", feature = "bincode"))]
+impl super::VerifiedEventContent {
     pub fn deserialize_cbor<T>(&self) -> ContentDeserializationResult<T>
-    // pub fn deserialize_cbor<T>(&self) -> std::result::Result<T,
-    // ciborium::de::Error<std::io::Error>>
     where
         T: EventContentKind,
     {
-        // ciborium::from_reader(self.as_ref())
         let Some(content) = self.content.as_ref() else {
             return MissingContentSnafu.fail();
         };
