@@ -126,6 +126,8 @@ pub fn api_router() -> Router<Arc<UiState>> {
         .route("/{rostra_id}/followees", get(get_followees))
         .route("/{rostra_id}/followers", get(get_followers))
         .route("/{rostra_id}/notifications", get(get_notifications))
+        .route("/{rostra_id}/posts", get(get_posts_by_author))
+        .route("/{rostra_id}/posts/{event_id}", get(get_single_post))
         .route("/{rostra_id}/following", get(get_following_timeline))
         .route("/{rostra_id}/network", get(get_network_timeline))
 }
@@ -996,6 +998,102 @@ async fn get_notifications(
         notifications,
         next_cursor,
     }))
+}
+
+// -- Posts by author / Single post --
+
+async fn get_posts_by_author(
+    State(state): State<SharedState>,
+    _version: ApiVersion,
+    Path(rostra_id): Path<RostraId>,
+    Query(query): Query<TimelineQuery>,
+) -> ApiResult<Json<TimelineResponse>> {
+    state.load_client(rostra_id).await.map_err(|e| {
+        api_error(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("Failed to load client: {e}"),
+        )
+    })?;
+
+    let client = state.client(rostra_id).await.map_err(|e| {
+        api_error(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("Client error: {e}"),
+        )
+    })?;
+    let client_ref = client.client_ref().map_err(|e| {
+        api_error(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("Client ref error: {e}"),
+        )
+    })?;
+
+    let cursor = query.ts.and_then(|ts| {
+        query
+            .event_id
+            .map(|event_id| EventPaginationCursor { ts, event_id })
+    });
+
+    let author_id = rostra_id;
+
+    let (posts, next) = client_ref
+        .db()
+        .paginate_social_posts_rev(cursor, 20, move |post| post.author == author_id)
+        .await;
+
+    let posts = posts.into_iter().map(post_to_timeline_item).collect();
+
+    let next_cursor = next.map(|c| TimelineCursorResponse {
+        ts: c.ts.as_u64(),
+        event_id: c.event_id.to_string(),
+    });
+
+    Ok(Json(TimelineResponse { posts, next_cursor }))
+}
+
+async fn get_single_post(
+    State(state): State<SharedState>,
+    _version: ApiVersion,
+    Path((rostra_id, event_id_str)): Path<(RostraId, String)>,
+) -> ApiResult<Json<TimelinePostItem>> {
+    let event_id: ShortEventId = event_id_str
+        .parse()
+        .map_err(|_| api_error(StatusCode::BAD_REQUEST, "Invalid event_id format"))?;
+
+    state.load_client(rostra_id).await.map_err(|e| {
+        api_error(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("Failed to load client: {e}"),
+        )
+    })?;
+
+    let client = state.client(rostra_id).await.map_err(|e| {
+        api_error(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("Client error: {e}"),
+        )
+    })?;
+    let client_ref = client.client_ref().map_err(|e| {
+        api_error(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("Client ref error: {e}"),
+        )
+    })?;
+
+    let post = client_ref
+        .db()
+        .get_social_post(event_id)
+        .await
+        .ok_or_else(|| api_error(StatusCode::NOT_FOUND, "Post not found"))?;
+
+    if post.author != rostra_id {
+        return Err(api_error(
+            StatusCode::NOT_FOUND,
+            "Post not found for this author",
+        ));
+    }
+
+    Ok(Json(post_to_timeline_item(post)))
 }
 
 // -- Timeline endpoints (Following / Network) --

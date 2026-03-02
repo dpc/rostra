@@ -272,6 +272,43 @@ To paginate through all notifications:
 2. If `next_cursor` is not null: `GET /api/{rostra_id}/notifications?ts={ts}&seq={seq}`
 3. Repeat until `next_cursor` is `null`.
 
+## Reading Posts by Author
+
+Paginate through all posts by a specific identity:
+
+```
+GET /api/{rostra_id}/posts
+X-Rostra-Api-Version: 0
+```
+
+The `{rostra_id}` is the author whose posts you want to read. This can be
+any identity, not just your own.
+
+Response format is the same as the timeline endpoints below.
+
+### Fetching a Single Post
+
+```
+GET /api/{rostra_id}/posts/{event_id}
+X-Rostra-Api-Version: 0
+```
+
+Returns a single post object (not wrapped in an array):
+
+```json
+{
+  "event_id": "BASE32EVENTID...",
+  "author": "rsAUTHORID...",
+  "ts": 1700000000,
+  "content": "Hello world!",
+  "reply_to": null,
+  "persona_tags": ["personal"],
+  "reply_count": 2
+}
+```
+
+Returns `404` if the post does not exist or does not belong to the given author.
+
 ## Reading Timelines
 
 Paginate through posts from people you follow or the wider network.
@@ -329,7 +366,7 @@ To paginate:
 2. If `next_cursor` is not null: `GET /api/{rostra_id}/following?ts={ts}&event_id={event_id}`
 3. Repeat until `next_cursor` is `null`.
 
-Same pattern applies to `/network`.
+Same pattern applies to `/network` and `/posts`.
 
 ## Following and Unfollowing
 
