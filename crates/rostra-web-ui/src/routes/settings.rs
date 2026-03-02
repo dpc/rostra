@@ -4,7 +4,7 @@ use std::str::FromStr as _;
 use axum::Form;
 use axum::extract::{Query, State};
 use axum::response::{IntoResponse, Redirect};
-use maud::{Markup, html};
+use maud::{Markup, PreEscaped, html};
 use rostra_client::id::IdResolvedData;
 use rostra_client::{IdP2PState, NodeP2PState};
 use rostra_client_db::{EventContentState, EventRecord, IdsDataUsageRecord, IrohNodeRecord};
@@ -72,7 +72,18 @@ pub async fn post_settings_profile(
 
     let content = state.render_profile_settings(&session).await?;
 
-    Ok(Maud(content))
+    Ok(Maud(html! {
+        (content)
+        div id="ajax-scripts" {
+            script {
+                (PreEscaped(r#"
+                    window.dispatchEvent(new CustomEvent('notify', {
+                        detail: { type: 'success', message: 'Profile updated' }
+                    }));
+                "#))
+            }
+        }
+    }))
 }
 
 #[derive(Deserialize)]
@@ -296,6 +307,10 @@ impl UiState {
         navbar: Markup,
         content: Markup,
     ) -> RequestResult<Markup> {
+        let content = html! {
+            (content)
+            div id="ajax-scripts" {}
+        };
         self.render_html_page(
             "Settings",
             self.render_page_layout(navbar, content),
@@ -403,7 +418,7 @@ impl UiState {
                 form id="profile-settings-form" ."m-profileSettings"
                     action="/settings/profile"
                     method="post"
-                    x-target="profile-settings-form"
+                    x-target="profile-settings-form ajax-scripts"
                     enctype="multipart/form-data"
                     "@ajax:before"=(ajax_attrs.before)
                     "@ajax:after"=(ajax_attrs.after)
