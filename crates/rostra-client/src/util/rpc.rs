@@ -1,5 +1,5 @@
 use std::cmp::Reverse;
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::{BTreeMap, BTreeSet, HashSet};
 
 use rostra_client_db::{InsertEventOutcome, ProcessEventState};
 use rostra_core::ShortEventId;
@@ -243,13 +243,13 @@ pub async fn download_events_from_child(
 
         if !storage.wants_content(q_item_event_id, process_state).await
             && matches!(insert_outcome, InsertEventOutcome::AlreadyPresent)
-            && !rand::random::<u8>().is_multiple_of(4)
+            && !rand::random::<u8>().is_multiple_of(5)
         {
             continue;
         }
 
         // Add parents to be processed
-        let parents: Vec<_> = [event.parent_prev(), event.parent_aux()]
+        let parents: HashSet<_> = [event.parent_prev(), event.parent_aux()]
             .into_iter()
             .flatten()
             .collect();
