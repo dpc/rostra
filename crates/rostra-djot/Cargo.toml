@@ -10,5 +10,6 @@ version = { workspace = true }
 workspace = true
 
 [dependencies]
+async-trait = { workspace = true }
 jotup = { workspace = true }
 rostra-core = { workspace = true }

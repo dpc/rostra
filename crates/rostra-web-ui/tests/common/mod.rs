@@ -130,6 +130,24 @@ impl UiDriver {
         (id, secret)
     }
 
+    /// Log in with an existing identity using its secret key.
+    pub async fn login_with_secret(&self, id: &str, secret: &str) {
+        let resp = self
+            .client
+            .post(self.url("/unlock"))
+            .form(&[("username", id), ("password", secret)])
+            .send()
+            .await
+            .expect("Login request failed");
+
+        assert_eq!(
+            resp.status(),
+            reqwest::StatusCode::SEE_OTHER,
+            "Expected redirect after login, got {}",
+            resp.status()
+        );
+    }
+
     /// Log in with an existing identity in read-only mode (no secret key).
     pub async fn login_readonly(&self, id: RostraId) {
         let resp = self

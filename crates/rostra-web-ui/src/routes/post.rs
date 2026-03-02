@@ -111,7 +111,17 @@ pub async fn get_single_post(
     {
         // Build Open Graph meta tags for rich link previews
         let og = if let Some(djot_content) = post_record.content.djot_content.as_deref() {
-            let excerpt = rostra_djot::extract::extract_excerpt(djot_content);
+            use jotup::r#async::AsyncRenderOutputExt as _;
+            use jotup::html::filters::AsyncSanitizeExt as _;
+
+            use super::content::RostraRenderExt as _;
+
+            let excerpt = rostra_djot::extract::ExcerptRenderer::default()
+                .rostra_profile_links(client_ref.clone())
+                .sanitize()
+                .render_into_document(djot_content)
+                .await
+                .expect("infallible");
 
             let og_profile = state.get_social_profile_opt(author, &client_ref).await;
             let display_name = og_profile

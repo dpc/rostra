@@ -3885,6 +3885,7 @@ dependencies = [
 name = "rostra-djot"
 version = "0.1.0"
 dependencies = [
+ "async-trait",
  "jotup",
  "rostra-core",
 ]

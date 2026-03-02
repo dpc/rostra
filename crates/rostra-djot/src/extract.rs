@@ -1,5 +1,6 @@
 //! Djot excerpt extraction for Open Graph meta tags and similar uses.
 
+use jotup::r#async::{AsyncRender, AsyncRenderOutput};
 use jotup::html::filters::SanitizeExt as _;
 use jotup::{Container, Event, Render, RenderOutput, RenderOutputExt as _};
 
@@ -33,8 +34,12 @@ enum Capturing {
 
 /// A [`Render`] implementation that extracts the first heading and first
 /// paragraph from a djot document as plain text.
+///
+/// Can be composed with async filters (e.g. profile link resolution) via its
+/// [`AsyncRender`] impl, then called with
+/// [`AsyncRenderOutputExt::render_into_document`].
 #[derive(Debug, Default)]
-struct ExcerptRenderer {
+pub struct ExcerptRenderer {
     excerpt: DjotExcerpt,
     /// What we are currently capturing (`None` = not capturing).
     capturing: Option<Capturing>,
@@ -151,6 +156,24 @@ impl<'s> Render<'s> for ExcerptRenderer {
 }
 
 impl<'s> RenderOutput<'s> for ExcerptRenderer {
+    type Output = DjotExcerpt;
+
+    fn into_output(self) -> DjotExcerpt {
+        self.excerpt
+    }
+}
+
+#[async_trait::async_trait]
+impl<'s> AsyncRender<'s> for ExcerptRenderer {
+    type Error = std::convert::Infallible;
+
+    async fn emit(&mut self, event: Event<'s>) -> Result<(), Self::Error> {
+        Render::emit(self, event)
+    }
+}
+
+#[async_trait::async_trait]
+impl<'s> AsyncRenderOutput<'s> for ExcerptRenderer {
     type Output = DjotExcerpt;
 
     fn into_output(self) -> DjotExcerpt {
