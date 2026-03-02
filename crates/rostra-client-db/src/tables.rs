@@ -186,8 +186,8 @@ def_table! {
     /// Key: (follower, followee)
     /// Value: timestamp and persona selector (which personas to see from followee)
     ///
-    /// Note: `selector = None` means "pending unfollow" - the entry exists to
-    /// track the unfollow timestamp but the follow relationship is inactive.
+    /// Entries represent active follows only. Unfollows remove the entry
+    /// entirely (and are recorded in `ids_unfollowed` instead).
     ids_followees: (RostraId, RostraId) => IdsFolloweesRecord
 }
 

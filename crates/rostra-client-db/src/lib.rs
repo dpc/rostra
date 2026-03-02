@@ -509,18 +509,7 @@ impl Database {
             let ids_followees_table = tx.open_table(&ids_followees::TABLE)?;
             Ok(Database::read_followees_tx(id, &ids_followees_table)?
                 .into_iter()
-                .filter_map(|(id, record)| {
-                    // Active follow: has tags_selector or legacy selector
-                    if record.tags_selector.is_some() || record.selector.is_some() {
-                        // Prefer tags_selector; fall back to match-all for old follows
-                        let selector = record
-                            .tags_selector
-                            .unwrap_or_else(PersonasTagsSelector::default);
-                        Some((id, selector))
-                    } else {
-                        None
-                    }
-                })
+                .map(|(id, record)| (id, record.effective_tags_selector()))
                 .collect())
         })
         .await
@@ -535,16 +524,7 @@ impl Database {
             let ids_followees_table = tx.open_table(&ids_followees::TABLE)?;
             let followees: HashMap<RostraId, PersonasTagsSelector> =
                 Database::read_followees_tx_iter(id, &ids_followees_table)?
-                    .filter_map_ok(|(id, record)| {
-                        if record.tags_selector.is_some() || record.selector.is_some() {
-                            let selector = record
-                                .tags_selector
-                                .unwrap_or_else(PersonasTagsSelector::default);
-                            Some((id, selector))
-                        } else {
-                            None
-                        }
-                    })
+                    .map_ok(|(id, record)| (id, record.effective_tags_selector()))
                     .collect::<Result<_, _>>()?;
 
             let mut extended = HashSet::new();
@@ -552,9 +532,9 @@ impl Database {
             for followee in followees.keys() {
                 for extended_followee in
                     Database::read_followees_tx_iter(*followee, &ids_followees_table)?
-                        .map_ok(|(id, record)| (id, record.selector))
+                        .map_ok(|(id, _record)| id)
                 {
-                    let extended_followee = extended_followee?.0;
+                    let extended_followee = extended_followee?;
                     if !followees.contains_key(&extended_followee) {
                         extended.insert(extended_followee);
                     }

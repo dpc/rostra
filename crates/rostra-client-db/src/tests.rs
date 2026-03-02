@@ -3348,13 +3348,9 @@ async fn test_total_migration() -> BoxedErrorResult<()> {
                 .get(&(user_a, user_b))?
                 .map(|g| g.value())
                 .expect("Follow should exist before migration");
-            assert!(
-                followee_record.selector.is_some(),
-                "Selector should be Some for an active follow"
-            );
             info!(
-                "Followee record before migration: latest_ts={:?}, selector={:?}",
-                followee_record.latest_ts, followee_record.selector
+                "Followee record before migration: latest_ts={:?}",
+                followee_record.latest_ts,
             );
 
             // Check follower record
@@ -3478,13 +3474,9 @@ async fn test_total_migration() -> BoxedErrorResult<()> {
             .get(&(user_a, user_b))?
             .map(|g| g.value())
             .expect("Follow should exist after migration");
-        assert!(
-            followee_record.selector.is_some(),
-            "Selector should be Some for an active follow after migration"
-        );
         info!(
-            "Followee record after migration: latest_ts={:?}, selector={:?}",
-            followee_record.latest_ts, followee_record.selector
+            "Followee record after migration: latest_ts={:?}",
+            followee_record.latest_ts,
         );
 
         // Check followers table in detail

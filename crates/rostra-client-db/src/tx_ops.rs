@@ -650,12 +650,7 @@ impl Database {
         }
         followees_table.insert(
             &db_key,
-            &IdsFolloweesRecord {
-                latest_ts: timestamp,
-                first_ts,
-                selector,
-                tags_selector,
-            },
+            &IdsFolloweesRecord::new(timestamp, first_ts, selector, tags_selector),
         )?;
         followers_table.insert(&(followee, author), &IdsFollowersRecord {})?;
 

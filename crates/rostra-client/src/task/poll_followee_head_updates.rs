@@ -97,14 +97,11 @@ impl PollFolloweeHeadUpdates {
         let backoff_state: SharedBackoffState = Arc::new(RwLock::new(HashMap::new()));
 
         loop {
-            // Get current active followees (selector.is_some() means active follow)
+            // All entries in the followees map are active follows
+            // (unfollows remove the entry entirely)
             let current_followees: HashSet<RostraId> = {
                 let followees = self.self_followees_rx.borrow();
-                followees
-                    .iter()
-                    .filter(|(_, record)| record.selector.is_some())
-                    .map(|(id, _)| *id)
-                    .collect()
+                followees.keys().copied().collect()
             };
 
             // Add new followees
