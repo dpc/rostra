@@ -64,6 +64,14 @@ pub trait EventExt {
     fn parent_aux(&self) -> Option<ShortEventId> {
         self.event().parent_aux.into()
     }
+
+    /// Return all unique parent event IDs (prev and aux, deduplicated).
+    fn all_parents(&self) -> BTreeSet<ShortEventId> {
+        [self.parent_prev(), self.parent_aux()]
+            .into_iter()
+            .flatten()
+            .collect()
+    }
     fn content_len(&self) -> u32 {
         self.event().content_len.into()
     }
