@@ -843,3 +843,180 @@ async fn prepare_does_not_require_secret() {
         "Should return hex-encoded content"
     );
 }
+
+// -- Follow / Unfollow tests --
+
+#[test_log::test(tokio::test(flavor = "multi_thread"))]
+async fn follow_and_list_followees() {
+    let server = TestServer::start().await;
+    let driver = server.driver();
+
+    // Generate two identities
+    let (id_a, secret_a) = generate_identity(&driver).await;
+    let (id_b, _secret_b) = generate_identity(&driver).await;
+
+    // A follows B
+    let resp = driver
+        .api_post_json(
+            &format!("/api/{id_a}/follow-managed"),
+            Some(&secret_a),
+            &serde_json::json!({
+                "followee": id_b,
+            }),
+        )
+        .await;
+    assert_eq!(resp.status(), 200, "Follow should succeed");
+    let body: serde_json::Value = resp.json().await.unwrap();
+    assert!(body["event_id"].as_str().is_some_and(|s| !s.is_empty()));
+    assert!(!body["heads"].as_array().unwrap().is_empty());
+
+    // List A's followees — should include B
+    let resp = driver.api_get(&format!("/api/{id_a}/followees")).await;
+    assert_eq!(resp.status(), 200);
+    let body: serde_json::Value = resp.json().await.unwrap();
+    let followees = body["followees"].as_array().unwrap();
+    assert_eq!(followees.len(), 1, "Should have one followee");
+    assert_eq!(followees[0]["rostra_id"].as_str().unwrap(), id_b);
+    assert_eq!(followees[0]["filter_mode"].as_str().unwrap(), "except");
+}
+
+#[test_log::test(tokio::test(flavor = "multi_thread"))]
+async fn follow_with_tag_filter() {
+    let server = TestServer::start().await;
+    let driver = server.driver();
+
+    let (id_a, secret_a) = generate_identity(&driver).await;
+    let (id_b, _secret_b) = generate_identity(&driver).await;
+
+    // A follows B with "only" filter on "bot" tag
+    let resp = driver
+        .api_post_json(
+            &format!("/api/{id_a}/follow-managed"),
+            Some(&secret_a),
+            &serde_json::json!({
+                "followee": id_b,
+                "filter_mode": "only",
+                "persona_tags": ["bot"],
+            }),
+        )
+        .await;
+    assert_eq!(resp.status(), 200);
+
+    let resp = driver.api_get(&format!("/api/{id_a}/followees")).await;
+    assert_eq!(resp.status(), 200);
+    let body: serde_json::Value = resp.json().await.unwrap();
+    let followees = body["followees"].as_array().unwrap();
+    assert_eq!(followees[0]["filter_mode"].as_str().unwrap(), "only");
+    assert_eq!(
+        followees[0]["persona_tags"].as_array().unwrap(),
+        &[serde_json::json!("bot")]
+    );
+}
+
+#[test_log::test(tokio::test(flavor = "multi_thread"))]
+async fn unfollow_removes_followee() {
+    let server = TestServer::start().await;
+    let driver = server.driver();
+
+    let (id_a, secret_a) = generate_identity(&driver).await;
+    let (id_b, _secret_b) = generate_identity(&driver).await;
+
+    // A follows B
+    let resp = driver
+        .api_post_json(
+            &format!("/api/{id_a}/follow-managed"),
+            Some(&secret_a),
+            &serde_json::json!({ "followee": id_b }),
+        )
+        .await;
+    assert_eq!(resp.status(), 200);
+
+    // Verify B is in followees
+    let resp = driver.api_get(&format!("/api/{id_a}/followees")).await;
+    let body: serde_json::Value = resp.json().await.unwrap();
+    assert_eq!(body["followees"].as_array().unwrap().len(), 1);
+
+    // Timestamps are second-resolution; wait so the unfollow gets a newer timestamp
+    tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+
+    // A unfollows B
+    let resp = driver
+        .api_post_json(
+            &format!("/api/{id_a}/unfollow-managed"),
+            Some(&secret_a),
+            &serde_json::json!({ "followee": id_b }),
+        )
+        .await;
+    assert_eq!(resp.status(), 200);
+
+    // Verify followees is now empty
+    let resp = driver.api_get(&format!("/api/{id_a}/followees")).await;
+    let body: serde_json::Value = resp.json().await.unwrap();
+    assert!(
+        body["followees"].as_array().unwrap().is_empty(),
+        "Followees should be empty after unfollow"
+    );
+}
+
+#[test_log::test(tokio::test(flavor = "multi_thread"))]
+async fn follow_without_secret_returns_401() {
+    let server = TestServer::start().await;
+    let driver = server.driver();
+
+    let (id_a, _secret_a) = generate_identity(&driver).await;
+    let (id_b, _secret_b) = generate_identity(&driver).await;
+
+    let resp = driver
+        .api_post_json(
+            &format!("/api/{id_a}/follow-managed"),
+            None,
+            &serde_json::json!({ "followee": id_b }),
+        )
+        .await;
+    assert_eq!(resp.status(), 401);
+}
+
+#[test_log::test(tokio::test(flavor = "multi_thread"))]
+async fn follow_with_wrong_secret_returns_403() {
+    let server = TestServer::start().await;
+    let driver = server.driver();
+
+    let (id_a, _secret_a) = generate_identity(&driver).await;
+    let (id_b, secret_b) = generate_identity(&driver).await;
+
+    // Try to follow from A using B's secret
+    let resp = driver
+        .api_post_json(
+            &format!("/api/{id_a}/follow-managed"),
+            Some(&secret_b),
+            &serde_json::json!({ "followee": id_b }),
+        )
+        .await;
+    assert_eq!(resp.status(), 403);
+}
+
+#[test_log::test(tokio::test(flavor = "multi_thread"))]
+async fn followers_empty_for_fresh_identity() {
+    let server = TestServer::start().await;
+    let driver = server.driver();
+
+    let (id_a, _secret_a) = generate_identity(&driver).await;
+
+    let resp = driver.api_get(&format!("/api/{id_a}/followers")).await;
+    assert_eq!(resp.status(), 200);
+    let body: serde_json::Value = resp.json().await.unwrap();
+    assert!(body["followers"].as_array().unwrap().is_empty());
+}
+
+#[test_log::test(tokio::test(flavor = "multi_thread"))]
+async fn followees_empty_for_fresh_identity() {
+    let server = TestServer::start().await;
+    let driver = server.driver();
+
+    let (id_a, _secret_a) = generate_identity(&driver).await;
+
+    let resp = driver.api_get(&format!("/api/{id_a}/followees")).await;
+    assert_eq!(resp.status(), 200);
+    let body: serde_json::Value = resp.json().await.unwrap();
+    assert!(body["followees"].as_array().unwrap().is_empty());
+}

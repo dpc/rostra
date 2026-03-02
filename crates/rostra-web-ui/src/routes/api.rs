@@ -8,8 +8,8 @@ use axum::routing::{get, post};
 use axum::{Json, Router};
 use rostra_client_db::social::ReceivedAtPaginationCursor;
 use rostra_core::event::{
-    Event, EventContentRaw, EventSignature, PersonaTag, SignedEvent, SocialPost, VerifiedEvent,
-    VerifiedEventContent,
+    Event, EventContentRaw, EventSignature, PersonaTag, PersonasTagsSelector, SignedEvent,
+    SocialPost, VerifiedEvent, VerifiedEventContent,
 };
 use rostra_core::id::{ExternalEventId, RostraId, RostraIdSecretKey};
 use rostra_core::{ShortEventId, Timestamp};
@@ -121,6 +121,10 @@ pub fn api_router() -> Router<Arc<UiState>> {
             post(publish_social_post_prepare),
         )
         .route("/{rostra_id}/publish", post(publish_signed_event))
+        .route("/{rostra_id}/follow-managed", post(follow_managed))
+        .route("/{rostra_id}/unfollow-managed", post(unfollow_managed))
+        .route("/{rostra_id}/followees", get(get_followees))
+        .route("/{rostra_id}/followers", get(get_followers))
         .route("/{rostra_id}/notifications", get(get_notifications))
 }
 
@@ -609,6 +613,282 @@ async fn publish_signed_event(
         event_id: ShortEventId::from(verified_event_content.event_id()).to_string(),
         heads,
     }))
+}
+
+// -- Follow / Unfollow --
+
+#[derive(Deserialize)]
+struct FollowManagedRequest {
+    followee: String,
+    /// "only" or "except" (defaults to "except" = follow all)
+    #[serde(default)]
+    filter_mode: Option<String>,
+    /// Persona tags for the filter
+    #[serde(default)]
+    persona_tags: Vec<String>,
+}
+
+#[derive(Serialize)]
+struct FollowManagedResponse {
+    event_id: String,
+    heads: Vec<String>,
+}
+
+async fn follow_managed(
+    State(state): State<SharedState>,
+    _version: ApiVersion,
+    ApiIdSecret(id_secret): ApiIdSecret,
+    Path(rostra_id): Path<RostraId>,
+    Json(req): Json<FollowManagedRequest>,
+) -> ApiResult<Json<FollowManagedResponse>> {
+    if id_secret.id() != rostra_id {
+        return Err(api_error(
+            StatusCode::FORBIDDEN,
+            "Secret key does not match the rostra_id",
+        ));
+    }
+
+    let followee: RostraId = req
+        .followee
+        .parse()
+        .map_err(|_| api_error(StatusCode::BAD_REQUEST, "Invalid followee rostra_id"))?;
+
+    let tags: BTreeSet<PersonaTag> = req
+        .persona_tags
+        .iter()
+        .filter_map(|s| PersonaTag::new(s).ok())
+        .collect();
+
+    let selector = match req.filter_mode.as_deref() {
+        Some("only") => PersonasTagsSelector::Only { ids: tags },
+        _ => PersonasTagsSelector::Except { ids: tags },
+    };
+
+    state.load_client(rostra_id).await.map_err(|e| {
+        api_error(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("Failed to load client: {e}"),
+        )
+    })?;
+
+    let client = state.client(rostra_id).await.map_err(|e| {
+        api_error(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("Client error: {e}"),
+        )
+    })?;
+    let client_ref = client.client_ref().map_err(|e| {
+        api_error(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("Client ref error: {e}"),
+        )
+    })?;
+
+    client_ref.unlock_active(id_secret).await.map_err(|e| {
+        api_error(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("Unlock error: {e}"),
+        )
+    })?;
+
+    let verified_event = client_ref
+        .follow(id_secret, followee, selector)
+        .await
+        .map_err(|e| {
+            api_error(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                format!("Failed to follow: {e}"),
+            )
+        })?;
+
+    let mut heads: Vec<String> = client_ref
+        .db()
+        .get_heads_events_for_id(rostra_id)
+        .await
+        .into_iter()
+        .map(|h| h.to_string())
+        .collect();
+    heads.sort();
+
+    Ok(Json(FollowManagedResponse {
+        event_id: ShortEventId::from(verified_event.event_id).to_string(),
+        heads,
+    }))
+}
+
+#[derive(Deserialize)]
+struct UnfollowManagedRequest {
+    followee: String,
+}
+
+async fn unfollow_managed(
+    State(state): State<SharedState>,
+    _version: ApiVersion,
+    ApiIdSecret(id_secret): ApiIdSecret,
+    Path(rostra_id): Path<RostraId>,
+    Json(req): Json<UnfollowManagedRequest>,
+) -> ApiResult<Json<FollowManagedResponse>> {
+    if id_secret.id() != rostra_id {
+        return Err(api_error(
+            StatusCode::FORBIDDEN,
+            "Secret key does not match the rostra_id",
+        ));
+    }
+
+    let followee: RostraId = req
+        .followee
+        .parse()
+        .map_err(|_| api_error(StatusCode::BAD_REQUEST, "Invalid followee rostra_id"))?;
+
+    state.load_client(rostra_id).await.map_err(|e| {
+        api_error(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("Failed to load client: {e}"),
+        )
+    })?;
+
+    let client = state.client(rostra_id).await.map_err(|e| {
+        api_error(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("Client error: {e}"),
+        )
+    })?;
+    let client_ref = client.client_ref().map_err(|e| {
+        api_error(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("Client ref error: {e}"),
+        )
+    })?;
+
+    client_ref.unlock_active(id_secret).await.map_err(|e| {
+        api_error(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("Unlock error: {e}"),
+        )
+    })?;
+
+    let verified_event = client_ref
+        .unfollow(id_secret, followee)
+        .await
+        .map_err(|e| {
+            api_error(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                format!("Failed to unfollow: {e}"),
+            )
+        })?;
+
+    let mut heads: Vec<String> = client_ref
+        .db()
+        .get_heads_events_for_id(rostra_id)
+        .await
+        .into_iter()
+        .map(|h| h.to_string())
+        .collect();
+    heads.sort();
+
+    Ok(Json(FollowManagedResponse {
+        event_id: ShortEventId::from(verified_event.event_id).to_string(),
+        heads,
+    }))
+}
+
+// -- Followees / Followers --
+
+#[derive(Serialize)]
+struct FolloweeItem {
+    rostra_id: String,
+    filter_mode: String,
+    persona_tags: Vec<String>,
+}
+
+#[derive(Serialize)]
+struct FolloweesResponse {
+    followees: Vec<FolloweeItem>,
+}
+
+async fn get_followees(
+    State(state): State<SharedState>,
+    _version: ApiVersion,
+    Path(rostra_id): Path<RostraId>,
+) -> ApiResult<Json<FolloweesResponse>> {
+    state.load_client(rostra_id).await.map_err(|e| {
+        api_error(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("Failed to load client: {e}"),
+        )
+    })?;
+
+    let client = state.client(rostra_id).await.map_err(|e| {
+        api_error(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("Client error: {e}"),
+        )
+    })?;
+    let client_ref = client.client_ref().map_err(|e| {
+        api_error(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("Client ref error: {e}"),
+        )
+    })?;
+
+    let followees_data = client_ref.db().get_followees(rostra_id).await;
+
+    let followees = followees_data
+        .into_iter()
+        .map(|(id, selector)| {
+            let (filter_mode, tags) = match selector {
+                PersonasTagsSelector::Only { ids } => ("only", ids),
+                PersonasTagsSelector::Except { ids } => ("except", ids),
+            };
+            FolloweeItem {
+                rostra_id: id.to_string(),
+                filter_mode: filter_mode.to_string(),
+                persona_tags: tags.into_iter().map(|t| t.to_string()).collect(),
+            }
+        })
+        .collect();
+
+    Ok(Json(FolloweesResponse { followees }))
+}
+
+#[derive(Serialize)]
+struct FollowersResponse {
+    followers: Vec<String>,
+}
+
+async fn get_followers(
+    State(state): State<SharedState>,
+    _version: ApiVersion,
+    Path(rostra_id): Path<RostraId>,
+) -> ApiResult<Json<FollowersResponse>> {
+    state.load_client(rostra_id).await.map_err(|e| {
+        api_error(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("Failed to load client: {e}"),
+        )
+    })?;
+
+    let client = state.client(rostra_id).await.map_err(|e| {
+        api_error(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("Client error: {e}"),
+        )
+    })?;
+    let client_ref = client.client_ref().map_err(|e| {
+        api_error(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("Client ref error: {e}"),
+        )
+    })?;
+
+    let followers_data = client_ref.db().get_followers(rostra_id).await;
+
+    let followers = followers_data
+        .into_iter()
+        .map(|id| id.to_string())
+        .collect();
+
+    Ok(Json(FollowersResponse { followers }))
 }
 
 // -- Notifications --

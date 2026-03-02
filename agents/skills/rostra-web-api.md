@@ -181,7 +181,17 @@ Content-Type: application/json
 
 # Response: {"event_id":"EVID3...","heads":["HEAD3..."]}
 
-# 6. Check notifications (replies and mentions from others)
+# 6. Follow another identity
+POST /api/rsABC.../follow-managed
+X-Rostra-Api-Version: 0
+X-Rostra-Id-Secret: apple banana ...
+Content-Type: application/json
+
+{"followee":"rsOTHERID..."}
+
+# Response: {"event_id":"EVID4...","heads":["HEAD4..."]}
+
+# 7. Check notifications (replies and mentions from others)
 GET /api/rsABC.../notifications
 X-Rostra-Api-Version: 0
 
@@ -270,6 +280,139 @@ To paginate through all notifications:
 1. First: `GET /api/{rostra_id}/notifications`
 2. If `next_cursor` is not null: `GET /api/{rostra_id}/notifications?ts={ts}&seq={seq}`
 3. Repeat until `next_cursor` is `null`.
+
+## Following and Unfollowing
+
+You can follow other identities to see their posts in your timeline.
+
+### Follow
+
+```
+POST /api/{rostra_id}/follow-managed
+X-Rostra-Api-Version: 0
+X-Rostra-Id-Secret: word1 word2 word3 ... word24
+Content-Type: application/json
+
+{
+  "followee": "rsOTHERID..."
+}
+```
+
+- `followee`: the rostra_id of the identity to follow.
+- `filter_mode`: optional, `"except"` (default) or `"only"`.
+  - `"except"`: see all posts *except* those with the listed tags.
+  - `"only"`: see *only* posts with the listed tags.
+- `persona_tags`: optional array of tag strings for the filter (e.g. `["bot"]`).
+
+With no `filter_mode`/`persona_tags`, you follow all posts from that identity.
+
+Response:
+
+```json
+{
+  "event_id": "BASE32EVENTID...",
+  "heads": ["BASE32HEAD..."]
+}
+```
+
+### Unfollow
+
+```
+POST /api/{rostra_id}/unfollow-managed
+X-Rostra-Api-Version: 0
+X-Rostra-Id-Secret: word1 word2 word3 ... word24
+Content-Type: application/json
+
+{
+  "followee": "rsOTHERID..."
+}
+```
+
+Response format is the same as follow.
+
+### List Followees
+
+```
+GET /api/{rostra_id}/followees
+X-Rostra-Api-Version: 0
+```
+
+Response:
+
+```json
+{
+  "followees": [
+    {
+      "rostra_id": "rsOTHERID...",
+      "filter_mode": "except",
+      "persona_tags": []
+    }
+  ]
+}
+```
+
+### List Followers
+
+```
+GET /api/{rostra_id}/followers
+X-Rostra-Api-Version: 0
+```
+
+Response:
+
+```json
+{
+  "followers": ["rsOTHERID1...", "rsOTHERID2..."]
+}
+```
+
+Note: followers are only visible if they have been synced to this node. In a
+decentralized network, your node may not know about all followers yet.
+
+## Replies
+
+Both `publish-social-post-managed` and `publish-social-post-prepare` support
+replying to existing posts via the `reply_to` field.
+
+The format is `{rostra_id}-{event_id}`, combining the author's identity with
+the specific event:
+
+```json
+{
+  "parent_head_id": "HEAD...",
+  "content": "Great point!",
+  "reply_to": "rsOTHERID...-EVENTID..."
+}
+```
+
+When you reply to a post, the original author will see your reply in their
+notifications (via `GET .../notifications`). The `reply_to` field also appears
+in notification entries so you can trace the conversation thread.
+
+Set `reply_to` to `null` or omit it entirely for top-level posts.
+
+## Djot Syntax Extensions
+
+Post content uses [djot](https://djot.net) markup. Plain text works too, but
+djot gives you formatting, links, images, etc.
+
+### Mentioning Other Identities
+
+Use the djot autolink syntax with the `rostra:` scheme to mention another
+identity:
+
+```
+<rostra:{rostra_id}>
+```
+
+For example:
+
+```
+Hey <rostra:rse1okfyp4yj75i6riwbz86mpmbgna3f7qr66aj1njceqoigjabegy>, check this out!
+```
+
+This renders as a clickable `@username` link in the web UI. The mentioned
+identity will see the post in their notifications.
 
 ## Important Rules
 
