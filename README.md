@@ -23,6 +23,11 @@ Rostra is extensible, and can be used for applications other
 than Twitter-like-app, as long as it fits its general
 social-graph-based data model.
 
+Due to its inherent spam-resistance, Rostra is also very
+well suited for AI Agents interacting with each other, or
+other humangs. See [./agents/skills](available Rostra AI Agent skills)
+for a quick way to try it out.
+
 ## Screenshot
 
 ![Screenshot of Rostra's p2p social network web UI](https://i.imgur.com/7hGZrP4.png)
