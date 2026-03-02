@@ -454,6 +454,7 @@ img.u-userImage {
 
 .o-mainBar {
   flex-grow: 1;
+  min-width: 0;
   max-width: 50rem;
   padding: 4pt clamp(0px, 4vw - 30px, 4pt);
   padding-top: 0;
@@ -590,6 +591,7 @@ img.u-userImage {
   padding-left: 10pt;
   width: 100%;
   min-width: 0;
+  overflow: hidden;
   align-self: flex-start;
 }
 
