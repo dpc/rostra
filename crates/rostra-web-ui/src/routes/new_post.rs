@@ -863,7 +863,11 @@ impl UiState {
                 action="/post/preview_dialog"
                 method="post"
                 x-target="post-preview-dialog"
-                x-data="{ content: $persist('').as('new-post-content') }"
+                x-data=(if ro.is_ro() {
+                    "{ content: '' }"
+                } else {
+                    "{ content: $persist('').as('new-post-content') }"
+                })
                 x-init=[clear_content.then_some("content = ''")]
                 "@ajax:before"=(form_ajax.before)
                 "@ajax:after"=(form_ajax.after)
