@@ -1,4 +1,4 @@
-use std::collections::BTreeSet;
+use std::collections::{BTreeSet, HashMap};
 use std::sync::Arc;
 
 use axum::extract::{FromRequestParts, Path, Query, State};
@@ -6,7 +6,7 @@ use axum::http::StatusCode;
 use axum::http::request::Parts;
 use axum::routing::{get, post};
 use axum::{Json, Router};
-use rostra_client_db::social::ReceivedAtPaginationCursor;
+use rostra_client_db::social::{EventPaginationCursor, ReceivedAtPaginationCursor};
 use rostra_core::event::{
     Event, EventContentRaw, EventSignature, PersonaTag, PersonasTagsSelector, SignedEvent,
     SocialPost, VerifiedEvent, VerifiedEventContent,
@@ -126,6 +126,8 @@ pub fn api_router() -> Router<Arc<UiState>> {
         .route("/{rostra_id}/followees", get(get_followees))
         .route("/{rostra_id}/followers", get(get_followers))
         .route("/{rostra_id}/notifications", get(get_notifications))
+        .route("/{rostra_id}/following", get(get_following_timeline))
+        .route("/{rostra_id}/network", get(get_network_timeline))
 }
 
 // -- Endpoints --
@@ -994,4 +996,168 @@ async fn get_notifications(
         notifications,
         next_cursor,
     }))
+}
+
+// -- Timeline endpoints (Following / Network) --
+
+#[derive(Deserialize)]
+struct TimelineQuery {
+    ts: Option<Timestamp>,
+    event_id: Option<ShortEventId>,
+}
+
+#[derive(Serialize)]
+struct TimelinePostItem {
+    event_id: String,
+    author: String,
+    ts: u64,
+    content: Option<String>,
+    reply_to: Option<String>,
+    persona_tags: Vec<String>,
+    reply_count: u64,
+}
+
+#[derive(Serialize)]
+struct TimelineResponse {
+    posts: Vec<TimelinePostItem>,
+    next_cursor: Option<TimelineCursorResponse>,
+}
+
+#[derive(Serialize)]
+struct TimelineCursorResponse {
+    ts: u64,
+    event_id: String,
+}
+
+fn post_to_timeline_item(
+    post: rostra_client_db::social::SocialPostRecord<SocialPost>,
+) -> TimelinePostItem {
+    let persona_tags = post
+        .content
+        .persona_tags()
+        .into_iter()
+        .map(|t| t.to_string())
+        .collect();
+    TimelinePostItem {
+        event_id: post.event_id.to_string(),
+        author: post.author.to_string(),
+        ts: post.ts.as_u64(),
+        content: post.content.djot_content,
+        reply_to: post.reply_to.map(|r| r.to_string()),
+        persona_tags,
+        reply_count: post.reply_count,
+    }
+}
+
+async fn get_following_timeline(
+    State(state): State<SharedState>,
+    _version: ApiVersion,
+    Path(rostra_id): Path<RostraId>,
+    Query(query): Query<TimelineQuery>,
+) -> ApiResult<Json<TimelineResponse>> {
+    state.load_client(rostra_id).await.map_err(|e| {
+        api_error(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("Failed to load client: {e}"),
+        )
+    })?;
+
+    let client = state.client(rostra_id).await.map_err(|e| {
+        api_error(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("Client error: {e}"),
+        )
+    })?;
+    let client_ref = client.client_ref().map_err(|e| {
+        api_error(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("Client ref error: {e}"),
+        )
+    })?;
+
+    let cursor = query.ts.and_then(|ts| {
+        query
+            .event_id
+            .map(|event_id| EventPaginationCursor { ts, event_id })
+    });
+
+    let self_id = rostra_id;
+    let followees: HashMap<RostraId, PersonasTagsSelector> = client_ref
+        .db()
+        .get_followees(self_id)
+        .await
+        .into_iter()
+        .collect();
+
+    let (posts, next) = client_ref
+        .db()
+        .paginate_social_posts_rev(cursor, 20, move |post| {
+            post.author != self_id
+                && followees.get(&post.author).is_some_and(|selector| {
+                    let tags = post.content.persona_tags();
+                    if tags.is_empty() {
+                        return true;
+                    }
+                    selector.matches_tags(&tags)
+                })
+        })
+        .await;
+
+    let posts = posts.into_iter().map(post_to_timeline_item).collect();
+
+    let next_cursor = next.map(|c| TimelineCursorResponse {
+        ts: c.ts.as_u64(),
+        event_id: c.event_id.to_string(),
+    });
+
+    Ok(Json(TimelineResponse { posts, next_cursor }))
+}
+
+async fn get_network_timeline(
+    State(state): State<SharedState>,
+    _version: ApiVersion,
+    Path(rostra_id): Path<RostraId>,
+    Query(query): Query<TimelineQuery>,
+) -> ApiResult<Json<TimelineResponse>> {
+    state.load_client(rostra_id).await.map_err(|e| {
+        api_error(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("Failed to load client: {e}"),
+        )
+    })?;
+
+    let client = state.client(rostra_id).await.map_err(|e| {
+        api_error(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("Client error: {e}"),
+        )
+    })?;
+    let client_ref = client.client_ref().map_err(|e| {
+        api_error(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("Client ref error: {e}"),
+        )
+    })?;
+
+    let cursor = query.ts.and_then(|ts| {
+        query
+            .event_id
+            .map(|event_id| EventPaginationCursor { ts, event_id })
+    });
+
+    let self_id = rostra_id;
+
+    let (posts, next) = client_ref
+        .db()
+        .paginate_social_posts_rev(cursor, 20, move |post| post.author != self_id)
+        .await;
+
+    let posts = posts.into_iter().map(post_to_timeline_item).collect();
+
+    let next_cursor = next.map(|c| TimelineCursorResponse {
+        ts: c.ts.as_u64(),
+        event_id: c.event_id.to_string(),
+    });
+
+    Ok(Json(TimelineResponse { posts, next_cursor }))
 }

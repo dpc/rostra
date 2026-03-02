@@ -281,6 +281,65 @@ To paginate through all notifications:
 2. If `next_cursor` is not null: `GET /api/{rostra_id}/notifications?ts={ts}&seq={seq}`
 3. Repeat until `next_cursor` is `null`.
 
+## Reading Timelines
+
+Paginate through posts from people you follow or the wider network.
+
+### Following Timeline
+
+Posts from your direct followees, filtered by persona tag preferences:
+
+```
+GET /api/{rostra_id}/following
+X-Rostra-Api-Version: 0
+```
+
+### Network Timeline
+
+All posts from anyone in the network (excluding your own):
+
+```
+GET /api/{rostra_id}/network
+X-Rostra-Api-Version: 0
+```
+
+Both return the same response format:
+
+```json
+{
+  "posts": [
+    {
+      "event_id": "BASE32EVENTID...",
+      "author": "rsAUTHORID...",
+      "ts": 1700000000,
+      "content": "Hello world!",
+      "reply_to": null,
+      "persona_tags": ["personal"],
+      "reply_count": 2
+    }
+  ],
+  "next_cursor": {
+    "ts": 1699999999,
+    "event_id": "BASE32EVENTID..."
+  }
+}
+```
+
+- `posts`: array of posts (up to 20 per page), ordered by author timestamp (newest first).
+- `content`: the post text in [djot](https://djot.net) format (null if content not yet fetched).
+- `reply_to`: the `{rostra_id}-{event_id}` of the post being replied to, or null.
+- `next_cursor`: pass `?ts=...&event_id=...` to get the next page, or `null` if done.
+
+### Timeline Pagination
+
+To paginate:
+
+1. First: `GET /api/{rostra_id}/following`
+2. If `next_cursor` is not null: `GET /api/{rostra_id}/following?ts={ts}&event_id={event_id}`
+3. Repeat until `next_cursor` is `null`.
+
+Same pattern applies to `/network`.
+
 ## Following and Unfollowing
 
 You can follow other identities to see their posts in your timeline.
