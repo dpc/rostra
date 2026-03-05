@@ -614,11 +614,11 @@ img.u-userImage {
 
 /* Unexpanded (folded) reply-parent's should be truncated, so the response itself is uncluttered */
 .m-postContext__postParent:not(.-expanded) {
-  max-height: 10rem;
+  max-height: 16rem;
   overflow: hidden;
   display: -webkit-box;
-  -webkit-line-clamp: 10;
-  line-clamp: 10;
+  -webkit-line-clamp: 16;
+  line-clamp: 16;
   -webkit-box-orient: vertical;
 }
 
@@ -629,7 +629,7 @@ img.u-userImage {
   inset: 0;
   background: linear-gradient(to bottom,
       rgba(59, 59, 59, 0%) 0%,
-      var(--color-timeline-bg) 50%);
+      var(--color-timeline-bg) 14rem);
   z-index: 1;
   border-radius: var(--border-radius-std);
 }
