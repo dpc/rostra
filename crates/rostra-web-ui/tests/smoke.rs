@@ -24,7 +24,7 @@ async fn unauthenticated_followees_redirects_to_unlock() {
     let server = TestServer::start().await;
     let driver = server.driver();
 
-    let resp = driver.get("/followees").await;
+    let resp = driver.get("/following").await;
     assert_eq!(resp.status(), 303);
 
     let location = resp.headers().get("location").unwrap().to_str().unwrap();
@@ -41,7 +41,7 @@ async fn login_then_access_followees() {
 
     driver.login_new_identity().await;
 
-    let resp = driver.get("/followees").await;
+    let resp = driver.get("/following").await;
     assert_eq!(resp.status(), 200);
 }
 

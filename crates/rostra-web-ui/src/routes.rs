@@ -129,7 +129,7 @@ pub fn route_handler(state: SharedState) -> Router<Arc<UiState>> {
         .nest("/api", api::api_router())
         .route("/", get(welcome::get_landing))
         .route("/home", get(welcome::get_home))
-        .route("/followees", get(timeline::get_followees))
+        .route("/following", get(timeline::get_followees))
         .route("/network", get(timeline::get_network))
         .route("/notifications", get(timeline::get_notifications))
         .route("/profile/{id}", get(profile::get_profile))

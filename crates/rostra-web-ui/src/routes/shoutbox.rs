@@ -129,7 +129,7 @@ pub async fn get_shoutbox(
             {
                 a ."o-mainBarTimeline__back" href="/" onclick="history.back(); return false;" { "<" }
                 a ."o-mainBarTimeline__followees"
-                    href="/followees"
+                    href="/following"
                 {
                     "Following"
                     span ."o-mainBarTimeline__newCount" x-text="formatCount(followees)" {}

@@ -504,7 +504,7 @@ impl UiState {
     ) -> RequestResult<Markup> {
         Ok(html! {
             div ."o-settingsContent" {
-                h2 ."o-settingsContent__header" { "Followees" }
+                h2 ."o-settingsContent__header" { "Following" }
 
                 div ."o-settingsContent__section" {
                     h3 ."o-settingsContent__sectionHeader" { "Add" }

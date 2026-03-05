@@ -907,7 +907,7 @@ pub(crate) enum TimelineMode {
 impl TimelineMode {
     fn to_path(self) -> String {
         match self {
-            TimelineMode::Followees => "/followees".to_string(),
+            TimelineMode::Followees => "/following".to_string(),
             TimelineMode::Network => "/network".to_string(),
             TimelineMode::Notifications => "/notifications".to_string(),
             TimelineMode::Profile(rostra_id) => format!("/profile/{rostra_id}"),
