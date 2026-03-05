@@ -625,6 +625,42 @@ document.addEventListener("alpine:init", () => {
     },
   }));
 
+  // Subsequence fuzzy match: each query char must appear in order in text.
+  // Returns score > 0 on match, 0 on no match. Rewards consecutive matches
+  // and matches at word boundaries (after _, -, space, or at start).
+  function fuzzyMatch(query, text) {
+    const q = query.toLowerCase();
+    const t = text.toLowerCase();
+
+    // Quick subsequence check
+    let qi = 0;
+    for (let ti = 0; ti < t.length && qi < q.length; ti++) {
+      if (t[ti] === q[qi]) qi++;
+    }
+    if (qi < q.length) return 0;
+
+    // Score the match
+    let score = 0;
+    qi = 0;
+    let prevMatchIdx = -2;
+    for (let ti = 0; ti < t.length && qi < q.length; ti++) {
+      if (t[ti] === q[qi]) {
+        score += 1;
+        if (ti === prevMatchIdx + 1) score += 2;
+        if (ti === 0 || t[ti - 1] === "_" || t[ti - 1] === "-" || t[ti - 1] === " ") {
+          score += 3;
+        }
+        prevMatchIdx = ti;
+        qi++;
+      }
+    }
+
+    // Prefer shorter candidates (more precise matches)
+    score -= t.length * 0.1;
+
+    return score;
+  }
+
   // Text autocomplete component for mentions (@) and emojis (:)
   Alpine.data("textAutocomplete", () => ({
     query: "",
@@ -634,6 +670,7 @@ document.addEventListener("alpine:init", () => {
     debounceTimer: null,
     autocompleteType: null, // 'mention' or 'emoji'
     emojiDatabase: null,
+    _allEmojis: null,
 
     init() {
       this._initEmojiDb();
@@ -649,6 +686,17 @@ document.addEventListener("alpine:init", () => {
           if (this.emojiDatabase._lazyUpdate) {
             this.emojiDatabase._lazyUpdate.catch(() => {});
           }
+          // Cache all emojis for fuzzy search
+          const allEmojis = [];
+          for (let group = 0; group < 10; group++) {
+            try {
+              const emojis = await this.emojiDatabase.getEmojiByGroup(group);
+              allEmojis.push(...emojis);
+            } catch (_) {
+              // group doesn't exist, stop
+            }
+          }
+          this._allEmojis = allEmojis;
         } catch (e) {
           this.emojiDatabase = null;
           setTimeout(() => this._initEmojiDb(), 1000);
@@ -701,55 +749,38 @@ document.addEventListener("alpine:init", () => {
     },
 
     async searchEmojis() {
-      if (!this.emojiDatabase) {
+      if (!this._allEmojis) {
         this.results = [];
         return;
       }
 
       clearTimeout(this.debounceTimer);
-      this.debounceTimer = setTimeout(async () => {
-        try {
-          await this.emojiDatabase.ready();
-          const emojis = await this.emojiDatabase.getEmojiBySearchQuery(
-            this.query,
-          );
-          const q = this.query.toLowerCase();
+      this.debounceTimer = setTimeout(() => {
+        const q = this.query.toLowerCase();
+        const scored = [];
 
-          const scored = emojis.map((e) => {
-            const shortcodes = e.shortcodes || [];
-            const annotation = (e.annotation || "").toLowerCase();
-            let score = 0;
+        for (const e of this._allEmojis) {
+          const shortcodes = e.shortcodes || [];
+          const annotation = (e.annotation || "").toLowerCase();
+          let score = 0;
 
-            for (const sc of shortcodes) {
-              const scLower = sc.toLowerCase();
-              if (scLower === q) {
-                score = Math.max(score, 100);
-              } else if (scLower.startsWith(q)) {
-                score = Math.max(score, 80);
-              } else if (scLower.includes(q)) {
-                score = Math.max(score, 40);
-              }
-            }
+          for (const sc of shortcodes) {
+            score = Math.max(score, fuzzyMatch(q, sc));
+          }
+          score = Math.max(score, fuzzyMatch(q, annotation));
 
-            if (annotation.startsWith(q)) {
-              score = Math.max(score, 60);
-            } else if (annotation.includes(q)) {
-              score = Math.max(score, 30);
-            }
-
-            return { emoji: e, score };
-          });
-
-          scored.sort((a, b) => b.score - a.score);
-          this.results = scored.slice(0, 8).map(({ emoji: e }) => ({
-            type: "emoji",
-            emoji: e.unicode,
-            shortcode: (e.shortcodes && e.shortcodes[0]) || e.annotation,
-          }));
-          this.selectedIndex = 0;
-        } catch (error) {
-          this.results = [];
+          if (score > 0) {
+            scored.push({ emoji: e, score });
+          }
         }
+
+        scored.sort((a, b) => b.score - a.score);
+        this.results = scored.slice(0, 8).map(({ emoji: e }) => ({
+          type: "emoji",
+          emoji: e.unicode,
+          shortcode: (e.shortcodes && e.shortcodes[0]) || e.annotation,
+        }));
+        this.selectedIndex = 0;
       }, 50);
     },
 
