@@ -308,7 +308,7 @@ pub async fn post_post_preview_dialog(
                             action="/post"
                             method="post"
                             x-target=(x_target)
-                            "x-on:keydown.enter.ctrl.shift.window"="$el.requestSubmit()"
+                            "x-on:keyup.enter.ctrl.shift.window"="$el.requestSubmit()"
                             "@ajax:before"=(ajax_attrs.before)
                             "@ajax:after"=(ajax_attrs.after)
                         {

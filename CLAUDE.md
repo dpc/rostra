@@ -109,3 +109,7 @@ Key web UI files:
 - Structured logging with `tracing`
 - No inline `mod`s - use standalone modules
 - Supports multi-device sync through event DAG merging
+
+## Web UI Conventions
+
+- For keyboard shortcuts that trigger `requestSubmit()`, always use `keyup` (not `keydown`). `keydown` fires repeatedly with key auto-repeat, which can cause duplicate form submissions and race conditions in alpine-ajax.
