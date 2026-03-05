@@ -3016,6 +3016,10 @@ h4.o-settingsContent__sectionHeader {
   border-color: var(--color-link);
 }
 
+.o-shoutbox__preview {
+  opacity: 0.5;
+}
+
 /* Send button icon */
 .o-shoutbox__submitButtonIcon {
   background: url('/assets/icons/arrow-right.svg') center/contain no-repeat;

@@ -183,6 +183,20 @@ pub async fn get_shoutbox(
                         (state.render_shoutbox_post(&client_ref, post).await?)
                     }
                 }
+
+                // Preview placeholder (inside messages area, after posts)
+                div id="shoutbox-preview" {}
+            }
+
+            // Hidden preview form
+            form id="shoutbox-preview-form"
+                action="/shoutbox/preview"
+                method="post"
+                style="display: none;"
+                x-target="shoutbox-preview"
+                x-autofocus
+            {
+                input type="hidden" name="content" value="" {}
             }
 
             // Input form fixed at bottom
@@ -190,7 +204,7 @@ pub async fn get_shoutbox(
             form ."o-shoutbox__form"
                 action="/shoutbox/post"
                 method="post"
-                "x-target.nofocus"="shoutbox-posts ajax-scripts"
+                "x-target.nofocus"="shoutbox-posts shoutbox-preview ajax-scripts"
                 "@ajax:before"=(form_ajax.before)
                 "@ajax:after"=(form_ajax.after)
                 "@ajax:success"="setTimeout(() => { const el = document.getElementById('shoutbox-messages'); el.scrollTop = el.scrollHeight; }, 50)"
@@ -206,6 +220,7 @@ pub async fn get_shoutbox(
                         disabled[ro_mode.to_disabled()]
                         rows="1"
                         "@keydown.enter.prevent"="if (!$event.shiftKey) { $el.form.requestSubmit(); }"
+                        "@input"="const pf = document.getElementById('shoutbox-preview-form'); pf.querySelector('input[name=content]').value = $el.value; pf.requestSubmit();"
                         {}
                     (fragment::button("o-shoutbox__submitButton", "Send")
                         .disabled(ro_mode.to_disabled())
@@ -263,6 +278,7 @@ pub async fn post_shoutbox(
     if content.is_empty() || 1000 < content.len() {
         return Ok(Maud(html! {
             div id="shoutbox-posts" x-merge="append" {}
+            div id="shoutbox-preview" {}
             div id="ajax-scripts" {
                 script {
                     (PreEscaped(r#"
@@ -284,6 +300,7 @@ pub async fn post_shoutbox(
     // Just clear the input - the post will appear via WebSocket
     Ok(Maud(html! {
         div id="shoutbox-posts" x-merge="append" {}
+        div id="shoutbox-preview" {}
         div id="ajax-scripts" {
             script {
                 (PreEscaped(r#"
@@ -291,6 +308,57 @@ pub async fn post_shoutbox(
                         const input = document.getElementById('shoutbox-input');
                         if (input) input.value = '';
                     })()
+                "#))
+            }
+        }
+    }))
+}
+
+pub async fn post_shoutbox_preview(
+    state: State<SharedState>,
+    session: UserSession,
+    Form(form): Form<ShoutboxPostInput>,
+) -> RequestResult<impl IntoResponse> {
+    let client = state.client(session.id()).await?;
+    let client_ref = client.client_ref()?;
+    let self_id = client_ref.rostra_id();
+
+    let content = form.content.trim();
+    if content.is_empty() {
+        return Ok(Maud(html! {
+            div id="shoutbox-preview" {}
+        }));
+    }
+
+    let profile = state.get_social_profile(self_id, &client_ref).await;
+
+    Ok(Maud(html! {
+        div id="shoutbox-preview" ."o-shoutbox__preview" {
+            div ."o-shoutbox__post" {
+                (fragment::avatar("o-shoutbox__avatar", state.avatar_url(self_id, profile.event_id), "Avatar"))
+                div ."o-shoutbox__postBody" {
+                    div ."o-shoutbox__postMeta" {
+                        a ."o-shoutbox__author" href=(format!("/profile/{self_id}")) {
+                            (profile.display_name)
+                        }
+                        span ."o-shoutbox__timestamp" {
+                            (format_timestamp(Timestamp::now()))
+                        }
+                    }
+                    div ."o-shoutbox__postContent" {
+                        (state.render_content(&client_ref, self_id, content).await)
+                    }
+                }
+            }
+            (re_typeset())
+            script {
+                (PreEscaped(r#"
+                    (function() {
+                        const preview = document.getElementById('shoutbox-preview');
+                        if (preview) preview.scrollIntoView({ block: 'end' });
+                        const input = document.getElementById('shoutbox-input');
+                        if (input) input.focus();
+                    })();
                 "#))
             }
         }

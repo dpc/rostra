@@ -173,6 +173,7 @@ pub fn route_handler(state: SharedState) -> Router<Arc<UiState>> {
         .route("/followee", post(add_followee::add_followee))
         .route("/shoutbox", get(shoutbox::get_shoutbox))
         .route("/shoutbox/post", post(shoutbox::post_shoutbox))
+        .route("/shoutbox/preview", post(shoutbox::post_shoutbox_preview))
         .route("/unlock", get(unlock::get).post(unlock::post_unlock))
         .route("/unlock/logout", get(unlock::get).post(unlock::logout))
         .route("/unlock/random", get(unlock::get_random))
