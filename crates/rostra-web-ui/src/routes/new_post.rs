@@ -330,7 +330,7 @@ pub async fn post_post_preview_dialog(
                                 }
 
                                 div ."o-previewDialog__actionButtons" {
-                                    (fragment::button("o-previewDialog__cancelButton", "Cancel")
+                                    (fragment::button("o-previewDialog__cancelButton", "Back")
                                         .button_type("button")
                                         .onclick("document.querySelector('.o-previewDialog').classList.remove('-active')")
                                         .call())
