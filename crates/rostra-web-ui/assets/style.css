@@ -2466,6 +2466,28 @@ h4.o-settingsContent__sectionHeader {
   opacity: 0.5;
 }
 
+.m-eventExplorer__contentView {
+  grid-column: label / end;
+}
+
+.m-eventExplorer__contentJson {
+  grid-column: label / end;
+  max-height: 20rem;
+  overflow: auto;
+}
+
+.m-eventExplorer__contentJson pre {
+  margin: 0;
+  white-space: pre-wrap;
+  word-break: break-all;
+  font-size: 0.8rem;
+}
+
+.m-eventExplorer__binaryNote {
+  font-style: italic;
+  opacity: 0.6;
+}
+
 /* P2P Explorer */
 .m-p2pExplorer__statusGrid {
   display: grid;

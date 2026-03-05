@@ -2,7 +2,7 @@ use std::collections::{BTreeMap, HashSet};
 use std::str::FromStr as _;
 
 use axum::Form;
-use axum::extract::{Query, State};
+use axum::extract::{Path, Query, State};
 use axum::response::{IntoResponse, Redirect};
 use maud::{Markup, PreEscaped, html};
 use rostra_client::id::IdResolvedData;
@@ -298,6 +298,49 @@ pub async fn get_settings_p2p(
             .render_settings_page(&session, navbar, content)
             .await?,
     ))
+}
+
+pub async fn get_event_content_json(
+    state: State<SharedState>,
+    session: UserSession,
+    Path(event_id): Path<ShortEventId>,
+) -> RequestResult<impl IntoResponse> {
+    let client = state.client(session.id()).await?;
+    let client_ref = client.client_ref()?;
+
+    let content_id = format!("event-content-{event_id}");
+
+    let content = client_ref.db().get_event_content(event_id).await;
+
+    let markup = match content {
+        None => html! {
+            div id=(content_id) ."m-eventExplorer__contentJson" {
+                pre { code { "Content not available" } }
+            }
+        },
+        Some(raw) => {
+            if let Some(value) = raw.try_decode_to_json() {
+                let pretty = serde_json::to_string_pretty(&value).unwrap_or_else(|e| e.to_string());
+                html! {
+                    div id=(content_id) ."m-eventExplorer__contentJson" {
+                        pre { code { (pretty) } }
+                    }
+                }
+            } else {
+                html! {
+                    div id=(content_id) ."m-eventExplorer__contentJson" {
+                        span ."m-eventExplorer__binaryNote" {
+                            "Binary content ("
+                            (rostra_util_fmt::format_bytes(raw.len() as u64))
+                            ")"
+                        }
+                    }
+                }
+            }
+        }
+    };
+
+    Ok(Maud(markup))
 }
 
 impl UiState {
@@ -959,6 +1002,18 @@ impl UiState {
                     } @else {
                         span ."m-eventExplorer__parentNone" { "none" }
                     }
+                }
+
+                // Row 4: Content view (on-demand via AJAX)
+                @if content_state.is_none() {
+                    div ."m-eventExplorer__contentView" {
+                        a href=(format!("/settings/events/content/{event_id}"))
+                            x-target=(format!("event-content-{event_id}"))
+                        {
+                            "Content"
+                        }
+                    }
+                    div id=(format!("event-content-{event_id}")) {}
                 }
             }
         }

@@ -195,6 +195,10 @@ pub fn route_handler(state: SharedState) -> Router<Arc<UiState>> {
         .route("/settings/following", get(settings::get_settings_following))
         .route("/settings/followers", get(settings::get_settings_followers))
         .route("/settings/events", get(settings::get_settings_events))
+        .route(
+            "/settings/events/content/{event_id}",
+            get(settings::get_event_content_json),
+        )
         .route("/settings/p2p", get(settings::get_settings_p2p))
         // .route("/a/", put(account_new))
         // .route("/t/", put(token_new))

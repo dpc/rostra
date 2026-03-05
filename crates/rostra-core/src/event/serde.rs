@@ -127,6 +127,14 @@ impl EventContentUnsized {
 
         Ok(v)
     }
+
+    /// Try to decode CBOR content as a generic JSON value
+    ///
+    /// Returns `Some` on success, `None` if the content is not
+    /// valid CBOR or cannot be represented as JSON (e.g. raw binary).
+    pub fn try_decode_to_json(&self) -> Option<serde_json::Value> {
+        cbor4ii::serde::from_slice::<serde_json::Value>(self.as_ref()).ok()
+    }
 }
 
 #[cfg(all(feature = "ed25519-dalek", feature = "bincode"))]

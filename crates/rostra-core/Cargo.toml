@@ -12,6 +12,7 @@ bincode = ["dep:bincode"]
 ed25519-dalek = ["dep:ed25519-dalek", "dep:rand"]
 serde = [
   "dep:serde",
+  "dep:serde_json",
   "dep:bip39",
   "dep:serde_bytes",
   # "dep:ciborium",
@@ -36,6 +37,7 @@ data-encoding = { workspace = true }
 ed25519-dalek = { workspace = true, optional = true }
 rand = { workspace = true, optional = true }
 serde = { workspace = true, optional = true, features = ["derive"] }
+serde_json = { workspace = true, optional = true }
 serde_bytes = { workspace = true, optional = true }
 # ciborium = { workspace = true, optional = true }
 cbor4ii = { workspace = true, optional = true, features = ["serde1"] }
