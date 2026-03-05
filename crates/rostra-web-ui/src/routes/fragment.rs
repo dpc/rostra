@@ -304,6 +304,7 @@ pub fn persona_tag_select(
         div ."m-personaTagSelect" data-id=(id) data-empty-label=(empty_label) {
             // Toggle button — hidden by default, shown when JS adds .-initialized
             div ."m-personaTagSelect__toggle"
+                tabindex="0"
                 onclick="personaTagSelectToggle(this)"
             {
                 span ."m-personaTagSelect__toggleLabel" { (toggle_label) }

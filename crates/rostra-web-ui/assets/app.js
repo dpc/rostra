@@ -238,6 +238,9 @@ function initPersonaTagSelects() {
     .forEach((el) => {
       el.classList.add("-initialized");
       updatePersonaTagSelectLabel(el);
+      // Focus the toggle if it has tabindex (keyboard-navigable)
+      const toggle = el.querySelector(".m-personaTagSelect__toggle[tabindex]");
+      if (toggle) toggle.focus();
     });
 }
 
@@ -270,6 +273,36 @@ function personaTagSelectChanged(checkbox) {
   const widget = checkbox.closest(".m-personaTagSelect");
   updatePersonaTagSelectLabel(widget);
 }
+
+// Arrow up/down cycles persona tag selection when preview dialog is active
+document.addEventListener("keydown", (e) => {
+  if (e.key !== "ArrowUp" && e.key !== "ArrowDown") return;
+
+  const dialog = document.querySelector(".o-previewDialog.-active");
+  if (!dialog) return;
+
+  const widget = dialog.querySelector(".m-personaTagSelect");
+  if (!widget) return;
+
+  const checkboxes = [...widget.querySelectorAll("input[type=checkbox]")];
+  if (checkboxes.length === 0) return;
+
+  e.preventDefault();
+
+  const checkedIdx = checkboxes.findIndex((cb) => cb.checked);
+  const delta = e.key === "ArrowDown" ? 1 : -1;
+
+  let nextIdx;
+  if (checkedIdx < 0) {
+    nextIdx = e.key === "ArrowDown" ? 0 : checkboxes.length - 1;
+  } else {
+    nextIdx = (checkedIdx + delta + checkboxes.length) % checkboxes.length;
+  }
+
+  checkboxes.forEach((cb) => (cb.checked = false));
+  checkboxes[nextIdx].checked = true;
+  updatePersonaTagSelectLabel(widget);
+});
 
 function personaTagSelectAddFromInput(input) {
   const tag = input.value.trim().toLowerCase();
