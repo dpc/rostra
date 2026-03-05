@@ -1,4 +1,4 @@
-use std::collections::{BTreeMap, HashSet};
+use std::collections::BTreeMap;
 use std::str::FromStr as _;
 
 use axum::Form;
@@ -597,7 +597,7 @@ impl UiState {
         let client_ref = client.client_ref()?;
 
         let mut followee_items = Vec::new();
-        for (followee_id, _persona_selector) in followees {
+        for (followee_id, persona_selector) in followees {
             let profile = self.get_social_profile_opt(followee_id, &client_ref).await;
             let display_name = profile
                 .as_ref()
@@ -607,7 +607,7 @@ impl UiState {
                 .as_ref()
                 .map(|p| p.event_id)
                 .unwrap_or(ShortEventId::ZERO);
-            followee_items.push((followee_id, display_name, event_id));
+            followee_items.push((followee_id, display_name, event_id, persona_selector));
         }
 
         // Sort by display name
@@ -641,13 +641,16 @@ impl UiState {
                         .call())
                     }
                 } @else {
-                    @for (followee_id, display_name, event_id) in &followee_items {
+                    @for (followee_id, display_name, event_id, selector) in &followee_items {
                         div ."m-followeeList__item" {
                             (fragment::avatar("m-followeeList__avatar", self.avatar_url(*followee_id, *event_id), "Avatar"))
-                            a ."m-followeeList__name"
-                                href=(format!("/profile/{}", followee_id))
-                            {
-                                (display_name)
+                            div ."m-followeeList__info" {
+                                a ."m-followeeList__name"
+                                    href=(format!("/profile/{}", followee_id))
+                                {
+                                    (display_name)
+                                }
+                                (Self::render_selector_summary(selector))
                             }
                             (fragment::ajax_button(
                                 &format!("/profile/{followee_id}/follow"),
@@ -667,6 +670,47 @@ impl UiState {
         })
     }
 
+    fn render_selector_summary(
+        selector: &rostra_core::event::content_kind::PersonasTagsSelector,
+    ) -> Markup {
+        use rostra_core::event::content_kind::PersonasTagsSelector;
+
+        match selector {
+            PersonasTagsSelector::Except { ids } if ids.is_empty() => {
+                html! {
+                    span ."m-followeeList__selector" { "all posts" }
+                }
+            }
+            PersonasTagsSelector::Except { ids } => {
+                html! {
+                    span ."m-followeeList__selector" {
+                        "all except: "
+                        @for (i, tag) in ids.iter().enumerate() {
+                            @if 0 < i { ", " }
+                            span ."m-followeeList__tag" { (tag) }
+                        }
+                    }
+                }
+            }
+            PersonasTagsSelector::Only { ids } if ids.is_empty() => {
+                html! {
+                    span ."m-followeeList__selector -none" { "no posts (empty filter)" }
+                }
+            }
+            PersonasTagsSelector::Only { ids } => {
+                html! {
+                    span ."m-followeeList__selector" {
+                        "only: "
+                        @for (i, tag) in ids.iter().enumerate() {
+                            @if 0 < i { ", " }
+                            span ."m-followeeList__tag" { (tag) }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
     pub async fn render_follower_list(
         &self,
         session: &UserSession,
@@ -675,13 +719,15 @@ impl UiState {
         let client = self.client(session.id()).await?;
         let client_ref = client.client_ref()?;
 
-        // Get the set of people we follow, to show correct button state
-        let followee_ids: HashSet<RostraId> = client_ref
+        // Get the people we follow with their selectors, to show follow-back status
+        let followee_map: std::collections::HashMap<
+            RostraId,
+            rostra_core::event::content_kind::PersonasTagsSelector,
+        > = client_ref
             .db()
             .get_followees(session.id())
             .await
             .into_iter()
-            .map(|(id, _)| id)
             .collect();
 
         let mut follower_items = Vec::new();
@@ -723,14 +769,22 @@ impl UiState {
                     }
                 } @else {
                     @for (follower_id, display_name, event_id) in &follower_items {
-                        @let following = followee_ids.contains(follower_id);
+                        @let follow_back = followee_map.get(follower_id);
+                        @let following = follow_back.is_some();
                         @let label = if following { "Following..." } else { "Follow..." };
                         div ."m-followeeList__item" {
                             (fragment::avatar("m-followeeList__avatar", self.avatar_url(*follower_id, *event_id), "Avatar"))
-                            a ."m-followeeList__name"
-                                href=(format!("/profile/{}", follower_id))
-                            {
-                                (display_name)
+                            div ."m-followeeList__info" {
+                                a ."m-followeeList__name"
+                                    href=(format!("/profile/{}", follower_id))
+                                {
+                                    (display_name)
+                                }
+                                @if let Some(selector) = follow_back {
+                                    (Self::render_selector_summary(selector))
+                                } @else {
+                                    span ."m-followeeList__selector -none" { "not following back" }
+                                }
                             }
                             (fragment::ajax_button(
                                 &format!("/profile/{follower_id}/follow"),

@@ -2287,9 +2287,15 @@ h4.o-settingsContent__sectionHeader {
   border-radius: var(--border-radius-std);
 }
 
-.m-followeeList__name {
+.m-followeeList__info {
   flex: 1;
   min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.1rem;
+}
+
+.m-followeeList__name {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -2299,6 +2305,21 @@ h4.o-settingsContent__sectionHeader {
 
 .m-followeeList__name:hover {
   /* Underline handled by global link styles */
+}
+
+.m-followeeList__selector {
+  font-size: 0.8rem;
+  opacity: 0.6;
+}
+
+.m-followeeList__selector.-none {
+  font-style: italic;
+}
+
+.m-followeeList__tag {
+  background-color: var(--color-pre-bg);
+  padding: 0 0.25rem;
+  border-radius: 2px;
 }
 
 .m-followeeList__actions {
