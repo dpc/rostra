@@ -274,9 +274,11 @@ function personaTagSelectChanged(checkbox) {
   updatePersonaTagSelectLabel(widget);
 }
 
-// Arrow up/down cycles persona tag selection when preview dialog is active
+// Arrow/j/k cycles persona tag selection when preview dialog is active
 document.addEventListener("keydown", (e) => {
-  if (e.key !== "ArrowUp" && e.key !== "ArrowDown") return;
+  const isDown = e.key === "ArrowDown" || e.key === "j";
+  const isUp = e.key === "ArrowUp" || e.key === "k";
+  if (!isDown && !isUp) return;
 
   const dialog = document.querySelector(".o-previewDialog.-active");
   if (!dialog) return;
@@ -290,11 +292,11 @@ document.addEventListener("keydown", (e) => {
   e.preventDefault();
 
   const checkedIdx = checkboxes.findIndex((cb) => cb.checked);
-  const delta = e.key === "ArrowDown" ? 1 : -1;
+  const delta = isDown ? 1 : -1;
 
   let nextIdx;
   if (checkedIdx < 0) {
-    nextIdx = e.key === "ArrowDown" ? 0 : checkboxes.length - 1;
+    nextIdx = isDown ? 0 : checkboxes.length - 1;
   } else {
     nextIdx = (checkedIdx + delta + checkboxes.length) % checkboxes.length;
   }
@@ -361,12 +363,301 @@ document.addEventListener(
 );
 
 // =============================================================================
+// Keyboard shortcuts help dialog
+// =============================================================================
+
+(function () {
+  const shortcuts = [
+    ["j / \u2193", "Next post"],
+    ["k / \u2191", "Previous post"],
+    ["l / \u2192", "Expand replies"],
+    ["r", "Reply to post"],
+    ["n", "New post"],
+    ["1-5", "Switch tab"],
+    ["q", "Home"],
+    ["Ctrl+Enter", "Preview / submit"],
+    ["Ctrl+Shift+Enter", "Publish from preview"],
+    ["Esc", "Close / unfocus / cancel"],
+    ["?", "Show this help"],
+  ];
+
+  let dialog = null;
+
+  function createDialog() {
+    dialog = document.createElement("div");
+    dialog.className = "o-shortcutsDialog";
+
+    const rows = shortcuts
+      .map(
+        ([key, desc]) =>
+          `<div class="o-shortcutsDialog__row">` +
+          `<kbd class="o-shortcutsDialog__key">${key}</kbd>` +
+          `<span class="o-shortcutsDialog__desc">${desc}</span>` +
+          `</div>`,
+      )
+      .join("");
+
+    dialog.innerHTML =
+      `<div class="o-shortcutsDialog__backdrop"></div>` +
+      `<div class="o-shortcutsDialog__content" role="dialog" aria-label="Keyboard shortcuts">` +
+      `<h4 class="o-shortcutsDialog__title">Keyboard Shortcuts</h4>` +
+      rows +
+      `</div>`;
+
+    dialog.querySelector(".o-shortcutsDialog__backdrop").addEventListener(
+      "click",
+      () => {
+        dialog.classList.remove("-active");
+      },
+    );
+
+    document.body.appendChild(dialog);
+  }
+
+  function toggle() {
+    if (!dialog) createDialog();
+    dialog.classList.toggle("-active");
+  }
+
+  function isInputFocused() {
+    const el = document.activeElement;
+    if (!el) return false;
+    const tag = el.tagName;
+    return (
+      tag === "TEXTAREA" ||
+      tag === "SELECT" ||
+      (tag === "INPUT" && el.type !== "hidden")
+    );
+  }
+
+  document.addEventListener("keydown", (e) => {
+    // Close on Escape regardless of focus
+    if (e.key === "Escape" && dialog && dialog.classList.contains("-active")) {
+      e.preventDefault();
+      dialog.classList.remove("-active");
+      return;
+    }
+
+    if (e.key === "?" && !isInputFocused()) {
+      e.preventDefault();
+      toggle();
+    }
+  });
+})();
+
+// =============================================================================
+// Escape key: blur new-post textarea, cancel inline reply
+// =============================================================================
+
+document.addEventListener("keydown", (e) => {
+  if (e.key !== "Escape") return;
+
+  const el = document.activeElement;
+  if (!el || el.tagName !== "TEXTAREA") return;
+
+  // Inline reply textarea — click the cancel button
+  if (el.classList.contains("m-inlineReply__content")) {
+    e.preventDefault();
+    const reply = el.closest(".m-inlineReply");
+    if (reply) {
+      const cancelBtn = reply.querySelector(".m-inlineReply__cancelButton");
+      if (cancelBtn) cancelBtn.click();
+    }
+    return;
+  }
+
+  // New post textarea — just blur
+  if (el.classList.contains("m-newPostForm__content")) {
+    e.preventDefault();
+    el.blur();
+  }
+});
+
+// =============================================================================
+// Keyboard navigation (j/k/l/r) for timeline posts
+// =============================================================================
+
+(function () {
+  const NAV_SELECTOR =
+    "#timeline-posts > .o-mainBarTimeline__item, #timeline-posts .o-postOverview__repliesItem";
+  const SELECTED_CLASS = "-keyboard-selected";
+
+  let selectedEl = null;
+
+  function getItems() {
+    return document.querySelectorAll(NAV_SELECTOR);
+  }
+
+  function clearSelection() {
+    if (selectedEl) {
+      selectedEl.classList.remove(SELECTED_CLASS);
+      selectedEl = null;
+    }
+  }
+
+  function selectItem(idx) {
+    const items = getItems();
+    if (items.length === 0) return;
+    if (idx < 0) idx = 0;
+    if (idx >= items.length) idx = items.length - 1;
+
+    clearSelection();
+    selectedEl = items[idx];
+    selectedEl.classList.add(SELECTED_CLASS);
+    selectedEl.scrollIntoView({ block: "nearest" });
+  }
+
+  function selectedIndex() {
+    if (!selectedEl) return -1;
+    const items = getItems();
+    for (let i = 0; i < items.length; i++) {
+      if (items[i] === selectedEl) return i;
+    }
+    // Selected element was removed from DOM
+    selectedEl = null;
+    return -1;
+  }
+
+  function isInputFocused() {
+    const el = document.activeElement;
+    if (!el) return false;
+    const tag = el.tagName;
+    return (
+      tag === "TEXTAREA" ||
+      tag === "SELECT" ||
+      (tag === "INPUT" && el.type !== "hidden")
+    );
+  }
+
+  // Find the nearest button bar for a navigable item.
+  // For top-level items, look for the direct post's button bar (not nested reply bars).
+  // For reply items, look within that reply.
+  function getButtonBar(item) {
+    // For reply items (.o-postOverview__repliesItem), the button bar is
+    // inside: .m-postContext > .m-postContext__postView > .m-postView > .m-postView__buttonBar
+    const postView = item.querySelector(
+      ":scope > .m-postContext > .m-postContext__postView > .m-postView",
+    );
+    if (postView) {
+      return postView.querySelector(":scope > .m-postView__buttonBar");
+    }
+    return null;
+  }
+
+  document.addEventListener("keydown", (e) => {
+    if (isInputFocused()) return;
+    if (document.querySelector(".o-previewDialog.-active")) return;
+
+    // Page-global shortcuts (work on any page)
+    if (e.key >= "1" && e.key <= "9") {
+      const tabs = document.querySelector(".o-mainBarTimeline__tabs");
+      if (!tabs) return;
+      const links = [...tabs.querySelectorAll("a[href]:not(.o-mainBarTimeline__back)")];
+      const tabIdx = parseInt(e.key, 10) - 1;
+      if (tabIdx < links.length) {
+        e.preventDefault();
+        links[tabIdx].click();
+      }
+      return;
+    } else if (e.key === "q") {
+      e.preventDefault();
+      window.location.href = "/";
+      return;
+    } else if (e.key === "n") {
+      const textarea = document.getElementById("new-post-content");
+      if (textarea) {
+        e.preventDefault();
+        textarea.focus();
+      }
+      return;
+    }
+
+    // Timeline post navigation (requires posts on the page)
+    const items = getItems();
+    if (items.length === 0) return;
+
+    const idx = selectedIndex();
+
+    if (e.key === "j" || e.key === "ArrowDown") {
+      e.preventDefault();
+      selectItem(idx < 0 ? 0 : idx + 1);
+    } else if (e.key === "k" || e.key === "ArrowUp") {
+      e.preventDefault();
+      selectItem(idx < 0 ? items.length - 1 : idx - 1);
+    } else if (e.key === "l" || e.key === "ArrowRight") {
+      e.preventDefault();
+      if (!selectedEl) return;
+      const bar = getButtonBar(selectedEl);
+      if (!bar) return;
+      const btn = bar.querySelector(".m-postView__repliesButton");
+      if (btn && !btn.classList.contains("u-hidden")) {
+        btn.click();
+      }
+    } else if (e.key === "r") {
+      e.preventDefault();
+      if (!selectedEl) return;
+      const bar = getButtonBar(selectedEl);
+      if (!bar) return;
+      const btn = bar.querySelector(".m-postView__replyToButton");
+      if (btn) {
+        btn.click();
+      }
+    }
+  });
+
+  // Clear selection when user clicks outside navigable items or focuses a text field
+  document.addEventListener("click", (e) => {
+    if (!e.target.closest(NAV_SELECTOR)) {
+      clearSelection();
+    }
+  });
+
+  document.addEventListener(
+    "focusin",
+    (e) => {
+      if (isInputFocused()) {
+        clearSelection();
+      }
+    },
+    true,
+  );
+})();
+
+// =============================================================================
+// aria-keyshortcuts annotations
+// =============================================================================
+
+function applyAriaKeyShortcuts() {
+  const mappings = [
+    ["#timeline-posts", "j k ArrowDown ArrowUp"],
+    ["#new-post-content", "n"],
+    [".m-newPostForm__content", "Escape Control+Enter"],
+    [".m-inlineReply__content", "Escape Control+Enter"],
+    [".m-inlineReply__cancelButton", "Escape"],
+    [".m-postView__repliesButton", "l ArrowRight"],
+    [".m-postView__replyToButton", "r"],
+    [".o-previewDialog__submitButton", "Control+Shift+Enter"],
+    [".m-personaTagSelect", "j k ArrowDown ArrowUp"],
+    [".o-mainBarTimeline__tabs", "1 2 3 4 5"],
+  ];
+  for (const [sel, key] of mappings) {
+    document.querySelectorAll(sel).forEach((el) => {
+      el.setAttribute("aria-keyshortcuts", key);
+    });
+  }
+  document.body.setAttribute("aria-keyshortcuts", "? Escape");
+}
+
+// =============================================================================
 // DOMContentLoaded handlers
 // =============================================================================
 
 document.addEventListener("DOMContentLoaded", () => {
   // Initialize persona tag select widgets
   initPersonaTagSelects();
+
+  // Apply aria-keyshortcuts to interactive elements
+  applyAriaKeyShortcuts();
 
   // Prevent flickering of images when they are already in the cache
   const images = document.querySelectorAll('img[loading="lazy"]');
@@ -434,9 +725,10 @@ document.addEventListener("DOMContentLoaded", () => {
 // Window event listeners
 // =============================================================================
 
-// Re-initialize persona tag selects after AJAX swaps (e.g. preview dialog)
+// Re-initialize after AJAX swaps (e.g. preview dialog, expanded replies)
 window.addEventListener("ajax:after", () => {
   initPersonaTagSelects();
+  applyAriaKeyShortcuts();
 });
 
 // Suppress unhandled promise rejections from TypeErrors — these are typically

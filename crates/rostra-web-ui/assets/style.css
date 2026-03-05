@@ -3066,6 +3066,78 @@ h4.o-settingsContent__sectionHeader {
   opacity: 0.5;
 }
 
+/* Keyboard shortcuts help dialog */
+.o-shortcutsDialog {
+  display: none;
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  z-index: 2000;
+  justify-content: center;
+  align-items: center;
+}
+
+.o-shortcutsDialog.-active {
+  display: flex;
+}
+
+.o-shortcutsDialog__backdrop {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  background-color: rgba(0, 0, 0, 0.5);
+}
+
+.o-shortcutsDialog__content {
+  position: relative;
+  background-color: var(--color-bg-default);
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  padding: 1.5rem 2rem;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+  min-width: 260px;
+  max-width: 90%;
+  animation: welcomeFadeIn 0.15s ease-out;
+}
+
+.o-shortcutsDialog__title {
+  margin: 0 0 1rem 0;
+  color: var(--color-link);
+}
+
+.o-shortcutsDialog__row {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  padding: 0.35rem 0;
+}
+
+.o-shortcutsDialog__key {
+  display: inline-block;
+  min-width: 2rem;
+  padding: 0.15rem 0.5rem;
+  text-align: center;
+  font-family: monospace;
+  font-size: 0.9rem;
+  background-color: var(--color-pre-bg);
+  border: 1px solid var(--color-button-border);
+  border-radius: var(--border-radius-std);
+}
+
+.o-shortcutsDialog__desc {
+  font-size: 0.95rem;
+}
+
+/* Keyboard navigation: selected post highlight */
+.o-mainBarTimeline__item.-keyboard-selected > .m-postContext > .m-postContext__postView > .m-postView > .m-postView__main,
+.o-postOverview__repliesItem.-keyboard-selected > .m-postContext > .m-postContext__postView > .m-postView > .m-postView__main {
+  background-color: var(--color-post-highlight-bg);
+}
+
 /* Send button icon */
 .o-shoutbox__submitButtonIcon {
   background: url('/assets/icons/arrow-right.svg') center/contain no-repeat;

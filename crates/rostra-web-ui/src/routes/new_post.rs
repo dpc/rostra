@@ -898,8 +898,6 @@ impl UiState {
                         "#
                         "@keydown"="handleKeydown($event)"
                         autocomplete="off"
-                        autofocus
-                        x-autofocus
                         disabled[ro.to_disabled()]
                         "x-on:keyup.enter.ctrl"="$el.form.requestSubmit()"
                         {}
