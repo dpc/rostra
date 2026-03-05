@@ -2112,15 +2112,11 @@ input:checked+.slider:before {
 }
 
 .o-settingsContent {
-  padding: 1rem;
-  background: var(--color-timeline-bg);
-  border: 1px solid var(--color-timeline-item-border);
-  border-radius: var(--border-radius-std);
+  padding: clamp(0.1rem, 1vw, 1rem) clamp(0.1rem, 2vw, 3rem);
 }
 
-.o-settingsContent__header {
-  margin: 0 0 1rem 0;
-  font-size: 1.5rem;
+.o-mainBarTimeline__settingsTitle {
+  background-color: var(--color-timeline-bg);
 }
 
 .o-settingsContent__section {
@@ -2172,15 +2168,15 @@ h4.o-settingsContent__sectionHeader {
 }
 
 /* Profile Settings */
-.m-profileSettings__headerRow {
+.m-profileSettings__avatarRow {
   display: flex;
   align-items: center;
-  justify-content: space-between;
+  gap: 0.75rem;
   margin-bottom: 1rem;
 }
 
-.m-profileSettings__headerRow .o-settingsContent__header {
-  margin-bottom: 0;
+.m-profileSettings__logoutForm {
+  margin-left: auto;
 }
 
 .m-profileSettings__logoutButtonIcon {

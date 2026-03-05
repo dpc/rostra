@@ -52,6 +52,7 @@ impl UiState {
                     type="text"
                     name="rostra_id"
                     autocomplete="off"
+                    autofocus
                     {}
 
                 div ."m-addFolloweeForm__bottomBar"{

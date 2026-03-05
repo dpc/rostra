@@ -36,7 +36,7 @@ pub async fn get_settings_profile(
 
     Ok(Maud(
         state
-            .render_settings_page(&session, navbar, content)
+            .render_settings_page(&session, navbar, "My Profile", content)
             .await?,
     ))
 }
@@ -144,7 +144,7 @@ pub async fn get_settings_following(
 
     Ok(Maud(
         state
-            .render_settings_page(&session, navbar, content)
+            .render_settings_page(&session, navbar, "Following", content)
             .await?,
     ))
 }
@@ -164,7 +164,7 @@ pub async fn get_settings_followers(
 
     Ok(Maud(
         state
-            .render_settings_page(&session, navbar, content)
+            .render_settings_page(&session, navbar, "Followers", content)
             .await?,
     ))
 }
@@ -231,7 +231,7 @@ pub async fn get_settings_events(
 
     Ok(Maud(
         state
-            .render_settings_page(&session, navbar, content)
+            .render_settings_page(&session, navbar, "Event Explorer", content)
             .await?,
     ))
 }
@@ -295,7 +295,7 @@ pub async fn get_settings_p2p(
 
     Ok(Maud(
         state
-            .render_settings_page(&session, navbar, content)
+            .render_settings_page(&session, navbar, "P2P Explorer", content)
             .await?,
     ))
 }
@@ -348,10 +348,18 @@ impl UiState {
         &self,
         _session: &UserSession,
         navbar: Markup,
+        title: &str,
         content: Markup,
     ) -> RequestResult<Markup> {
         let content = html! {
-            (content)
+            div ."o-mainBarTimeline" {
+                div ."o-mainBarTimeline__tabs" {
+                    span ."o-mainBarTimeline__settingsTitle" { (title) }
+                }
+                div ."o-settingsContent" {
+                    (content)
+                }
+            }
             div id="ajax-scripts" {}
         };
         self.render_html_page(
@@ -438,14 +446,6 @@ impl UiState {
         "#;
 
         Ok(html! {
-            div ."o-settingsContent" {
-                div ."m-profileSettings__headerRow" {
-                    h2 ."o-settingsContent__header" { "My Profile" }
-                    form action="/unlock/logout" method="post" {
-                        (fragment::button("m-profileSettings__logoutButton", "Logout").call())
-                    }
-                }
-
                 // Hidden form for live preview
                 form id="profile-preview-form"
                     action="/settings/profile/preview"
@@ -458,6 +458,16 @@ impl UiState {
                     input type="hidden" name="bio" value="" {}
                 }
 
+                div ."m-profileSettings__avatarRow" {
+                    label for="avatar-upload" ."m-profileSettings__avatarLabel" {
+                        (fragment::avatar("m-profileSettings__avatar", self.avatar_url(self_id, self_profile.event_id), "Your avatar"))
+                        span ."m-profileSettings__avatarHint" { "Click to change" }
+                    }
+                    form action="/unlock/logout" method="post" ."m-profileSettings__logoutForm" {
+                        (fragment::button("m-profileSettings__logoutButton", "Logout").call())
+                    }
+                }
+
                 form id="profile-settings-form" ."m-profileSettings"
                     action="/settings/profile"
                     method="post"
@@ -467,10 +477,6 @@ impl UiState {
                     "@ajax:after"=(ajax_attrs.after)
                 {
                     div ."m-profileSettings__avatarSection" {
-                        label for="avatar-upload" ."m-profileSettings__avatarLabel" {
-                            (fragment::avatar("m-profileSettings__avatar", self.avatar_url(self_id, self_profile.event_id), "Your avatar"))
-                            span ."m-profileSettings__avatarHint" { "Click to change" }
-                        }
                         input # "avatar-upload"
                             type="file"
                             name="avatar"
@@ -497,6 +503,7 @@ impl UiState {
                             rows="6"
                             dir="auto"
                             name="bio"
+                            autofocus
                             "x-on:keyup.enter.ctrl"="$el.form.requestSubmit()"
                             "@input"=(input_handler)
                         {
@@ -532,7 +539,6 @@ impl UiState {
                             .call())
                     }
                 }
-            }
         })
     }
 
@@ -546,22 +552,18 @@ impl UiState {
         )>,
     ) -> RequestResult<Markup> {
         Ok(html! {
-            div ."o-settingsContent" {
-                h2 ."o-settingsContent__header" { "Following" }
-
-                div ."o-settingsContent__section" {
-                    h3 ."o-settingsContent__sectionHeader" { "Add" }
-                    (self.render_add_followee_form(None))
-                }
-
-                div ."o-settingsContent__section" {
-                    h3 ."o-settingsContent__sectionHeader" { "People You Follow" }
-                    (self.render_followee_list(session, followees).await?)
-                }
-
-                // Follow dialog container (shared by all followee items)
-                div id="follow-dialog-content" {}
+            div ."o-settingsContent__section" {
+                h3 ."o-settingsContent__sectionHeader" { "Add" }
+                (self.render_add_followee_form(None))
             }
+
+            div ."o-settingsContent__section" {
+                h3 ."o-settingsContent__sectionHeader" { "People You Follow" }
+                (self.render_followee_list(session, followees).await?)
+            }
+
+            // Follow dialog container (shared by all followee items)
+            div id="follow-dialog-content" {}
         })
     }
 
@@ -571,17 +573,13 @@ impl UiState {
         followers: Vec<RostraId>,
     ) -> RequestResult<Markup> {
         Ok(html! {
-            div ."o-settingsContent" {
-                h2 ."o-settingsContent__header" { "Followers" }
-
-                div ."o-settingsContent__section" {
-                    h3 ."o-settingsContent__sectionHeader" { "People Who Follow You" }
-                    (self.render_follower_list(session, followers).await?)
-                }
-
-                // Follow dialog container (shared by all follower items)
-                div id="follow-dialog-content" {}
+            div ."o-settingsContent__section" {
+                h3 ."o-settingsContent__sectionHeader" { "People Who Follow You" }
+                (self.render_follower_list(session, followers).await?)
             }
+
+            // Follow dialog container (shared by all follower items)
+            div id="follow-dialog-content" {}
         })
     }
 
@@ -832,14 +830,11 @@ impl UiState {
         }
 
         Ok(html! {
-            div ."o-settingsContent" {
-                h2 ."o-settingsContent__header" { "Event Explorer" }
-
-                div ."o-settingsContent__section" {
-                    h3 ."o-settingsContent__sectionHeader" { "Select Identity" }
+            div ."o-settingsContent__section" {
+                h3 ."o-settingsContent__sectionHeader" { "Select Identity" }
 
                     form ."m-eventExplorer__form" method="get" action="/settings/events" {
-                        select ."m-eventExplorer__select" name="id" onchange="this.form.submit()" {
+                        select ."m-eventExplorer__select" name="id" autofocus onchange="this.form.submit()" {
                             @for (id, display_name, is_self) in &id_display_names {
                                 option value=(id.to_string()) selected[*id == selected_id] {
                                     @if *is_self {
@@ -952,7 +947,6 @@ impl UiState {
                         }
                     }
                 }
-            }
         })
     }
 
@@ -1102,14 +1096,11 @@ impl UiState {
         }
 
         Ok(html! {
-            div ."o-settingsContent" {
-                h2 ."o-settingsContent__header" { "P2P Explorer" }
+            div ."o-settingsContent__section" {
+                h3 ."o-settingsContent__sectionHeader" { "Select Identity" }
 
-                div ."o-settingsContent__section" {
-                    h3 ."o-settingsContent__sectionHeader" { "Select Identity" }
-
-                    form ."m-eventExplorer__form" method="get" action="/settings/p2p" {
-                        select ."m-eventExplorer__select" name="id" onchange="this.form.submit()" {
+                form ."m-eventExplorer__form" method="get" action="/settings/p2p" {
+                        select ."m-eventExplorer__select" name="id" autofocus onchange="this.form.submit()" {
                             @for (id, display_name, is_self) in &id_display_names {
                                 option value=(id.to_string()) selected[*id == selected_id] {
                                     @if *is_self {
@@ -1410,7 +1401,6 @@ impl UiState {
                         }
                     }
                 }
-            }
         })
     }
 }
