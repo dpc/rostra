@@ -1948,6 +1948,13 @@ input:checked+.slider:before {
   margin-top: 4px;
 }
 
+.m-textAutocomplete.-upward {
+  top: auto;
+  bottom: 100%;
+  margin-top: 0;
+  margin-bottom: 4px;
+}
+
 .m-textAutocomplete__item {
   padding: 8px 12px;
   cursor: pointer;

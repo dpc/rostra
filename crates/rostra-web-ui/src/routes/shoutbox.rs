@@ -209,7 +209,10 @@ pub async fn get_shoutbox(
                 "@ajax:after"=(form_ajax.after)
                 "@ajax:success"="setTimeout(() => { const el = document.getElementById('shoutbox-messages'); el.scrollTop = el.scrollHeight; }, 50)"
             {
-                div ."o-shoutbox__inputWrapper" {
+                div ."o-shoutbox__inputWrapper"
+                    x-data="textAutocomplete"
+                    style="position: relative;"
+                {
                     textarea
                         ."o-shoutbox__input"
                         id="shoutbox-input"
@@ -219,9 +222,51 @@ pub async fn get_shoutbox(
                         dir="auto"
                         disabled[ro_mode.to_disabled()]
                         rows="1"
-                        "@keydown.enter.prevent"="if (!$event.shiftKey) { $el.form.requestSubmit(); }"
-                        "@input"="const pf = document.getElementById('shoutbox-preview-form'); pf.querySelector('input[name=content]').value = $el.value; pf.requestSubmit();"
+                        "@keydown.enter.prevent"="if (!$event.shiftKey && !showDropdown) { $el.form.requestSubmit(); }"
+                        "@keydown"="handleKeydown($event)"
+                        "@input"="handleInput($event); const pf = document.getElementById('shoutbox-preview-form'); pf.querySelector('input[name=content]').value = $el.value; pf.requestSubmit();"
+                        autocomplete="off"
                         {}
+
+                    // Autocomplete dropdown (mentions and emojis) — upward
+                    div ."m-textAutocomplete -upward"
+                        x-show="showDropdown"
+                        x-cloak
+                        "@click.outside"="showDropdown = false"
+                    {
+                        // Mention results
+                        template x-if="autocompleteType === 'mention'" {
+                            div {
+                                template x-for="(result, index) in results" ":key"="result.rostra_id" {
+                                    div ."m-textAutocomplete__item"
+                                        ":class"="{ '-selected': index === selectedIndex }"
+                                        "@click"="selectResult(result)"
+                                    {
+                                        span ."m-textAutocomplete__displayName" x-text="result.display_name" {}
+                                        span ."m-textAutocomplete__id" x-text="'@' + result.rostra_id.substring(0, 8)" {}
+                                    }
+                                }
+                            }
+                        }
+                        // Emoji results
+                        template x-if="autocompleteType === 'emoji'" {
+                            div {
+                                template x-for="(result, index) in results" ":key"="index" {
+                                    div ."m-textAutocomplete__item"
+                                        ":class"="{ '-selected': index === selectedIndex }"
+                                        "@click"="selectResult(result)"
+                                    {
+                                        span ."m-textAutocomplete__emoji" x-text="result.emoji" {}
+                                        span ."m-textAutocomplete__shortcode" x-text="':' + result.shortcode + ':'" {}
+                                    }
+                                }
+                            }
+                        }
+                        div x-show="results.length === 0 && query.length > 0" ."m-textAutocomplete__empty" {
+                            "No matches found"
+                        }
+                    }
+
                     (fragment::button("o-shoutbox__submitButton", "Send")
                         .disabled(ro_mode.to_disabled())
                         .call())
@@ -252,6 +297,8 @@ pub async fn get_shoutbox(
     let content = html! {
         (page_layout)
         div id="ajax-scripts" style="display: none;" {}
+        // Initialize emoji database for autocomplete
+        script type="module" src="/assets/emoji-init.js" {}
     };
 
     Ok(Maud(
