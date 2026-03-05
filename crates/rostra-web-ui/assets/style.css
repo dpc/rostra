@@ -521,11 +521,7 @@ img.u-userImage {
 }
 
 .o-mainBarTimeline__item {
-  padding: clamp(0.1rem, 1vw, 1rem) clamp(0.1rem, 2vw, 3rem)
-}
-
-.o-mainBarTimeline__item {
-  margin-top: 0.5em;
+  padding: 0.5em clamp(0.5em, 0.5vw, 0.5rem);
 }
 
 .o-mainBarTimeline__item.-preview .m-postView {
@@ -568,7 +564,15 @@ img.u-userImage {
 
 .m-postView {
   max-width: 55rem;
-  margin: 0.5em 0;
+}
+
+.m-postView__main[data-href] {
+  cursor: pointer;
+  transition: background-color 0.15s ease;
+}
+
+.m-postView__main[data-href]:hover {
+  background-color: var(--color-post-highlight-bg);
 }
 
 
@@ -576,6 +580,9 @@ img.u-userImage {
   display: flex;
   flex-direction: column;
   max-width: 50rem;
+  padding: clamp(0.2rem, 0.8vw, 0.75rem) clamp(0.3rem, 2vw, 3rem);
+  border-radius: var(--border-radius-std);
+  position: relative;
 }
 
 .m-postView__topRow {
@@ -616,18 +623,15 @@ img.u-userImage {
 }
 
 /* Cover reply-parent's folded content with gradient if not expanded */
-.m-postContext__postParent:not(.-expanded) .m-postView__content::before {
+.m-postContext__postParent:not(.-expanded) .m-postView__main::before {
   content: '';
   position: absolute;
-  top: 0;
-  left: 0;
-  right: 0;
-  height: 10rem;
-  /* top: 40%; */
+  inset: 0;
   background: linear-gradient(to bottom,
       rgba(59, 59, 59, 0%) 0%,
       var(--color-timeline-bg) 50%);
   z-index: 1;
+  border-radius: var(--border-radius-std);
 }
 
 /* By default, hide buttons on reply parents */
@@ -687,10 +691,6 @@ img.u-userImage {
 
 .m-postView__personaTag:not(:last-child)::after {
   content: ", ";
-}
-
-.m-postView__replies {
-  padding-left: 1rem;
 }
 
 .m-newPostForm__emojiButton,

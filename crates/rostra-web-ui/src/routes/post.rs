@@ -549,6 +549,8 @@ impl UiState {
 
         let post_main = html! {
             div ."m-postView__main"
+                data-href=[event_id.map(|eid| format!("/post/{}/{}", author, eid))]
+                "@click"="if ($el.dataset.href && !event.target.closest('a, button, details, form, textarea, input, select') && !event.target.closest('.m-postContext__postParent:not(.-expanded)')) window.location = $el.dataset.href"
             {
                 div ."m-postView__topRow" {
                     (fragment::avatar("m-postView__userImage", self.avatar_url(author, user_profile.as_ref().map(|p| p.event_id).unwrap_or(ShortEventId::ZERO)), &format!("{display_name}'s avatar")))

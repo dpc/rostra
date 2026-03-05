@@ -230,7 +230,7 @@ where
                                 class: "lazyload-wrapper".into(),
                             },
                             jotup::Attributes::try_from(
-                                "{ onclick=\"this.classList.add('-expanded'); this.lastElementChild.src = this.lastElementChild.dataset.src\" }",
+                                "{ onclick=\"if (!this.classList.contains('-expanded')) event.stopPropagation(); this.classList.add('-expanded'); this.lastElementChild.src = this.lastElementChild.dataset.src\" }",
                             )
                             .expect("Can't fail"),
                         ))
