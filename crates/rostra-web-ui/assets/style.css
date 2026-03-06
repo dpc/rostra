@@ -3134,7 +3134,9 @@ h4.o-settingsContent__sectionHeader {
 
 /* Keyboard navigation: selected post highlight */
 .o-mainBarTimeline__item.-keyboard-selected > .m-postContext > .m-postContext__postView > .m-postView > .m-postView__main,
-.o-postOverview__repliesItem.-keyboard-selected > .m-postContext > .m-postContext__postView > .m-postView > .m-postView__main {
+.o-postOverview__repliesItem.-keyboard-selected > .m-postContext > .m-postContext__postView > .m-postView > .m-postView__main,
+.m-postContext__postParent.-keyboard-selected > .m-postView > .m-postView__main,
+.m-postContext__postView.-keyboard-selected > .m-postView > .m-postView__main {
   background-color: var(--color-post-highlight-bg);
 }
 

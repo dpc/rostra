@@ -481,7 +481,9 @@ document.addEventListener("keydown", (e) => {
 
 (function () {
   const NAV_SELECTOR =
-    ".o-mainBarTimeline__item:not(.-preview), " +
+    ".m-postContext__postParent, " +
+    ".m-postContext__postParent ~ .m-postContext__postView, " +
+    ".o-mainBarTimeline__item:not(.-preview):not(:has(.m-postContext__postParent)), " +
     ".o-postOverview__repliesItem";
   const SELECTED_CLASS = "-keyboard-selected";
 
@@ -507,6 +509,15 @@ document.addEventListener("keydown", (e) => {
     clearSelection();
     selectedEl = items[idx];
     selectedEl.classList.add(SELECTED_CLASS);
+
+    // Auto-expand collapsed parent posts
+    if (
+      selectedEl.classList.contains("m-postContext__postParent") &&
+      !selectedEl.classList.contains("-expanded")
+    ) {
+      selectedEl.classList.add("-expanded");
+    }
+
     selectedEl.scrollIntoView({ block: "nearest" });
   }
 
@@ -533,11 +544,20 @@ document.addEventListener("keydown", (e) => {
   }
 
   // Find the nearest button bar for a navigable item.
-  // For top-level items, look for the direct post's button bar (not nested reply bars).
-  // For reply items, look within that reply.
   function getButtonBar(item) {
-    // For reply items (.o-postOverview__repliesItem), the button bar is
-    // inside: .m-postContext > .m-postContext__postView > .m-postView > .m-postView__buttonBar
+    // Parent posts: .m-postContext__postParent > .m-postView > .m-postView__buttonBar
+    // PostView (when split from parent): .m-postContext__postView > .m-postView > ...
+    if (
+      item.classList.contains("m-postContext__postParent") ||
+      item.classList.contains("m-postContext__postView")
+    ) {
+      const postView = item.querySelector(":scope > .m-postView");
+      return postView
+        ? postView.querySelector(":scope > .m-postView__buttonBar")
+        : null;
+    }
+    // Timeline items and reply items:
+    // .m-postContext > .m-postContext__postView > .m-postView > .m-postView__buttonBar
     const postView = item.querySelector(
       ":scope > .m-postContext > .m-postContext__postView > .m-postView",
     );
