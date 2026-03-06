@@ -493,10 +493,21 @@ document.addEventListener("keydown", (e) => {
     return document.querySelectorAll(NAV_SELECTOR);
   }
 
+  function getItemHref(el) {
+    const main = el.querySelector(".m-postView__main[data-href]");
+    return main ? main.dataset.href : null;
+  }
+
+  function saveSelection() {
+    const href = selectedEl ? getItemHref(selectedEl) : null;
+    history.replaceState({ ...history.state, selectedHref: href }, "");
+  }
+
   function clearSelection() {
     if (selectedEl) {
       selectedEl.classList.remove(SELECTED_CLASS);
       selectedEl = null;
+      saveSelection();
     }
   }
 
@@ -518,6 +529,8 @@ document.addEventListener("keydown", (e) => {
     ) {
       selectedEl.classList.add("-expanded");
     }
+
+    saveSelection();
 
     // Parent posts: scroll timeline item to top. Everything else: just ensure visible.
     if (selectedEl.classList.contains("m-postContext__postParent")) {
@@ -695,6 +708,18 @@ document.addEventListener("keydown", (e) => {
   document.addEventListener("mousemove", () => {
     document.body.classList.remove("-keyboard-nav");
   });
+
+  // Restore selection from history state (e.g. after pressing Back)
+  const savedHref = history.state?.selectedHref;
+  if (savedHref) {
+    const items = getItems();
+    for (let i = 0; i < items.length; i++) {
+      if (getItemHref(items[i]) === savedHref) {
+        selectItem(i);
+        break;
+      }
+    }
+  }
 })();
 
 // =============================================================================
