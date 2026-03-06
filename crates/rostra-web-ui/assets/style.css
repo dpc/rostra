@@ -610,8 +610,8 @@ body:not(.-keyboard-nav) .m-postView__body:has(.m-postView__main[data-href]):hov
 
 .m-postView__content {
   position: relative;
-  padding-left: .1em;
-  padding-right: .1em;
+  padding-left: .25em;
+  padding-right: .25em;
 
   & img {
     width: 100%;
@@ -629,7 +629,11 @@ body:not(.-keyboard-nav) .m-postView__body:has(.m-postView__main[data-href]):hov
 }
 
 /* Cover reply-parent's folded content with gradient if not expanded */
-.m-postContext__postParent:not(.-expanded) .m-postView__main::before {
+.m-postContext__postParent:not(.-expanded) .m-postView__body {
+  position: relative;
+}
+
+.m-postContext__postParent:not(.-expanded) .m-postView__body::before {
   content: '';
   position: absolute;
   inset: 0;
@@ -862,8 +866,6 @@ emoji-picker {
   gap: 5pt;
   padding-right: 1rem;
   padding-left: 1rem;
-  /* padding-bottom: 0.25rem; */
-  /* padding-top: 0.25rem; */
 }
 
 .m-postView__reactions {
