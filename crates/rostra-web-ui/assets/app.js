@@ -532,6 +532,25 @@ document.addEventListener("keydown", (e) => {
     return -1;
   }
 
+  function isInView(el) {
+    const rect = el.getBoundingClientRect();
+    return rect.bottom > 0 && rect.top < window.innerHeight;
+  }
+
+  function firstVisibleIndex(items) {
+    for (let i = 0; i < items.length; i++) {
+      if (isInView(items[i])) return i;
+    }
+    return 0;
+  }
+
+  function lastVisibleIndex(items) {
+    for (let i = items.length - 1; 0 <= i; i--) {
+      if (isInView(items[i])) return i;
+    }
+    return items.length - 1;
+  }
+
   function isInputFocused() {
     const el = document.activeElement;
     if (!el) return false;
@@ -607,10 +626,18 @@ document.addEventListener("keydown", (e) => {
 
     if (e.key === "j" || e.key === "ArrowDown") {
       e.preventDefault();
-      selectItem(idx < 0 ? 0 : idx + 1);
+      if (idx < 0 || !isInView(selectedEl)) {
+        selectItem(firstVisibleIndex(items));
+      } else {
+        selectItem(idx + 1);
+      }
     } else if (e.key === "k" || e.key === "ArrowUp") {
       e.preventDefault();
-      selectItem(idx < 0 ? items.length - 1 : idx - 1);
+      if (idx < 0 || !isInView(selectedEl)) {
+        selectItem(lastVisibleIndex(items));
+      } else {
+        selectItem(idx - 1);
+      }
     } else if (e.key === "l" || e.key === "ArrowRight") {
       e.preventDefault();
       if (!selectedEl) return;
