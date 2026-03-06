@@ -372,6 +372,7 @@ document.addEventListener(
     ["k / \u2191", "Previous post"],
     ["l / \u2192", "Expand replies"],
     ["r", "Reply to post"],
+    ["h / \u2190", "Go back"],
     ["n", "New post"],
     ["1-5", "Switch tab"],
     ["q", "Home"],
@@ -479,7 +480,8 @@ document.addEventListener("keydown", (e) => {
 
 (function () {
   const NAV_SELECTOR =
-    "#timeline-posts > .o-mainBarTimeline__item, #timeline-posts .o-postOverview__repliesItem";
+    ".o-mainBarTimeline__item:not(.-preview), " +
+    ".o-postOverview__repliesItem";
   const SELECTED_CLASS = "-keyboard-selected";
 
   let selectedEl = null;
@@ -562,6 +564,10 @@ document.addEventListener("keydown", (e) => {
     } else if (e.key === "q") {
       e.preventDefault();
       window.location.href = "/";
+      return;
+    } else if (e.key === "h" || e.key === "ArrowLeft") {
+      e.preventDefault();
+      history.back();
       return;
     } else if (e.key === "n") {
       const textarea = document.getElementById("new-post-content");
