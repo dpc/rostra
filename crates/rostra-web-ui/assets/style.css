@@ -3069,6 +3069,12 @@ h4.o-settingsContent__sectionHeader {
   opacity: 0.5;
 }
 
+/* Hide cursor during keyboard navigation */
+body.-keyboard-nav,
+body.-keyboard-nav * {
+  cursor: none !important;
+}
+
 /* Keyboard shortcuts help dialog */
 .o-shortcutsDialog {
   display: none;

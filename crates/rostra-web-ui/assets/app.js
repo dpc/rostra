@@ -509,6 +509,7 @@ document.addEventListener("keydown", (e) => {
     clearSelection();
     selectedEl = items[idx];
     selectedEl.classList.add(SELECTED_CLASS);
+    document.body.classList.add("-keyboard-nav");
 
     // Auto-expand collapsed parent posts
     if (
@@ -682,6 +683,10 @@ document.addEventListener("keydown", (e) => {
     },
     true,
   );
+
+  document.addEventListener("mousemove", () => {
+    document.body.classList.remove("-keyboard-nav");
+  });
 })();
 
 // =============================================================================
