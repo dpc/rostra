@@ -519,10 +519,8 @@ document.addEventListener("keydown", (e) => {
       selectedEl.classList.add("-expanded");
     }
 
-    // Replies: just ensure visible. Posts/parents: scroll timeline item to top.
-    if (selectedEl.classList.contains("o-postOverview__repliesItem")) {
-      selectedEl.scrollIntoView({ block: "nearest" });
-    } else {
+    // Parent posts: scroll timeline item to top. Everything else: just ensure visible.
+    if (selectedEl.classList.contains("m-postContext__postParent")) {
       const scrollTarget =
         selectedEl.closest(".o-mainBarTimeline__item") || selectedEl;
       const tabs = document.querySelector(".o-mainBarTimeline__tabs");
@@ -532,6 +530,8 @@ document.addEventListener("keydown", (e) => {
         document.body.scrollTop -
         offset;
       document.body.scrollTo({ top, behavior: "instant" });
+    } else {
+      selectedEl.scrollIntoView({ block: "nearest" });
     }
   }
 
