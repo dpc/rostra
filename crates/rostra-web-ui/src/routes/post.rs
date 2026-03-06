@@ -226,9 +226,19 @@ pub async fn get_single_post(
             }
         };
         let page_layout = state.render_page_layout(navbar, main_content);
+        let content = html! {
+            (page_layout)
+
+            // Dialog containers for post interactions (preview, media, etc.)
+            div id="post-preview-dialog" ."o-previewDialog" x-sync {}
+            div id="media-list" ."o-mediaList" x-sync {}
+            div id="ajax-scripts" style="display: none;" {}
+
+            script type="module" src="/assets/emoji-init.js" {}
+        };
         return Ok(Maud(
             state
-                .render_html_page("Post", page_layout, None, og.as_ref())
+                .render_html_page("Post", content, None, og.as_ref())
                 .await?,
         ));
     }
