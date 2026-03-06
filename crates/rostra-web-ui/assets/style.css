@@ -877,6 +877,10 @@ emoji-picker {
   gap: .5rem;
 }
 
+.m-postView__replies {
+  margin-left: 1.5rem;
+}
+
 .m-postView__repliesButtonIcon {
   background: url('/assets/icons/comment.svg') center/contain no-repeat;
 }
