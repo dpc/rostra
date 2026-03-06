@@ -519,14 +519,20 @@ document.addEventListener("keydown", (e) => {
       selectedEl.classList.add("-expanded");
     }
 
-    // Scroll the containing timeline item to the top, below the sticky tabs
-    const scrollTarget =
-      selectedEl.closest(".o-mainBarTimeline__item") || selectedEl;
-    const tabs = document.querySelector(".o-mainBarTimeline__tabs");
-    const offset = tabs ? tabs.getBoundingClientRect().bottom : 0;
-    const top =
-      scrollTarget.getBoundingClientRect().top + document.body.scrollTop - offset;
-    document.body.scrollTo({ top, behavior: "instant" });
+    // Replies: just ensure visible. Posts/parents: scroll timeline item to top.
+    if (selectedEl.classList.contains("o-postOverview__repliesItem")) {
+      selectedEl.scrollIntoView({ block: "nearest" });
+    } else {
+      const scrollTarget =
+        selectedEl.closest(".o-mainBarTimeline__item") || selectedEl;
+      const tabs = document.querySelector(".o-mainBarTimeline__tabs");
+      const offset = tabs ? tabs.getBoundingClientRect().bottom : 0;
+      const top =
+        scrollTarget.getBoundingClientRect().top +
+        document.body.scrollTop -
+        offset;
+      document.body.scrollTo({ top, behavior: "instant" });
+    }
   }
 
   function selectedIndex() {
