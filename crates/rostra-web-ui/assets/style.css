@@ -569,6 +569,10 @@ img.u-userImage {
   max-width: 55rem;
 }
 
+.m-postView__body {
+  padding-bottom: 0.25rem;
+}
+
 .m-postView__main[data-href] {
   cursor: pointer;
   transition: background-color 0.15s ease;
@@ -3142,11 +3146,12 @@ body.-keyboard-nav * {
 }
 
 /* Keyboard navigation: selected post highlight */
-.o-mainBarTimeline__item.-keyboard-selected>.m-postContext>.m-postContext__postView>.m-postView>.m-postView__main,
-.o-postOverview__repliesItem.-keyboard-selected>.m-postContext>.m-postContext__postView>.m-postView>.m-postView__main,
-.m-postContext__postParent.-keyboard-selected>.m-postView>.m-postView__main,
-.m-postContext__postView.-keyboard-selected>.m-postView>.m-postView__main {
+.o-mainBarTimeline__item.-keyboard-selected>.m-postContext>.m-postContext__postView>.m-postView>.m-postView__body,
+.o-postOverview__repliesItem.-keyboard-selected>.m-postContext>.m-postContext__postView>.m-postView>.m-postView__body,
+.m-postContext__postParent.-keyboard-selected>.m-postView>.m-postView__body,
+.m-postContext__postView.-keyboard-selected>.m-postView>.m-postView__body {
   background-color: var(--color-post-highlight-bg);
+  border-radius: var(--border-radius-std);
 }
 
 /* Send button icon */

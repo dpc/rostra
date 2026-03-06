@@ -694,9 +694,11 @@ impl UiState {
                 ."m-postView"
                 id=[post_thread_id.zip(event_id).map(|(ctx, id)| post_html_id(ctx, id))]
              {
-                (post_main)
+                div ."m-postView__body" {
+                    (post_main)
 
-                (button_bar)
+                    (button_bar)
+                }
 
                 // Initially empty replies container - placeholders rendered inside when Reply/Replies clicked
                 div ."m-postView__replies"

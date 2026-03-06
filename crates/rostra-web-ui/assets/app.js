@@ -572,26 +572,21 @@ document.addEventListener("keydown", (e) => {
 
   // Find the nearest button bar for a navigable item.
   function getButtonBar(item) {
-    // Parent posts: .m-postContext__postParent > .m-postView > .m-postView__buttonBar
-    // PostView (when split from parent): .m-postContext__postView > .m-postView > ...
+    // Parent posts: > .m-postView > .m-postView__body > .m-postView__buttonBar
+    // PostView (when split from parent): same path
     if (
       item.classList.contains("m-postContext__postParent") ||
       item.classList.contains("m-postContext__postView")
     ) {
-      const postView = item.querySelector(":scope > .m-postView");
-      return postView
-        ? postView.querySelector(":scope > .m-postView__buttonBar")
-        : null;
+      return item.querySelector(
+        ":scope > .m-postView > .m-postView__body > .m-postView__buttonBar",
+      );
     }
     // Timeline items and reply items:
-    // .m-postContext > .m-postContext__postView > .m-postView > .m-postView__buttonBar
-    const postView = item.querySelector(
-      ":scope > .m-postContext > .m-postContext__postView > .m-postView",
+    // > .m-postContext > .m-postContext__postView > .m-postView > .m-postView__body > .m-postView__buttonBar
+    return item.querySelector(
+      ":scope > .m-postContext > .m-postContext__postView > .m-postView > .m-postView__body > .m-postView__buttonBar",
     );
-    if (postView) {
-      return postView.querySelector(":scope > .m-postView__buttonBar");
-    }
-    return null;
   }
 
   document.addEventListener("keydown", (e) => {
