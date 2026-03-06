@@ -211,6 +211,7 @@ button:hover {
 
 p {
   margin-top: .5rem;
+  margin-bottom: .5rem;
 }
 
 p:not(:last-child) {
@@ -569,25 +570,23 @@ img.u-userImage {
   max-width: 55rem;
 }
 
-.m-postView__body {
-  padding-bottom: 0.25rem;
-}
-
-.m-postView__main[data-href] {
+.m-postView__body:has(.m-postView__main[data-href]) {
   cursor: pointer;
-  transition: background-color 0.15s ease;
+  border-radius: var(--border-radius-std);
 }
 
-.m-postView__main[data-href]:hover {
+body:not(.-keyboard-nav) .m-postView__body:has(.m-postView__main[data-href]):hover {
   background-color: var(--color-post-highlight-bg);
 }
 
+.m-postView__body {
+  padding: clamp(0.3rem, .5vw, 2rem) clamp(0.3rem, .5vw, 2rem);
+}
 
 .m-postView__main {
   display: flex;
   flex-direction: column;
   max-width: 50rem;
-  padding: clamp(0.2rem, 0.8vw, 0.75rem) clamp(0.3rem, 1vw, 2rem);
   border-radius: var(--border-radius-std);
   position: relative;
 }
@@ -861,10 +860,10 @@ emoji-picker {
   display: flex;
   justify-content: space-between;
   gap: 5pt;
-  margin-bottom: 0.5rem;
-  margin-right: 1rem;
-  margin-left: 1rem;
-  margin-top: 0.25rem;
+  padding-right: 1rem;
+  padding-left: 1rem;
+  /* padding-bottom: 0.25rem; */
+  /* padding-top: 0.25rem; */
 }
 
 .m-postView__reactions {
