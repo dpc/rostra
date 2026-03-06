@@ -371,6 +371,7 @@ document.addEventListener(
     ["j / \u2193", "Next post"],
     ["k / \u2191", "Previous post"],
     ["l / \u2192", "Expand replies"],
+    ["Enter", "Open post"],
     ["r", "Reply to post"],
     ["h / \u2190", "Go back"],
     ["n", "New post"],
@@ -598,6 +599,13 @@ document.addEventListener("keydown", (e) => {
       const btn = bar.querySelector(".m-postView__repliesButton");
       if (btn && !btn.classList.contains("u-hidden")) {
         btn.click();
+      }
+    } else if (e.key === "Enter") {
+      if (!selectedEl) return;
+      const main = selectedEl.querySelector(".m-postView__main[data-href]");
+      if (main) {
+        e.preventDefault();
+        window.location = main.dataset.href;
       }
     } else if (e.key === "r") {
       e.preventDefault();
