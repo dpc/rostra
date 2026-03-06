@@ -519,7 +519,14 @@ document.addEventListener("keydown", (e) => {
       selectedEl.classList.add("-expanded");
     }
 
-    selectedEl.scrollIntoView({ block: "nearest" });
+    // Scroll the containing timeline item to the top, below the sticky tabs
+    const scrollTarget =
+      selectedEl.closest(".o-mainBarTimeline__item") || selectedEl;
+    const tabs = document.querySelector(".o-mainBarTimeline__tabs");
+    const offset = tabs ? tabs.getBoundingClientRect().bottom : 0;
+    const top =
+      scrollTarget.getBoundingClientRect().top + document.body.scrollTop - offset;
+    document.body.scrollTo({ top, behavior: "instant" });
   }
 
   function selectedIndex() {
