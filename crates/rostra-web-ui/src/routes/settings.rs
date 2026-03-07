@@ -367,6 +367,7 @@ impl UiState {
             self.render_page_layout(navbar, content),
             None,
             None,
+            None,
         )
         .await
     }

@@ -304,7 +304,7 @@ pub async fn get_shoutbox(
 
     Ok(Maud(
         state
-            .render_html_page("Shoutbox - Rostra", content, None::<&FeedLinks>, None)
+            .render_html_page("Shoutbox - Rostra", content, None::<&FeedLinks>, None, None)
             .await?,
     ))
 }

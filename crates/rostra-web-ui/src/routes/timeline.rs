@@ -69,6 +69,7 @@ pub async fn get_followees(
                 TimelineMode::Followees,
                 is_ajax,
                 None,
+                None,
             )
             .await?,
     ))
@@ -100,6 +101,7 @@ pub async fn get_network(
                 TimelineMode::Network,
                 is_ajax,
                 None,
+                None,
             )
             .await?,
     ))
@@ -130,6 +132,7 @@ pub async fn get_notifications(
                 &mut cookies,
                 TimelineMode::Notifications,
                 is_ajax,
+                None,
                 None,
             )
             .await?,
@@ -452,6 +455,7 @@ impl UiState {
         mode: TimelineMode,
         is_ajax_request: bool,
         og: Option<&OpenGraphMeta>,
+        json_ld: Option<&str>,
     ) -> RequestResult<Markup> {
         let client = self.client(session.id()).await?;
         let client_ref = client.client_ref()?;
@@ -502,7 +506,7 @@ impl UiState {
             _ => None,
         };
 
-        self.render_html_page("Rostra", content, feed_links.as_ref(), og)
+        self.render_html_page("Rostra", content, feed_links.as_ref(), og, json_ld)
             .await
     }
 

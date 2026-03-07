@@ -2,6 +2,14 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use rostra_core::Timestamp;
 
+/// Format a timestamp as ISO 8601 (`YYYY-MM-DDTHH:MM:SSZ`).
+pub fn format_timestamp_iso(timestamp: Timestamp) -> String {
+    let dt = time::OffsetDateTime::from_unix_timestamp(timestamp.as_u64() as i64)
+        .unwrap_or(time::OffsetDateTime::UNIX_EPOCH);
+    dt.format(&time::format_description::well_known::Iso8601::DEFAULT)
+        .expect("ISO 8601 formatting can't fail for valid OffsetDateTime")
+}
+
 pub fn format_timestamp(timestamp: Timestamp) -> String {
     let system_time: SystemTime = UNIX_EPOCH + std::time::Duration::from_secs(timestamp.as_u64());
     let now = SystemTime::now();

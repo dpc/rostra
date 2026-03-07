@@ -124,9 +124,26 @@ pub async fn not_found(_state: State<SharedState>, _req: Request<Body>) -> impl 
     )
 }
 
+async fn robots_txt() -> impl IntoResponse {
+    (
+        [(
+            header::CONTENT_TYPE,
+            HeaderValue::from_static("text/plain; charset=utf-8"),
+        )],
+        "User-agent: *\n\
+         Allow: /profile/\n\
+         Allow: /post/\n\
+         Disallow: /settings\n\
+         Disallow: /unlock\n\
+         Disallow: /api/\n\
+         Disallow: /media/\n",
+    )
+}
+
 pub fn route_handler(state: SharedState) -> Router<Arc<UiState>> {
     Router::new()
         .nest("/api", api::api_router())
+        .route("/robots.txt", get(robots_txt))
         .route("/", get(welcome::get_landing))
         .route("/home", get(welcome::get_home))
         .route("/following", get(timeline::get_followees))

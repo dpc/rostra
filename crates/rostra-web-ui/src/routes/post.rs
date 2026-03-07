@@ -20,7 +20,7 @@ use crate::error::{ReadOnlyModeSnafu, RequestResult};
 use crate::html_utils::re_typeset;
 use crate::layout::{OpenGraphMeta, truncate_at_word_boundary};
 use crate::util::extractors::AjaxRequest;
-use crate::util::time::format_timestamp;
+use crate::util::time::{format_timestamp, format_timestamp_iso};
 use crate::{SharedState, UiState};
 
 /// Generate HTML ID for post content element.
@@ -109,8 +109,9 @@ pub async fn get_single_post(
         .as_ref()
         .filter(|r| r.content.djot_content.is_some())
     {
-        // Build Open Graph meta tags for rich link previews
-        let og = if let Some(djot_content) = post_record.content.djot_content.as_deref() {
+        // Build Open Graph meta tags and JSON-LD for rich link previews
+        let (og, json_ld) = if let Some(djot_content) = post_record.content.djot_content.as_deref()
+        {
             use jotup::r#async::AsyncRenderOutputExt as _;
             use jotup::html::filters::AsyncSanitizeExt as _;
 
@@ -147,14 +148,36 @@ pub async fn get_single_post(
                 .map(|p| truncate_at_word_boundary(p, 200))
                 .unwrap_or_default();
 
-            Some(OpenGraphMeta {
-                title,
-                description,
-                url: state.absolute_url(&format!("/post/{author}/{event_id}")),
-                image: Some(state.absolute_url(&state.avatar_url(author, og_event_id))),
-            })
+            let post_url = state.absolute_url(&format!("/post/{author}/{event_id}"));
+            let avatar_url = state.absolute_url(&state.avatar_url(author, og_event_id));
+            let profile_url = state.absolute_url(&format!("/profile/{author}"));
+
+            let ld = serde_json::json!({
+                "@context": "https://schema.org",
+                "@type": "SocialMediaPosting",
+                "headline": title,
+                "articleBody": description,
+                "url": post_url,
+                "datePublished": format_timestamp_iso(post_record.ts),
+                "author": {
+                    "@type": "Person",
+                    "name": display_name,
+                    "url": profile_url,
+                    "image": avatar_url,
+                }
+            });
+
+            (
+                Some(OpenGraphMeta {
+                    title,
+                    description,
+                    url: post_url,
+                    image: Some(avatar_url),
+                }),
+                Some(ld.to_string()),
+            )
         } else {
-            None
+            (None, None)
         };
 
         // Load parent post if this is a reply
@@ -238,7 +261,7 @@ pub async fn get_single_post(
         };
         return Ok(Maud(
             state
-                .render_html_page("Post", content, None, og.as_ref())
+                .render_html_page("Post", content, None, og.as_ref(), json_ld.as_deref())
                 .await?,
         ));
     }
@@ -571,7 +594,7 @@ impl UiState {
                             span ."m-postView__userHandle" {
                                 (self.render_user_handle(event_id, author, user_profile.as_ref()))
                                 @if let Some(ts) = timestamp {
-                                    span ."m-postView__timestamp" {
+                                    time ."m-postView__timestamp" datetime=(format_timestamp_iso(ts)) {
                                         (format_timestamp(ts))
                                     }
                                 }

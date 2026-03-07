@@ -26,6 +26,7 @@ impl UiState {
         page_title: &str,
         feed_links: Option<&FeedLinks>,
         og: Option<&OpenGraphMeta>,
+        json_ld: Option<&str>,
     ) -> Markup {
         html! {
             (DOCTYPE)
@@ -52,6 +53,8 @@ impl UiState {
                 }
                 // Open Graph meta tags
                 @if let Some(og) = og {
+                    meta name="description" content=(og.description);
+                    link rel="canonical" href=(og.url);
                     meta property="og:type" content="article";
                     meta property="og:title" content=(og.title);
                     meta property="og:description" content=(og.description);
@@ -66,6 +69,10 @@ impl UiState {
                     @if let Some(ref image) = og.image {
                         meta name="twitter:image" content=(image);
                     }
+                }
+                // JSON-LD structured data
+                @if let Some(json_ld) = json_ld {
+                    script type="application/ld+json" { (maud::PreEscaped(json_ld)) }
                 }
                 // Hide elements with x-cloak until Alpine initializes
                 style { "[x-cloak] { display: none !important; }" }
@@ -106,9 +113,10 @@ impl UiState {
         content: Markup,
         feed_links: Option<&FeedLinks>,
         og: Option<&OpenGraphMeta>,
+        json_ld: Option<&str>,
     ) -> RequestResult<Markup> {
         Ok(html! {
-            (self.render_html_head(title, feed_links, og))
+            (self.render_html_head(title, feed_links, og, json_ld))
             body ."o-body"
                 x-data="notifications"
             {
@@ -167,7 +175,8 @@ impl UiState {
         };
 
         let page_layout = self.render_page_layout(navbar, main_content);
-        self.render_html_page(title, page_layout, None, None).await
+        self.render_html_page(title, page_layout, None, None, None)
+            .await
     }
 
     /// Renders a tab bar with a back button and a title tab.

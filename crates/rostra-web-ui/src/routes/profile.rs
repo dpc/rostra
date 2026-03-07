@@ -34,12 +34,31 @@ pub async fn get_profile(
     let client_ref = client.client_ref()?;
     let profile = state.get_social_profile(profile_id, &client_ref).await;
 
+    let profile_url = state.absolute_url(&format!("/profile/{profile_id}"));
+    let avatar_url = state.absolute_url(&state.avatar_url(profile_id, profile.event_id));
+    let description = truncate_at_word_boundary(&profile.bio, 200);
+
     let og = OpenGraphMeta {
         title: profile.display_name.clone(),
-        description: truncate_at_word_boundary(&profile.bio, 200),
-        url: state.absolute_url(&format!("/profile/{profile_id}")),
-        image: Some(state.absolute_url(&state.avatar_url(profile_id, profile.event_id))),
+        description: description.clone(),
+        url: profile_url.clone(),
+        image: Some(avatar_url.clone()),
     };
+
+    let json_ld = serde_json::json!({
+        "@context": "https://schema.org",
+        "@type": "ProfilePage",
+        "name": profile.display_name,
+        "description": description,
+        "url": profile_url,
+        "mainEntity": {
+            "@type": "Person",
+            "name": profile.display_name,
+            "description": description,
+            "image": avatar_url,
+        }
+    })
+    .to_string();
 
     Ok(Maud(
         state
@@ -51,6 +70,7 @@ pub async fn get_profile(
                 TimelineMode::Profile(profile_id),
                 is_ajax,
                 Some(&og),
+                Some(&json_ld),
             )
             .await?,
     ))
