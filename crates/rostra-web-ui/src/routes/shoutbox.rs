@@ -226,6 +226,7 @@ pub async fn get_shoutbox(
                         "@keydown"="handleKeydown($event)"
                         "@input"="handleInput($event); const pf = document.getElementById('shoutbox-preview-form'); pf.querySelector('input[name=content]').value = $el.value; pf.requestSubmit();"
                         autocomplete="off"
+                        autofocus
                         {}
 
                     // Autocomplete dropdown (mentions and emojis) — upward

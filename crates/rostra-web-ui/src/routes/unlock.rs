@@ -194,6 +194,7 @@ impl UiState {
                             autocomplete="username"
                             title="Id is a single, long string of characters encoding your public identifier"
                             value=(current_rostra_id.map(|id| id.to_string()).unwrap_or_default())
+                            autofocus
                             {}
                         (fragment::button("o-unlockScreen__unlockButton", "Login").call())
                     }
