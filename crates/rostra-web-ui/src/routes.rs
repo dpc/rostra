@@ -124,19 +124,47 @@ pub async fn not_found(_state: State<SharedState>, _req: Request<Body>) -> impl 
     )
 }
 
-async fn robots_txt() -> impl IntoResponse {
+async fn robots_txt(state: State<SharedState>) -> impl IntoResponse {
+    let sitemap_url = state.absolute_url("/sitemap.xml");
     (
         [(
             header::CONTENT_TYPE,
             HeaderValue::from_static("text/plain; charset=utf-8"),
         )],
-        "User-agent: *\n\
-         Allow: /profile/\n\
-         Allow: /post/\n\
-         Disallow: /settings\n\
-         Disallow: /unlock\n\
-         Disallow: /api/\n\
-         Disallow: /media/\n",
+        format!(
+            "User-agent: *\n\
+             Allow: /\n\
+             Disallow: /settings\n\
+             Disallow: /unlock\n\
+             Disallow: /api/\n\
+             Disallow: /media/\n\n\
+             Sitemap: {sitemap_url}\n"
+        ),
+    )
+}
+
+async fn sitemap_xml(state: State<SharedState>) -> impl IntoResponse {
+    const PATHS: &[&str] = &["/", "/home", "/following", "/network", "/notifications"];
+
+    let urls: String = PATHS
+        .iter()
+        .map(|path| {
+            let loc = state.absolute_url(path);
+            format!("  <url><loc>{loc}</loc></url>\n")
+        })
+        .collect();
+
+    (
+        [(
+            header::CONTENT_TYPE,
+            HeaderValue::from_static("application/xml; charset=utf-8"),
+        )],
+        format!(
+            "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n\
+             <urlset xmlns=\"http://www.sitemaps.org/schemas/sitemap/0.9\">\n\
+             {urls}\
+             </urlset>\n"
+        ),
     )
 }
 
@@ -144,6 +172,7 @@ pub fn route_handler(state: SharedState) -> Router<Arc<UiState>> {
     Router::new()
         .nest("/api", api::api_router())
         .route("/robots.txt", get(robots_txt))
+        .route("/sitemap.xml", get(sitemap_xml))
         .route("/", get(welcome::get_landing))
         .route("/home", get(welcome::get_home))
         .route("/following", get(timeline::get_followees))
