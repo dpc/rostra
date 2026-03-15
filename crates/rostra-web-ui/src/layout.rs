@@ -51,7 +51,7 @@ impl UiState {
                     link rel="alternate" type="application/atom+xml"
                          title=(links.title) href=(links.atom_url);
                 }
-                // Open Graph meta tags
+                // Meta description (from OG or fallback)
                 @if let Some(og) = og {
                     meta name="description" content=(og.description);
                     link rel="canonical" href=(og.url);
@@ -69,6 +69,8 @@ impl UiState {
                     @if let Some(ref image) = og.image {
                         meta name="twitter:image" content=(image);
                     }
+                } @else {
+                    meta name="description" content="Rostra — a peer-to-peer social network";
                 }
                 // JSON-LD structured data
                 @if let Some(json_ld) = json_ld {
