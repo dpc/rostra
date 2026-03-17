@@ -368,6 +368,7 @@ impl UiState {
             None,
             None,
             None,
+            false,
         )
         .await
     }

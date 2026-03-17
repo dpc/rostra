@@ -261,7 +261,14 @@ pub async fn get_single_post(
         };
         return Ok(Maud(
             state
-                .render_html_page("Post", content, None, og.as_ref(), json_ld.as_deref())
+                .render_html_page(
+                    "Post",
+                    content,
+                    None,
+                    og.as_ref(),
+                    json_ld.as_deref(),
+                    false,
+                )
                 .await?,
         ));
     }

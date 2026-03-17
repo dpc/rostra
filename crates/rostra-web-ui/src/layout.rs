@@ -27,6 +27,7 @@ impl UiState {
         feed_links: Option<&FeedLinks>,
         og: Option<&OpenGraphMeta>,
         json_ld: Option<&str>,
+        noindex: bool,
     ) -> Markup {
         html! {
             (DOCTYPE)
@@ -35,6 +36,9 @@ impl UiState {
                 meta charset="utf-8";
                 meta name="viewport" content="width=device-width, initial-scale=1.0";
                 meta name="color-scheme" content="light dark";
+                @if noindex {
+                    meta name="robots" content="noindex";
+                }
                 link rel="stylesheet" type="text/css" href="/assets/style.css";
                 // Prism.js themes - conditionally loaded based on color scheme
                 link rel="stylesheet" type="text/css" href="/assets/libs/prismjs/prism.min.css" media="(prefers-color-scheme: light)";
@@ -116,9 +120,10 @@ impl UiState {
         feed_links: Option<&FeedLinks>,
         og: Option<&OpenGraphMeta>,
         json_ld: Option<&str>,
+        noindex: bool,
     ) -> RequestResult<Markup> {
         Ok(html! {
-            (self.render_html_head(title, feed_links, og, json_ld))
+            (self.render_html_head(title, feed_links, og, json_ld, noindex))
             body ."o-body"
                 x-data="notifications"
             {
@@ -177,7 +182,7 @@ impl UiState {
         };
 
         let page_layout = self.render_page_layout(navbar, main_content);
-        self.render_html_page(title, page_layout, None, None, None)
+        self.render_html_page(title, page_layout, None, None, None, false)
             .await
     }
 

@@ -506,8 +506,15 @@ impl UiState {
             _ => None,
         };
 
-        self.render_html_page("Rostra", content, feed_links.as_ref(), og, json_ld)
-            .await
+        self.render_html_page(
+            "Rostra",
+            content,
+            feed_links.as_ref(),
+            og,
+            json_ld,
+            og.is_none(),
+        )
+        .await
     }
 
     pub(crate) async fn handle_notification_cookies(

@@ -226,7 +226,7 @@ impl UiState {
                 }
             }
         };
-        self.render_html_page("Sign in", content, None, None, None)
+        self.render_html_page("Sign in", content, None, None, None, false)
             .await
     }
 }
