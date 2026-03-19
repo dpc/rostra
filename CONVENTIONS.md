@@ -2,7 +2,7 @@
 
 ## Conventions
 
-> When writing code, follow this conventions
+> When writing code, follow these conventions
 
 
 - Do NOT add comments explaining what is each line/expression doing.

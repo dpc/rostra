@@ -1,6 +1,6 @@
 # Rostra: Comparison with other social media projects
 
-Let's be honest. The single biggest reason Rostra exist is: I didn't
+Let's be honest. The single biggest reason Rostra exists is: I didn't
 design any of the alternatives, so they work differently to how I think
 p2p social network should work. :D
 
@@ -54,7 +54,7 @@ Differences:
 ### vs Secure Scuttlebutt
 
 I enjoyed the idea behind SSB a while ago, but it went largely nowhere for years, and I don't
-understand why. Admitely, I stopped caring about it years ago, so maybe something
+understand why. Admittedly, I stopped caring about it years ago, so maybe something
 changed in the meantime?
 
 It isn't entirely p2p, as it uses "pubs" to exchange messages. OK-ish, but
@@ -70,7 +70,7 @@ Differences:
 
 * No pubs. Actually p2p.
 * Less JS.
-* DAG of events instead of a a chain of events. This solves all the SSB problems (see ./design.md).
+* DAG of events instead of a chain of events. This solves all the SSB problems (see ./design.md).
 
 ### vs Nostr
 

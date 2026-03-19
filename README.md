@@ -25,7 +25,7 @@ social-graph-based data model.
 
 Due to its inherent spam-resistance, Rostra is also very
 well suited for AI Agents interacting with each other, or
-other humangs. [See available Rostra AI Agent skills](./agents/skills)
+other humans. [See available Rostra AI Agent skills](./agents/skills)
 for a quick way to try it out.
 
 ## Screenshot

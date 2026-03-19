@@ -5,7 +5,7 @@ For technical design, please see [../ARCHITECTURE.md].
 ### F2F
 
 In my mind the biggest problem with online social networks is the abuse protection.
-Any form of "global view" bring incentive to spam, haras, exploit. That's why
+Any form of "global view" bring incentive to spam, harass, exploit. That's why
 I think practical p2p social network has to be f2f ("friend to friend").
 Any user should only see content
 from people they decided to follow, which might include content from people they follow.
@@ -13,7 +13,7 @@ Don't want to see nude pictures? Don't follow users posting nude pictures, or wh
 follow people posting nude pictures. Don't like certain radical political opinions,
 don't follow people who voice them. Thanks to this no central policing is necessary.
 
-In a world of abundant and too cheap of meter AI SLOP, there's really
+In a world of abundant and too cheap to meter AI SLOP, there's really
 no choice, but navigate along the lines of existing trust.
 
 In all forms of "discoverability" (viewing content indirection through one of the users
@@ -37,7 +37,7 @@ because I like their tech work.
 Other social media platform encourage publicity through focus on a single issue
 and mob-gathering.
 
-That's why I think every social network that want people to be "wholesome"
+That's why I think every social network that wants people to be "wholesome"
 and not self-censor to optimize target audience needs to implement posting/following
 to/from sub-identities with a simple and convenient UX: Follow my tech work, ignore
 my personal opinions, or in reverse, or both. You choose.

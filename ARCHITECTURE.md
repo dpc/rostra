@@ -1,6 +1,6 @@
 ## Rostra: Technical Architecture
 
-## Lightewight event DAGs
+## Lightweight event DAGs
 
 In Rostra all data is propagated in forms of `Event`s.
 The events are a tiny fixed-sized packet, that
@@ -11,20 +11,20 @@ Among some other minor things, `Event` includes `EventId`s of
 up to two previous `Event`s
 
 Thanks to this the history of all past events of the given user
-forms a dag, that can be traversered (and replicated) from the newer
-to the later events. Among other benefits, this allows seamless
+forms a dag, that can be traversed (and replicated) from the newer
+to the older events. Among other benefits, this allows seamless
 multi-device use - any disjoint parts of the history can get
 "stitched together" with any newer event pointing to both.
 
 The `Event` also includes `ContentHash` - a cryptographic hash
-of the actually payload carried.
+of the actual payload carried.
 
-This defers the need to download the bulkd of data, and allows
+This defers the need to download the bulk of data, and allows
 selective (incremental, partial, etc) data replication.
 
 ## Network architecture
 
-Rostra utilizes [Pkarr][pkarr] as a sovereign distributed naming/identy system,
+Rostra utilizes [Pkarr][pkarr] as a sovereign distributed naming/identity system,
 and [iroh-net][iroh-net] as a p2p transport layer.
 
 [pkarr]: https://github.com/pubky/pkarr

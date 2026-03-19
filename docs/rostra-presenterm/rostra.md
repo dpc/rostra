@@ -156,8 +156,8 @@ Rostra: WebUI
 * Features:
   * Social Post
   * Djot (Markdown) formatting
-  * Native or External Media (videos & large attachements!)
-  * Emojis, LaTeX Math, Syntax Highlightning
+  * Native or External Media (videos & large attachments!)
+  * Emojis, LaTeX Math, Syntax Highlighting
   * Notifications, Mentions
   * Shoutbox
   * RSS feeds
@@ -168,7 +168,7 @@ Rostra: WebUI
 The End
 ====
 
-Thanks you for your time!
+Thank you for your time!
 
 You can easily try out Rostra using [Rostra's public demo instance](https://rostra.me).
 
