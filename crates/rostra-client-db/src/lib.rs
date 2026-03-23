@@ -183,6 +183,11 @@ pub enum DbError {
         #[snafu(implicit)]
         location: Location,
     },
+    Upgrade {
+        source: redb::UpgradeError,
+        #[snafu(implicit)]
+        location: Location,
+    },
     Overflow,
 }
 pub type DbResult<T> = std::result::Result<T, DbError>;
@@ -255,6 +260,7 @@ impl Database {
     pub async fn new_in_memory(self_id: RostraId) -> DbResult<Database> {
         debug!(target: LOG_TARGET, id = %self_id, "Opening in-memory database");
         let inner = redb::Database::builder()
+            .create_with_file_format_v3(true)
             .create_with_backend(redb::backends::InMemoryBackend::new())
             .context(DatabaseSnafu)?;
         Self::open_inner(inner, self_id).await
@@ -264,10 +270,16 @@ impl Database {
         let path = path.into();
         debug!(target: LOG_TARGET, id = %self_id, path = %path.display(), "Opening database");
 
-        let inner = tokio::task::spawn_blocking(move || redb::Database::create(path))
-            .await
-            .context(JoinSnafu)?
-            .context(DatabaseSnafu)?;
+        let mut inner = tokio::task::spawn_blocking(move || {
+            redb::Database::builder()
+                .create_with_file_format_v3(true)
+                .create(path)
+        })
+        .await
+        .context(JoinSnafu)?
+        .context(DatabaseSnafu)?;
+
+        inner.upgrade().context(UpgradeSnafu)?;
 
         Self::open_inner(inner, self_id).await
     }

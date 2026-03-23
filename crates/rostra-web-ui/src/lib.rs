@@ -341,9 +341,12 @@ async fn build_state_and_session(
 
     let session_db_path = opts.data_dir.join("webui.redb");
     let session_db = tokio::task::spawn_blocking(move || {
-        redb::Database::create(session_db_path)
-            .map(redb_bincode::Database::from)
-            .map(Arc::new)
+        let mut db = redb::Database::builder()
+            .create_with_file_format_v3(true)
+            .create(session_db_path)?;
+        db.upgrade()
+            .expect("upgrade should not fail on a freshly opened database");
+        Ok::<_, redb::DatabaseError>(Arc::new(redb_bincode::Database::from(db)))
     })
     .await
     .expect("spawn_blocking panicked")
