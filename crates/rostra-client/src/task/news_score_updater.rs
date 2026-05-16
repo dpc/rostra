@@ -1,3 +1,5 @@
+use std::time::Duration;
+
 use rostra_core::ExternalEventId;
 use rostra_core::id::ToShort as _;
 use rostra_util_error::FmtCompact as _;
@@ -5,6 +7,10 @@ use tracing::{debug, instrument};
 
 use crate::LOG_TARGET;
 use crate::client::Client;
+
+pub fn news_score_refresh_interval() -> Duration {
+    Duration::from_secs(10 * 60)
+}
 
 #[derive(Clone)]
 pub struct NewsScoreUpdater {
@@ -25,32 +31,47 @@ impl NewsScoreUpdater {
 
     #[instrument(name = "news-score-updater", skip(self), fields(self_id = %self.self_id.to_short()), ret)]
     pub async fn run(mut self) {
+        let mut interval = tokio::time::interval(news_score_refresh_interval());
         loop {
-            let post_id = match self.rx.recv().await {
-                Ok(post_id) => post_id,
-                Err(dedup_chan::RecvError::Lagging) => {
-                    let Ok(db) = self.client.db() else {
+            tokio::select! {
+                _ = interval.tick() => {
+                    if !self.update_scores(None).await {
                         break;
-                    };
-                    for post_id in db.get_random_news_post_ids(4).await {
-                        db.recalculate_news_post_score(post_id).await;
                     }
-                    continue;
                 }
-                Err(err) => {
-                    debug!(target: LOG_TARGET, err = %err.fmt_compact(), "News score updater receiver closed");
-                    break;
+                res = self.rx.recv() => {
+                    match res {
+                        Ok(post_id) => {
+                            if !self.update_scores(Some(post_id)).await {
+                                break;
+                            }
+                        }
+                        Err(dedup_chan::RecvError::Lagging) => {
+                            if !self.update_scores(None).await {
+                                break;
+                            }
+                        }
+                        Err(err) => {
+                            debug!(target: LOG_TARGET, err = %err.fmt_compact(), "News score updater receiver closed");
+                            break;
+                        }
+                    }
                 }
-            };
-
-            let Ok(db) = self.client.db() else {
-                break;
-            };
-
-            db.recalculate_news_post_score(post_id).await;
-            for random_post_id in db.get_random_news_post_ids(4).await {
-                db.recalculate_news_post_score(random_post_id).await;
             }
         }
+    }
+
+    async fn update_scores(&self, post_id: Option<ExternalEventId>) -> bool {
+        let Ok(db) = self.client.db() else {
+            return false;
+        };
+
+        if let Some(post_id) = post_id {
+            db.recalculate_news_post_score(post_id).await;
+        }
+        for random_post_id in db.get_random_news_post_ids(4).await {
+            db.recalculate_news_post_score(random_post_id).await;
+        }
+        true
     }
 }
