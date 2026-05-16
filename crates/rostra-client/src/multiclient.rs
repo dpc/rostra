@@ -16,16 +16,12 @@ use crate::{Client, ClientHandle, LOG_TARGET};
 
 #[derive(Debug, Snafu)]
 pub enum MultiClientError {
-    ClientInit {
-        source: InitError,
-    },
-    Database {
-        source: DbError,
-    },
+    #[snafu(display("Failed to initialize client"))]
+    ClientInit { source: InitError },
+    #[snafu(display("Failed to open client database"))]
+    Database { source: DbError },
     #[snafu(transparent)]
-    Io {
-        source: io::Error,
-    },
+    Io { source: io::Error },
 }
 
 pub type MultiClientResult<T> = std::result::Result<T, MultiClientError>;

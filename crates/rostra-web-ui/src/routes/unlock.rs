@@ -6,6 +6,7 @@ use axum::http::StatusCode;
 use axum::response::{IntoResponse, Redirect, Response};
 use maud::{Markup, html};
 use rostra_core::id::{RostraId, RostraIdSecretKey};
+use rostra_util_error::FmtCompact as _;
 use serde::Deserialize;
 use session::{OptionalUserSession, SESSION_KEY, UserSessionData};
 use snafu::ResultExt as _;
@@ -106,13 +107,14 @@ pub async fn post_unlock(
     let secret_key_opt = match state.unlock(rostra_id, form.mnemonic).await {
         Ok(secret) => secret,
         Err(e) => {
+            let error_message = e.fmt_compact().to_string();
             return Ok(Maud(
                 state
                     .unlock_page(
                         form.rostra_id,
                         form.mnemonic,
                         html! {
-                            span ."o-unlockScreen_notice" { (e)}
+                            span ."o-unlockScreen_notice" { (error_message)}
                         },
                         redirect_path,
                     )

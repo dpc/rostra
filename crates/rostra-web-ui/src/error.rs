@@ -68,16 +68,16 @@ pub struct UserErrorResponse {
 #[derive(Debug, Snafu)]
 pub enum UnlockError {
     #[snafu(visibility(pub(crate)))]
+    #[snafu(display("RostraId or secret key is required"))]
     PublicKeyMissing,
     #[snafu(visibility(pub(crate)))]
+    #[snafu(display("RostraId does not match secret key"))]
     IdMismatch,
     #[snafu(transparent)]
-    Io {
-        source: io::Error,
-    },
-    Database {
-        source: DbError,
-    },
+    Io { source: io::Error },
+    #[snafu(display("Failed to open database"))]
+    Database { source: DbError },
+    #[snafu(display("Failed to initialize client"))]
     Init {
         #[snafu(source(from(InitError, Box::new)))]
         source: Box<InitError>,
@@ -88,9 +88,7 @@ pub enum UnlockError {
         source: Box<MultiClientError>,
     },
     #[snafu(transparent)]
-    MultiClientActivate {
-        source: ActivateError,
-    },
+    MultiClientActivate { source: ActivateError },
 }
 pub type UnlockResult<T> = std::result::Result<T, UnlockError>;
 

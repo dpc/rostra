@@ -11,8 +11,6 @@ use std::sync::{Arc, Weak};
 use std::time::Duration;
 
 use backon::Retryable as _;
-use iroh::address_lookup::dns::DnsAddressLookup;
-use iroh::address_lookup::pkarr::PkarrPublisher;
 use iroh_base::EndpointAddr;
 use rostra_client_db::{Database, DbResult, IdsFolloweesRecord, IdsFollowersRecord, WotData};
 use rostra_core::event::{
@@ -485,14 +483,11 @@ impl Client {
         use iroh::{Endpoint, SecretKey};
         let secret_key = iroh_secret.into().unwrap_or_else(SecretKey::generate);
 
-        // We rely entirely on tickets published by our own publisher
-        // for every RostraId via Pkarr, so we don't need discovery
-        // Address lookup is used for publishing our address and resolving others
-        let mut builder = Endpoint::builder(presets::Minimal)
+        // Use the n0 preset for relay transport and Pkarr/DNS address lookup.
+        // Rostra publishes its own tickets through Pkarr for each identity.
+        let mut builder = Endpoint::builder(presets::N0)
             .secret_key(secret_key)
-            .alpns(vec![ROSTRA_P2P_V0_ALPN.to_vec()])
-            .address_lookup(PkarrPublisher::n0_dns())
-            .address_lookup(DnsAddressLookup::n0_dns());
+            .alpns(vec![ROSTRA_P2P_V0_ALPN.to_vec()]);
 
         // By default, use relay-only mode for privacy (no direct IP connections).
         // In public mode, allow direct IP connections (useful for hosted nodes).

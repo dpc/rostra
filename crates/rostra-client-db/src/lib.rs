@@ -133,6 +133,7 @@ pub type TableDumpResult<T> = std::result::Result<T, TableDumpError>;
 
 #[derive(Debug, Snafu)]
 pub enum DbError {
+    #[snafu(display("Database error"))]
     Database {
         source: redb::DatabaseError,
         #[snafu(implicit)]
@@ -150,23 +151,27 @@ pub enum DbError {
         #[snafu(implicit)]
         location: Location,
     },
+    #[snafu(display("Database transaction error"))]
     Transaction {
         #[snafu(source(from(redb::TransactionError, Box::new)))]
         source: Box<redb::TransactionError>,
         #[snafu(implicit)]
         location: Location,
     },
+    #[snafu(display("Database commit error"))]
     Commit {
         source: redb::CommitError,
         #[snafu(implicit)]
         location: Location,
     },
+    #[snafu(display("Database version {db_ver} is newer than supported version {code_ver}"))]
     DbVersionTooHigh {
         db_ver: u64,
         code_ver: u64,
         #[snafu(implicit)]
         location: Location,
     },
+    #[snafu(display("Database task failed"))]
     Join {
         source: JoinError,
         #[snafu(implicit)]
@@ -184,11 +189,13 @@ pub enum DbError {
         #[snafu(implicit)]
         location: Location,
     },
+    #[snafu(display("Database file-format upgrade failed"))]
     Upgrade {
         source: redb::UpgradeError,
         #[snafu(implicit)]
         location: Location,
     },
+    #[snafu(display("Integer overflow"))]
     Overflow,
 }
 pub type DbResult<T> = std::result::Result<T, DbError>;

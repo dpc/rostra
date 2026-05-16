@@ -29,6 +29,7 @@ pub type InitResult<T> = std::result::Result<T, InitError>;
 #[derive(Debug, Snafu)]
 #[snafu(visibility(pub(crate)))]
 pub enum ActivateError {
+    #[snafu(display("Secret key does not match RostraId"))]
     SecretMismatch,
 }
 
