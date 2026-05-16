@@ -10,7 +10,7 @@ use rostra_core::event::{
     EventContentRaw, EventExt as _, VerifiedEvent, VerifiedEventContent, content_kind,
 };
 use rostra_core::id::{RostraId, ToShort as _};
-use rostra_core::{ContentHash, ShortEventId, Timestamp};
+use rostra_core::{ContentHash, ExternalEventId, ShortEventId, Timestamp};
 use tables::EventRecord;
 use tables::event::{
     ContentStoreRecord, EventContentResult, EventContentState, EventsMissingRecord,
@@ -29,6 +29,48 @@ use crate::{
     IdSocialProfileRecord, IdsDataUsageRecord, LOG_TARGET, Latest, SocialPostRecord, WotData,
     events_content_missing, ids_data_usage, ids_full, social_posts, social_profiles,
 };
+
+pub(crate) trait RandomTableKey: Copy + Ord {
+    fn min_key() -> Self;
+    fn random_key() -> Self;
+    fn max_key() -> Self;
+}
+
+impl RandomTableKey for ShortEventId {
+    fn min_key() -> Self {
+        Self::ZERO
+    }
+
+    fn random_key() -> Self {
+        Self::random()
+    }
+
+    fn max_key() -> Self {
+        Self::MAX
+    }
+}
+
+impl RandomTableKey for ExternalEventId {
+    fn min_key() -> Self {
+        Self::new(RostraId::ZERO, ShortEventId::ZERO)
+    }
+
+    fn random_key() -> Self {
+        let mut rng = rand::rng();
+        let mut rostra_id = [0u8; 32];
+        let mut event_id = [0u8; 16];
+        rng.fill_bytes(&mut rostra_id);
+        rng.fill_bytes(&mut event_id);
+        Self::new(
+            RostraId::from_bytes(rostra_id),
+            ShortEventId::from_bytes(event_id),
+        )
+    }
+
+    fn max_key() -> Self {
+        Self::new(RostraId::MAX, ShortEventId::MAX)
+    }
+}
 
 impl Database {
     pub fn read_followees_tx(
@@ -761,35 +803,35 @@ impl Database {
         Ok(table.get(&id)?.map(|v| v.value().inner))
     }
 
+    pub(crate) fn get_random_table_key<K, V>(
+        table: &impl ReadableTable<K, V>,
+    ) -> Result<Option<K>, DbError>
+    where
+        K: RandomTableKey + bincode::Decode<()> + bincode::Encode,
+        V: bincode::Decode<()> + bincode::Encode,
+    {
+        let pivot = K::random_key();
+
+        let before_pivot = K::min_key()..pivot;
+        let after_pivot = pivot..=K::max_key();
+
+        if rand::rng().random() {
+            if let Some(key) = get_first_in_range(table, after_pivot)? {
+                return Ok(Some(key));
+            }
+            return get_last_in_range(table, before_pivot);
+        }
+
+        if let Some(key) = get_last_in_range(table, before_pivot)? {
+            return Ok(Some(key));
+        }
+        get_first_in_range(table, after_pivot)
+    }
+
     pub(crate) fn get_random_self_event(
         events_self_table: &impl ReadableTable<ShortEventId, ()>,
     ) -> Result<Option<ShortEventId>, DbError> {
-        let pivot = ShortEventId::random();
-
-        let before_pivot = (ShortEventId::ZERO)..(pivot);
-        let after_pivot = (pivot)..=(ShortEventId::MAX);
-
-        Ok(Some(if rand::rng().random() {
-            match get_first_in_range(events_self_table, after_pivot)? {
-                Some(k) => k,
-                _ => match get_last_in_range(events_self_table, before_pivot)? {
-                    Some(k) => k,
-                    _ => {
-                        return Ok(None);
-                    }
-                },
-            }
-        } else {
-            match get_first_in_range(events_self_table, before_pivot)? {
-                Some(k) => k,
-                _ => match get_last_in_range(events_self_table, after_pivot)? {
-                    Some(k) => k,
-                    _ => {
-                        return Ok(None);
-                    }
-                },
-            }
-        }))
+        Self::get_random_table_key(events_self_table)
     }
 
     pub fn read_iroh_secret_tx(

@@ -1,4 +1,5 @@
-use rand::Rng as _;
+use std::collections::BTreeSet;
+
 use rostra_core::event::{EventAuxKey, EventExt as _, EventKind, content_kind};
 use rostra_core::id::RostraId;
 use rostra_core::{ExternalEventId, ShortEventId, Timestamp};
@@ -261,25 +262,20 @@ impl Database {
     pub async fn get_random_news_post_ids(&self, limit: usize) -> Vec<ExternalEventId> {
         self.read_with(|tx| {
             let table = tx.open_table(&social_news_rank_by_post_id::TABLE)?;
-            let mut rng = rand::rng();
-            let mut reservoir = Vec::new();
-            let mut seen = 0usize;
+            let mut post_ids = BTreeSet::new();
+            let max_attempts = limit.saturating_mul(4).max(limit);
 
-            for entry in table.range(..)? {
-                let (key, _) = entry?;
-                seen += 1;
-                let post_id = key.value();
-                if reservoir.len() < limit {
-                    reservoir.push(post_id);
-                } else {
-                    let replace_index = rng.random_range(0..seen);
-                    if replace_index < limit {
-                        reservoir[replace_index] = post_id;
-                    }
+            for _ in 0..max_attempts {
+                let Some(post_id) = Self::get_random_table_key(&table)? else {
+                    break;
+                };
+                post_ids.insert(post_id);
+                if limit <= post_ids.len() {
+                    break;
                 }
             }
 
-            Ok(reservoir)
+            Ok(post_ids.into_iter().collect())
         })
         .await
         .expect("Storage error")
