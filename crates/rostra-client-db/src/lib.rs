@@ -2,6 +2,7 @@ mod events_content_missing_ops;
 mod id_nodes_ops;
 mod migration_ops;
 mod models;
+pub mod news;
 mod paginate;
 mod process_event_content_ops;
 mod process_event_ops;
@@ -26,7 +27,7 @@ use rostra_core::event::{
     VerifiedEvent, VerifiedEventContent, content_kind,
 };
 use rostra_core::id::{RostraId, ToShort as _};
-use rostra_core::{ShortEventId, Timestamp};
+use rostra_core::{ExternalEventId, ShortEventId, Timestamp};
 use rostra_util_error::{BoxedError, FmtCompact as _};
 use snafu::{Location, ResultExt as _, Snafu};
 use tokio::sync::{Notify, broadcast, watch};
@@ -219,6 +220,7 @@ pub struct Database {
     new_shoutbox_tx: broadcast::Sender<(VerifiedEventContent, content_kind::Shoutbox)>,
     new_heads_tx: broadcast::Sender<(RostraId, ShortEventId)>,
     ids_with_missing_events_tx: dedup_chan::Sender<RostraId>,
+    news_score_updates_tx: dedup_chan::Sender<ExternalEventId>,
 
     /// Notification for when new content is added to `events_content_missing`.
     ///
@@ -349,6 +351,7 @@ impl Database {
             new_shoutbox_tx,
             new_heads_tx,
             ids_with_missing_events_tx: dedup_chan::Sender::new(),
+            news_score_updates_tx: dedup_chan::Sender::new(),
             content_missing_notify: Arc::new(Notify::new()),
         };
 
@@ -383,6 +386,16 @@ impl Database {
                 }
                 "social_posts_reactions" => {
                     Self::dump_table_dbtx(tx, &tables::social_posts_reactions::TABLE)?
+                }
+                "social_vote_sums" => Self::dump_table_dbtx(tx, &tables::social_vote_sums::TABLE)?,
+                "social_news_rank_by_post_id" => {
+                    Self::dump_table_dbtx(tx, &tables::social_news_rank_by_post_id::TABLE)?
+                }
+                "social_news_rank_by_score" => {
+                    Self::dump_table_dbtx(tx, &tables::social_news_rank_by_score::TABLE)?
+                }
+                "social_news_rank_by_time" => {
+                    Self::dump_table_dbtx(tx, &tables::social_news_rank_by_time::TABLE)?
                 }
                 _ => {
                     return Ok(Err(UnknownTableSnafu {
@@ -441,6 +454,13 @@ impl Database {
         capacity: usize,
     ) -> dedup_chan::Receiver<RostraId> {
         self.ids_with_missing_events_tx.subscribe(capacity)
+    }
+
+    pub fn news_score_updates_subscribe(
+        &self,
+        capacity: usize,
+    ) -> dedup_chan::Receiver<ExternalEventId> {
+        self.news_score_updates_tx.subscribe(capacity)
     }
 
     /// Get a handle to the content-missing notification.

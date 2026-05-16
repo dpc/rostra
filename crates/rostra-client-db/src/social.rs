@@ -765,7 +765,7 @@ impl Database {
         .expect("Storage error")
     }
 
-    fn get_social_post_record_tx(
+    pub(crate) fn get_social_post_record_tx(
         events_table: &impl events::ReadableTable,
         social_posts_table: &impl social_posts::ReadableTable,
         events_content_state_table: &impl events_content_state::ReadableTable,

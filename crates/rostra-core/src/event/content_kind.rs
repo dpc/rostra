@@ -4,6 +4,7 @@ use std::str::FromStr as _;
 
 use snafu::Snafu;
 use unicode_segmentation::UnicodeSegmentation as _;
+use url::Url;
 
 #[cfg(feature = "serde")]
 use super::{EventAuxKey, EventContentRaw, EventKind};
@@ -189,6 +190,12 @@ pub struct SocialPost {
     // "e" for "emoji"
     #[cfg_attr(feature = "serde", serde(rename = "e"))]
     pub reaction: Option<String>,
+    #[cfg_attr(feature = "serde", serde(rename = "u"))]
+    pub url: Option<Url>,
+    #[cfg_attr(feature = "serde", serde(rename = "h"))]
+    pub title: Option<String>,
+    #[cfg_attr(feature = "serde", serde(rename = "n", default))]
+    pub news: bool,
     /// Persona tags for this post
     #[cfg_attr(feature = "serde", serde(rename = "t", default))]
     persona_tags: BTreeSet<PersonaTag>,
@@ -215,6 +222,9 @@ impl SocialPost {
             djot_content,
             reply_to,
             reaction,
+            url: None,
+            title: None,
+            news: false,
             persona_tags,
         }
     }
@@ -279,11 +289,54 @@ impl SocialPost {
 
         Self::is_reaction(&self.reply_to, reaction)
     }
+
+    pub fn with_news_fields(mut self, url: Option<Url>, title: Option<String>) -> Self {
+        self.url = url;
+        self.title = title;
+        self.news = true;
+        self
+    }
 }
 
 #[cfg(feature = "serde")]
 impl EventContentKind for SocialPost {
     const KIND: EventKind = EventKind::SOCIAL_POST;
+}
+
+#[cfg_attr(feature = "serde", derive(::serde::Serialize, ::serde::Deserialize))]
+#[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
+pub struct SocialVote {
+    #[cfg_attr(feature = "serde", serde(rename = "r"))]
+    pub reply_to: Option<ExternalEventId>,
+    #[cfg_attr(feature = "serde", serde(rename = "v"))]
+    pub upvote: Option<bool>,
+}
+
+impl SocialVote {
+    pub fn new(reply_to: ExternalEventId, upvote: Option<bool>) -> Self {
+        Self {
+            reply_to: Some(reply_to),
+            upvote,
+        }
+    }
+
+    pub fn vote_value(&self) -> i64 {
+        match self.upvote {
+            Some(true) => 1,
+            None => 0,
+            Some(false) => -1,
+        }
+    }
+}
+
+#[cfg(feature = "serde")]
+impl EventContentKind for SocialVote {
+    const KIND: EventKind = EventKind::SOCIAL_VOTE;
+
+    fn singleton_key_aux(&self) -> Option<EventAuxKey> {
+        self.reply_to
+            .map(|reply_to| EventAuxKey::from_bytes(reply_to.event_id().to_bytes()))
+    }
 }
 
 /// Shoutbox post - simple broadcast message without persona, replies, or

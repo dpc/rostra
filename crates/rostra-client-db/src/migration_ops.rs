@@ -62,13 +62,13 @@ pub type LegacyContentStoreRecordOwned = LegacyContentStoreRecord<'static>;
 /// Current schema version.
 ///
 /// Increment this when making schema changes that require migration.
-const DB_VER: u64 = 22;
+const DB_VER: u64 = 23;
 
 /// Versions older than this require a total migration.
 ///
 /// This should be set to the version where we last did a major schema
 /// overhaul. Older databases get rebuilt from scratch.
-const DB_VER_REQUIRES_TOTAL_MIGRATION: u64 = 22;
+const DB_VER_REQUIRES_TOTAL_MIGRATION: u64 = 23;
 
 /// Last DB version that used the legacy enum `ContentStoreRecord::Present(...)`
 /// format.
@@ -144,6 +144,10 @@ impl Database {
         tx.open_table(&crate::social_posts_by_received_at::TABLE)?;
         tx.open_table(&crate::social_posts_replies::TABLE)?;
         tx.open_table(&crate::social_posts_reactions::TABLE)?;
+        tx.open_table(&crate::social_vote_sums::TABLE)?;
+        tx.open_table(&crate::social_news_rank_by_post_id::TABLE)?;
+        tx.open_table(&crate::social_news_rank_by_score::TABLE)?;
+        tx.open_table(&crate::social_news_rank_by_time::TABLE)?;
         tx.open_table(&crate::social_posts_self_mention::TABLE)?;
 
         tx.open_table(&crate::shoutbox_posts_by_received_at::TABLE)?;

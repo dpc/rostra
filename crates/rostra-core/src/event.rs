@@ -420,6 +420,7 @@ impl EventKind {
 
     /// Social Post, backbone of the social network
     pub const SOCIAL_POST: Self = EventKind::from_u16(0x20);
+    pub const SOCIAL_VOTE: Self = EventKind::from_u16(0x21);
     pub const SOCIAL_PROFILE_UPDATE: Self = EventKind::from_u16(0x24);
     pub const SOCIAL_MEDIA: Self = EventKind::from_u16(0x25);
     /// Shoutbox post - simple broadcast message
@@ -443,6 +444,7 @@ impl fmt::Display for EventKind {
             Self::UNFOLLOW => "unfollow",
             Self::NODE_ANNOUNCEMENT => "node-announcement",
             Self::SOCIAL_POST => "social-post",
+            Self::SOCIAL_VOTE => "social-vote",
             Self::SOCIAL_PROFILE_UPDATE => "social-profile-update",
             Self::SOCIAL_MEDIA => "social-media",
             Self::SHOUTBOX => "shoutbox",

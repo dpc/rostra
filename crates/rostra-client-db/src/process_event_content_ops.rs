@@ -1,9 +1,9 @@
 use std::cmp;
 use std::sync::Arc;
 
-use rostra_core::Timestamp;
 use rostra_core::event::{EventExt as _, EventKind, VerifiedEventContent, content_kind};
 use rostra_core::id::{RostraId, ToShort as _};
+use rostra_core::{ExternalEventId, Timestamp};
 use rostra_util_error::{BoxedError, FmtCompact as _};
 use snafu::{Location, OptionExt as _, ResultExt as _, Snafu};
 use tracing::debug;
@@ -284,6 +284,18 @@ impl Database {
                         }
                     });
 
+                    if content.news {
+                        let post_id =
+                            ExternalEventId::new(author, event_content.event_id().to_short());
+                        self.upsert_social_news_rank_tx(
+                            post_id,
+                            Self::cap_creation_timestamp(event_content.timestamp(), now),
+                            0,
+                            tx,
+                        )?;
+                        self.notify_news_score_update_on_commit(tx, post_id);
+                    }
+
                     // Check for @mentions of self in the post content
                     if author != self.self_id {
                         if let Some(ref djot_content) = content.djot_content {
@@ -354,6 +366,24 @@ impl Database {
                         social_post_tbl
                             .insert(&reply_to.event_id(), &reply_to_social_post_record)
                             .map_err(DbError::from)?;
+                    }
+                }
+                EventKind::SOCIAL_VOTE => {
+                    let content = event_content
+                        .deserialize_cbor::<content_kind::SocialVote>()
+                        .boxed()
+                        .context(InvalidSnafu)?;
+                    if let Some(reply_to) = content.reply_to {
+                        if event_content.event.is_singleton()
+                            && event_content.aux_key() == Self::social_vote_aux_key(reply_to)
+                        {
+                            self.process_social_vote_tx(
+                                &content,
+                                author,
+                                event_content.timestamp(),
+                                tx,
+                            )?;
+                        }
                     }
                 }
                 EventKind::SHOUTBOX => {
@@ -449,6 +479,16 @@ impl Database {
                         event_content.event_id().to_short(),
                     ))
                     .map_err(DbError::from)?;
+
+                if content.news {
+                    Self::remove_social_news_rank_tx(
+                        ExternalEventId::new(
+                            event_content.author(),
+                            event_content.event_id().to_short(),
+                        ),
+                        tx,
+                    )?;
+                }
 
                 // Remove from self-mention table if present
                 let mut self_mention_tbl = tx

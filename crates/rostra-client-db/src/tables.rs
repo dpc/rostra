@@ -105,7 +105,7 @@ use id_self::IdSelfAccountRecord;
 use ids::{IdsFolloweesRecord, IdsFollowersRecord, IdsPersonaRecord, IdsUnfollowedRecord};
 use rostra_core::event::{EventAuxKey, EventKind, IrohNodeId, PersonaId};
 use rostra_core::id::{RestRostraId, RostraId, ShortRostraId};
-use rostra_core::{ContentHash, ShortEventId, Timestamp};
+use rostra_core::{ContentHash, ExternalEventId, ShortEventId, Timestamp};
 use serde::Serialize;
 
 pub use self::event::{
@@ -506,6 +506,26 @@ def_table! {
 }
 
 def_table! {
+    /// Vote sums keyed by the external id of the voted post.
+    social_vote_sums: ExternalEventId => SocialVoteSumRecord
+}
+
+def_table! {
+    /// News post rank state keyed by post id.
+    social_news_rank_by_post_id: ExternalEventId => SocialNewsRankRecord
+}
+
+def_table! {
+    /// News posts sorted by current rank score.
+    social_news_rank_by_score: (SocialVoteScore, ExternalEventId) => ()
+}
+
+def_table! {
+    /// News posts sorted by creation timestamp.
+    social_news_rank_by_time: (Timestamp, ExternalEventId) => ()
+}
+
+def_table! {
     /// Posts that @mention the local user (self).
     ///
     /// Key: post_event_id
@@ -594,6 +614,20 @@ pub struct SocialPostRecord {
     pub reply_count: u64,
     /// Number of reactions to this post
     pub reaction_count: u64,
+}
+
+pub type SocialVoteScore = i64;
+
+#[derive(Debug, Encode, Decode, Serialize, Clone, Copy)]
+pub struct SocialVoteSumRecord {
+    pub last_vote_time: Timestamp,
+    pub current_sum: i64,
+}
+
+#[derive(Debug, Encode, Decode, Serialize, Clone, Copy)]
+pub struct SocialNewsRankRecord {
+    pub creation_ts: Timestamp,
+    pub score: SocialVoteScore,
 }
 
 /// Information about an iroh network endpoint for an identity.

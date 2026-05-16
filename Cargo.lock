@@ -4205,6 +4205,7 @@ dependencies = [
  "time",
  "tracing",
  "unicode-segmentation",
+ "url",
  "z32",
 ]
 

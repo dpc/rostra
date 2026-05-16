@@ -395,6 +395,7 @@ impl Client {
             client.start_poll_follower_head_updates();
             client.start_poll_followee_head_updates();
             client.start_wot_head_sync();
+            client.start_news_score_updater();
         }
 
         if let Some(secret) = secret {
@@ -546,6 +547,10 @@ impl Client {
 
     pub(crate) fn start_wot_head_sync(&self) {
         tokio::spawn(crate::task::wot_head_sync::WotHeadSync::new(self).run());
+    }
+
+    pub(crate) fn start_news_score_updater(&self) {
+        tokio::spawn(crate::task::news_score_updater::NewsScoreUpdater::new(self).run());
     }
 
     pub(crate) async fn iroh_address(&self) -> WhateverResult<EndpointAddr> {
@@ -786,6 +791,41 @@ impl Client {
         )
         .call()
         .await
+    }
+
+    pub async fn social_news_post(
+        &self,
+        id_secret: RostraIdSecretKey,
+        body: String,
+        url: Option<url::Url>,
+        title: Option<String>,
+    ) -> PostResult<VerifiedEvent> {
+        self.publish_event(
+            id_secret,
+            content_kind::SocialPost::new(
+                body,
+                None,
+                BTreeSet::from([PersonaTag::new("news").expect("valid persona tag")]),
+            )
+            .with_news_fields(url, title),
+        )
+        .call()
+        .await
+    }
+
+    pub async fn set_social_vote(
+        &self,
+        id_secret: RostraIdSecretKey,
+        post_id: ExternalEventId,
+        upvote: Option<bool>,
+    ) -> PostResult<VerifiedEvent> {
+        self.publish_event(id_secret, content_kind::SocialVote::new(post_id, upvote))
+            .call()
+            .await
+    }
+
+    pub async fn get_self_social_vote(&self, post_id: ExternalEventId) -> Option<Option<bool>> {
+        self.db.get_social_vote(self.rostra_id(), post_id).await
     }
     pub async fn post_social_profile_update(
         &self,
