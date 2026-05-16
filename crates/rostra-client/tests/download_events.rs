@@ -49,7 +49,8 @@ async fn test_download_events_from_child() -> BoxedErrorResult<()> {
     let mem_lookup = iroh::address_lookup::memory::MemoryLookup::new();
 
     // Create endpoint A (the server)
-    let ep_a = iroh::Endpoint::empty_builder(iroh::RelayMode::Disabled)
+    let ep_a = iroh::Endpoint::builder(iroh::endpoint::presets::Minimal)
+        .relay_mode(iroh::RelayMode::Disabled)
         .alpns(vec![ROSTRA_P2P_V0_ALPN.to_vec()])
         .address_lookup(mem_lookup.clone())
         .bind()
@@ -65,7 +66,8 @@ async fn test_download_events_from_child() -> BoxedErrorResult<()> {
     mem_lookup.add_endpoint_info(ep_a_addr);
 
     // Create endpoint B (the client)
-    let ep_b = iroh::Endpoint::empty_builder(iroh::RelayMode::Disabled)
+    let ep_b = iroh::Endpoint::builder(iroh::endpoint::presets::Minimal)
+        .relay_mode(iroh::RelayMode::Disabled)
         .alpns(vec![ROSTRA_P2P_V0_ALPN.to_vec()])
         .address_lookup(mem_lookup.clone())
         .bind()
@@ -178,7 +180,8 @@ async fn test_follow_while_running_syncs_events() -> BoxedErrorResult<()> {
     let mem_lookup = iroh::address_lookup::memory::MemoryLookup::new();
 
     // Create endpoint A (serves events)
-    let ep_a = iroh::Endpoint::empty_builder(iroh::RelayMode::Disabled)
+    let ep_a = iroh::Endpoint::builder(iroh::endpoint::presets::Minimal)
+        .relay_mode(iroh::RelayMode::Disabled)
         .alpns(vec![ROSTRA_P2P_V0_ALPN.to_vec()])
         .address_lookup(mem_lookup.clone())
         .bind()
@@ -190,7 +193,8 @@ async fn test_follow_while_running_syncs_events() -> BoxedErrorResult<()> {
     mem_lookup.add_endpoint_info(ep_a_addr);
 
     // Create endpoint B (follows A)
-    let ep_b = iroh::Endpoint::empty_builder(iroh::RelayMode::Disabled)
+    let ep_b = iroh::Endpoint::builder(iroh::endpoint::presets::Minimal)
+        .relay_mode(iroh::RelayMode::Disabled)
         .alpns(vec![ROSTRA_P2P_V0_ALPN.to_vec()])
         .address_lookup(mem_lookup.clone())
         .bind()

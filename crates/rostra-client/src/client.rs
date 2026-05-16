@@ -481,15 +481,14 @@ impl Client {
         iroh_secret: impl Into<Option<iroh::SecretKey>>,
         public_mode: bool,
     ) -> InitResult<iroh::Endpoint> {
+        use iroh::endpoint::presets;
         use iroh::{Endpoint, SecretKey};
-        let secret_key = iroh_secret
-            .into()
-            .unwrap_or_else(|| SecretKey::generate(&mut rand::rng()));
+        let secret_key = iroh_secret.into().unwrap_or_else(SecretKey::generate);
 
         // We rely entirely on tickets published by our own publisher
         // for every RostraId via Pkarr, so we don't need discovery
         // Address lookup is used for publishing our address and resolving others
-        let mut builder = Endpoint::builder()
+        let mut builder = Endpoint::builder(presets::Minimal)
             .secret_key(secret_key)
             .alpns(vec![ROSTRA_P2P_V0_ALPN.to_vec()])
             .address_lookup(PkarrPublisher::n0_dns())

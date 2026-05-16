@@ -3,7 +3,7 @@ use std::collections::{HashMap, HashSet};
 
 use ids::{IdsFollowersRecord, IdsUnfollowedRecord};
 use itertools::Itertools as _;
-use rand::Rng as _;
+use rand::{Rng as _, RngCore as _};
 use redb::StorageError;
 use redb_bincode::{ReadableTable, Table};
 use rostra_core::event::{

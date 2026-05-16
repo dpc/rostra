@@ -114,15 +114,15 @@ impl RequestHandler {
         }
     }
     pub async fn handle_incoming(self: Arc<Self>, incoming: Incoming) {
-        let peer_addr = incoming.remote_address();
+        let peer_addr = incoming.remote_addr();
         if let Err(err) = Arc::clone(&self).handle_incoming_try(incoming).await {
             match err {
                 // normal, mostly ignore
                 IncomingConnectionError::Connection { source: _, .. } => {
-                    trace!(target: LOG_TARGET, err = %err.fmt_compact(), %peer_addr, "Client disconnected");
+                    trace!(target: LOG_TARGET, err = %err.fmt_compact(), ?peer_addr, "Client disconnected");
                 }
                 _ => {
-                    debug!(target: LOG_TARGET, err = %err.fmt_compact(), %peer_addr, "Error handling incoming connection");
+                    debug!(target: LOG_TARGET, err = %err.fmt_compact(), ?peer_addr, "Error handling incoming connection");
                 }
             }
         }

@@ -18,7 +18,8 @@ async fn test_concurrent_rpcs_on_same_connection() {
     let mem_lookup = iroh::address_lookup::memory::MemoryLookup::new();
 
     // Server endpoint
-    let ep_server = iroh::Endpoint::empty_builder(iroh::RelayMode::Disabled)
+    let ep_server = iroh::Endpoint::builder(iroh::endpoint::presets::Minimal)
+        .relay_mode(iroh::RelayMode::Disabled)
         .alpns(vec![ROSTRA_P2P_V0_ALPN.to_vec()])
         .address_lookup(mem_lookup.clone())
         .bind()
@@ -30,7 +31,8 @@ async fn test_concurrent_rpcs_on_same_connection() {
     mem_lookup.add_endpoint_info(server_addr);
 
     // Client endpoint
-    let ep_client = iroh::Endpoint::empty_builder(iroh::RelayMode::Disabled)
+    let ep_client = iroh::Endpoint::builder(iroh::endpoint::presets::Minimal)
+        .relay_mode(iroh::RelayMode::Disabled)
         .alpns(vec![ROSTRA_P2P_V0_ALPN.to_vec()])
         .address_lookup(mem_lookup.clone())
         .bind()
