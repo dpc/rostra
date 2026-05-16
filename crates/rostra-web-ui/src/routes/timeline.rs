@@ -8,20 +8,21 @@ use axum::response::IntoResponse;
 use maud::{Markup, html};
 use rostra_client::ClientRef;
 use rostra_client_db::IdSocialProfileRecord;
+use rostra_client_db::news::NewsRankPaginationCursor;
 use rostra_client_db::social::{
     EventPaginationCursor, ReceivedAtPaginationCursor, SocialPostRecord,
 };
 use rostra_core::event::{EventKind, PersonasTagsSelector, SocialPost, content_kind};
 use rostra_core::id::{RostraId, ToShort as _};
-use rostra_core::{ShortEventId, Timestamp};
+use rostra_core::{ExternalEventId, ShortEventId, Timestamp};
 use rostra_util_error::FmtCompact as _;
 use serde::Deserialize;
 use tower_cookies::Cookies;
 use tracing::debug;
 
-use super::super::error::RequestResult;
+use super::super::error::{BadRequestSnafu, ReadOnlyModeSnafu, RequestError, RequestResult};
 use super::cookies::CookiesExt as _;
-use super::unlock::session::UserSession;
+use super::unlock::session::{RoMode, UserSession};
 use super::{Maud, fragment};
 use crate::html_utils::re_typeset;
 use crate::layout::{FeedLinks, OpenGraphMeta};
@@ -36,11 +37,21 @@ pub struct PendingCounts {
     pub shoutbox: usize,
 }
 
+fn news_vote_controls_html_id(post_id: ExternalEventId) -> String {
+    format!(
+        "news-vote-{}-{}",
+        post_id.rostra_id().to_short(),
+        post_id.event_id().to_short()
+    )
+}
+
 #[derive(Deserialize)]
 pub struct TimelinePaginationInput {
     pub ts: Option<Timestamp>,
     pub seq: Option<u64>,
     pub event_id: Option<ShortEventId>,
+    pub score: Option<i64>,
+    pub post_id: Option<ExternalEventId>,
 }
 
 pub async fn get_followees(
@@ -105,6 +116,85 @@ pub async fn get_network(
             )
             .await?,
     ))
+}
+
+pub async fn get_news(
+    state: State<SharedState>,
+    session: UserSession,
+    mut cookies: Cookies,
+    AjaxRequest(is_ajax): AjaxRequest,
+    Form(form): Form<TimelinePaginationInput>,
+) -> RequestResult<impl IntoResponse> {
+    let pagination = form.score.and_then(|score| {
+        form.post_id
+            .map(|post_id| TimelineCursor::ByNewsRank(NewsRankPaginationCursor { score, post_id }))
+    });
+    let navbar = state
+        .timeline_common_navbar()
+        .session(&session)
+        .hide_new_post_form(true)
+        .call()
+        .await?;
+    Ok(Maud(
+        state
+            .render_timeline_page(
+                navbar,
+                pagination,
+                &session,
+                &mut cookies,
+                TimelineMode::News,
+                is_ajax,
+                None,
+                None,
+            )
+            .await?,
+    ))
+}
+
+#[derive(Deserialize)]
+pub struct NewsVoteInput {
+    post_id: ExternalEventId,
+    vote: String,
+}
+
+pub async fn post_news_vote(
+    state: State<SharedState>,
+    session: UserSession,
+    Form(form): Form<NewsVoteInput>,
+) -> RequestResult<impl IntoResponse> {
+    let upvote = match form.vote.as_str() {
+        "up" => Some(true),
+        "down" => Some(false),
+        "clear" => None,
+        _ => {
+            return Err(RequestError::User {
+                source: BadRequestSnafu {
+                    message: "Invalid vote".to_string(),
+                }
+                .build(),
+            });
+        }
+    };
+    let id_secret = state
+        .id_secret(session.session_token())
+        .ok_or_else(|| ReadOnlyModeSnafu.build())?;
+    let client_handle = state.client(session.id()).await?;
+    let client_ref = client_handle.client_ref()?;
+    client_ref
+        .set_social_vote(id_secret, form.post_id, upvote)
+        .await?;
+    let vote_sum = client_ref.db().get_social_vote_sum(form.post_id).await;
+    let self_vote = client_ref
+        .get_self_social_vote(form.post_id)
+        .await
+        .flatten();
+
+    Ok(Maud(state.render_news_vote_controls(
+        form.post_id,
+        vote_sum,
+        self_vote,
+        state.ro_mode(session.session_token()),
+    )))
 }
 
 pub async fn get_notifications(
@@ -532,7 +622,7 @@ impl UiState {
         }
 
         match mode {
-            TimelineMode::Profile(_) => {
+            TimelineMode::Profile(_) | TimelineMode::News => {
                 Ok((PendingCounts::default(), NotificationDebugInfo::default()))
             }
             TimelineMode::Followees | TimelineMode::Network | TimelineMode::Notifications => {
@@ -768,6 +858,12 @@ impl UiState {
                             "Network"
                             span ."o-mainBarTimeline__newCount" x-text="formatCount(network)" {}
                         }
+                        a ."o-mainBarTimeline__news"
+                            ."-active"[mode.is_news()]
+                            href=(TimelineMode::News.to_path())
+                        {
+                            "News"
+                        }
                         a ."o-mainBarTimeline__notifications"
                             ."-active"[mode.is_notifications()]
                             href=(TimelineMode::Notifications.to_path())
@@ -799,6 +895,11 @@ impl UiState {
                         span class="slider round" { }
                     }
                 }
+                @if mode.is_news() {
+                    div ."o-mainBarTimeline__item" {
+                        (self.news_post_form(self.ro_mode(session.session_token())))
+                    }
+                }
                 div id="new-post-preview" ."o-mainBarTimeline__item -preview -empty" x-sync { }
                 div id="new-post-added" x-merge="after" {}
                 div id="timeline-posts" x-merge="append" {
@@ -825,12 +926,22 @@ impl UiState {
                                         .event_id(post.event_id)
                                         .post_thread_id(post.event_id)
                                         .content(djot_content)
+                                        .maybe_url(post.content.url.as_ref())
+                                        .maybe_title(post.content.title.as_deref())
                                         .reply_count(post.reply_count)
                                         .timestamp(post.ts)
                                         .ro(self.ro_mode(session.session_token()))
                                         .call()
                                         .await?
                                 )
+                                @if mode.is_news() {
+                                    (self.render_news_vote_controls(
+                                        ExternalEventId::new(post.author, post.event_id),
+                                        client_ref.db().get_social_vote_sum(ExternalEventId::new(post.author, post.event_id)).await,
+                                        client_ref.get_self_social_vote(ExternalEventId::new(post.author, post.event_id)).await.flatten(),
+                                        self.ro_mode(session.session_token()),
+                                    ))
+                                }
                             }
                         }
                     }
@@ -850,6 +961,56 @@ impl UiState {
                 }
             }
         })
+    }
+
+    pub(crate) fn render_news_vote_controls(
+        &self,
+        post_id: ExternalEventId,
+        vote_sum: i64,
+        self_vote: Option<bool>,
+        ro: RoMode,
+    ) -> Markup {
+        let controls_id = news_vote_controls_html_id(post_id);
+        let up_vote_value = if self_vote == Some(true) {
+            "clear"
+        } else {
+            "up"
+        };
+        let down_vote_value = if self_vote == Some(false) {
+            "clear"
+        } else {
+            "down"
+        };
+
+        html! {
+            div #(controls_id) ."m-newsVote" {
+                form action="/news/vote" method="post" x-target=(controls_id) {
+                    input type="hidden" name="post_id" value=(post_id) {}
+                    button
+                        ."m-newsVote__button"
+                        ."-active"[self_vote == Some(true)]
+                        type="submit"
+                        name="vote"
+                        value=(up_vote_value)
+                        title="Upvote"
+                        disabled[ro.to_disabled()]
+                    { "▲" }
+                }
+                span ."m-newsVote__score" { (vote_sum) }
+                form action="/news/vote" method="post" x-target=(controls_id) {
+                    input type="hidden" name="post_id" value=(post_id) {}
+                    button
+                        ."m-newsVote__button"
+                        ."-active"[self_vote == Some(false)]
+                        type="submit"
+                        name="vote"
+                        value=(down_vote_value)
+                        title="Downvote"
+                        disabled[ro.to_disabled()]
+                    { "▼" }
+                }
+            }
+        }
     }
 
     pub(crate) fn render_user_handle(
@@ -891,6 +1052,7 @@ impl UiState {
 pub(crate) enum TimelineCursor {
     ByEventTime(EventPaginationCursor),
     ByReceivedTime(ReceivedAtPaginationCursor),
+    ByNewsRank(NewsRankPaginationCursor),
 }
 
 impl TimelineCursor {
@@ -903,6 +1065,9 @@ impl TimelineCursor {
             TimelineCursor::ByReceivedTime(c) => {
                 format!("ts={}&seq={}", c.ts, c.seq)
             }
+            TimelineCursor::ByNewsRank(c) => {
+                format!("score={}&post_id={}", c.score, c.post_id)
+            }
         }
     }
 }
@@ -911,6 +1076,7 @@ impl TimelineCursor {
 pub(crate) enum TimelineMode {
     Followees,
     Network,
+    News,
     Notifications,
     Profile(RostraId),
 }
@@ -920,6 +1086,7 @@ impl TimelineMode {
         match self {
             TimelineMode::Followees => "/following".to_string(),
             TimelineMode::Network => "/network".to_string(),
+            TimelineMode::News => "/news".to_string(),
             TimelineMode::Notifications => "/notifications".to_string(),
             TimelineMode::Profile(rostra_id) => format!("/profile/{rostra_id}"),
         }
@@ -934,6 +1101,9 @@ impl TimelineMode {
     fn is_notifications(&self) -> bool {
         *self == TimelineMode::Notifications
     }
+    fn is_news(&self) -> bool {
+        *self == TimelineMode::News
+    }
 
     fn is_profile(&self) -> bool {
         matches!(self, TimelineMode::Profile(_))
@@ -944,6 +1114,21 @@ impl TimelineMode {
         pagination: Option<TimelineCursor>,
     ) -> (Vec<SocialPostRecord<SocialPost>>, Option<TimelineCursor>) {
         let filter_fn = self.to_filter_fn(client).await;
+
+        if matches!(self, Self::News) {
+            let cursor = pagination.and_then(|c| match c {
+                TimelineCursor::ByNewsRank(c) => Some(c),
+                _ => None,
+            });
+            let (posts, next) = client
+                .db()
+                .paginate_news_posts_by_rank_rev(cursor, 20)
+                .await;
+            return (
+                posts.into_iter().map(|record| record.post).collect(),
+                next.map(TimelineCursor::ByNewsRank),
+            );
+        }
 
         // For Notifications, order by when we received posts rather than when
         // they were authored. This ensures new notifications appear at the top.
@@ -999,6 +1184,7 @@ impl TimelineMode {
                 // TODO: actually verify against extended followees
                 move |post| post.author != self_id,
             ),
+            TimelineMode::News => Box::new(|post| post.content.news),
             TimelineMode::Notifications => {
                 let self_mentions = client.db().get_self_mentions().await;
                 Box::new(move |post| {

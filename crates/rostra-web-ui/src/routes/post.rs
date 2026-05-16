@@ -13,6 +13,7 @@ use rostra_core::{ExternalEventId, ShortEventId, Timestamp};
 use serde::Deserialize;
 use tower_cookies::Cookies;
 use tracing::debug;
+use url::Url;
 
 use super::unlock::session::{RoMode, UserSession};
 use super::{Maud, fragment};
@@ -411,6 +412,8 @@ impl UiState {
         /// multiple places). If not provided, defaults to event_id.
         post_thread_id: Option<ShortEventId>,
         content: Option<&str>,
+        url: Option<&Url>,
+        title: Option<&str>,
         reply_count: Option<u64>,
         timestamp: Option<Timestamp>,
         ro: RoMode,
@@ -462,6 +465,8 @@ impl UiState {
             .maybe_event_id(event_id)
             .maybe_post_thread_id(post_thread_id)
             .maybe_content(content)
+            .maybe_url(url)
+            .maybe_title(title)
             .maybe_reply_count(reply_count)
             .maybe_timestamp(timestamp)
             .ro(ro)
@@ -487,6 +492,8 @@ impl UiState {
                             .maybe_post_thread_id(post_thread_id)
                             .ro(ro)
                             .maybe_content(reply_to_post.and_then(|r| r.content.djot_content.as_deref()))
+                            .maybe_url(reply_to_post.and_then(|r| r.content.url.as_ref()))
+                            .maybe_title(reply_to_post.and_then(|r| r.content.title.as_deref()))
                             .maybe_timestamp(reply_to_post.map(|r| r.ts))
                             .call()
                         ).await?)
@@ -514,6 +521,8 @@ impl UiState {
         /// multiple places). If not provided, defaults to event_id.
         post_thread_id: Option<ShortEventId>,
         content: Option<&str>,
+        url: Option<&Url>,
+        title: Option<&str>,
         reply_count: Option<u64>,
         timestamp: Option<Timestamp>,
         ro: RoMode,
@@ -574,6 +583,26 @@ impl UiState {
             }
         };
 
+        let fetched_post = if url.is_none() || title.is_none() {
+            if let Some(event_id) = event_id {
+                client.db().get_social_post(event_id).await
+            } else {
+                None
+            }
+        } else {
+            None
+        };
+        let post_url = url.cloned().or_else(|| {
+            fetched_post
+                .as_ref()
+                .and_then(|post| post.content.url.clone())
+        });
+        let post_title = title.map(str::to_string).or_else(|| {
+            fetched_post
+                .as_ref()
+                .and_then(|post| post.content.title.clone())
+        });
+
         let post_content_rendered = if let Some(content) = content.as_ref() {
             Some(self.render_content(client, author, content).await)
         } else {
@@ -614,6 +643,21 @@ impl UiState {
                                         }
                                     }
                                 }
+                            }
+                        }
+                        @if let Some(url) = post_url.as_ref() {
+                            div ."m-postView__linkHeader" {
+                                a href=(url.as_str()) target="_blank" rel="noopener noreferrer" {
+                                    @if let Some(title) = post_title.as_ref() {
+                                        (title)
+                                    } @else {
+                                        (url.as_str())
+                                    }
+                                }
+                            }
+                        } @else if let Some(title) = post_title.as_ref() {
+                            div ."m-postView__linkHeader" {
+                                (title)
                             }
                         }
                     }

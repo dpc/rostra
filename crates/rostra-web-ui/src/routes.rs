@@ -144,7 +144,14 @@ async fn robots_txt(state: State<SharedState>) -> impl IntoResponse {
 }
 
 async fn sitemap_xml(state: State<SharedState>) -> impl IntoResponse {
-    const PATHS: &[&str] = &["/", "/home", "/following", "/network", "/notifications"];
+    const PATHS: &[&str] = &[
+        "/",
+        "/home",
+        "/following",
+        "/network",
+        "/news",
+        "/notifications",
+    ];
 
     let urls: String = PATHS
         .iter()
@@ -177,6 +184,8 @@ pub fn route_handler(state: SharedState) -> Router<Arc<UiState>> {
         .route("/home", get(welcome::get_home))
         .route("/following", get(timeline::get_followees))
         .route("/network", get(timeline::get_network))
+        .route("/news", get(timeline::get_news))
+        .route("/news/vote", post(timeline::post_news_vote))
         .route("/notifications", get(timeline::get_notifications))
         .route("/profile/{id}", get(profile::get_profile))
         .route("/profile/{id}/atom.xml", get(feeds::get_profile_feed_atom))

@@ -703,6 +703,20 @@ body:not(.-keyboard-nav) .m-postView__body:has(.m-postView__main[data-href]):hov
   content: ", ";
 }
 
+.m-postView__linkHeader {
+  font-weight: 600;
+  margin-top: 0.25rem;
+}
+
+.m-postView__linkHeader a {
+  color: var(--color-link);
+  text-decoration: none;
+}
+
+.m-postView__linkHeader a:hover {
+  text-decoration: underline;
+}
+
 .m-newPostForm__emojiButton,
 .m-newPostForm__attachButton,
 .m-newPostForm__helpButton {
@@ -1066,13 +1080,54 @@ emoji-picker {
 }
 
 
-.m-newPostForm__content {
+.m-newPostForm__content,
+.m-newPostForm__title,
+.m-newPostForm__url {
   box-sizing: border-box;
   width: 100%;
   padding: 5pt;
-  height: 10rem;
   border: 1px solid var(--color-button-border);
   border-radius: var(--border-radius-std);
+}
+
+.m-newPostForm__content {
+  height: 10rem;
+}
+
+.m-newsVote {
+  align-items: center;
+  display: flex;
+  gap: 0.5rem;
+  padding: 0 0.5rem 0.5rem;
+}
+
+.m-newsVote form {
+  margin: 0;
+}
+
+.m-newsVote__button {
+  background: transparent;
+  border: 1px solid var(--color-button-border);
+  border-radius: var(--border-radius-std);
+  color: inherit;
+  cursor: pointer;
+  padding: 0.15rem 0.4rem;
+}
+
+.m-newsVote__button.-active {
+  background: var(--color-button-bg-hover);
+  font-weight: 700;
+}
+
+.m-newsVote__button:disabled {
+  cursor: default;
+  opacity: 0.5;
+}
+
+.m-newsVote__score {
+  font-weight: 700;
+  min-width: 2ch;
+  text-align: center;
 }
 
 .m-newPostForm__footer {

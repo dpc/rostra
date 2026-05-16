@@ -10,9 +10,10 @@ use rostra_core::id::{RostraId, ToShort as _};
 use rostra_core::{ExternalEventId, ShortEventId};
 use serde::Deserialize;
 use tower_cookies::Cookies;
+use url::Url;
 
 use super::super::SharedState;
-use super::super::error::{ReadOnlyModeSnafu, RequestResult};
+use super::super::error::{BadRequestSnafu, ReadOnlyModeSnafu, RequestError, RequestResult};
 use super::cookies::CookiesExt as _;
 use super::post::{
     post_inline_reply_added_html_id, post_inline_reply_form_html_id,
@@ -30,10 +31,45 @@ pub struct PostInput {
     content: String,
     #[serde(default)]
     persona_tags: Vec<String>,
+    #[serde(default)]
+    news: bool,
+    title: Option<String>,
+    url: Option<String>,
     /// For inline reply mode: the post thread context ID
     post_thread_id: Option<ShortEventId>,
     /// Where to redirect after posting (no-JS fallback)
     redirect: Option<String>,
+}
+
+fn bad_request(message: impl Into<String>) -> RequestError {
+    RequestError::User {
+        source: BadRequestSnafu {
+            message: message.into(),
+        }
+        .build(),
+    }
+}
+
+fn news_persona_tags() -> BTreeSet<PersonaTag> {
+    BTreeSet::from([PersonaTag::new("news").expect("valid persona tag")])
+}
+
+fn normalized_news_title(title: Option<&str>) -> RequestResult<String> {
+    let title = title.unwrap_or_default().trim();
+    if title.is_empty() {
+        return Err(bad_request("News title is required"));
+    }
+    Ok(title.to_string())
+}
+
+fn parse_news_url(url: Option<&str>) -> RequestResult<Option<Url>> {
+    let url = url.unwrap_or_default().trim();
+    if url.is_empty() {
+        return Ok(None);
+    }
+    Url::parse(url)
+        .map(Some)
+        .map_err(|_| bad_request("News URL is invalid"))
 }
 
 fn focus_on_new_post_content_input() -> Markup {
@@ -88,28 +124,47 @@ pub async fn post_new_post(
     let client_handle = state.client(session.id()).await?;
     let client_ref = client_handle.client_ref()?;
 
-    // Convert form persona_tags to BTreeSet<PersonaTag>
-    let persona_tags: BTreeSet<PersonaTag> = form
-        .persona_tags
-        .iter()
-        .filter_map(|s| PersonaTag::new(s).ok())
-        .collect();
+    let (persona_tags, news_title, news_url) = if form.news {
+        (
+            news_persona_tags(),
+            Some(normalized_news_title(form.title.as_deref())?),
+            parse_news_url(form.url.as_deref())?,
+        )
+    } else {
+        let persona_tags: BTreeSet<PersonaTag> = form
+            .persona_tags
+            .iter()
+            .filter_map(|s| PersonaTag::new(s).ok())
+            .collect();
 
-    // Save the selected persona tags in a cookie
-    if !persona_tags.is_empty() {
-        cookies.save_persona_tags(client_ref.rostra_id(), &persona_tags);
-    }
+        if !persona_tags.is_empty() {
+            cookies.save_persona_tags(client_ref.rostra_id(), &persona_tags);
+        }
+
+        (persona_tags, None, None)
+    };
 
     let redirect_to = form.redirect.clone();
 
-    let event = client_ref
-        .social_post(
-            id_secret,
-            form.content.clone(),
-            form.reply_to,
-            persona_tags.clone(),
-        )
-        .await?;
+    let event = if form.news {
+        client_ref
+            .social_news_post(
+                id_secret,
+                form.content.clone(),
+                news_url.clone(),
+                news_title.clone(),
+            )
+            .await?
+    } else {
+        client_ref
+            .social_post(
+                id_secret,
+                form.content.clone(),
+                form.reply_to,
+                persona_tags.clone(),
+            )
+            .await?
+    };
 
     // No-JS: redirect back to the page the user was on
     if !is_ajax {
@@ -182,11 +237,15 @@ pub async fn post_new_post(
     // Standard new post handling
     // Clear the form content after posting (clear_content = true clears persisted
     // draft)
-    let clean_form = state.new_post_form_inner(
-        state.ro_mode(session.session_token()),
-        Some(client_ref.rostra_id()),
-        true,
-    );
+    let clean_form = if form.news {
+        state.news_post_form_inner(state.ro_mode(session.session_token()), true)
+    } else {
+        state.new_post_form_inner(
+            state.ro_mode(session.session_token()),
+            Some(client_ref.rostra_id()),
+            true,
+        )
+    };
 
     let self_id = client_ref.rostra_id();
     let event_id = event.event_id.to_short();
@@ -213,10 +272,20 @@ pub async fn post_new_post(
                     .event_id(event_id)
                     .post_thread_id(event_id)
                     .content(&form.content)
+                    .maybe_url(news_url.as_ref())
+                    .maybe_title(news_title.as_deref())
                     .timestamp(rostra_core::Timestamp::now())
                     .ro(state.ro_mode(session.session_token()))
                     .call().await?
                 )
+                @if form.news {
+                    (state.render_news_vote_controls(
+                        ExternalEventId::new(self_id, event_id),
+                        0,
+                        None,
+                        state.ro_mode(session.session_token()),
+                    ))
+                }
             }
         }
 
@@ -254,14 +323,18 @@ pub async fn post_post_preview_dialog(
     let client_ref = client.client_ref()?;
     let self_id = client_ref.rostra_id();
 
-    if form.content.trim().is_empty() {
-        return Err(crate::error::RequestError::User {
-            source: crate::error::BadRequestSnafu {
-                message: "Post content cannot be empty",
-            }
-            .build(),
-        });
-    }
+    let (preview_persona_tags, news_title, news_url) = if form.news {
+        (
+            Some(news_persona_tags()),
+            Some(normalized_news_title(form.title.as_deref())?),
+            parse_news_url(form.url.as_deref())?,
+        )
+    } else {
+        if form.content.trim().is_empty() {
+            return Err(bad_request("Post content cannot be empty"));
+        }
+        (None, None, None)
+    };
 
     let mut persona_tags_for_id = client_ref.db().get_persona_tags_for_id(self_id).await;
     persona_tags_for_id.extend(PersonaTag::defaults());
@@ -276,7 +349,10 @@ pub async fn post_post_preview_dialog(
 
     let preview_content = state
         .render_post_context(&client.client_ref()?, self_id)
+        .maybe_persona_tags(preview_persona_tags.as_ref())
         .content(&form.content)
+        .maybe_url(news_url.as_ref())
+        .maybe_title(news_title.as_deref())
         .timestamp(rostra_core::Timestamp::now())
         .ro(state.ro_mode(session.session_token()))
         .call()
@@ -300,6 +376,8 @@ pub async fn post_post_preview_dialog(
                         let preview_id = post_inline_reply_preview_html_id(post_thread_id, reply_to_id);
                         let added_id = post_inline_reply_added_html_id(post_thread_id, reply_to_id);
                         format!("{form_id} {preview_id} {added_id} post-preview-dialog ajax-scripts")
+                    } else if form.news {
+                        "news-post-form post-preview-dialog new-post-preview new-post-added ajax-scripts".to_string()
                     } else {
                         "new-post-form post-preview-dialog new-post-preview new-post-added ajax-scripts".to_string()
                     };
@@ -313,6 +391,15 @@ pub async fn post_post_preview_dialog(
                             "@ajax:after"=(ajax_attrs.after)
                         {
                             input type="hidden" name="content" value=(form.content) {}
+                            @if form.news {
+                                input type="hidden" name="news" value="true" {}
+                                @if let Some(title) = news_title.as_ref() {
+                                    input type="hidden" name="title" value=(title) {}
+                                }
+                                @if let Some(url) = news_url.as_ref() {
+                                    input type="hidden" name="url" value=(url.as_str()) {}
+                                }
+                            }
                             @if let Some(reply_to) = form.reply_to {
                                 input type="hidden" name="reply_to" value=(reply_to) {}
                             }
@@ -322,11 +409,13 @@ pub async fn post_post_preview_dialog(
 
                             div ."o-previewDialog__actionContainer" {
                                 div ."o-previewDialog__personaContainer" {
-                                    (fragment::persona_tag_select("persona_tags")
-                                        .available_tags(&persona_tags_for_id)
-                                        .selected_tags(&saved_persona_tags)
-                                        .id("post-persona-tags")
-                                        .call())
+                                    @if !form.news {
+                                        (fragment::persona_tag_select("persona_tags")
+                                            .available_tags(&persona_tags_for_id)
+                                            .selected_tags(&saved_persona_tags)
+                                            .id("post-persona-tags")
+                                            .call())
+                                    }
                                 }
 
                                 div ."o-previewDialog__actionButtons" {
@@ -354,6 +443,15 @@ pub async fn post_post_preview_dialog(
         div ."o-mainBarTimeline__item" {
             form action="/post" method="post" {
                 input type="hidden" name="content" value=(form.content) {}
+                @if form.news {
+                    input type="hidden" name="news" value="true" {}
+                    @if let Some(title) = news_title.as_ref() {
+                        input type="hidden" name="title" value=(title) {}
+                    }
+                    @if let Some(url) = news_url.as_ref() {
+                        input type="hidden" name="url" value=(url.as_str()) {}
+                    }
+                }
                 @if let Some(ref redirect) = redirect_to {
                     input type="hidden" name="redirect" value=(redirect) {}
                 }
@@ -366,11 +464,13 @@ pub async fn post_post_preview_dialog(
 
                 div ."o-previewDialog__actionContainer" {
                     div ."o-previewDialog__personaContainer" {
-                        (fragment::persona_tag_select("persona_tags")
-                            .available_tags(&persona_tags_for_id)
-                            .selected_tags(&saved_persona_tags)
-                            .id("post-persona-tags-nojs")
-                            .call())
+                        @if !form.news {
+                            (fragment::persona_tag_select("persona_tags")
+                                .available_tags(&persona_tags_for_id)
+                                .selected_tags(&saved_persona_tags)
+                                .id("post-persona-tags-nojs")
+                                .call())
+                        }
                     }
 
                     (fragment::button("o-previewDialog__submitButton", "Post").call())
@@ -393,8 +493,28 @@ pub async fn get_new_post_preview(
 ) -> RequestResult<impl IntoResponse> {
     let client = state.client(session.id()).await?;
     let self_id = client.client_ref()?.rostra_id();
+    let news_title = if form.news {
+        form.title
+            .as_deref()
+            .map(str::trim)
+            .filter(|title| !title.is_empty())
+    } else {
+        None
+    };
+    let news_url = if form.news {
+        parse_news_url(form.url.as_deref())?
+    } else {
+        None
+    };
+    let preview_persona_tags = form.news.then(news_persona_tags);
+    let has_preview = if form.news {
+        news_title.is_some() || !form.content.is_empty()
+    } else {
+        !form.content.is_empty()
+    };
+
     Ok(Maud(html! {
-        @if !form.content.is_empty() {
+        @if has_preview {
             div id="new-post-preview" ."o-mainBarTimeline__item -preview"
                 ."-reply"[form.reply_to.is_some()]
                 ."-post"[form.reply_to.is_none()]
@@ -403,7 +523,10 @@ pub async fn get_new_post_preview(
                     &client.client_ref()?,
                     self_id
                     )
+                    .maybe_persona_tags(preview_persona_tags.as_ref())
                     .content(&form.content)
+                    .maybe_url(news_url.as_ref())
+                    .maybe_title(news_title)
                     .timestamp(rostra_core::Timestamp::now())
                     .ro(state.ro_mode(session.session_token()))
                     .call().await?
@@ -827,6 +950,164 @@ impl UiState {
                 // Note: preview container is added by caller as a sibling, not here
 
                 (focus_on_inline_reply_content(&textarea_id))
+            }
+        }
+    }
+
+    pub(crate) fn news_post_form(&self, ro: RoMode) -> Markup {
+        self.news_post_form_inner(ro, false)
+    }
+
+    pub(crate) fn news_post_form_inner(&self, ro: RoMode, clear_content: bool) -> Markup {
+        let preview_update = r#"
+            const previewForm = document.getElementById('new-post-preview-form');
+            previewForm.querySelector('input[name=content]').value = document.getElementById('new-post-content')?.value ?? '';
+            previewForm.querySelector('input[name=title]').value = document.getElementById('news-post-title')?.value ?? '';
+            previewForm.querySelector('input[name=url]').value = document.getElementById('news-post-url')?.value ?? '';
+            previewForm.requestSubmit();
+        "#;
+
+        html! {
+            form id="new-post-preview-form"
+                action="/post/new_post_preview"
+                method="post"
+                style="display: none;"
+                x-target="new-post-preview"
+                x-autofocus
+            {
+                input type="hidden" name="news" value="true" {}
+                input type="hidden" name="title" value="" {}
+                input type="hidden" name="url" value="" {}
+                input type="hidden" name="content" value="" {}
+            }
+
+            @let form_ajax = fragment::AjaxLoadingAttrs::for_class("m-newPostForm__previewButton");
+            form id="news-post-form" ."m-newPostForm" ."m-newsPostForm"
+                action="/post/preview_dialog"
+                method="post"
+                x-target="post-preview-dialog"
+                x-data=(if ro.is_ro() {
+                    "{ content: '', title: '', url: '' }"
+                } else {
+                    "{ content: $persist('').as('news-post-content'), title: $persist('').as('news-post-title'), url: $persist('').as('news-post-url') }"
+                })
+                x-init=[clear_content.then_some("content = ''; title = ''; url = ''")]
+                "@ajax:before"=(form_ajax.before)
+                "@ajax:after"=(form_ajax.after)
+            {
+                input type="hidden" name="news" value="true" {}
+                input
+                    id="news-post-title"
+                    ."m-newPostForm__title"
+                    type="text"
+                    name="title"
+                    placeholder="News title"
+                    x-model="title"
+                    required
+                    disabled[ro.to_disabled()]
+                    "@input"=(preview_update)
+                    {}
+                input
+                    id="news-post-url"
+                    ."m-newPostForm__url"
+                    type="url"
+                    name="url"
+                    placeholder="URL (optional)"
+                    x-model="url"
+                    disabled[ro.to_disabled()]
+                    "@input"=(preview_update)
+                    {}
+
+                div ."m-newPostForm__textareaWrapper"
+                    x-data="textAutocomplete"
+                    style="position: relative;"
+                {
+                    textarea
+                        id="new-post-content"
+                        ."m-newPostForm__content"
+                        placeholder="Discussion text (optional)"
+                        dir="auto"
+                        name="content"
+                        x-model="content"
+                        "@input"=(format!("handleInput($event); {preview_update}"))
+                        "@keydown"="handleKeydown($event)"
+                        autocomplete="off"
+                        disabled[ro.to_disabled()]
+                        "x-on:keyup.enter.ctrl"="$el.form.requestSubmit()"
+                        {}
+
+                    div ."m-textAutocomplete"
+                        x-show="showDropdown"
+                        x-cloak
+                        "@click.outside"="showDropdown = false"
+                    {
+                        template x-if="autocompleteType === 'mention'" {
+                            div {
+                                template x-for="(result, index) in results" ":key"="result.rostra_id" {
+                                    div ."m-textAutocomplete__item"
+                                        ":class"="{ '-selected': index === selectedIndex }"
+                                        "@click"="selectResult(result)"
+                                    {
+                                        span ."m-textAutocomplete__displayName" x-text="result.display_name" {}
+                                        span ."m-textAutocomplete__id" x-text="'@' + result.rostra_id.substring(0, 8)" {}
+                                    }
+                                }
+                            }
+                        }
+                        template x-if="autocompleteType === 'emoji'" {
+                            div {
+                                template x-for="(result, index) in results" ":key"="index" {
+                                    div ."m-textAutocomplete__item"
+                                        ":class"="{ '-selected': index === selectedIndex }"
+                                        "@click"="selectResult(result)"
+                                    {
+                                        span ."m-textAutocomplete__emoji" x-text="result.emoji" {}
+                                        span ."m-textAutocomplete__shortcode" x-text="':' + result.shortcode + ':'" {}
+                                    }
+                                }
+                            }
+                        }
+                        div x-show="results.length === 0 && query.length > 0" ."m-textAutocomplete__empty" {
+                            "No matches found"
+                        }
+                    }
+                }
+
+                div ."m-newPostForm__footer" {
+                    div ."m-newPostForm__footerRow m-newPostForm__footerRow--main" {
+                        a ."m-newPostForm__helpButton"
+                            href="https://htmlpreview.github.io/?https://github.com/jgm/djot/blob/master/doc/syntax.html"
+                            target="_blank"
+                            title="Formatting help"
+                        {
+                            span ."m-newPostForm__helpButtonIcon" {}
+                        }
+                        a
+                            ."m-newPostForm__emojiButton u-requiresJs"
+                            href="#"
+                            onclick="toggleEmojiPicker('emoji-picker-container', event)"
+                        { "😀" }
+                        @if ro.is_ro() {
+                            (fragment::button("m-newPostForm__logoutButton", "Logout")
+                                .form("ro-logout-form")
+                                .call())
+                        } @else {
+                            (fragment::button("m-newPostForm__previewButton", "Preview")
+                                .call())
+                        }
+                    }
+                }
+            }
+
+            @if ro.is_ro() {
+                form id="ro-logout-form" action="/unlock/logout" method="post" style="display: none;" {}
+            }
+
+            div id="emoji-picker-container" ."m-newPostForm__emojiBar -hidden"
+                role="tooltip" {
+                emoji-picker
+                    data-source="/assets/libs/emoji-picker-element/data.json"
+                {}
             }
         }
     }
