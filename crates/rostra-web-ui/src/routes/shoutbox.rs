@@ -140,6 +140,11 @@ pub async fn get_shoutbox(
                     "Network"
                     span ."o-mainBarTimeline__newCount" x-text="formatCount(network)" {}
                 }
+                a ."o-mainBarTimeline__news"
+                    href="/news"
+                {
+                    "News"
+                }
                 a ."o-mainBarTimeline__notifications"
                     href="/notifications"
                     ":class"="{ '-pending': notifications > 0 }"
