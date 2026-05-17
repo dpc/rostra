@@ -133,6 +133,7 @@ pub async fn get_news(
         .timeline_common_navbar()
         .session(&session)
         .hide_new_post_form(true)
+        .show_news_post_form(true)
         .call()
         .await?;
     Ok(Maud(
@@ -340,6 +341,9 @@ impl UiState {
         /// has its own input)
         #[builder(default)]
         hide_new_post_form: bool,
+        /// If true, show the news post form in place of the regular post form.
+        #[builder(default)]
+        show_news_post_form: bool,
     ) -> RequestResult<Markup> {
         let client = self.client(session.id()).await?;
         let client_ref = client.client_ref()?;
@@ -354,7 +358,9 @@ impl UiState {
                     (self.render_self_profile_summary(session).await?)
                 }
 
-                @if !hide_new_post_form {
+                @if show_news_post_form {
+                    (self.news_post_form(ro_mode))
+                } @else if !hide_new_post_form {
                     (self.new_post_form(None, ro_mode, Some(user_id)))
                 }
             }
@@ -893,11 +899,6 @@ impl UiState {
                             onclick="this.closest('.o-mainBarTimeline').classList.toggle('-hideReplies', !this.checked)"
                         { }
                         span class="slider round" { }
-                    }
-                }
-                @if mode.is_news() {
-                    div ."o-mainBarTimeline__item" {
-                        (self.news_post_form(self.ro_mode(session.session_token())))
                     }
                 }
                 div id="new-post-preview" ."o-mainBarTimeline__item -preview -empty" x-sync { }

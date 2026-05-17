@@ -532,7 +532,9 @@ pub async fn get_new_post_preview(
                     .call().await?
                 )
                 (scroll_new_post_preview_into_view())
-                (focus_on_new_post_content_input())
+                @if !form.news {
+                    (focus_on_new_post_content_input())
+                }
                 (re_typeset())
             }
         } @else {
