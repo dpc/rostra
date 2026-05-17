@@ -416,6 +416,7 @@ impl UiState {
         title: Option<&str>,
         reply_count: Option<u64>,
         timestamp: Option<Timestamp>,
+        extra_buttons: Option<Markup>,
         ro: RoMode,
     ) -> RequestResult<Markup> {
         // Note: we are actually not doing pagination, and just ignore
@@ -469,6 +470,7 @@ impl UiState {
             .maybe_title(title)
             .maybe_reply_count(reply_count)
             .maybe_timestamp(timestamp)
+            .maybe_extra_buttons(extra_buttons)
             .ro(ro)
             .call()
             .await?;
@@ -525,6 +527,7 @@ impl UiState {
         title: Option<&str>,
         reply_count: Option<u64>,
         timestamp: Option<Timestamp>,
+        extra_buttons: Option<Markup>,
         ro: RoMode,
     ) -> RequestResult<Markup> {
         let external_event_id = event_id.map(|e| ExternalEventId::new(author, e));
@@ -711,6 +714,9 @@ impl UiState {
                         (reactions_html)
                     }
                     div ."m-postView__buttons" {
+                        @if let Some(extra_buttons) = extra_buttons {
+                            (extra_buttons)
+                        }
                         @if let Some(reply_count) = reply_count {
                             @if reply_count > 0 {
                                 @if let Some(ctx) = post_thread_id {

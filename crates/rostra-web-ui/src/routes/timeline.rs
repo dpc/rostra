@@ -907,6 +907,17 @@ impl UiState {
                     @for post in &filtered_posts {
                         @if let Some(djot_content) = post.content.djot_content.as_ref() {
                             @let effective_tags = post.content.persona_tags();
+                            @let post_id = ExternalEventId::new(post.author, post.event_id);
+                            @let extra_buttons = if mode.is_news() {
+                                Some(self.render_news_vote_controls(
+                                    post_id,
+                                    client_ref.db().get_social_vote_sum(post_id).await,
+                                    client_ref.get_self_social_vote(post_id).await.flatten(),
+                                    self.ro_mode(session.session_token()),
+                                ))
+                            } else {
+                                None
+                            };
                             div ."o-mainBarTimeline__item"
                             ."-reply"[post.reply_to.is_some()]
                             ."-post"[post.reply_to.is_none()]
@@ -931,18 +942,11 @@ impl UiState {
                                         .maybe_title(post.content.title.as_deref())
                                         .reply_count(post.reply_count)
                                         .timestamp(post.ts)
+                                        .maybe_extra_buttons(extra_buttons)
                                         .ro(self.ro_mode(session.session_token()))
                                         .call()
                                         .await?
                                 )
-                                @if mode.is_news() {
-                                    (self.render_news_vote_controls(
-                                        ExternalEventId::new(post.author, post.event_id),
-                                        client_ref.db().get_social_vote_sum(ExternalEventId::new(post.author, post.event_id)).await,
-                                        client_ref.get_self_social_vote(ExternalEventId::new(post.author, post.event_id)).await.flatten(),
-                                        self.ro_mode(session.session_token()),
-                                    ))
-                                }
                             }
                         }
                     }
@@ -988,27 +992,29 @@ impl UiState {
                 form action="/news/vote" method="post" x-target=(controls_id) {
                     input type="hidden" name="post_id" value=(post_id) {}
                     button
-                        ."m-newsVote__button"
+                        ."m-newsVote__button u-button"
                         ."-active"[self_vote == Some(true)]
                         type="submit"
                         name="vote"
                         value=(up_vote_value)
                         title="Upvote"
+                        aria-label="Upvote"
                         disabled[ro.to_disabled()]
-                    { "▲" }
+                    { "👍" }
                 }
-                span ."m-newsVote__score" { (vote_sum) }
+                span ."m-newsVote__score" title="News score" { (vote_sum) }
                 form action="/news/vote" method="post" x-target=(controls_id) {
                     input type="hidden" name="post_id" value=(post_id) {}
                     button
-                        ."m-newsVote__button"
+                        ."m-newsVote__button u-button"
                         ."-active"[self_vote == Some(false)]
                         type="submit"
                         name="vote"
                         value=(down_vote_value)
                         title="Downvote"
+                        aria-label="Downvote"
                         disabled[ro.to_disabled()]
-                    { "▼" }
+                    { "👎" }
                 }
             }
         }
