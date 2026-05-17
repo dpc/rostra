@@ -15,6 +15,8 @@ use crate::{
     social_vote_sums,
 };
 
+pub(crate) const NEWS_MAX_AGE_SECS: u64 = 4 * 365 * 24 * 60 * 60;
+
 #[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 pub struct NewsRankPaginationCursor {
     pub score: SocialVoteScore,
@@ -233,6 +235,15 @@ impl Database {
         let Some(existing) = rank_by_post_id_table.get(&post_id)?.map(|g| g.value()) else {
             return Ok(false);
         };
+
+        if NEWS_MAX_AGE_SECS < now.secs_since(existing.creation_ts) {
+            rank_by_post_id_table.remove(&post_id)?;
+            let mut rank_by_score_table = tx.open_table(&social_news_rank_by_score::TABLE)?;
+            let mut rank_by_time_table = tx.open_table(&social_news_rank_by_time::TABLE)?;
+            rank_by_score_table.remove(&(existing.score, post_id))?;
+            rank_by_time_table.remove(&(existing.creation_ts, post_id))?;
+            return Ok(false);
+        }
 
         let vote_sum = tx
             .open_table(&social_vote_sums::TABLE)?

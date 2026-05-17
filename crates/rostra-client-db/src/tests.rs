@@ -5560,3 +5560,103 @@ async fn test_process_social_vote_with_content() -> BoxedErrorResult<()> {
 
     Ok(())
 }
+
+#[test_log::test(tokio::test(flavor = "multi_thread"))]
+async fn test_expired_news_rank_removed_on_score_recalculation() -> BoxedErrorResult<()> {
+    use rostra_core::{ExternalEventId, ShortEventId, Timestamp};
+
+    use crate::{
+        SocialNewsRankRecord, social_news_rank_by_post_id, social_news_rank_by_score,
+        social_news_rank_by_time,
+    };
+
+    let id_secret = RostraIdSecretKey::generate();
+    let (_dir, db) = temp_db(id_secret.id()).await?;
+    let post_id = ExternalEventId::new(id_secret.id(), ShortEventId::ZERO);
+    let creation_ts = Timestamp::from(1_000);
+    let score = 42;
+    let now = creation_ts.saturating_add_secs(crate::news::NEWS_MAX_AGE_SECS + 1);
+
+    db.write_with(|tx| {
+        tx.open_table(&social_news_rank_by_post_id::TABLE)?
+            .insert(&post_id, &SocialNewsRankRecord { creation_ts, score })?;
+        tx.open_table(&social_news_rank_by_score::TABLE)?
+            .insert(&(score, post_id), &())?;
+        tx.open_table(&social_news_rank_by_time::TABLE)?
+            .insert(&(creation_ts, post_id), &())?;
+
+        let updated = Database::recalculate_news_post_score_tx(post_id, now, tx)?;
+        assert!(!updated);
+
+        assert!(
+            tx.open_table(&social_news_rank_by_post_id::TABLE)?
+                .get(&post_id)?
+                .is_none()
+        );
+        assert!(
+            tx.open_table(&social_news_rank_by_score::TABLE)?
+                .get(&(score, post_id))?
+                .is_none()
+        );
+        assert!(
+            tx.open_table(&social_news_rank_by_time::TABLE)?
+                .get(&(creation_ts, post_id))?
+                .is_none()
+        );
+
+        Ok(())
+    })
+    .await?;
+
+    Ok(())
+}
+
+#[test_log::test(tokio::test(flavor = "multi_thread"))]
+async fn test_news_rank_at_max_age_not_removed_on_score_recalculation() -> BoxedErrorResult<()> {
+    use rostra_core::{ExternalEventId, ShortEventId, Timestamp};
+
+    use crate::{
+        SocialNewsRankRecord, social_news_rank_by_post_id, social_news_rank_by_score,
+        social_news_rank_by_time,
+    };
+
+    let id_secret = RostraIdSecretKey::generate();
+    let (_dir, db) = temp_db(id_secret.id()).await?;
+    let post_id = ExternalEventId::new(id_secret.id(), ShortEventId::ZERO);
+    let creation_ts = Timestamp::from(1_000);
+    let now = creation_ts.saturating_add_secs(crate::news::NEWS_MAX_AGE_SECS);
+    let score = Database::calculate_news_score(creation_ts, 0, now);
+
+    db.write_with(|tx| {
+        tx.open_table(&social_news_rank_by_post_id::TABLE)?
+            .insert(&post_id, &SocialNewsRankRecord { creation_ts, score })?;
+        tx.open_table(&social_news_rank_by_score::TABLE)?
+            .insert(&(score, post_id), &())?;
+        tx.open_table(&social_news_rank_by_time::TABLE)?
+            .insert(&(creation_ts, post_id), &())?;
+
+        let updated = Database::recalculate_news_post_score_tx(post_id, now, tx)?;
+        assert!(updated);
+
+        assert!(
+            tx.open_table(&social_news_rank_by_post_id::TABLE)?
+                .get(&post_id)?
+                .is_some()
+        );
+        assert!(
+            tx.open_table(&social_news_rank_by_score::TABLE)?
+                .get(&(score, post_id))?
+                .is_some()
+        );
+        assert!(
+            tx.open_table(&social_news_rank_by_time::TABLE)?
+                .get(&(creation_ts, post_id))?
+                .is_some()
+        );
+
+        Ok(())
+    })
+    .await?;
+
+    Ok(())
+}
