@@ -850,6 +850,12 @@ impl UiState {
 
                     } @else {
 
+                        a ."o-mainBarTimeline__news"
+                            ."-active"[mode.is_news()]
+                            href=(TimelineMode::News.to_path())
+                        {
+                            "News"
+                        }
                         a ."o-mainBarTimeline__followees"
                             ."-active"[mode.is_followees()]
                             href=(TimelineMode::Followees.to_path())
@@ -863,12 +869,6 @@ impl UiState {
                         {
                             "Network"
                             span ."o-mainBarTimeline__newCount" x-text="formatCount(network)" {}
-                        }
-                        a ."o-mainBarTimeline__news"
-                            ."-active"[mode.is_news()]
-                            href=(TimelineMode::News.to_path())
-                        {
-                            "News"
                         }
                         a ."o-mainBarTimeline__notifications"
                             ."-active"[mode.is_notifications()]

@@ -32,9 +32,9 @@ pub async fn get_landing(
     Ok(Maud(render_welcome_page(has_default_profile)).into_response())
 }
 
-/// Home page - redirects to /following (may change in future).
+/// Home page - redirects to /news.
 pub async fn get_home() -> impl IntoResponse {
-    Redirect::temporary("/following")
+    Redirect::temporary("/news")
 }
 
 fn render_welcome_page(has_default_profile: bool) -> Markup {

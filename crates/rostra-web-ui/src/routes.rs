@@ -147,9 +147,9 @@ async fn sitemap_xml(state: State<SharedState>) -> impl IntoResponse {
     const PATHS: &[&str] = &[
         "/",
         "/home",
+        "/news",
         "/following",
         "/network",
-        "/news",
         "/notifications",
     ];
 
