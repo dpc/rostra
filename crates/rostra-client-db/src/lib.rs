@@ -711,31 +711,29 @@ impl Database {
         now: Timestamp,
         tx: &WriteTransactionCtx,
     ) -> DbResult<()> {
-        let events_table = tx.open_table(&events::TABLE)?;
-        let mut events_content_state_table = tx.open_table(&events_content_state::TABLE)?;
-        let mut content_store_table = tx.open_table(&content_store::TABLE)?;
-        let mut content_rc_table = tx.open_table(&tables::content_rc::TABLE)?;
-        let mut events_content_missing_table =
-            tx.open_table(&tables::events_content_missing::TABLE)?;
-        let mut ids_data_usage_table = tx.open_table(&tables::ids_data_usage::TABLE)?;
-
-        let has_event = Database::has_event_tx(event_content.event.event_id, &events_table)?;
-        if !has_event {
-            // Event doesn't exist - this shouldn't happen in normal operation.
-            // It means process_event_content_tx was called without first inserting the
-            // event.
-            debug_assert!(false, "Processing content for non-existent event");
-            error!(
-                target: LOG_TARGET,
-                event_id = %event_content.event.event_id,
-                "Processing content for non-existent event - possible bug"
-            );
-            return Ok(());
+        {
+            let events_table = tx.open_table(&events::TABLE)?;
+            let has_event = Database::has_event_tx(event_content.event.event_id, &events_table)?;
+            if !has_event {
+                // Event doesn't exist - this shouldn't happen in normal operation.
+                // It means process_event_content_tx was called without first inserting the
+                // event.
+                debug_assert!(false, "Processing content for non-existent event");
+                error!(
+                    target: LOG_TARGET,
+                    event_id = %event_content.event.event_id,
+                    "Processing content for non-existent event - possible bug"
+                );
+                return Ok(());
+            }
         }
 
         // Remove from missing list (need next_fetch_attempt for composite key)
         {
             let event_short_id = event_content.event_id().to_short();
+            let events_content_state_table = tx.open_table(&events_content_state::TABLE)?;
+            let mut events_content_missing_table =
+                tx.open_table(&tables::events_content_missing::TABLE)?;
             let state = events_content_state_table
                 .get(&event_short_id)?
                 .map(|g| g.value());
@@ -750,6 +748,7 @@ impl Database {
         // Check if content should be processed (not deleted/pruned, is Missing)
         let can_insert = if u32::from(event_content.event.event.content_len) < Self::MAX_CONTENT_LEN
         {
+            let events_content_state_table = tx.open_table(&events_content_state::TABLE)?;
             Database::can_insert_event_content_tx(event_content, &events_content_state_table)?
         } else {
             false
@@ -789,22 +788,33 @@ impl Database {
 
                 if is_valid {
                     // Store content in content_store if not already there
-                    if content_store_table.get(&content_hash)?.is_none() {
-                        content_store_table.insert(
-                            &content_hash,
-                            &ContentStoreRecord(Cow::Owned(content.clone())),
-                        )?;
+                    {
+                        let mut content_store_table = tx.open_table(&content_store::TABLE)?;
+                        if content_store_table.get(&content_hash)?.is_none() {
+                            content_store_table.insert(
+                                &content_hash,
+                                &ContentStoreRecord(Cow::Owned(content.clone())),
+                            )?;
+                        }
                     }
 
                     // Remove the Missing marker now that content is processed
-                    events_content_state_table.remove(&event_short_id)?;
+                    {
+                        let mut events_content_state_table =
+                            tx.open_table(&events_content_state::TABLE)?;
+                        events_content_state_table.remove(&event_short_id)?;
+                    }
 
                     // Track payload as processed (missing → current)
-                    Database::track_payload_processed_tx(
-                        event_content.author(),
-                        event_content.content_len(),
-                        &mut ids_data_usage_table,
-                    )?;
+                    {
+                        let mut ids_data_usage_table =
+                            tx.open_table(&tables::ids_data_usage::TABLE)?;
+                        Database::track_payload_processed_tx(
+                            event_content.author(),
+                            event_content.content_len(),
+                            &mut ids_data_usage_table,
+                        )?;
+                    }
 
                     // Notify about new content
                     tx.on_commit({
@@ -817,16 +827,27 @@ impl Database {
                 } else {
                     // Content failed validation — mark as Invalid, decrement RC,
                     // discard content bytes
-                    events_content_state_table
-                        .insert(&event_short_id, &EventContentState::Invalid)?;
-                    Database::decrement_content_rc_tx(content_hash, &mut content_rc_table)?;
+                    {
+                        let mut events_content_state_table =
+                            tx.open_table(&events_content_state::TABLE)?;
+                        events_content_state_table
+                            .insert(&event_short_id, &EventContentState::Invalid)?;
+                    }
+                    {
+                        let mut content_rc_table = tx.open_table(&tables::content_rc::TABLE)?;
+                        Database::decrement_content_rc_tx(content_hash, &mut content_rc_table)?;
+                    }
 
                     // Track payload as invalid (missing → invalid)
-                    Database::track_payload_invalid_tx(
-                        event_content.author(),
-                        event_content.content_len(),
-                        &mut ids_data_usage_table,
-                    )?;
+                    {
+                        let mut ids_data_usage_table =
+                            tx.open_table(&tables::ids_data_usage::TABLE)?;
+                        Database::track_payload_invalid_tx(
+                            event_content.author(),
+                            event_content.content_len(),
+                            &mut ids_data_usage_table,
+                        )?;
+                    }
                 }
             }
         }

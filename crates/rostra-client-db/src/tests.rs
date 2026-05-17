@@ -5536,3 +5536,27 @@ async fn test_wot_contains() -> BoxedErrorResult<()> {
     info!("=== wot_contains test passed ===");
     Ok(())
 }
+
+#[test_log::test(tokio::test(flavor = "multi_thread"))]
+async fn test_process_social_vote_with_content() -> BoxedErrorResult<()> {
+    use rostra_core::ExternalEventId;
+    use rostra_core::event::{VerifiedEventContent, content_kind};
+
+    let voter_secret = RostraIdSecretKey::generate();
+    let voter = voter_secret.id();
+    let post_author = RostraIdSecretKey::generate().id();
+    let post_id = ExternalEventId::new(post_author, rostra_core::ShortEventId::ZERO);
+    let (_dir, db) = temp_db(voter).await?;
+
+    let vote = content_kind::SocialVote::new(post_id, Some(true));
+    let (event, content_raw) = Event::builder(&vote).author(voter).build()?;
+    let signed_event = event.signed_by(voter_secret);
+    let verified_event = VerifiedEvent::verify_signed(voter, signed_event).expect("Valid event");
+    let verified_content = VerifiedEventContent::assume_verified(verified_event, content_raw);
+
+    db.process_event_with_content(&verified_content).await;
+
+    assert_eq!(db.get_social_vote_sum(post_id).await, 1);
+
+    Ok(())
+}
