@@ -908,7 +908,7 @@ impl UiState {
                         @if let Some(djot_content) = post.content.djot_content.as_ref() {
                             @let effective_tags = post.content.persona_tags();
                             @let post_id = ExternalEventId::new(post.author, post.event_id);
-                            @let extra_buttons = if mode.is_news() {
+                            @let extra_buttons = if post.content.news {
                                 Some(self.render_news_vote_controls(
                                     post_id,
                                     client_ref.db().get_social_vote_sum(post_id).await,
