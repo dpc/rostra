@@ -117,12 +117,14 @@
 
                 tests = craneLib.cargoNextest {
                   cargoArtifacts = workspace;
+                  cargoNextestExtraArgs = "--workspace";
                 };
 
                 clippy = craneLib.cargoClippy {
                   # must be deps, otherwise it will not rebuild
                   # anything and thus not detect anything
                   cargoArtifacts = workspaceDeps;
+                  cargoClippyExtraArgs = "-- -D warnings";
                 };
 
                 rostraDeps = craneLib.buildDepsOnly { };

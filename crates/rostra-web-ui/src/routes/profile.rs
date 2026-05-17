@@ -27,7 +27,7 @@ pub async fn get_profile(
 ) -> RequestResult<impl IntoResponse> {
     let pagination = form.ts.and_then(|ts| {
         form.event_id
-            .map(|event_id| TimelineCursor::ByEventTime(EventPaginationCursor { ts, event_id }))
+            .map(|event_id| TimelineCursor::EventTime(EventPaginationCursor { ts, event_id }))
     });
 
     let client = state.client(session.id()).await?;

@@ -209,7 +209,7 @@ impl UiState {
                             title="Mnemonic is 12 words passphrase encoding secret key of your identity"
                             value=(current_secret_key.as_ref().map(ToString::to_string).unwrap_or_default())
                             { }
-                        (fragment::button("o-unlockScreen__roButton", "Clear secret")
+                        (fragment::button("o-unlockScreen__roButton", "Clear\u{a0}secret")
                             .button_type("button")
                             .onclick("document.querySelector('.o-unlockScreen__mnemonic').value = '';")
                             .title("Clear the mnemonic to login in read-only mode")

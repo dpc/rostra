@@ -63,7 +63,7 @@ pub async fn get_followees(
 ) -> RequestResult<impl IntoResponse> {
     let pagination = form.ts.and_then(|ts| {
         form.event_id
-            .map(|event_id| TimelineCursor::ByEventTime(EventPaginationCursor { ts, event_id }))
+            .map(|event_id| TimelineCursor::EventTime(EventPaginationCursor { ts, event_id }))
     });
     let navbar = state
         .timeline_common_navbar()
@@ -95,7 +95,7 @@ pub async fn get_network(
 ) -> RequestResult<impl IntoResponse> {
     let pagination = form.ts.and_then(|ts| {
         form.event_id
-            .map(|event_id| TimelineCursor::ByEventTime(EventPaginationCursor { ts, event_id }))
+            .map(|event_id| TimelineCursor::EventTime(EventPaginationCursor { ts, event_id }))
     });
     let navbar = state
         .timeline_common_navbar()
@@ -127,7 +127,7 @@ pub async fn get_news(
 ) -> RequestResult<impl IntoResponse> {
     let pagination = form.score.and_then(|score| {
         form.post_id
-            .map(|post_id| TimelineCursor::ByNewsRank(NewsRankPaginationCursor { score, post_id }))
+            .map(|post_id| TimelineCursor::NewsRank(NewsRankPaginationCursor { score, post_id }))
     });
     let navbar = state
         .timeline_common_navbar()
@@ -207,7 +207,7 @@ pub async fn get_notifications(
 ) -> RequestResult<impl IntoResponse> {
     let pagination = form.ts.and_then(|ts| {
         form.seq
-            .map(|seq| TimelineCursor::ByReceivedTime(ReceivedAtPaginationCursor { ts, seq }))
+            .map(|seq| TimelineCursor::ReceivedTime(ReceivedAtPaginationCursor { ts, seq }))
     });
     let navbar = state
         .timeline_common_navbar()
@@ -1051,28 +1051,28 @@ impl UiState {
 /// Unified cursor for timeline pagination that can hold either event-time or
 /// received-time cursors.
 ///
-/// - `ByEventTime`: For Followees/Network/Profile tabs - ordered by author's
+/// - `EventTime`: For Followees/Network/Profile tabs - ordered by author's
 ///   timestamp
-/// - `ByReceivedTime`: For Notifications tab - ordered by when we received the
+/// - `ReceivedTime`: For Notifications tab - ordered by when we received the
 ///   post
 #[derive(Copy, Clone, Debug)]
 pub(crate) enum TimelineCursor {
-    ByEventTime(EventPaginationCursor),
-    ByReceivedTime(ReceivedAtPaginationCursor),
-    ByNewsRank(NewsRankPaginationCursor),
+    EventTime(EventPaginationCursor),
+    ReceivedTime(ReceivedAtPaginationCursor),
+    NewsRank(NewsRankPaginationCursor),
 }
 
 impl TimelineCursor {
     /// Build query parameters for the "load more" URL
     fn to_query_params(self) -> String {
         match self {
-            TimelineCursor::ByEventTime(c) => {
+            TimelineCursor::EventTime(c) => {
                 format!("ts={}&event_id={}", c.ts, c.event_id)
             }
-            TimelineCursor::ByReceivedTime(c) => {
+            TimelineCursor::ReceivedTime(c) => {
                 format!("ts={}&seq={}", c.ts, c.seq)
             }
-            TimelineCursor::ByNewsRank(c) => {
+            TimelineCursor::NewsRank(c) => {
                 format!("score={}&post_id={}", c.score, c.post_id)
             }
         }
@@ -1124,7 +1124,7 @@ impl TimelineMode {
 
         if matches!(self, Self::News) {
             let cursor = pagination.and_then(|c| match c {
-                TimelineCursor::ByNewsRank(c) => Some(c),
+                TimelineCursor::NewsRank(c) => Some(c),
                 _ => None,
             });
             let (posts, next) = client
@@ -1133,7 +1133,7 @@ impl TimelineMode {
                 .await;
             return (
                 posts.into_iter().map(|record| record.post).collect(),
-                next.map(TimelineCursor::ByNewsRank),
+                next.map(TimelineCursor::NewsRank),
             );
         }
 
@@ -1141,24 +1141,24 @@ impl TimelineMode {
         // they were authored. This ensures new notifications appear at the top.
         if matches!(self, Self::Notifications) {
             let cursor = pagination.and_then(|c| match c {
-                TimelineCursor::ByReceivedTime(c) => Some(c),
+                TimelineCursor::ReceivedTime(c) => Some(c),
                 _ => None,
             });
             let (posts, next) = client
                 .db()
                 .paginate_social_posts_by_received_at_rev(cursor, 20, filter_fn)
                 .await;
-            (posts, next.map(TimelineCursor::ByReceivedTime))
+            (posts, next.map(TimelineCursor::ReceivedTime))
         } else {
             let cursor = pagination.and_then(|c| match c {
-                TimelineCursor::ByEventTime(c) => Some(c),
+                TimelineCursor::EventTime(c) => Some(c),
                 _ => None,
             });
             let (posts, next) = client
                 .db()
                 .paginate_social_posts_rev(cursor, 20, filter_fn)
                 .await;
-            (posts, next.map(TimelineCursor::ByEventTime))
+            (posts, next.map(TimelineCursor::EventTime))
         }
     }
 

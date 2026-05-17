@@ -349,10 +349,9 @@ impl Database {
                 &rank_by_score_table,
                 cursor.map(|c| (c.score, c.post_id)),
                 limit,
-                move |(score, post_id), _| {
+                move |(_score, post_id), _| {
                     Self::news_post_record_for_id_tx(
                         post_id,
-                        score,
                         &events_table,
                         &social_posts_table,
                         &events_content_state_table,
@@ -395,13 +394,8 @@ impl Database {
                 cursor.map(|c| (c.ts, c.post_id)),
                 limit,
                 move |(_ts, post_id), _| {
-                    let rank = rank_by_post_id_table.get(&post_id)?.map(|g| g.value());
-                    let Some(rank) = rank else {
-                        return Ok(None);
-                    };
                     Self::news_post_record_for_id_tx(
                         post_id,
-                        rank.score,
                         &events_table,
                         &social_posts_table,
                         &events_content_state_table,
@@ -423,7 +417,6 @@ impl Database {
 
     fn news_post_record_for_id_tx(
         post_id: ExternalEventId,
-        score: SocialVoteScore,
         events_table: &impl events::ReadableTable,
         social_posts_table: &impl social_posts::ReadableTable,
         events_content_state_table: &impl events_content_state::ReadableTable,
@@ -467,7 +460,7 @@ impl Database {
             },
             post_id,
             creation_ts: rank.creation_ts,
-            score,
+            score: rank.score,
             vote_sum,
         }))
     }
