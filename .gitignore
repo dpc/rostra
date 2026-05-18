@@ -4,6 +4,7 @@
 /dev
 /.env
 /tmp
+/.isolate
 .aider*
 !/.aider.conf.yml
 
