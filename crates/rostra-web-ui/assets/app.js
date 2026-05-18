@@ -18,6 +18,26 @@ function previewAvatar(event) {
     URL.createObjectURL(event.target.files[0]);
 }
 
+function activeElementDeep(root = document) {
+  let el = root.activeElement;
+  while (el?.shadowRoot?.activeElement) {
+    el = el.shadowRoot.activeElement;
+  }
+  return el;
+}
+
+function isTextInputFocused() {
+  const el = activeElementDeep();
+  if (!el) return false;
+  const tag = el.tagName;
+  return (
+    tag === "TEXTAREA" ||
+    tag === "SELECT" ||
+    (tag === "INPUT" && el.type !== "hidden") ||
+    el.isContentEditable
+  );
+}
+
 function togglePersonaList() {
   const selectedOption = document.querySelector("#follow-type-select").value;
   const personaList = document.querySelector(
@@ -279,6 +299,7 @@ document.addEventListener("keydown", (e) => {
   const isDown = e.key === "ArrowDown" || e.key === "j";
   const isUp = e.key === "ArrowUp" || e.key === "k";
   if (!isDown && !isUp) return;
+  if (isTextInputFocused()) return;
 
   const dialog = document.querySelector(".o-previewDialog.-active");
   if (!dialog) return;
@@ -421,17 +442,6 @@ document.addEventListener(
     dialog.classList.toggle("-active");
   }
 
-  function isInputFocused() {
-    const el = document.activeElement;
-    if (!el) return false;
-    const tag = el.tagName;
-    return (
-      tag === "TEXTAREA" ||
-      tag === "SELECT" ||
-      (tag === "INPUT" && el.type !== "hidden")
-    );
-  }
-
   document.addEventListener("keydown", (e) => {
     // Close on Escape regardless of focus
     if (e.key === "Escape" && dialog && dialog.classList.contains("-active")) {
@@ -440,7 +450,7 @@ document.addEventListener(
       return;
     }
 
-    if (e.key === "?" && !isInputFocused()) {
+    if (e.key === "?" && !isTextInputFocused()) {
       e.preventDefault();
       toggle();
     }
@@ -578,17 +588,6 @@ document.addEventListener("keydown", (e) => {
     return items.length - 1;
   }
 
-  function isInputFocused() {
-    const el = document.activeElement;
-    if (!el) return false;
-    const tag = el.tagName;
-    return (
-      tag === "TEXTAREA" ||
-      tag === "SELECT" ||
-      (tag === "INPUT" && el.type !== "hidden")
-    );
-  }
-
   // Find the nearest button bar for a navigable item.
   function getButtonBar(item) {
     // Parent posts: > .m-postView > .m-postView__body > .m-postView__buttonBar
@@ -609,7 +608,7 @@ document.addEventListener("keydown", (e) => {
   }
 
   document.addEventListener("keydown", (e) => {
-    if (isInputFocused()) return;
+    if (isTextInputFocused()) return;
     if (document.querySelector(".o-previewDialog.-active")) return;
 
     // Page-global shortcuts (work on any page)
@@ -698,7 +697,7 @@ document.addEventListener("keydown", (e) => {
   document.addEventListener(
     "focusin",
     (e) => {
-      if (isInputFocused()) {
+      if (isTextInputFocused()) {
         clearSelection();
       }
     },
