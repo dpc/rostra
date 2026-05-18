@@ -116,7 +116,13 @@ to use a script to do so. See [`flake.nix`](./flake.nix) to investigate how it w
 * [FAQ](./docs/FAQ.md)
 * [Comparison with other social protocols](./docs/comparison.md)
 * [`HACKING.md`](./HACKING.md)
-* [Github Discussions](https://github.com/dpc/rostra/discussions)
+
+Contact and feedback:
+
+* [GitHub Discussions](https://github.com/dpc/rostra/discussions)
+* [Matrix `#support:dpc.pw`](https://matrix.to/#/#support:dpc.pw)
+* [Discord](https://discord.gg/zens2jjA3U)
+* [dpc's Rostra profile](https://rostra.me/profile/rse1okfyp4yj75i6riwbz86mpmbgna3f7qr66aj1njceqoigjabegy)
 
 
 ## License

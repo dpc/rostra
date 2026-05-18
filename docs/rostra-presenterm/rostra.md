@@ -172,4 +172,4 @@ Thank you for your time!
 
 You can easily try out Rostra using [Rostra's public demo instance](https://rostra.me).
 
-Please share your feedback on [Rostra's Github Discussions page](https://github.com/dpc/rostra/discussions), or [dpc's #support Matrix channel](https://matrix.to/#/#support:dpc.pw).
+Please share your feedback on [Rostra's GitHub Discussions page](https://github.com/dpc/rostra/discussions), [dpc's #support Matrix channel](https://matrix.to/#/#support:dpc.pw), [Discord](https://discord.gg/zens2jjA3U), or [dpc's Rostra profile](https://rostra.me/profile/rse1okfyp4yj75i6riwbz86mpmbgna3f7qr66aj1njceqoigjabegy).
