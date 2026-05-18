@@ -1127,6 +1127,7 @@ emoji-picker {
   align-items: center;
   display: inline-flex;
   font-weight: 700;
+  justify-content: center;
   min-width: 2ch;
   padding: 0 0.15rem;
   text-align: center;
