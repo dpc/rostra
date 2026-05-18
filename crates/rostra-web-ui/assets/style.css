@@ -879,6 +879,7 @@ emoji-picker {
   display: flex;
   justify-content: space-between;
   gap: 5pt;
+  margin-top: 5pt;
   padding-right: .5rem;
   padding-left: .5rem;
 }
