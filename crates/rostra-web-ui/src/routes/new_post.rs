@@ -249,6 +249,16 @@ pub async fn post_new_post(
 
     let self_id = client_ref.rostra_id();
     let event_id = event.event_id.to_short();
+    let extra_buttons = if form.news {
+        Some(state.render_news_vote_controls(
+            ExternalEventId::new(self_id, event_id),
+            0,
+            None,
+            state.ro_mode(session.session_token()),
+        ))
+    } else {
+        None
+    };
 
     Ok(Maud(html! {
         // new clean form (this is the main target)
@@ -275,17 +285,10 @@ pub async fn post_new_post(
                     .maybe_url(news_url.as_ref())
                     .maybe_title(news_title.as_deref())
                     .timestamp(rostra_core::Timestamp::now())
+                    .maybe_extra_buttons(extra_buttons)
                     .ro(state.ro_mode(session.session_token()))
                     .call().await?
                 )
-                @if form.news {
-                    (state.render_news_vote_controls(
-                        ExternalEventId::new(self_id, event_id),
-                        0,
-                        None,
-                        state.ro_mode(session.session_token()),
-                    ))
-                }
             }
         }
 
