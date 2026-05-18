@@ -77,7 +77,7 @@ pub struct EventSingletonRecord {
 #[derive(Debug, Encode, Decode, Clone, Serialize)]
 pub struct ContentStoreRecord<'a>(pub Cow<'a, EventContentUnsized>);
 
-/// Owned version of [`ContentStoreRecord`].
+/// Owned record for the `content_store` table.
 pub type ContentStoreRecordOwned = ContentStoreRecord<'static>;
 
 /// Per-event content processing state stored in `events_content_state` table.

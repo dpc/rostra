@@ -83,6 +83,7 @@
                     pname = projectName;
                     src = buildSrc;
                     nativeBuildInputs = [ ];
+                    env.RUSTDOCFLAGS = "-D warnings";
                   }
                 );
               in
@@ -117,7 +118,7 @@
 
                 tests = craneLib.cargoNextest {
                   cargoArtifacts = workspace;
-                  cargoNextestExtraArgs = "--workspace";
+                  cargoNextestExtraArgs = "--workspace --show-progress none";
                 };
 
                 clippy = craneLib.cargoClippy {

@@ -37,7 +37,7 @@ enum Capturing {
 ///
 /// Can be composed with async filters (e.g. profile link resolution) via its
 /// [`AsyncRender`] impl, then called with
-/// [`AsyncRenderOutputExt::render_into_document`].
+/// `AsyncRenderOutputExt::render_into_document`.
 #[derive(Debug, Default)]
 pub struct ExcerptRenderer {
     excerpt: DjotExcerpt,

@@ -104,7 +104,7 @@ pub struct WebUiOpts {
     #[arg(long, env = "ROSTRA_REUSEPORT", default_value = "true")]
     pub reuseport: bool,
 
-    /// Public origin URL (e.g. "rostra.me" or "https://rostra.me").
+    /// Public origin URL (e.g. `rostra.me` or <https://rostra.me>).
     /// Used for CORS and absolute URLs in meta tags.
     /// If no scheme is provided, https:// is assumed.
     #[arg(

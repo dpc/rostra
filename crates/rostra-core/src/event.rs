@@ -192,9 +192,9 @@ pub struct Event {
 
     /// Blake3 hash of the content
     ///
-    /// The [`EventContent`] is used to store and interpret
-    /// the actual content, and is stored and transmitted outside
-    /// of the [`Event`] itself to decouple them.
+    /// [`EventContentRaw`] stores the actual content bytes. The bytes are
+    /// interpreted according to [`EventKind`] and are stored and transmitted
+    /// outside of the [`Event`] itself to decouple them.
     pub content_hash: ContentHash,
 }
 

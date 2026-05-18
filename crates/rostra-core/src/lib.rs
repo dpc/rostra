@@ -8,7 +8,8 @@ pub mod event;
 #[cfg(feature = "rand")]
 pub mod rand;
 
-/// Version of [`define_array_type`] that does not derive Serde
+/// Version of [`array_type_define!`](macro@crate::array_type_define) that does
+/// not derive Serde
 ///
 /// Because some types can't serde. :/
 pub mod id;
@@ -59,7 +60,7 @@ array_type_impl_zero_default!(ShortEventId, 16);
 array_type_define_public!(
     /// Blake3 hash of a payload
     ///
-    /// For actual content, see [`EventContent`]
+    /// For actual content, see [`event::EventContentRaw`]
     struct ContentHash, 32
 );
 array_type_impl_serde!(struct ContentHash, 32);

@@ -155,7 +155,7 @@ impl UiState {
 
     /// Get the secret key for a session from in-memory storage.
     ///
-    /// Takes the [`SessionToken`] as the key (derived from tower-sessions ID).
+    /// Takes the session token as the key (derived from tower-sessions ID).
     /// Returns `None` if the user is in read-only mode (no secret key stored).
     pub fn id_secret(&self, session_token: SessionToken) -> Option<RostraIdSecretKey> {
         self.secrets.get(session_token)

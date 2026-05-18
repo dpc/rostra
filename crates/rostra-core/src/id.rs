@@ -244,7 +244,7 @@ impl ToShort for EventId {
 
 /// Full, external event id
 ///
-/// Combination of [`crate::RostraId`] of the author and [`crate::ShortEventId`]
+/// Combination of [`RostraId`] of the author and [`ShortEventId`]
 /// of the [`crate::Event`] that makes it possible to possibly fetch the event
 /// by anyone.
 ///

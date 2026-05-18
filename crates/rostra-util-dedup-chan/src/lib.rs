@@ -8,14 +8,14 @@
 //! by calling [`Sender::subscribe`]. Each subscription creates a separate
 //! channel.
 //!
-//! On [`Receiver::send`] a copy of an item will be addedto each subscribed
+//! On [`Sender::send`] a copy of an item will be added to each subscribed
 //! channel. If the item is already in the channel, yet unprocessed, it will not
 //! be added again.
 //!
 //! Channels will be destroyed when the last [`Receiver`] is gone and the
 //! channel is "disconnected".
 //!
-//! [`Receivers`] will be notified when the amount of pending work exceeds
+//! [`Receiver`]s will be notified when the amount of pending work exceeds
 //! `capacity`.
 
 use std::collections::{BTreeMap, HashSet, VecDeque};
