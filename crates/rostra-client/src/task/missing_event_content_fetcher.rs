@@ -58,7 +58,7 @@ impl MissingEventContentFetcher {
     /// - If due: attempts to fetch, on failure records backoff
     /// - If not yet due: sleeps until the scheduled time or a notification
     /// - If empty: waits for a notification that new missing content arrived
-    #[instrument(name = "missing-event-content-fetcher", skip(self), fields(self_id = %self.self_id.to_short()), ret)]
+    #[instrument(name = "missing-event-content-fetcher", skip(self), fields(self_id = %self.self_id.fmt_short()), ret)]
     pub async fn run(self) {
         let Ok(db) = self.client.db() else {
             return;

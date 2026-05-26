@@ -72,7 +72,7 @@ impl WotHeadSync {
         }
     }
 
-    #[instrument(name = "wot-head-sync", skip(self), fields(self_id = %self.self_id.to_short()), ret)]
+    #[instrument(name = "wot-head-sync", skip(self), fields(self_id = %self.self_id.fmt_short()), ret)]
     pub async fn run(self) {
         loop {
             self.sync_cycle().await;

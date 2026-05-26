@@ -8,7 +8,7 @@ use iroh::endpoint::Incoming;
 use n0_future::task::AbortOnDropHandle;
 use rostra_client_db::{DbError, IdsFolloweesRecord, IdsFollowersRecord};
 use rostra_core::event::{EventContentRaw, EventExt as _, VerifiedEvent, VerifiedEventContent};
-use rostra_core::id::{RostraId, ToShort as _};
+use rostra_core::id::RostraId;
 use rostra_p2p::RpcError;
 use rostra_p2p::connection::{
     Connection, FeedEventRequest, FeedEventResponse, GetEventContentRequest,
@@ -88,7 +88,7 @@ pub struct RequestHandler {
 
 impl RequestHandler {
     pub fn new(client: &Client, endpoint: Endpoint) -> Arc<Self> {
-        info!(id = %client.rostra_id(), iroh_endpoint = %endpoint.id(), "Starting request handler task");
+        info!(id = %client.rostra_id().fmt_short(), iroh_endpoint = %endpoint.id(), "Starting request handler task");
         Self {
             client: client.handle(),
             endpoint,
@@ -100,7 +100,7 @@ impl RequestHandler {
     }
 
     /// Run the thread
-    #[instrument(name = "request-handler", skip(self), fields(self_id = %self.our_id.to_short()), ret)]
+    #[instrument(name = "request-handler", skip(self), fields(self_id = %self.our_id.fmt_short()), ret)]
     pub async fn run(self: Arc<Self>) {
         let mut connection_tasks = FuturesUnordered::new();
         loop {

@@ -150,6 +150,21 @@ impl fmt::Display for ShortRostraId {
     }
 }
 
+pub struct FmtShortRostraId(RostraId);
+
+impl fmt::Display for FmtShortRostraId {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str("rs")?;
+        f.write_str(&z32::encode(&self.0.as_slice()[..5]))
+    }
+}
+
+impl RostraId {
+    pub fn fmt_short(self) -> FmtShortRostraId {
+        FmtShortRostraId(self)
+    }
+}
+
 impl RostraId {
     pub fn split(self) -> (ShortRostraId, RestRostraId) {
         (

@@ -41,7 +41,7 @@ impl HeadUpdateBroadcaster {
     }
 
     /// Run the thread
-    #[instrument(name = "head-update-broadcaster", skip(self), fields(self_id = %self.self_id.to_short()), ret)]
+    #[instrument(name = "head-update-broadcaster", skip(self), fields(self_id = %self.self_id.fmt_short()), ret)]
     pub async fn run(self) {
         let mut self_followers_rx = self.self_followers_rx.clone();
         let mut self_head_rx = self.self_head_rx.clone();

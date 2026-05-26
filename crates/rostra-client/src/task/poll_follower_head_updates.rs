@@ -105,7 +105,7 @@ impl PollFollowerHeadUpdates {
         }
     }
 
-    #[instrument(name = "poll-follower-head-updates", skip(self), fields(self_id = %self.self_id.to_short()), ret)]
+    #[instrument(name = "poll-follower-head-updates", skip(self), fields(self_id = %self.self_id.fmt_short()), ret)]
     pub async fn run(mut self) {
         let mut desired_peers = BTreeSet::new();
         let mut pending_peers = BTreeSet::new();

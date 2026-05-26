@@ -1,7 +1,6 @@
 use std::time::Duration;
 
 use rostra_core::ExternalEventId;
-use rostra_core::id::ToShort as _;
 use rostra_util_error::FmtCompact as _;
 use tracing::{debug, instrument};
 
@@ -29,7 +28,7 @@ impl NewsScoreUpdater {
         }
     }
 
-    #[instrument(name = "news-score-updater", skip(self), fields(self_id = %self.self_id.to_short()), ret)]
+    #[instrument(name = "news-score-updater", skip(self), fields(self_id = %self.self_id.fmt_short()), ret)]
     pub async fn run(mut self) {
         let mut interval = tokio::time::interval(news_score_refresh_interval());
         loop {
