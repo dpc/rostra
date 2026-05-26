@@ -1,4 +1,5 @@
 use std::collections::{BTreeSet, HashMap};
+use std::future::Future;
 use std::marker::PhantomData;
 use std::net::Ipv4Addr;
 use std::ops;
@@ -7,11 +8,12 @@ use std::path::Path;
 use std::str::FromStr as _;
 use std::sync::atomic::AtomicBool;
 use std::sync::atomic::Ordering::SeqCst;
-use std::sync::{Arc, Weak};
+use std::sync::{Arc, Mutex, Weak};
 use std::time::Duration;
 
 use backon::Retryable as _;
 use iroh_base::EndpointAddr;
+use n0_future::task::AbortOnDropHandle;
 use rostra_client_db::{Database, DbResult, IdsFolloweesRecord, IdsFollowersRecord, WotData};
 use rostra_core::event::{
     Event, EventContentRaw, IrohNodeId, PersonaTag, PersonasTagsSelector, SignedEvent, SocialPost,
@@ -148,6 +150,9 @@ pub struct P2PState {
     nodes: RwLock<HashMap<IrohNodeId, NodeP2PState>>,
 }
 
+const P2P_IDS_WARN_LIMIT: usize = 10_000;
+const P2P_NODES_WARN_LIMIT: usize = 10_000;
+
 impl P2PState {
     pub fn new() -> Self {
         Self::default()
@@ -168,6 +173,14 @@ impl P2PState {
         let mut ids = self.ids.write().await;
         let state = ids.entry(id).or_default();
         f(state);
+        if ids.len() == P2P_IDS_WARN_LIMIT + 1 {
+            warn!(
+                target: LOG_TARGET,
+                len = ids.len(),
+                limit = P2P_IDS_WARN_LIMIT,
+                "P2P identity state map is large"
+            );
+        }
     }
 
     /// Get the P2P state for a specific node.
@@ -190,6 +203,14 @@ impl P2PState {
         let mut nodes = self.nodes.write().await;
         let state = nodes.entry(node_id).or_default();
         f(state);
+        if nodes.len() == P2P_NODES_WARN_LIMIT + 1 {
+            warn!(
+                target: LOG_TARGET,
+                len = nodes.len(),
+                limit = P2P_NODES_WARN_LIMIT,
+                "P2P node state map is large"
+            );
+        }
     }
 
     /// Check if a node is currently in backoff.
@@ -308,6 +329,8 @@ pub struct Client {
 
     /// Networking layer (endpoint, pkarr, p2p_state, connection cache)
     pub(crate) networking: Arc<crate::net::ClientNetworking>,
+
+    task_handles: Mutex<Vec<AbortOnDropHandle<()>>>,
 }
 
 #[bon::bon]
@@ -378,6 +401,7 @@ impl Client {
             db,
             id,
             active: AtomicBool::new(false),
+            task_handles: Mutex::new(Vec::new()),
         });
 
         trace!(target: LOG_TARGET, id = %id, "Starting client tasks");
@@ -501,50 +525,60 @@ impl Client {
         Ok(ep)
     }
 
+    fn spawn_task(&self, future: impl Future<Output = ()> + Send + 'static) {
+        let handle = AbortOnDropHandle::new(tokio::spawn(future));
+        self.task_handles
+            .lock()
+            .expect("locking failed")
+            .push(handle);
+    }
+
     pub(crate) fn start_pkarr_id_publisher(&self, secret_id: RostraIdSecretKey) {
-        tokio::spawn(PkarrIdPublisher::new(self, secret_id).run());
+        self.spawn_task(PkarrIdPublisher::new(self, secret_id).run());
     }
 
     pub(crate) fn start_head_merger(&self, secret_id: RostraIdSecretKey) {
-        tokio::spawn(HeadMerger::new(self, secret_id).run());
+        self.spawn_task(HeadMerger::new(self, secret_id).run());
     }
 
     pub(crate) fn start_request_handler(&self) {
-        tokio::spawn(RequestHandler::new(self, self.networking.endpoint.clone()).run());
+        self.spawn_task(RequestHandler::new(self, self.networking.endpoint.clone()).run());
     }
 
     pub(crate) fn start_head_update_broadcaster(&self) {
-        tokio::spawn(crate::task::head_update_broadcaster::HeadUpdateBroadcaster::new(self).run());
+        self.spawn_task(
+            crate::task::head_update_broadcaster::HeadUpdateBroadcaster::new(self).run(),
+        );
     }
     pub(crate) fn start_missing_event_fetcher(&self) {
-        tokio::spawn(MissingEventFetcher::new(self).run());
+        self.spawn_task(MissingEventFetcher::new(self).run());
     }
     pub(crate) fn start_missing_event_content_fetcher(&self) {
-        tokio::spawn(MissingEventContentFetcher::new(self).run());
+        self.spawn_task(MissingEventContentFetcher::new(self).run());
     }
 
     pub(crate) fn start_new_head_fetcher(&self) {
-        tokio::spawn(crate::task::new_head_fetcher::NewHeadFetcher::new(self).run());
+        self.spawn_task(crate::task::new_head_fetcher::NewHeadFetcher::new(self).run());
     }
 
     pub(crate) fn start_poll_follower_head_updates(&self) {
-        tokio::spawn(
+        self.spawn_task(
             crate::task::poll_follower_head_updates::PollFollowerHeadUpdates::new(self).run(),
         );
     }
 
     pub(crate) fn start_poll_followee_head_updates(&self) {
-        tokio::spawn(
+        self.spawn_task(
             crate::task::poll_followee_head_updates::PollFolloweeHeadUpdates::new(self).run(),
         );
     }
 
     pub(crate) fn start_wot_head_sync(&self) {
-        tokio::spawn(crate::task::wot_head_sync::WotHeadSync::new(self).run());
+        self.spawn_task(crate::task::wot_head_sync::WotHeadSync::new(self).run());
     }
 
     pub(crate) fn start_news_score_updater(&self) {
-        tokio::spawn(crate::task::news_score_updater::NewsScoreUpdater::new(self).run());
+        self.spawn_task(crate::task::news_score_updater::NewsScoreUpdater::new(self).run());
     }
 
     pub(crate) async fn iroh_address(&self) -> WhateverResult<EndpointAddr> {

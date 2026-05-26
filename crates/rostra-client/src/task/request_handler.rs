@@ -1,8 +1,11 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
+use futures::StreamExt as _;
+use futures::stream::FuturesUnordered;
 use iroh::Endpoint;
 use iroh::endpoint::Incoming;
+use n0_future::task::AbortOnDropHandle;
 use rostra_client_db::{DbError, IdsFolloweesRecord, IdsFollowersRecord};
 use rostra_core::event::{EventContentRaw, EventExt as _, VerifiedEvent, VerifiedEventContent};
 use rostra_core::id::{RostraId, ToShort as _};
@@ -99,18 +102,25 @@ impl RequestHandler {
     /// Run the thread
     #[instrument(name = "request-handler", skip(self), fields(self_id = %self.our_id.to_short()), ret)]
     pub async fn run(self: Arc<Self>) {
+        let mut connection_tasks = FuturesUnordered::new();
         loop {
             if self.client.app_ref_opt().is_none() {
                 debug!(target: LOG_TARGET, "Client gone, quitting");
                 break;
             };
-            let Some(incoming) = self.endpoint.accept().await else {
-                debug!(target: LOG_TARGET, "Can't accept any more connection, quitting");
-                return;
-            };
 
-            trace!(target: LOG_TARGET, "New connection" );
-            tokio::spawn(self.clone().handle_incoming(incoming));
+            tokio::select! {
+                incoming = self.endpoint.accept() => {
+                    let Some(incoming) = incoming else {
+                        debug!(target: LOG_TARGET, "Can't accept any more connection, quitting");
+                        return;
+                    };
+
+                    trace!(target: LOG_TARGET, "New connection" );
+                    connection_tasks.push(AbortOnDropHandle::new(tokio::spawn(self.clone().handle_incoming(incoming))));
+                }
+                Some(_) = connection_tasks.next(), if !connection_tasks.is_empty() => {}
+            }
         }
     }
     pub async fn handle_incoming(self: Arc<Self>, incoming: Incoming) {
@@ -138,57 +148,63 @@ impl RequestHandler {
             .context(ConnectionSnafu)?;
 
         let semaphore = Arc::new(Semaphore::new(MAX_CONCURRENT_RPCS_PER_CONNECTION));
+        let mut rpc_tasks = FuturesUnordered::new();
 
         loop {
-            let (send, mut recv) = conn.accept_bi().await.context(ConnectionStreamSnafu)?;
-            let (rpc_id, req_msg) = Connection::read_request_raw(&mut recv)
-                .await
-                .context(RpcSnafu)?;
+            tokio::select! {
+                stream = conn.accept_bi() => {
+                    let (send, mut recv) = stream.context(ConnectionStreamSnafu)?;
+                    let (rpc_id, req_msg) = Connection::read_request_raw(&mut recv)
+                        .await
+                        .context(RpcSnafu)?;
 
-            debug!(
-                target: LOG_TARGET,
-                rpc_id = %rpc_id,
-                from = %conn.remote_id().to_short(),
-                "Rpc request"
-            );
+                    debug!(
+                        target: LOG_TARGET,
+                        rpc_id = %rpc_id,
+                        from = %conn.remote_id().to_short(),
+                        "Rpc request"
+                    );
 
-            let permit = semaphore
-                .clone()
-                .acquire_owned()
-                .await
-                .expect("semaphore never closed");
+                    let permit = semaphore
+                        .clone()
+                        .acquire_owned()
+                        .await
+                        .expect("semaphore never closed");
 
-            // Spawn each RPC handler as a separate task so that blocking
-            // RPCs (WAIT_HEAD_UPDATE, WAIT_FOLLOWERS_NEW_HEADS) don't
-            // prevent other RPCs on the same connection from being accepted.
-            let handler = self.clone();
-            tokio::spawn(async move {
-                let result = match rpc_id {
-                    RpcId::PING => handler.handle_ping_request(req_msg, send).await,
-                    RpcId::FEED_EVENT => handler.handle_feed_event(req_msg, send, recv).await,
-                    RpcId::GET_EVENT => handler.handle_get_event(req_msg, send, recv).await,
-                    RpcId::GET_EVENT_CONTENT => {
-                        handler.handle_get_event_content(req_msg, send, recv).await
-                    }
-                    RpcId::WAIT_HEAD_UPDATE => {
-                        handler.handle_wait_head_update(req_msg, send, recv).await
-                    }
-                    RpcId::GET_HEAD => handler.handle_get_head(req_msg, send, recv).await,
-                    RpcId::WAIT_FOLLOWERS_NEW_HEADS => {
-                        handler
-                            .handle_wait_followers_new_heads(req_msg, send, recv)
-                            .await
-                    }
-                    _ => {
-                        debug!(target: LOG_TARGET, %rpc_id, "Unknown RPC ID");
-                        return;
-                    }
-                };
-                drop(permit);
-                if let Err(err) = result {
-                    debug!(target: LOG_TARGET, err = %err.fmt_compact(), "RPC handler error");
+                    // Spawn each RPC handler as a separate task so that blocking
+                    // RPCs (WAIT_HEAD_UPDATE, WAIT_FOLLOWERS_NEW_HEADS) don't
+                    // prevent other RPCs on the same connection from being accepted.
+                    let handler = self.clone();
+                    rpc_tasks.push(AbortOnDropHandle::new(tokio::spawn(async move {
+                        let result = match rpc_id {
+                            RpcId::PING => handler.handle_ping_request(req_msg, send).await,
+                            RpcId::FEED_EVENT => handler.handle_feed_event(req_msg, send, recv).await,
+                            RpcId::GET_EVENT => handler.handle_get_event(req_msg, send, recv).await,
+                            RpcId::GET_EVENT_CONTENT => {
+                                handler.handle_get_event_content(req_msg, send, recv).await
+                            }
+                            RpcId::WAIT_HEAD_UPDATE => {
+                                handler.handle_wait_head_update(req_msg, send, recv).await
+                            }
+                            RpcId::GET_HEAD => handler.handle_get_head(req_msg, send, recv).await,
+                            RpcId::WAIT_FOLLOWERS_NEW_HEADS => {
+                                handler
+                                    .handle_wait_followers_new_heads(req_msg, send, recv)
+                                    .await
+                            }
+                            _ => {
+                                debug!(target: LOG_TARGET, %rpc_id, "Unknown RPC ID");
+                                return;
+                            }
+                        };
+                        drop(permit);
+                        if let Err(err) = result {
+                            debug!(target: LOG_TARGET, err = %err.fmt_compact(), "RPC handler error");
+                        }
+                    })));
                 }
-            });
+                Some(_) = rpc_tasks.next(), if !rpc_tasks.is_empty() => {}
+            }
         }
     }
 

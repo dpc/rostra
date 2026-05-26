@@ -4,7 +4,7 @@ use std::time::Duration;
 use rostra_core::Timestamp;
 use rostra_core::id::{RostraId, ToShort as _};
 use rostra_util_error::FmtCompact as _;
-use tracing::{debug, instrument, trace};
+use tracing::{debug, instrument, trace, warn};
 
 use crate::LOG_TARGET;
 use crate::client::Client;
@@ -16,6 +16,7 @@ const INITIAL_CONTENT_FETCH_BACKOFF_SECS: u64 = 60;
 
 /// Maximum backoff for content fetch retries (24 hours).
 const MAX_CONTENT_FETCH_BACKOFF_SECS: u64 = 86400;
+const FOLLOWERS_BY_FOLLOWEE_WARN_LIMIT: usize = 10_000;
 
 /// Calculate exponential backoff seconds for a given attempt count.
 ///
@@ -104,6 +105,14 @@ impl MissingEventContentFetcher {
             } else {
                 let followers = db.get_followers(author_id).await;
                 followers_by_followee.insert(author_id, followers.clone());
+                if followers_by_followee.len() == FOLLOWERS_BY_FOLLOWEE_WARN_LIMIT + 1 {
+                    warn!(
+                        target: LOG_TARGET,
+                        len = followers_by_followee.len(),
+                        limit = FOLLOWERS_BY_FOLLOWEE_WARN_LIMIT,
+                        "Followers-by-followee cache is large"
+                    );
+                }
                 followers
             };
 

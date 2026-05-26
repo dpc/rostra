@@ -23,6 +23,7 @@ iroh-base = { workspace = true }
 iroh = { workspace = true }
 iroh-io = { workspace = true }
 itertools = { workspace = true }
+n0-future = { workspace = true }
 pkarr = { workspace = true, features = ["dht", "relays"] }
 redb = { workspace = true }
 redb-bincode = { workspace = true }

@@ -460,7 +460,9 @@ impl UiState {
                             .render_shoutbox_post_live(&client_ref, self_id, author, &shoutbox_content)
                             .await
                             .into_string();
-                        let _ = ws.send(shout_html.into()).await;
+                        if ws.send(shout_html.into()).await.is_err() {
+                            break;
+                        }
                     }
                 }
             }
@@ -473,7 +475,9 @@ impl UiState {
                     shoutbox_count,
                 )
                 .into_string();
-            let _ = ws.send(badge_html.into()).await;
+            if ws.send(badge_html.into()).await.is_err() {
+                break;
+            }
             tokio::time::sleep(Duration::from_millis(100)).await;
         }
         Ok(())

@@ -1,8 +1,9 @@
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeSet, HashMap};
 use std::sync::Arc;
 use std::time::Duration;
 
 use futures::StreamExt as _;
+use futures::future::BoxFuture;
 use futures::stream::FuturesUnordered;
 use rostra_client_db::{Database, IdsFolloweesRecord};
 use rostra_core::id::{RostraId, ToShort as _};
@@ -16,6 +17,8 @@ use crate::connection_cache::ConnectionCache;
 use crate::net::ClientNetworking;
 
 const LOG_TARGET: &str = "rostra::poll_followee_heads";
+const MAX_ACTIVE_POLLS: usize = 32;
+const POLL_SLOT_TIMEOUT: Duration = Duration::from_secs(5 * 60);
 
 /// Per-peer backoff state for polling.
 #[derive(Debug, Clone, Default)]
@@ -92,49 +95,33 @@ impl PollFolloweeHeadUpdates {
 
     #[instrument(name = "poll-followee-head-updates", skip(self), fields(self_id = %self.self_id.to_short()), ret)]
     pub async fn run(mut self) {
-        let mut active_peers: HashSet<RostraId> = HashSet::new();
-        let mut poll_futures: FuturesUnordered<_> = FuturesUnordered::new();
+        let mut desired_peers = BTreeSet::new();
+        let mut pending_peers = BTreeSet::new();
+        let mut active_peers = BTreeSet::new();
+        let mut poll_futures = FuturesUnordered::new();
         let backoff_state: SharedBackoffState = Arc::new(RwLock::new(HashMap::new()));
 
+        Self::update_desired_followees(
+            &self.self_followees_rx,
+            &mut desired_peers,
+            &active_peers,
+            &mut pending_peers,
+        );
+        self.schedule_pending(
+            &mut pending_peers,
+            &mut active_peers,
+            &mut poll_futures,
+            &backoff_state,
+        );
+
         loop {
-            // All entries in the followees map are active follows
-            // (unfollows remove the entry entirely)
-            let current_followees: HashSet<RostraId> = {
-                let followees = self.self_followees_rx.borrow();
-                followees.keys().copied().collect()
-            };
-
-            // Add new followees
-            let new_followees: Vec<_> = current_followees
-                .difference(&active_peers)
-                .copied()
-                .collect();
-            for followee_id in new_followees {
-                debug!(target: LOG_TARGET, followee_id = %followee_id.to_short(), "Adding followee to poll list");
-                active_peers.insert(followee_id);
-            }
-
-            // Spawn polling tasks for peers that need them
-            let peers_to_poll: Vec<_> = active_peers.iter().copied().collect();
-            for peer_id in peers_to_poll {
-                let networking = self.networking.clone();
-                let connections = self.connections.clone();
-                let db = self.db.clone();
-                let backoff = backoff_state.clone();
-
-                poll_futures.push(async move {
-                    Self::poll_followee(networking, connections, db, peer_id, backoff).await;
-                    peer_id
-                });
-            }
-
-            // Clear active peers - they'll be re-added based on poll results
-            active_peers.clear();
-
             tokio::select! {
                 Some(peer_id) = poll_futures.next() => {
-                    trace!(target: LOG_TARGET, peer_id = %peer_id.to_short(), "Poll task completed, will restart");
-                    active_peers.insert(peer_id);
+                    active_peers.remove(&peer_id);
+                    trace!(target: LOG_TARGET, peer_id = %peer_id.to_short(), "Poll task completed");
+                    if desired_peers.contains(&peer_id) {
+                        pending_peers.insert(peer_id);
+                    }
                 }
                 res = self.self_followees_rx.changed() => {
                     if res.is_err() {
@@ -142,13 +129,71 @@ impl PollFolloweeHeadUpdates {
                         break;
                     }
                     debug!(target: LOG_TARGET, "Followees changed, updating poll list");
+                    Self::update_desired_followees(
+                        &self.self_followees_rx,
+                        &mut desired_peers,
+                        &active_peers,
+                        &mut pending_peers,
+                    );
                 }
             }
+
+            self.schedule_pending(
+                &mut pending_peers,
+                &mut active_peers,
+                &mut poll_futures,
+                &backoff_state,
+            );
 
             if self.client.app_ref_opt().is_none() {
                 debug!(target: LOG_TARGET, "Client gone, quitting");
                 break;
             }
+        }
+    }
+
+    fn update_desired_followees(
+        self_followees_rx: &watch::Receiver<Arc<HashMap<RostraId, IdsFolloweesRecord>>>,
+        desired_peers: &mut BTreeSet<RostraId>,
+        active_peers: &BTreeSet<RostraId>,
+        pending_peers: &mut BTreeSet<RostraId>,
+    ) {
+        desired_peers.clear();
+        desired_peers.extend(self_followees_rx.borrow().keys().copied());
+        pending_peers.retain(|id| desired_peers.contains(id));
+
+        for peer_id in desired_peers.difference(active_peers) {
+            pending_peers.insert(*peer_id);
+        }
+    }
+
+    fn schedule_pending(
+        &self,
+        pending_peers: &mut BTreeSet<RostraId>,
+        active_peers: &mut BTreeSet<RostraId>,
+        poll_futures: &mut FuturesUnordered<BoxFuture<'static, RostraId>>,
+        backoff_state: &SharedBackoffState,
+    ) {
+        while active_peers.len() < MAX_ACTIVE_POLLS {
+            let Some(peer_id) = pending_peers.pop_first() else {
+                break;
+            };
+            if !active_peers.insert(peer_id) {
+                continue;
+            }
+
+            let networking = self.networking.clone();
+            let connections = self.connections.clone();
+            let db = self.db.clone();
+            let backoff = backoff_state.clone();
+            poll_futures.push(Box::pin(async move {
+                let _ = tokio::time::timeout(
+                    POLL_SLOT_TIMEOUT,
+                    Self::poll_followee(networking, connections, db, peer_id, backoff),
+                )
+                .await;
+                peer_id
+            }));
         }
     }
 

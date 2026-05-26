@@ -1,8 +1,9 @@
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeSet, HashMap};
 use std::sync::Arc;
 use std::time::Duration;
 
 use futures::StreamExt as _;
+use futures::future::BoxFuture;
 use futures::stream::FuturesUnordered;
 use rostra_client_db::{Database, IdsFollowersRecord, WotData};
 use rostra_core::event::VerifiedEvent;
@@ -18,6 +19,8 @@ use crate::connection_cache::ConnectionCache;
 use crate::net::ClientNetworking;
 
 const LOG_TARGET: &str = "rostra::poll_follower_heads";
+const MAX_ACTIVE_POLLS: usize = 32;
+const POLL_SLOT_TIMEOUT: Duration = Duration::from_secs(5 * 60);
 
 /// Per-peer backoff state for polling.
 #[derive(Debug, Clone, Default)]
@@ -104,48 +107,97 @@ impl PollFollowerHeadUpdates {
 
     #[instrument(name = "poll-follower-head-updates", skip(self), fields(self_id = %self.self_id.to_short()), ret)]
     pub async fn run(mut self) {
-        // Keep track of which peers we're polling
-        let mut active_peers: HashSet<RostraId> = HashSet::new();
-        // FuturesUnordered to manage concurrent polling tasks
-        let mut poll_futures: FuturesUnordered<_> = FuturesUnordered::new();
-        // Shared backoff state for all peers
+        let mut desired_peers = BTreeSet::new();
+        let mut pending_peers = BTreeSet::new();
+        let mut active_peers = BTreeSet::new();
+        let mut poll_futures = FuturesUnordered::new();
         let backoff_state: SharedBackoffState = Arc::new(RwLock::new(HashMap::new()));
 
-        // Always poll self — another instance of our node may learn
-        // about follower updates we don't know about locally.
-        active_peers.insert(self.self_id);
+        self.update_desired_followers(&mut desired_peers, &active_peers, &mut pending_peers);
+        self.schedule_pending(
+            &mut pending_peers,
+            &mut active_peers,
+            &mut poll_futures,
+            &backoff_state,
+        );
 
         loop {
-            // Check for follower changes to update active peers
-            let current_followers: HashSet<RostraId> = {
-                let followers = self.self_followers_rx.borrow();
-                followers.keys().copied().collect()
-            };
-
-            // Add new followers
-            let new_followers: Vec<_> = current_followers
-                .difference(&active_peers)
-                .copied()
-                .collect();
-            for follower_id in new_followers {
-                debug!(target: LOG_TARGET, %follower_id, "Adding follower to poll list");
-                active_peers.insert(follower_id);
+            tokio::select! {
+                Some(peer_id) = poll_futures.next() => {
+                    active_peers.remove(&peer_id);
+                    trace!(target: LOG_TARGET, %peer_id, "Poll task completed");
+                    if desired_peers.contains(&peer_id) {
+                        pending_peers.insert(peer_id);
+                    }
+                }
+                res = self.self_followers_rx.changed() => {
+                    if res.is_err() {
+                        debug!(target: LOG_TARGET, "Followers channel closed, shutting down");
+                        break;
+                    }
+                    debug!(target: LOG_TARGET, "Followers changed, updating poll list");
+                    self.update_desired_followers(
+                        &mut desired_peers,
+                        &active_peers,
+                        &mut pending_peers,
+                    );
+                }
             }
 
-            // Note: We don't remove peers that are no longer followers since existing
-            // connections will naturally close when the RPC fails.
+            self.schedule_pending(
+                &mut pending_peers,
+                &mut active_peers,
+                &mut poll_futures,
+                &backoff_state,
+            );
 
-            // Spawn polling tasks for peers that don't have active connections
-            let peers_to_poll: Vec<_> = active_peers.iter().copied().collect();
-            for peer_id in peers_to_poll {
-                let networking = self.networking.clone();
-                let connections = self.connections.clone();
-                let db = self.db.clone();
-                let self_id = self.self_id;
-                let wot_rx = self.self_wot_rx.clone();
-                let backoff = backoff_state.clone();
+            if self.client.app_ref_opt().is_none() {
+                debug!(target: LOG_TARGET, "Client gone, quitting");
+                break;
+            }
+        }
+    }
 
-                poll_futures.push(async move {
+    fn update_desired_followers(
+        &self,
+        desired_peers: &mut BTreeSet<RostraId>,
+        active_peers: &BTreeSet<RostraId>,
+        pending_peers: &mut BTreeSet<RostraId>,
+    ) {
+        desired_peers.clear();
+        desired_peers.insert(self.self_id);
+        desired_peers.extend(self.self_followers_rx.borrow().keys().copied());
+        pending_peers.retain(|id| desired_peers.contains(id));
+
+        for peer_id in desired_peers.difference(active_peers) {
+            pending_peers.insert(*peer_id);
+        }
+    }
+
+    fn schedule_pending(
+        &self,
+        pending_peers: &mut BTreeSet<RostraId>,
+        active_peers: &mut BTreeSet<RostraId>,
+        poll_futures: &mut FuturesUnordered<BoxFuture<'static, RostraId>>,
+        backoff_state: &SharedBackoffState,
+    ) {
+        while active_peers.len() < MAX_ACTIVE_POLLS {
+            let Some(peer_id) = pending_peers.pop_first() else {
+                break;
+            };
+            if !active_peers.insert(peer_id) {
+                continue;
+            }
+
+            let networking = self.networking.clone();
+            let connections = self.connections.clone();
+            let db = self.db.clone();
+            let self_id = self.self_id;
+            let wot_rx = self.self_wot_rx.clone();
+            let backoff = backoff_state.clone();
+            poll_futures.push(Box::pin(async move {
+                let _ = tokio::time::timeout(
+                    POLL_SLOT_TIMEOUT,
                     Self::poll_peer_for_heads(
                         networking,
                         connections,
@@ -154,38 +206,11 @@ impl PollFollowerHeadUpdates {
                         peer_id,
                         wot_rx,
                         backoff,
-                    )
-                    .await;
-                    peer_id
-                });
-            }
-
-            // Clear active peers - they'll be re-added based on poll results
-            active_peers.clear();
-            active_peers.insert(self.self_id);
-
-            tokio::select! {
-                // Wait for any polling task to complete
-                Some(peer_id) = poll_futures.next() => {
-                    trace!(target: LOG_TARGET, %peer_id, "Poll task completed, will restart");
-                    // Re-add the peer to be polled again
-                    active_peers.insert(peer_id);
-                }
-                // Check for follower changes
-                res = self.self_followers_rx.changed() => {
-                    if res.is_err() {
-                        debug!(target: LOG_TARGET, "Followers channel closed, shutting down");
-                        break;
-                    }
-                    debug!(target: LOG_TARGET, "Followers changed, updating poll list");
-                }
-            }
-
-            // Check if client is still running
-            if self.client.app_ref_opt().is_none() {
-                debug!(target: LOG_TARGET, "Client gone, quitting");
-                break;
-            }
+                    ),
+                )
+                .await;
+                peer_id
+            }));
         }
     }
 

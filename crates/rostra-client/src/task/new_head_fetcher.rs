@@ -1,6 +1,7 @@
 use std::collections::{BTreeSet, HashSet};
 use std::sync::{Arc, Mutex};
 
+use n0_future::task::AbortOnDropHandle;
 use rostra_client_db::{Database, WotData};
 use rostra_core::ShortEventId;
 use rostra_core::id::{RostraId, ToShort as _};
@@ -116,9 +117,9 @@ impl NewHeadFetcher {
 
         let (queue, notify_rx) = WorkQueue::new();
 
-        // Spawn worker tasks
+        let mut worker_handles = Vec::with_capacity(NUM_WORKERS);
         for worker_id in 0..NUM_WORKERS {
-            tokio::spawn(Self::worker(
+            worker_handles.push(AbortOnDropHandle::new(tokio::spawn(Self::worker(
                 worker_id,
                 queue.clone(),
                 notify_rx.clone(),
@@ -126,7 +127,7 @@ impl NewHeadFetcher {
                 self.db.clone(),
                 self.self_id,
                 self.connections.clone(),
-            ));
+            ))));
         }
 
         loop {

@@ -75,6 +75,7 @@ jotup = { version = "0.10.0", features = ["async"] }
 pkarr = "5.0.2"
 proptest = "1.6.0"
 maud = "*"
+n0-future = "0.3.2"
 tempfile = "3.14.0"
 test-log = { version = "0.2.16", features = ["trace"] }
 rand = "0.9"

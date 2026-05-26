@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
 
 use futures::stream::{self, StreamExt as _};
 use rostra_core::ShortEventId;
@@ -13,12 +14,14 @@ use crate::error::ConnectResult;
 use crate::net::ClientNetworking;
 
 const LOG_TARGET: &str = "rostra-client::connection-cache";
+const CLEANUP_INTERVAL: u64 = 64;
 
 type LazySharedConnection = Arc<OnceCell<Connection>>;
 
 #[derive(Clone)]
 pub struct ConnectionCache {
     connections: Arc<Mutex<HashMap<RostraId, LazySharedConnection>>>,
+    access_count: Arc<AtomicU64>,
 }
 
 impl Default for ConnectionCache {
@@ -31,6 +34,26 @@ impl ConnectionCache {
     pub fn new() -> Self {
         Self {
             connections: Arc::new(Mutex::new(HashMap::new())),
+            access_count: Arc::new(AtomicU64::new(0)),
+        }
+    }
+
+    fn maybe_cleanup_closed(&self, connections: &mut HashMap<RostraId, LazySharedConnection>) {
+        let access_count = self.access_count.fetch_add(1, Ordering::Relaxed);
+        if !access_count.is_multiple_of(CLEANUP_INTERVAL) {
+            return;
+        }
+
+        let before = connections.len();
+        connections.retain(|_, conn| conn.get().is_some_and(|conn| !conn.is_closed()));
+        let removed = before.saturating_sub(connections.len());
+        if 0 < removed {
+            trace!(
+                target: LOG_TARGET,
+                removed,
+                remaining = connections.len(),
+                "Removed closed or empty connections from cache"
+            );
         }
     }
 
@@ -40,6 +63,7 @@ impl ConnectionCache {
         id: RostraId,
     ) -> ConnectResult<Connection> {
         let mut pool_lock = self.connections.lock().await;
+        self.maybe_cleanup_closed(&mut pool_lock);
 
         let entry_arc = pool_lock
             .entry(id)
