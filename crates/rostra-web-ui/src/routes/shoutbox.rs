@@ -204,6 +204,16 @@ pub async fn get_shoutbox(
                 input type="hidden" name="content" value="" {}
             }
 
+            // Hidden media attach form for pasted images
+            form id="shoutbox-media-attach-form"
+                action=(format!("/media/{}/list", rostra_id))
+                method="get"
+                x-target="media-list"
+                style="display: none;"
+            {
+                input type="hidden" name="target" value="#shoutbox-input" {}
+            }
+
             // Input form fixed at bottom
             @let form_ajax = fragment::AjaxLoadingAttrs::for_class("o-shoutbox__submitButton");
             form ."o-shoutbox__form"
@@ -229,6 +239,7 @@ pub async fn get_shoutbox(
                         rows="1"
                         "@keydown.enter.prevent"="if (!$event.shiftKey && !showDropdown) { $el.form.requestSubmit(); }"
                         "@keydown"="handleKeydown($event)"
+                        "@paste"="handleMediaPaste($event, 'shoutbox-media-attach-form')"
                         "@input"="handleInput($event); const pf = document.getElementById('shoutbox-preview-form'); pf.querySelector('input[name=content]').value = $el.value; pf.requestSubmit();"
                         autocomplete="off"
                         autofocus

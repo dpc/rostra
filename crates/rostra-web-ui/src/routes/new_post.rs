@@ -238,7 +238,11 @@ pub async fn post_new_post(
     // Clear the form content after posting (clear_content = true clears persisted
     // draft)
     let clean_form = if form.news {
-        state.news_post_form_inner(state.ro_mode(session.session_token()), true)
+        state.news_post_form_inner(
+            state.ro_mode(session.session_token()),
+            Some(client_ref.rostra_id()),
+            true,
+        )
     } else {
         state.new_post_form_inner(
             state.ro_mode(session.session_token()),
@@ -815,6 +819,7 @@ impl UiState {
                             autocomplete="off"
                             disabled[ro.to_disabled()]
                             "x-on:keyup.enter.ctrl"="$el.form.requestSubmit()"
+                            "@paste"=(format!("handleMediaPaste($event, '{attach_form_id}')"))
                             {}
 
                         // Autocomplete dropdown (mentions and emojis)
@@ -959,11 +964,16 @@ impl UiState {
         }
     }
 
-    pub(crate) fn news_post_form(&self, ro: RoMode) -> Markup {
-        self.news_post_form_inner(ro, false)
+    pub(crate) fn news_post_form(&self, ro: RoMode, user_id: Option<RostraId>) -> Markup {
+        self.news_post_form_inner(ro, user_id, false)
     }
 
-    pub(crate) fn news_post_form_inner(&self, ro: RoMode, clear_content: bool) -> Markup {
+    pub(crate) fn news_post_form_inner(
+        &self,
+        ro: RoMode,
+        user_id: Option<RostraId>,
+        clear_content: bool,
+    ) -> Markup {
         let preview_update = r#"
             const previewForm = document.getElementById('new-post-preview-form');
             previewForm.querySelector('input[name=content]').value = document.getElementById('new-post-content')?.value ?? '';
@@ -1039,6 +1049,7 @@ impl UiState {
                         autocomplete="off"
                         disabled[ro.to_disabled()]
                         "x-on:keyup.enter.ctrl"="$el.form.requestSubmit()"
+                        "@paste"=[user_id.is_some().then_some("handleMediaPaste($event, 'news-media-attach-form')")]
                         {}
 
                     div ."m-textAutocomplete"
@@ -1106,6 +1117,17 @@ impl UiState {
 
             @if ro.is_ro() {
                 form id="ro-logout-form" action="/unlock/logout" method="post" style="display: none;" {}
+            }
+
+            @if let Some(uid) = user_id {
+                form id="news-media-attach-form"
+                    action=(format!("/media/{}/list", uid))
+                    method="get"
+                    x-target="media-list"
+                    style="display: none;"
+                {
+                    input type="hidden" name="target" value="#new-post-content" {}
+                }
             }
 
             div id="emoji-picker-container" ."m-newPostForm__emojiBar -hidden"
@@ -1186,6 +1208,7 @@ impl UiState {
                         autocomplete="off"
                         disabled[ro.to_disabled()]
                         "x-on:keyup.enter.ctrl"="$el.form.requestSubmit()"
+                        "@paste"=[user_id.is_some().then_some("handleMediaPaste($event, 'media-attach-form')")]
                         {}
 
                     // Autocomplete dropdown (mentions and emojis)
@@ -1292,12 +1315,6 @@ impl UiState {
                     input type="hidden" name="target" value="#new-post-content" {}
                 }
 
-                input id="media-file-input"
-                    name="media_file"
-                    type="file"
-                    style="display: none;"
-                    "@change"="uploadMediaFile($el)"
-                    {}
             }
 
             // Emoji picker (outside form to avoid re-creation on swap)

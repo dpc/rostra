@@ -359,7 +359,7 @@ impl UiState {
                 }
 
                 @if show_news_post_form {
-                    (self.news_post_form(ro_mode))
+                    (self.news_post_form(ro_mode, Some(user_id)))
                 } @else if !hide_new_post_form {
                     (self.new_post_form(None, ro_mode, Some(user_id)))
                 }

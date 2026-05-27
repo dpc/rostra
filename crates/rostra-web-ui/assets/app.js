@@ -118,6 +118,47 @@ window.insertMediaSyntax = function (eventId, targetSelector) {
 window.uploadMediaFile = function (inputEl) {
   const file = inputEl.files[0];
   if (!file) return;
+  previewMediaFile(file, inputEl);
+};
+
+window.handleMediaPaste = function (event, attachFormId) {
+  const file = [...(event.clipboardData?.items ?? [])]
+    .filter((item) => item.kind === "file")
+    .map((item) => item.getAsFile())
+    .find((file) => file && file.type.startsWith("image/"));
+
+  if (!file) return;
+
+  event.preventDefault();
+
+  const attachForm = document.getElementById(attachFormId);
+  if (!attachForm) return;
+
+  const target = attachForm.querySelector('input[name="target"]')?.value;
+  attachForm.requestSubmit();
+  previewMediaFileWhenDialogReady(file, target);
+};
+
+function previewMediaFileWhenDialogReady(file, target, attempts = 0) {
+  const dialog = document.getElementById("media-list");
+  if (dialog && (!target || dialog.dataset.target === target)) {
+    previewMediaFile(file, null);
+    return;
+  }
+
+  if (attempts < 50) {
+    setTimeout(() => previewMediaFileWhenDialogReady(file, target, attempts + 1), 50);
+    return;
+  }
+
+  window.dispatchEvent(
+    new CustomEvent("notify", {
+      detail: { type: "error", message: "Could not open media upload dialog" },
+    }),
+  );
+}
+
+function previewMediaFile(file, inputEl) {
 
   const dialog = document.getElementById("media-list");
   const previewEl = document.getElementById("media-upload-preview");
@@ -178,9 +219,9 @@ window.uploadMediaFile = function (inputEl) {
   };
   closeBtn.onclick = () => {
     cleanup();
-    inputEl.value = "";
+    if (inputEl) inputEl.value = "";
   };
-};
+}
 
 function doMediaUpload(inputEl, file) {
   const formData = new FormData();
@@ -206,7 +247,7 @@ function doMediaUpload(inputEl, file) {
 
   xhr.addEventListener("load", () => {
     if (progressEl) progressEl.classList.remove("-active");
-    inputEl.value = "";
+    if (inputEl) inputEl.value = "";
 
     if (xhr.status >= 200 && xhr.status < 300) {
       // Parse response and execute scripts (same as alpine-ajax would)
@@ -235,7 +276,7 @@ function doMediaUpload(inputEl, file) {
 
   xhr.addEventListener("error", () => {
     if (progressEl) progressEl.classList.remove("-active");
-    inputEl.value = "";
+    if (inputEl) inputEl.value = "";
     window.dispatchEvent(
       new CustomEvent("notify", {
         detail: { type: "error", message: "Upload failed - network error" },

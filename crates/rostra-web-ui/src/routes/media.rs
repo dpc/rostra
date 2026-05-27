@@ -272,13 +272,18 @@ pub async fn list(
                 div ."o-mediaList__actionButtons" {
                     (fragment::button("o-mediaList__uploadButton", "Upload")
                         .button_type("button")
-                        .onclick("document.getElementById('media-file-input').click()")
+                        .onclick("document.querySelector('#media-list input[name=media_file]')?.click()")
                         .call())
                     (fragment::button("o-mediaList__closeButton", "Close")
                         .button_type("button")
                         .onclick("document.getElementById('media-list').classList.remove('-active')")
                         .call())
                 }
+                input name="media_file"
+                    type="file"
+                    style="display: none;"
+                    "@change"="uploadMediaFile($el)"
+                    {}
             }
         }
     }))
