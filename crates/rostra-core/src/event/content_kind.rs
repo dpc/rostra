@@ -217,6 +217,23 @@ impl SocialPost {
         } else {
             (Some(body), None)
         };
+        Self::from_parts(djot_content, reply_to, reaction, persona_tags)
+    }
+
+    pub fn new_text(
+        body: String,
+        reply_to: Option<ExternalEventId>,
+        persona_tags: BTreeSet<PersonaTag>,
+    ) -> Self {
+        Self::from_parts(Some(body), reply_to, None, persona_tags)
+    }
+
+    fn from_parts(
+        djot_content: Option<String>,
+        reply_to: Option<ExternalEventId>,
+        reaction: Option<String>,
+        persona_tags: BTreeSet<PersonaTag>,
+    ) -> Self {
         Self {
             persona: Some(PersonaId(0)),
             djot_content,

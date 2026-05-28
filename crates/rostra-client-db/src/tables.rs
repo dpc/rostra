@@ -506,6 +506,16 @@ def_table! {
 }
 
 def_table! {
+    /// Mapping from an old social post event id to the event that replaced it.
+    social_posts_replaced_by: (RostraId, ShortEventId, ShortEventId) => ()
+}
+
+def_table! {
+    /// Reverse mapping from a social post replacement event to the old event id.
+    social_posts_replaces: (RostraId, ShortEventId, ShortEventId) => ()
+}
+
+def_table! {
     /// Vote sums keyed by the external id of the voted post.
     social_vote_sums: ExternalEventId => SocialVoteSumRecord
 }

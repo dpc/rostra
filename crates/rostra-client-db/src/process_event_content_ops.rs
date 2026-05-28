@@ -14,7 +14,8 @@ use crate::{
     SocialPostsReactionsRecord, SocialPostsRepliesRecord, WriteTransactionCtx,
     events_singletons_new, ids_followees, shoutbox_posts_by_received_at, social_posts,
     social_posts_by_received_at, social_posts_by_time, social_posts_reactions,
-    social_posts_replies, social_posts_self_mention,
+    social_posts_replaced_by, social_posts_replaces, social_posts_replies,
+    social_posts_self_mention,
 };
 
 #[derive(Debug, Snafu)]
@@ -234,17 +235,29 @@ impl Database {
                             debug!(target: LOG_TARGET, err = %err.fmt_compact(), "Ignoring malformed SocialComment payload");
                         }).boxed().context(InvalidSnafu)?;
 
+                    let event_id = event_content.event_id().to_short();
+                    let replaced_event_id = event_content
+                        .event
+                        .is_delete_parent_aux_content_set()
+                        .then(|| event_content.event.parent_aux())
+                        .flatten()
+                        .filter(|_| {
+                            content
+                                .djot_content
+                                .as_deref()
+                                .is_some_and(|text| !text.trim().is_empty())
+                        });
+                    if event_content.event.is_delete_parent_aux_content_set()
+                        && replaced_event_id.is_none()
+                    {
+                        return Ok(());
+                    }
+
                     let mut social_post_by_time_tbl = tx
                         .open_table(&social_posts_by_time::TABLE)
                         .map_err(DbError::from)?;
                     social_post_by_time_tbl
-                        .insert(
-                            &(
-                                event_content.timestamp(),
-                                event_content.event_id().to_short(),
-                            ),
-                            &(),
-                        )
+                        .insert(&(event_content.timestamp(), event_id), &())
                         .map_err(DbError::from)?;
 
                     // Also insert into received_at index for notification ordering.
@@ -268,12 +281,29 @@ impl Database {
                     // Assert key uniqueness - reception_order is monotonic so this should never
                     // fail
                     let prev = social_post_by_received_at_tbl
-                        .insert(&key, &event_content.event_id().to_short())
+                        .insert(&key, &event_id)
                         .map_err(DbError::from)?;
                     debug_assert!(
                         prev.is_none(),
                         "social_posts_by_received_at key collision: {key:?}"
                     );
+
+                    if let Some(old_event_id) = replaced_event_id {
+                        let mut replaced_by_tbl = tx
+                            .open_table(&social_posts_replaced_by::TABLE)
+                            .map_err(DbError::from)?;
+                        replaced_by_tbl
+                            .insert(&(author, old_event_id, event_id), &())
+                            .map_err(DbError::from)?;
+                        drop(replaced_by_tbl);
+
+                        let mut replaces_tbl = tx
+                            .open_table(&social_posts_replaces::TABLE)
+                            .map_err(DbError::from)?;
+                        replaces_tbl
+                            .insert(&(author, event_id, old_event_id), &())
+                            .map_err(DbError::from)?;
+                    }
 
                     tx.on_commit({
                         let event_content = event_content.clone();
@@ -338,7 +368,7 @@ impl Database {
                                     &(
                                         reply_to.event_id(),
                                         event_content.event.event.timestamp.into(),
-                                        event_content.event.event_id.to_short(),
+                                        event_id,
                                     ),
                                     &SocialPostsRepliesRecord,
                                 )
@@ -357,7 +387,7 @@ impl Database {
                                     &(
                                         reply_to.event_id(),
                                         event_content.event.event.timestamp.into(),
-                                        event_content.event.event_id.to_short(),
+                                        event_id,
                                     ),
                                     &SocialPostsReactionsRecord,
                                 )

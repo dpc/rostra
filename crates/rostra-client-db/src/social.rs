@@ -12,7 +12,8 @@ use crate::event::ContentStoreRecord;
 use crate::{
     DbResult, LOG_TARGET, content_store, events, events_content_state,
     shoutbox_posts_by_received_at, social_posts, social_posts_by_received_at, social_posts_by_time,
-    social_posts_reactions, social_posts_replies, tables,
+    social_posts_reactions, social_posts_replaced_by, social_posts_replaces, social_posts_replies,
+    tables,
 };
 
 /// Cursor for paginating events by their author timestamp.
@@ -106,6 +107,127 @@ pub struct ShoutboxPostRecord {
 }
 
 impl Database {
+    fn is_social_post_replaced_tx(
+        author: RostraId,
+        event_id: ShortEventId,
+        social_posts_replaced_by_table: &impl social_posts_replaced_by::ReadableTable,
+    ) -> DbResult<bool> {
+        Ok(social_posts_replaced_by_table
+            .range(
+                &(author, event_id, ShortEventId::ZERO)..=&(author, event_id, ShortEventId::MAX),
+            )?
+            .next()
+            .transpose()?
+            .is_some())
+    }
+
+    fn latest_social_post_version_tx(
+        author: RostraId,
+        event_id: ShortEventId,
+        social_posts_replaced_by_table: &impl social_posts_replaced_by::ReadableTable,
+    ) -> DbResult<ShortEventId> {
+        let mut current = event_id;
+
+        while let Some(record) = social_posts_replaced_by_table
+            .range(&(author, current, ShortEventId::ZERO)..=&(author, current, ShortEventId::MAX))?
+            .next()
+            .transpose()?
+        {
+            let (_, _, new_event_id) = record.0.value();
+            current = new_event_id;
+        }
+
+        Ok(current)
+    }
+
+    fn social_post_versions_tx(
+        author: RostraId,
+        event_id: ShortEventId,
+        social_posts_replaces_table: &impl social_posts_replaces::ReadableTable,
+    ) -> DbResult<Vec<ShortEventId>> {
+        let mut versions = vec![event_id];
+        let mut current = event_id;
+
+        while let Some(record) = social_posts_replaces_table
+            .range(&(author, current, ShortEventId::ZERO)..=&(author, current, ShortEventId::MAX))?
+            .next()
+            .transpose()?
+        {
+            let (_, _, old_event_id) = record.0.value();
+            versions.push(old_event_id);
+            current = old_event_id;
+        }
+
+        Ok(versions)
+    }
+
+    fn social_post_reply_count_tx(
+        author: RostraId,
+        event_id: ShortEventId,
+        social_posts_table: &impl social_posts::ReadableTable,
+        social_posts_replaces_table: &impl social_posts_replaces::ReadableTable,
+    ) -> DbResult<u64> {
+        let mut reply_count = 0u64;
+        for version in Self::social_post_versions_tx(author, event_id, social_posts_replaces_table)?
+        {
+            reply_count = reply_count.saturating_add(
+                Database::get_social_post_tx(version, social_posts_table)?
+                    .unwrap_or_default()
+                    .reply_count,
+            );
+        }
+        Ok(reply_count)
+    }
+
+    fn social_post_record_by_id_tx(
+        event_id: ShortEventId,
+        ts: Timestamp,
+        events_table: &impl events::ReadableTable,
+        social_posts_table: &impl social_posts::ReadableTable,
+        events_content_state_table: &impl events_content_state::ReadableTable,
+        content_store_table: &impl content_store::ReadableTable,
+        social_posts_replaces_table: &impl social_posts_replaces::ReadableTable,
+    ) -> DbResult<Option<SocialPostRecord<content_kind::SocialPost>>> {
+        let Some(event) = Database::get_event_tx(event_id, events_table)? else {
+            warn!(target: LOG_TARGET, %event_id, "Missing event for a post with social_post_record?!");
+            return Ok(None);
+        };
+        let author = event.author();
+        let content_hash = event.content_hash();
+
+        if Database::get_event_content_state_tx(event_id, events_content_state_table)?.is_some() {
+            debug!(target: LOG_TARGET, %event_id, "Skipping post without content present");
+            return Ok(None);
+        }
+
+        let Some(store_record) = content_store_table.get(&content_hash)?.map(|g| g.value()) else {
+            debug!(target: LOG_TARGET, %event_id, "Skipping post without content present");
+            return Ok(None);
+        };
+        let ContentStoreRecord(content) = store_record;
+
+        let Ok(social_post) = content.deserialize_cbor::<content_kind::SocialPost>() else {
+            debug!(target: LOG_TARGET, %event_id, "Skipping post with invalid content");
+            return Ok(None);
+        };
+
+        let reply_count = Self::social_post_reply_count_tx(
+            author,
+            event_id,
+            social_posts_table,
+            social_posts_replaces_table,
+        )?;
+
+        Ok(Some(SocialPostRecord {
+            ts,
+            author,
+            event_id,
+            reply_to: social_post.reply_to,
+            reply_count,
+            content: social_post,
+        }))
+    }
+
     pub async fn paginate_social_posts(
         &self,
         cursor: Option<EventPaginationCursor>,
@@ -121,6 +243,8 @@ impl Database {
             let social_posts_by_time_table = tx.open_table(&social_posts_by_time::TABLE)?;
             let events_content_state_table = tx.open_table(&events_content_state::TABLE)?;
             let content_store_table = tx.open_table(&content_store::TABLE)?;
+            let social_posts_replaced_by_table = tx.open_table(&social_posts_replaced_by::TABLE)?;
+            let social_posts_replaces_table = tx.open_table(&social_posts_replaces::TABLE)?;
 
             let (ret, cursor) = Self::paginate_table(&social_posts_by_time_table,
                 cursor.map(|c| (c.ts, c.event_id)),
@@ -131,6 +255,10 @@ impl Database {
                     warn!(target: LOG_TARGET, %event_id, "Missing event for a post with social_post_record?!");
                     return Ok(None);
                 };
+                let author = event.author();
+                if Self::is_social_post_replaced_tx(author, event_id, &social_posts_replaced_by_table)? {
+                    return Ok(None);
+                }
                 let content_hash = event.content_hash();
 
                 // If event has a content state, it means content is deleted or pruned
@@ -153,14 +281,18 @@ impl Database {
                     return Ok(None);
                 };
 
-                let social_post_record =
-                    Database::get_social_post_tx(event_id, &social_posts_table)?.unwrap_or_default();
+                let reply_count = Self::social_post_reply_count_tx(
+                    author,
+                    event_id,
+                    &social_posts_table,
+                    &social_posts_replaces_table,
+                )?;
 
                 let social_post_record = SocialPostRecord {
                     ts,
-                    author: event.author(),
+                    author,
                     event_id,
-                    reply_count: social_post_record.reply_count,
+                    reply_count,
                     reply_to: social_post.reply_to,
                     content: social_post,
                 };
@@ -196,6 +328,8 @@ impl Database {
             let social_posts_by_time_table = tx.open_table(&social_posts_by_time::TABLE)?;
             let events_content_state_table = tx.open_table(&events_content_state::TABLE)?;
             let content_store_table = tx.open_table(&content_store::TABLE)?;
+            let social_posts_replaced_by_table = tx.open_table(&social_posts_replaced_by::TABLE)?;
+            let social_posts_replaces_table = tx.open_table(&social_posts_replaces::TABLE)?;
 
             let (ret, cursor) = Self::paginate_table_rev(&social_posts_by_time_table,
                 cursor.map(|c| (c.ts, c.event_id)),
@@ -206,6 +340,10 @@ impl Database {
                     warn!(target: LOG_TARGET, %event_id, "Missing event for a post with social_post_record?!");
                     return Ok(None);
                 };
+                let author = event.author();
+                if Self::is_social_post_replaced_tx(author, event_id, &social_posts_replaced_by_table)? {
+                    return Ok(None);
+                }
                 let content_hash = event.content_hash();
 
                 // If event has a content state, it means content is deleted or pruned
@@ -228,14 +366,18 @@ impl Database {
                     return Ok(None);
                 };
 
-                let social_post_record =
-                    Database::get_social_post_tx(event_id, &social_posts_table)?.unwrap_or_default();
+                let reply_count = Self::social_post_reply_count_tx(
+                    author,
+                    event_id,
+                    &social_posts_table,
+                    &social_posts_replaces_table,
+                )?;
 
                 let social_post_record = SocialPostRecord {
                     ts,
-                    author: event.author(),
+                    author,
                     event_id,
-                    reply_count: social_post_record.reply_count,
+                    reply_count,
                     reply_to: social_post.reply_to,
                     content: social_post,
                 };
@@ -297,6 +439,8 @@ impl Database {
                 tx.open_table(&social_posts_by_received_at::TABLE)?;
             let events_content_state_table = tx.open_table(&events_content_state::TABLE)?;
             let content_store_table = tx.open_table(&content_store::TABLE)?;
+            let social_posts_replaced_by_table = tx.open_table(&social_posts_replaced_by::TABLE)?;
+            let social_posts_replaces_table = tx.open_table(&social_posts_replaces::TABLE)?;
 
             let (ret, cursor) = Self::paginate_table(
                 &social_posts_by_received_at_table,
@@ -307,6 +451,14 @@ impl Database {
                         warn!(target: LOG_TARGET, %event_id, "Missing event for a post with social_post_record?!");
                         return Ok(None);
                     };
+                    let author = event.author();
+                    if Self::is_social_post_replaced_tx(
+                        author,
+                        event_id,
+                        &social_posts_replaced_by_table,
+                    )? {
+                        return Ok(None);
+                    }
                     let content_hash = event.content_hash();
 
                     // If event has a content state, it means content is deleted or pruned
@@ -330,15 +482,18 @@ impl Database {
                         return Ok(None);
                     };
 
-                    let social_post_record =
-                        Database::get_social_post_tx(event_id, &social_posts_table)?
-                            .unwrap_or_default();
+                    let reply_count = Self::social_post_reply_count_tx(
+                        author,
+                        event_id,
+                        &social_posts_table,
+                        &social_posts_replaces_table,
+                    )?;
 
                     let social_post_record = SocialPostRecord {
                         ts,
-                        author: event.author(),
+                        author,
                         event_id,
-                        reply_count: social_post_record.reply_count,
+                        reply_count,
                         reply_to: social_post.reply_to,
                         content: social_post,
                     };
@@ -382,6 +537,8 @@ impl Database {
                 tx.open_table(&social_posts_by_received_at::TABLE)?;
             let events_content_state_table = tx.open_table(&events_content_state::TABLE)?;
             let content_store_table = tx.open_table(&content_store::TABLE)?;
+            let social_posts_replaced_by_table = tx.open_table(&social_posts_replaced_by::TABLE)?;
+            let social_posts_replaces_table = tx.open_table(&social_posts_replaces::TABLE)?;
 
             let (ret, cursor) = Self::paginate_table_rev(
                 &social_posts_by_received_at_table,
@@ -392,6 +549,14 @@ impl Database {
                         warn!(target: LOG_TARGET, %event_id, "Missing event for a post with social_post_record?!");
                         return Ok(None);
                     };
+                    let author = event.author();
+                    if Self::is_social_post_replaced_tx(
+                        author,
+                        event_id,
+                        &social_posts_replaced_by_table,
+                    )? {
+                        return Ok(None);
+                    }
                     let content_hash = event.content_hash();
 
                     // If event has a content state, it means content is deleted or pruned
@@ -415,15 +580,18 @@ impl Database {
                         return Ok(None);
                     };
 
-                    let social_post_record =
-                        Database::get_social_post_tx(event_id, &social_posts_table)?
-                            .unwrap_or_default();
+                    let reply_count = Self::social_post_reply_count_tx(
+                        author,
+                        event_id,
+                        &social_posts_table,
+                        &social_posts_replaces_table,
+                    )?;
 
                     let social_post_record = SocialPostRecord {
                         ts,
-                        author: event.author(),
+                        author,
                         event_id,
-                        reply_count: social_post_record.reply_count,
+                        reply_count,
                         reply_to: social_post.reply_to,
                         content: social_post,
                     };
@@ -463,53 +631,55 @@ impl Database {
             let social_post_replies_tbl = tx.open_table(&social_posts_replies::TABLE)?;
             let events_content_state_table = tx.open_table(&events_content_state::TABLE)?;
             let content_store_table = tx.open_table(&content_store::TABLE)?;
+            let social_posts_replaces_table = tx.open_table(&social_posts_replaces::TABLE)?;
 
-            let (ret, cursor) = Database::paginate_table_partition_rev(&social_post_replies_tbl,
-                (post_event_id, Timestamp::ZERO, ShortEventId::ZERO)..=
-                (post_event_id, Timestamp::MAX, ShortEventId::MAX),
-                |(_, ts, event_id)| (post_event_id, ts, event_id),
-
-                 cursor.map(|c| (post_event_id, c.ts, c.event_id)), limit, move |(_, ts, event_id), _| {
-
-                let social_post_record = Database::get_social_post_tx(event_id, &social_posts_tbl)?.unwrap_or_default();
-
-                let Some(event) = Database::get_event_tx(event_id, &events_table)? else {
-                    warn!(target: LOG_TARGET, %event_id, "Missing event for a post with social_post_record?!");
-                    return Ok(None);
+            let versions =
+                if let Some(event) = Database::get_event_tx(post_event_id, &events_table)? {
+                    Self::social_post_versions_tx(
+                        event.author(),
+                        post_event_id,
+                        &social_posts_replaces_table,
+                    )?
+                } else {
+                    vec![post_event_id]
                 };
-                let content_hash = event.content_hash();
 
-                // If event has a content state, it means content is deleted or pruned
-                if Database::get_event_content_state_tx(event_id, &events_content_state_table)?
-                    .is_some()
-                {
-                    debug!(target: LOG_TARGET, %event_id, "Skipping comment without content present");
-                    return Ok(None);
+            let mut records = vec![];
+            for version in versions {
+                for entry in social_post_replies_tbl.range(
+                    &(version, Timestamp::ZERO, ShortEventId::ZERO)
+                        ..=&(version, Timestamp::MAX, ShortEventId::MAX),
+                )? {
+                    let (key, _) = entry?;
+                    let (_, ts, event_id) = key.value();
+                    if cursor.is_some_and(|cursor| (cursor.ts, cursor.event_id) <= (ts, event_id)) {
+                        continue;
+                    }
+
+                    let Some(record) = Self::social_post_record_by_id_tx(
+                        event_id,
+                        ts,
+                        &events_table,
+                        &social_posts_tbl,
+                        &events_content_state_table,
+                        &content_store_table,
+                        &social_posts_replaces_table,
+                    )?
+                    else {
+                        continue;
+                    };
+                    records.push(record);
                 }
+            }
 
-                // Get content from store
-                let Some(store_record) = content_store_table.get(&content_hash)?.map(|g| g.value()) else {
-                    debug!(target: LOG_TARGET, %event_id, "Skipping comment without content present");
-                    return Ok(None);
-                };
-                let ContentStoreRecord(content) = store_record;
+            records.sort_by(|a, b| (b.ts, b.event_id).cmp(&(a.ts, a.event_id)));
+            records.truncate(limit);
+            let cursor = records.last().map(|record| EventPaginationCursor {
+                ts: record.ts,
+                event_id: record.event_id,
+            });
 
-                let Ok(social_post) = content.deserialize_cbor::<content_kind::SocialPost>() else {
-                    debug!(target: LOG_TARGET, %event_id, "Skpping comment with invalid content");
-                    return Ok(None);
-                };
-
-                Ok(Some(SocialPostRecord {
-                    ts,
-                    author: event.author(),
-                    event_id,
-                    reply_to: social_post.reply_to,
-                    reply_count: social_post_record.reply_count,
-                    content: social_post,
-                }))
-            })?;
-
-            Ok((ret, cursor.map(|(_, ts, event_id)| EventPaginationCursor { ts, event_id })))
+            Ok((records, cursor))
         })
         .await
         .expect("Storage error")
@@ -530,53 +700,55 @@ impl Database {
             let social_post_reactions_tbl = tx.open_table(&social_posts_reactions::TABLE)?;
             let events_content_state_table = tx.open_table(&events_content_state::TABLE)?;
             let content_store_table = tx.open_table(&content_store::TABLE)?;
+            let social_posts_replaces_table = tx.open_table(&social_posts_replaces::TABLE)?;
 
-
-            let (ret, cursor) = Database::paginate_table_partition_rev(&social_post_reactions_tbl,
-                (post_event_id, Timestamp::ZERO, ShortEventId::ZERO)..=(post_event_id, Timestamp::MAX, ShortEventId::MAX),
-                |(_, ts, event_id)| (post_event_id, ts, event_id),
-
-                cursor.map(|c| (post_event_id, c.ts, c.event_id)), limit, move |(_, ts, event_id), _| {
-
-                let social_post_record = Database::get_social_post_tx(event_id, &social_posts_tbl)?.unwrap_or_default();
-
-                let Some(event) = Database::get_event_tx(event_id, &events_table)? else {
-                    warn!(target: LOG_TARGET, %event_id, "Missing event for a post with social_post_record?!");
-                    return Ok(None);
+            let versions =
+                if let Some(event) = Database::get_event_tx(post_event_id, &events_table)? {
+                    Self::social_post_versions_tx(
+                        event.author(),
+                        post_event_id,
+                        &social_posts_replaces_table,
+                    )?
+                } else {
+                    vec![post_event_id]
                 };
-                let content_hash = event.content_hash();
 
-                // If event has a content state, it means content is deleted or pruned
-                if Database::get_event_content_state_tx(event_id, &events_content_state_table)?
-                    .is_some()
-                {
-                    debug!(target: LOG_TARGET, %event_id, "Skipping reaction without content present");
-                    return Ok(None);
+            let mut records = vec![];
+            for version in versions {
+                for entry in social_post_reactions_tbl.range(
+                    &(version, Timestamp::ZERO, ShortEventId::ZERO)
+                        ..=&(version, Timestamp::MAX, ShortEventId::MAX),
+                )? {
+                    let (key, _) = entry?;
+                    let (_, ts, event_id) = key.value();
+                    if cursor.is_some_and(|cursor| (cursor.ts, cursor.event_id) <= (ts, event_id)) {
+                        continue;
+                    }
+
+                    let Some(record) = Self::social_post_record_by_id_tx(
+                        event_id,
+                        ts,
+                        &events_table,
+                        &social_posts_tbl,
+                        &events_content_state_table,
+                        &content_store_table,
+                        &social_posts_replaces_table,
+                    )?
+                    else {
+                        continue;
+                    };
+                    records.push(record);
                 }
+            }
 
-                // Get content from store
-                let Some(store_record) = content_store_table.get(&content_hash)?.map(|g| g.value()) else {
-                    debug!(target: LOG_TARGET, %event_id, "Skipping comment without content present");
-                    return Ok(None);
-                };
-                let ContentStoreRecord(content) = store_record;
+            records.sort_by(|a, b| (b.ts, b.event_id).cmp(&(a.ts, a.event_id)));
+            records.truncate(limit);
+            let cursor = records.last().map(|record| EventPaginationCursor {
+                ts: record.ts,
+                event_id: record.event_id,
+            });
 
-                let Ok(social_post) = content.deserialize_cbor::<content_kind::SocialPost>() else {
-                    debug!(target: LOG_TARGET, %event_id, "Skpping comment with invalid content");
-                    return Ok(None);
-                };
-
-                Ok(Some(SocialPostRecord {
-                    ts,
-                    author: event.author(),
-                    event_id,
-                    reply_to: social_post.reply_to,
-                    reply_count: social_post_record.reply_count,
-                    content: social_post,
-                }))
-            })?;
-
-            Ok((ret, cursor.map(|(_, ts, event_id)| EventPaginationCursor { ts, event_id})))
+            Ok((records, cursor))
         })
         .await
         .expect("Storage error")
@@ -591,11 +763,25 @@ impl Database {
             let social_posts_table = tx.open_table(&social_posts::TABLE)?;
             let events_content_state_table = tx.open_table(&events_content_state::TABLE)?;
             let content_store_table = tx.open_table(&content_store::TABLE)?;
+            let social_posts_replaces_table = tx.open_table(&social_posts_replaces::TABLE)?;
+            let social_posts_replaced_by_table = tx.open_table(&social_posts_replaced_by::TABLE)?;
 
             let mut ret = HashMap::new();
 
-            for event_id in post_ids {
-                let Some((social_post, event, social_post_record)) =
+            for requested_event_id in post_ids {
+                let event_id = if let Some(event) =
+                    Database::get_event_tx(requested_event_id, &events_table)?
+                {
+                    Self::latest_social_post_version_tx(
+                        event.author(),
+                        requested_event_id,
+                        &social_posts_replaced_by_table,
+                    )?
+                } else {
+                    requested_event_id
+                };
+
+                let Some((social_post, event, _social_post_record)) =
                     Self::get_social_post_record_tx(
                         &events_table,
                         &social_posts_table,
@@ -608,12 +794,17 @@ impl Database {
                 };
 
                 ret.insert(
-                    event_id,
+                    requested_event_id,
                     SocialPostRecord {
                         ts: event.timestamp(),
                         author: event.author(),
                         event_id,
-                        reply_count: social_post_record.reply_count,
+                        reply_count: Self::social_post_reply_count_tx(
+                            event.author(),
+                            event_id,
+                            &social_posts_table,
+                            &social_posts_replaces_table,
+                        )?,
                         reply_to: social_post.reply_to,
                         content: social_post,
                     },
@@ -740,8 +931,20 @@ impl Database {
             let social_posts_table = tx.open_table(&social_posts::TABLE)?;
             let events_content_state_table = tx.open_table(&events_content_state::TABLE)?;
             let content_store_table = tx.open_table(&content_store::TABLE)?;
+            let social_posts_replaces_table = tx.open_table(&social_posts_replaces::TABLE)?;
+            let social_posts_replaced_by_table = tx.open_table(&social_posts_replaced_by::TABLE)?;
 
-            let Some((social_post, event, social_post_record)) = Self::get_social_post_record_tx(
+            let event_id = if let Some(event) = Database::get_event_tx(event_id, &events_table)? {
+                Self::latest_social_post_version_tx(
+                    event.author(),
+                    event_id,
+                    &social_posts_replaced_by_table,
+                )?
+            } else {
+                event_id
+            };
+
+            let Some((social_post, event, _social_post_record)) = Self::get_social_post_record_tx(
                 &events_table,
                 &social_posts_table,
                 &events_content_state_table,
@@ -752,11 +955,25 @@ impl Database {
                 return Ok(None);
             };
 
+            if event.is_delete_parent_aux_content_set()
+                && social_post
+                    .djot_content
+                    .as_deref()
+                    .is_none_or(|text| text.trim().is_empty())
+            {
+                return Ok(None);
+            }
+
             Ok(Some(SocialPostRecord {
                 ts: event.timestamp(),
                 author: event.author(),
                 event_id,
-                reply_count: social_post_record.reply_count,
+                reply_count: Self::social_post_reply_count_tx(
+                    event.author(),
+                    event_id,
+                    &social_posts_table,
+                    &social_posts_replaces_table,
+                )?,
                 reply_to: social_post.reply_to,
                 content: social_post,
             }))
