@@ -211,6 +211,11 @@ pub fn route_handler(state: SharedState) -> Router<Arc<UiState>> {
             "/post/{author}/{event}/edit",
             get(post::get_edit_post).post(post::post_edit_post),
         )
+        .route(
+            "/post/{author}/{event}/edit_cancel",
+            get(post::get_edit_post_cancel),
+        )
+        .route("/post/edit_preview", post(post::post_edit_post_preview))
         .route("/post", post(new_post::post_new_post))
         .route(
             "/post/new_post_preview",

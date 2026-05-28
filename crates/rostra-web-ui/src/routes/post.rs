@@ -77,12 +77,21 @@ pub struct SinglePostQuery {
 #[derive(Deserialize)]
 pub struct EditPostQuery {
     post_thread_id: ShortEventId,
+    post_target_id: Option<String>,
 }
 
 #[derive(Deserialize)]
 pub struct EditPostInput {
     content: String,
     post_thread_id: ShortEventId,
+    post_target_id: String,
+}
+
+#[derive(Deserialize)]
+pub struct EditPostPreviewInput {
+    content: String,
+    post_thread_id: ShortEventId,
+    event_id: ShortEventId,
 }
 
 pub async fn get_single_post(
@@ -354,6 +363,122 @@ pub async fn delete_post(
     }))
 }
 
+fn render_post_error_id(post_target_id: &str, message: &str) -> Markup {
+    html! {
+        div id=(post_target_id) ."m-postView" {
+            div ."error" { (message) }
+        }
+    }
+}
+
+fn focus_on_edit_post_content(textarea_id: &str) -> Markup {
+    html! {
+        script {
+            (PreEscaped(format!(r#"
+                (function() {{
+                    document.getElementById('{textarea_id}')?.focus();
+                }})()
+            "#)))
+        }
+    }
+}
+
+fn render_inline_edit_post_form(
+    author_id: RostraId,
+    event_id: ShortEventId,
+    post_thread_id: ShortEventId,
+    post_target_id: &str,
+    content: &str,
+    error: Option<&str>,
+) -> Markup {
+    let textarea_id = format!("edit-post-content-{post_thread_id}-{event_id}");
+    let save_ajax = fragment::AjaxLoadingAttrs::for_class("m-inlineReply__previewButton");
+    let cancel_ajax = fragment::AjaxLoadingAttrs::for_document_class("m-inlineReply__cancelButton");
+    let cancel_form_id = format!("edit-post-cancel-{post_thread_id}-{event_id}");
+    let preview_form_id = format!("edit-post-preview-form-{post_thread_id}-{event_id}");
+    let preview_id = format!("edit-post-preview-{post_thread_id}-{event_id}");
+
+    html! {
+        div id=(post_target_id) ."m-postView" {
+            div ."m-inlineReply -active" {
+                @if let Some(error) = error {
+                    div ."error" { (error) }
+                }
+
+                form id=(preview_form_id)
+                    action="/post/edit_preview"
+                    method="post"
+                    x-target=(preview_id)
+                    style="display: none;"
+                {
+                    input type="hidden" name="content" value=(content) {}
+                    input type="hidden" name="post_thread_id" value=(post_thread_id) {}
+                    input type="hidden" name="event_id" value=(event_id) {}
+                }
+
+                form ."m-inlineReply__form"
+                    action=(format!("/post/{author_id}/{event_id}/edit"))
+                    method="post"
+                    x-target=(format!("{} ajax-scripts", post_target_id))
+                    "@ajax:before"=(save_ajax.before)
+                    "@ajax:after"=(save_ajax.after)
+                {
+                    input type="hidden" name="post_thread_id" value=(post_thread_id) {}
+                    input type="hidden" name="post_target_id" value=(post_target_id) {}
+
+                    div ."m-inlineReply__textareaWrapper"
+                        x-data="textAutocomplete"
+                        style="position: relative;"
+                    {
+                        @let input_handler = format!(r#"
+                            handleInput($event);
+                            const previewForm = document.getElementById('{preview_form_id}');
+                            previewForm.querySelector('input[name=content]').value = $el.value;
+                            previewForm.requestSubmit();
+                        "#);
+                        textarea
+                            id=(textarea_id)
+                            ."m-inlineReply__content"
+                            name="content"
+                            placeholder="Edit post..."
+                            dir="auto"
+                            autocomplete="off"
+                            "@input"=(input_handler)
+                            "@keydown"="handleKeydown($event)"
+                            "x-on:keyup.enter.ctrl"="$el.form.requestSubmit()"
+                        { (content) }
+                    }
+
+                    div ."m-inlineReply__footer" {
+                        div ."m-inlineReply__footerLeft" {
+                            (fragment::button("m-inlineReply__cancelButton", "Cancel")
+                                .form(&cancel_form_id)
+                                .call())
+                        }
+                        (fragment::button("m-inlineReply__previewButton", "Save").call())
+                    }
+                }
+
+                form id=(cancel_form_id)
+                    action=(format!("/post/{author_id}/{event_id}/edit_cancel"))
+                    method="get"
+                    x-target=(post_target_id)
+                    "@ajax:before"=(cancel_ajax.before)
+                    "@ajax:after"=(cancel_ajax.after)
+                    style="display: none;"
+                {
+                    input type="hidden" name="post_thread_id" value=(post_thread_id) {}
+                    input type="hidden" name="post_target_id" value=(post_target_id) {}
+                }
+
+                div id=(preview_id) ."m-inlineReply__preview" {}
+
+                (focus_on_edit_post_content(&textarea_id))
+            }
+        }
+    }
+}
+
 pub async fn get_edit_post(
     state: State<SharedState>,
     session: UserSession,
@@ -364,22 +489,30 @@ pub async fn get_edit_post(
     let client_handle = state.client(session.id()).await?;
     let client = client_handle.client_ref()?;
 
+    let post_target_id = query
+        .post_target_id
+        .clone()
+        .unwrap_or_else(|| post_html_id(query.post_thread_id, event_id));
+
     if state.ro_mode(session.session_token()).is_ro() {
-        return Ok(Maud(html! {
-            div ."error" { "Editing is disabled in ro-mode" }
-        }));
+        return Ok(Maud(render_post_error_id(
+            &post_target_id,
+            "Editing is disabled in ro-mode",
+        )));
     }
 
     let Some(post_record) = client.db().get_social_post(event_id).await else {
-        return Ok(Maud(html! {
-            div ."error" { "Post not found" }
-        }));
+        return Ok(Maud(render_post_error_id(
+            &post_target_id,
+            "Post not found",
+        )));
     };
 
     if author_id != client.rostra_id() || post_record.author != client.rostra_id() {
-        return Ok(Maud(html! {
-            div ."error" { "You can only edit your own posts" }
-        }));
+        return Ok(Maud(render_post_error_id(
+            &post_target_id,
+            "You can only edit your own posts",
+        )));
     }
 
     let content = post_record
@@ -388,48 +521,17 @@ pub async fn get_edit_post(
         .as_deref()
         .unwrap_or_default();
 
-    let form = html! {
-        form ."o-previewDialog__form"
-            action=(format!("/post/{author_id}/{event_id}/edit"))
-            method="post"
-            x-target=(format!(
-                "{} post-preview-dialog ajax-scripts",
-                post_html_id(query.post_thread_id, event_id),
-            ))
-            "x-on:keyup.enter.ctrl.shift.window"="$el.requestSubmit()"
-        {
-            input type="hidden" name="post_thread_id" value=(query.post_thread_id) {}
-            textarea
-                ."m-nojs-textarea"
-                name="content"
-                placeholder="Edit post..."
-                dir="auto"
-                rows="8"
-                { (content) }
-
-            div ."o-previewDialog__actionContainer" {
-                div {}
-                div ."o-previewDialog__actionButtons" {
-                    (fragment::button("o-previewDialog__cancelButton", "Cancel")
-                        .button_type("button")
-                        .onclick("document.querySelector('.o-previewDialog')?.classList.remove('-active')")
-                        .call())
-                    (fragment::button("o-previewDialog__submitButton", "Save").call())
-                }
-            }
-        }
-    };
+    let form = render_inline_edit_post_form(
+        author_id,
+        post_record.event_id,
+        query.post_thread_id,
+        &post_target_id,
+        content,
+        None,
+    );
 
     if is_ajax {
-        Ok(Maud(html! {
-            div id="post-preview-dialog" ."o-previewDialog -active" {
-                (fragment::dialog_escape_handler("post-preview-dialog"))
-                div ."o-previewDialog__content" {
-                    h4 ."o-previewDialog__title" { "Edit Post" }
-                    div ."o-previewDialog__actions" { (form) }
-                }
-            }
-        }))
+        Ok(Maud(form))
     } else {
         Ok(Maud(
             state
@@ -437,6 +539,77 @@ pub async fn get_edit_post(
                 .await?,
         ))
     }
+}
+
+pub async fn get_edit_post_cancel(
+    state: State<SharedState>,
+    session: UserSession,
+    Path((author_id, event_id)): Path<(RostraId, ShortEventId)>,
+    Query(query): Query<EditPostQuery>,
+) -> RequestResult<impl IntoResponse> {
+    let client_handle = state.client(session.id()).await?;
+    let client = client_handle.client_ref()?;
+
+    let post_target_id = query
+        .post_target_id
+        .clone()
+        .unwrap_or_else(|| post_html_id(query.post_thread_id, event_id));
+
+    let Some(post_record) = client.db().get_social_post(event_id).await else {
+        return Ok(Maud(render_post_error_id(
+            &post_target_id,
+            "Post not found",
+        )));
+    };
+
+    Ok(Maud(
+        state
+            .render_post_view(&client, author_id)
+            .maybe_persona_tags(Some(&post_record.content.persona_tags()))
+            .event_id(post_record.event_id)
+            .post_thread_id(query.post_thread_id)
+            .maybe_content(post_record.content.djot_content.as_deref())
+            .maybe_url(post_record.content.url.as_ref())
+            .maybe_title(post_record.content.title.as_deref())
+            .reply_count(post_record.reply_count)
+            .timestamp(post_record.ts)
+            .post_target_id(post_target_id)
+            .ro(state.ro_mode(session.session_token()))
+            .call()
+            .await?,
+    ))
+}
+
+pub async fn post_edit_post_preview(
+    state: State<SharedState>,
+    session: UserSession,
+    Form(form): Form<EditPostPreviewInput>,
+) -> RequestResult<impl IntoResponse> {
+    let client_handle = state.client(session.id()).await?;
+    let client = client_handle.client_ref()?;
+    let self_id = client.rostra_id();
+    let preview_id = format!(
+        "edit-post-preview-{}-{}",
+        form.post_thread_id, form.event_id
+    );
+
+    Ok(Maud(html! {
+        @if !form.content.is_empty() {
+            div id=(preview_id) ."m-inlineReply__preview -active" {
+                (state.render_post_context(
+                    &client,
+                    self_id,
+                    )
+                    .content(&form.content)
+                    .timestamp(rostra_core::Timestamp::now())
+                    .ro(state.ro_mode(session.session_token()))
+                    .call().await?)
+                (re_typeset())
+            }
+        } @else {
+            div id=(preview_id) ."m-inlineReply__preview" {}
+        }
+    }))
 }
 
 pub async fn post_edit_post(
@@ -448,7 +621,15 @@ pub async fn post_edit_post(
 ) -> RequestResult<impl IntoResponse> {
     if form.content.trim().is_empty() {
         return Ok(Maud(html! {
-            div ."error" { "Post content cannot be empty" }
+            (render_inline_edit_post_form(
+                author_id,
+                event_id,
+                form.post_thread_id,
+                &form.post_target_id,
+                &form.content,
+                Some("Post content cannot be empty"),
+            ))
+            div id="ajax-scripts" {}
         }));
     }
 
@@ -461,13 +642,15 @@ pub async fn post_edit_post(
 
     let Some(post_record) = client.db().get_social_post(event_id).await else {
         return Ok(Maud(html! {
-            div ."error" { "Post not found" }
+            (render_post_error_id(&form.post_target_id, "Post not found"))
+            div id="ajax-scripts" {}
         }));
     };
 
     if author_id != client.rostra_id() || post_record.author != client.rostra_id() {
         return Ok(Maud(html! {
-            div ."error" { "You can only edit your own posts" }
+            (render_post_error_id(&form.post_target_id, "You can only edit your own posts"))
+            div id="ajax-scripts" {}
         }));
     }
 
@@ -509,25 +692,22 @@ pub async fn post_edit_post(
     }
 
     Ok(Maud(html! {
-        div id=(post_html_id(form.post_thread_id, post_record.event_id)) {
-            (state.render_post_view(
-                &client,
-                author_id,
-            )
-                .persona_tags(&persona_tags)
-                .event_id(new_event_id)
-                .post_thread_id(form.post_thread_id)
-                .content(&form.content)
-                .maybe_url(post_record.content.url.as_ref())
-                .maybe_title(post_record.content.title.as_deref())
-                .reply_count(post_record.reply_count)
-                .timestamp(rostra_core::Timestamp::now())
-                .ro(state.ro_mode(session.session_token()))
-                .call()
-                .await?)
-        }
-
-        div id="post-preview-dialog" ."o-previewDialog" {}
+        (state.render_post_view(
+            &client,
+            author_id,
+        )
+            .persona_tags(&persona_tags)
+            .event_id(new_event_id)
+            .post_thread_id(form.post_thread_id)
+            .content(&form.content)
+            .maybe_url(post_record.content.url.as_ref())
+            .maybe_title(post_record.content.title.as_deref())
+            .reply_count(post_record.reply_count)
+            .timestamp(rostra_core::Timestamp::now())
+            .post_target_id(form.post_target_id.clone())
+            .ro(state.ro_mode(session.session_token()))
+            .call()
+            .await?)
 
         div id="ajax-scripts" {
             script {
@@ -735,6 +915,7 @@ impl UiState {
         reply_count: Option<u64>,
         timestamp: Option<Timestamp>,
         extra_buttons: Option<Markup>,
+        post_target_id: Option<String>,
         ro: RoMode,
     ) -> RequestResult<Markup> {
         let external_event_id = event_id.map(|e| ExternalEventId::new(author, e));
@@ -826,6 +1007,12 @@ impl UiState {
         };
         let post_content_is_missing = post_content_rendered.is_none();
 
+        let post_target_id = post_target_id.or_else(|| {
+            post_thread_id
+                .zip(event_id)
+                .map(|(ctx, id)| post_html_id(ctx, id))
+        });
+
         let post_main = html! {
             div ."m-postView__main"
                 data-href=[event_id.map(|eid| format!("/post/{}/{}", author, eid))]
@@ -880,6 +1067,7 @@ impl UiState {
                                 }
                                 @if author == client.rostra_id() {
                                     @if let Some(ctx) = post_thread_id {
+                                        @let post_target = post_target_id.as_deref().unwrap_or("");
                                         @if ro.is_ro() {
                                             (fragment::button("m-postView__actionMenuItem", "Edit... (ro-mode)")
                                                 .disabled(true)
@@ -888,21 +1076,21 @@ impl UiState {
                                             (fragment::ajax_button(
                                                 &format!("/post/{author}/{event_id}/edit"),
                                                 "get",
-                                                "post-preview-dialog",
+                                                post_target,
                                                 "m-postView__actionMenuItem",
                                                 "Edit...",
                                             )
                                             .hidden_inputs(html! {
                                                 input type="hidden" name="post_thread_id" value=(ctx) {}
+                                                input type="hidden" name="post_target_id" value=(post_target) {}
                                             })
                                             .call())
                                         }
 
-                                        @let post_target = post_html_id(ctx, event_id);
                                         (fragment::ajax_button(
                                             &format!("/post/{author}/{event_id}/delete"),
                                             "post",
-                                            &post_target,
+                                            post_target,
                                             "m-postView__deleteMenuItem",
                                             "Delete",
                                         )
@@ -997,7 +1185,7 @@ impl UiState {
         Ok(html! {
             div
                 ."m-postView"
-                id=[post_thread_id.zip(event_id).map(|(ctx, id)| post_html_id(ctx, id))]
+                id=[post_target_id.as_deref()]
              {
                 div ."m-postView__body" {
                     (post_main)
