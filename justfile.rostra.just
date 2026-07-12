@@ -11,8 +11,16 @@ alias mutants-db := _mutants-db
 _mutants-db *ARGS:
     cargo mutants --package rostra-client-db {{ARGS}}
 
-# run and restart on changes
+# run and restart on changes, then open the site in the default browser
 dev PORT="2345":
+    just _dev "{{PORT}}" 1
+
+# run and restart on changes without opening a browser
+dev-no-open PORT="2345":
+    just _dev "{{PORT}}" 0
+
+[private]
+_dev PORT OPEN_BROWSER:
     #!/usr/bin/env bash
     set -euo pipefail
 
@@ -28,7 +36,9 @@ dev PORT="2345":
       cargo run gen-id | jq -r '.secret' > "$ROSTRA_DATA_DIR/secret"
     fi
 
-    ( sleep 1 ; xdg-open "http://[::1]:{{PORT}}" ) &
+    if [[ "{{OPEN_BROWSER}}" == 1 ]]; then
+      ( sleep 1 ; xdg-open "http://[::1]:{{PORT}}" ) &
+    fi
 
     env \
       ROSTRA_DEV_MODE=1 \
@@ -49,3 +59,7 @@ dev PORT="2345":
             --reuseport \
             --default-profile rs64xtoy61x4grdcd4d75pazf8dcwrjrm4krqfcfz7oxhmm33ci74o \
           "
+
+# inspect the live development UI with an isolated Chromium profile
+ui-inspect *ARGS:
+    cargo run --locked -p rostra-ui-preview -- {{ARGS}}

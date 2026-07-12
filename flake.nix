@@ -216,6 +216,7 @@
         devShells = flakeboxLib.mkShells {
           toolchain = toolchainAll;
           packages = with pkgs; [
+            chromium
             jq
             systemfd
             cargo-mutants
