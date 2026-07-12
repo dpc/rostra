@@ -3,7 +3,8 @@ use std::str::FromStr as _;
 
 use axum::Form;
 use axum::extract::{Path, Query, State};
-use axum::response::{IntoResponse, Redirect};
+use axum::http::{HeaderMap, StatusCode};
+use axum::response::{IntoResponse, Redirect, Response};
 use maud::{Markup, PreEscaped, html};
 use rostra_client::id::IdResolvedData;
 use rostra_client::{IdP2PState, NodeP2PState};
@@ -14,8 +15,8 @@ use rostra_core::{ShortEventId, Timestamp};
 use serde::Deserialize;
 
 use super::profile_self::extractor;
-use super::unlock::session::UserSession;
-use super::{Maud, fragment};
+use super::unlock::session::{CsrfToken, UserSession};
+use super::{Maud, fragment, recovery};
 use crate::error::{ReadOnlyModeSnafu, RequestResult};
 use crate::util::time::format_timestamp;
 use crate::{SharedState, UiState};
@@ -39,6 +40,57 @@ pub async fn get_settings_profile(
             .render_settings_page(&session, navbar, "My Profile", content)
             .await?,
     ))
+}
+
+/// Render the identity metadata and protected recovery controls.
+pub async fn get_settings_identity(
+    state: State<SharedState>,
+    session: UserSession,
+) -> RequestResult<Response> {
+    let navbar = state.render_settings_navbar(&session, "identity").await?;
+    let content = state.render_identity_settings(&session);
+    let page = state
+        .render_settings_page(&session, navbar, "Identity & recovery", content)
+        .await?;
+
+    Ok(recovery::sensitive_response(Maud(page)))
+}
+
+#[derive(Deserialize)]
+/// CSRF-protected recovery phrase reveal request.
+pub struct RecoveryPhraseInput {
+    csrf_token: CsrfToken,
+}
+
+/// Reveal the current read-write session's recovery phrase.
+pub async fn post_settings_recovery_phrase(
+    state: State<SharedState>,
+    session: UserSession,
+    headers: HeaderMap,
+    Form(form): Form<RecoveryPhraseInput>,
+) -> Response {
+    if !state.recovery_transport_secure() {
+        return StatusCode::FORBIDDEN.into_response();
+    }
+    if headers
+        .get("sec-fetch-site")
+        .is_some_and(|value| value != "same-origin")
+        || &form.csrf_token != session.csrf_token()
+    {
+        return StatusCode::FORBIDDEN.into_response();
+    }
+
+    let Some(secret) = state.id_secret(session.session_token()) else {
+        return StatusCode::FORBIDDEN.into_response();
+    };
+    if secret.id() != session.id() {
+        return StatusCode::FORBIDDEN.into_response();
+    }
+
+    recovery::sensitive_response(Maud(recovery::phrase_panel(
+        secret,
+        recovery::PhrasePanelContext::Settings,
+    )))
 }
 
 pub async fn post_settings_profile(
@@ -389,6 +441,15 @@ impl UiState {
 
                 div ."o-settingsNav" {
                     div ."o-settingsNav__group" {
+                        h3 ."o-settingsNav__groupHeader" { "Account" }
+                        a ."o-settingsNav__item"
+                            ."-active"[active_category == "identity"]
+                            href="/settings/identity"
+                        {
+                            "Identity & recovery"
+                        }
+                    }
+                    div ."o-settingsNav__group" {
                         h3 ."o-settingsNav__groupHeader" { "Social" }
                         a ."o-settingsNav__item"
                             ."-active"[active_category == "profile"]
@@ -428,6 +489,98 @@ impl UiState {
                 }
             }
         })
+    }
+
+    /// Render identity and recovery settings without including the secret.
+    pub fn render_identity_settings(&self, session: &UserSession) -> Markup {
+        let id = session.id().to_string();
+        let read_only = self.ro_mode(session.session_token()).is_ro();
+        let insecure_transport = !self.recovery_transport_secure();
+
+        html! {
+            div ."o-settingsContent__section m-identityRecovery" {
+                h3 ."o-settingsContent__sectionHeader" { "Public identity" }
+                div ."m-identityRecovery__publicId" {
+                    code { (id) }
+                    button type="button"
+                        data-value=(id)
+                        onclick="copyIdToClipboard(event)"
+                    {
+                        "Copy ID"
+                    }
+                }
+            }
+            div ."o-settingsContent__section m-identityRecovery" {
+                h3 ."o-settingsContent__sectionHeader" { "Recovery phrase" }
+                p {
+                    "Your 24-word recovery phrase controls this identity. Anyone who gets it "
+                    "can permanently act as you, and Rostra cannot reset or recover it."
+                }
+                p {
+                    "Save it only in a trusted password manager or offline backup. Never share "
+                    "it or paste it into support or chat."
+                }
+                @if insecure_transport {
+                    p ."m-identityRecovery__insecureWarning" {
+                        "Recovery phrase reveal is disabled because this server is not configured "
+                        "for HTTPS or loopback-only access."
+                    }
+                }
+                @if read_only || insecure_transport {
+                    @if read_only {
+                        p ."o-settingsContent__note" {
+                            "This session does not hold the recovery phrase. Sign in with it to enable management."
+                        }
+                    }
+                    (fragment::button(
+                        "m-identityRecovery__revealButton",
+                        "Reveal recovery phrase",
+                    )
+                    .disabled(true)
+                    .call())
+                } @else {
+                    (fragment::button(
+                        "m-identityRecovery__revealButton",
+                        "Reveal recovery phrase",
+                    )
+                    .button_type("button")
+                    .onclick("document.getElementById('recovery-confirmation').showModal()")
+                    .call())
+                }
+                div id="recovery-phrase-target" {}
+                dialog id="recovery-confirmation" ."m-identityRecovery__dialog" {
+                    form action="/settings/identity/recovery-phrase"
+                        method="post"
+                        x-target="recovery-phrase-target"
+                        "@ajax:after"="document.getElementById('recovery-confirmation').close()"
+                    {
+                        input type="hidden"
+                            name="csrf_token"
+                            value=(session.csrf_token())
+                        {}
+                        h3 { "Reveal your recovery phrase?" }
+                        p {
+                            "Make sure nobody can see your screen. Reveal it only to save it "
+                            "directly in a trusted password manager or offline backup."
+                        }
+                        div ."m-recoveryPhrase__actions" {
+                            (fragment::button(
+                                "m-identityRecovery__confirmButton",
+                                "I understand — reveal",
+                            )
+                            .call())
+                            (fragment::button(
+                                "m-identityRecovery__cancelButton",
+                                "Cancel",
+                            )
+                            .button_type("button")
+                            .onclick("document.getElementById('recovery-confirmation').close()")
+                            .call())
+                        }
+                    }
+                }
+            }
+        }
     }
 
     pub async fn render_profile_settings(&self, session: &UserSession) -> RequestResult<Markup> {

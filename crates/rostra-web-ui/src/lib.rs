@@ -36,6 +36,7 @@ use tokio::signal;
 use tokio::sync::oneshot;
 use tokio::task::JoinHandle;
 use tower_cookies::CookieManagerLayer;
+use tower_cookies::cookie::SameSite;
 use tower_http::CompressionLevel;
 use tower_http::compression::CompressionLayer;
 use tower_http::compression::predicate::SizeAbove;
@@ -128,6 +129,9 @@ pub struct UiState {
     session_store: RedbSessionStore,
     /// External origin URL (from `--origin`) for absolute links in meta tags.
     origin_url: Option<url::Url>,
+    /// Whether permanent credentials may be shown over the configured
+    /// transport.
+    recovery_transport_secure: bool,
 }
 
 impl UiState {
@@ -139,6 +143,11 @@ impl UiState {
             Some(ref origin) => format!("{}{path}", origin.as_str().trim_end_matches('/')),
             None => path.to_string(),
         }
+    }
+
+    /// Whether credential recovery is safe over HTTPS or loopback-only HTTP.
+    pub(crate) fn recovery_transport_secure(&self) -> bool {
+        self.recovery_transport_secure
     }
 
     pub async fn client(&self, id: RostraId) -> UiStateClientResult<ClientHandle> {
@@ -355,6 +364,21 @@ async fn build_state_and_session(
 
     let session_store = RedbSessionStore::new(session_db.clone()).context(SessionStoreSnafu)?;
 
+    let loopback_bind = matches!(&opts.listen, BindAddr::Tcp(addr) if addr.ip().is_loopback());
+    let https_origin = opts
+        .origin
+        .as_ref()
+        .is_some_and(|origin| origin.scheme() == "https");
+    let loopback_origin = opts
+        .origin
+        .as_ref()
+        .is_none_or(|origin| match origin.host() {
+            Some(url::Host::Domain(host)) => host.eq_ignore_ascii_case("localhost"),
+            Some(url::Host::Ipv4(ip)) => ip.is_loopback(),
+            Some(url::Host::Ipv6(ip)) => ip.is_loopback(),
+            None => false,
+        });
+    let loopback_http = !https_origin && loopback_bind && loopback_origin;
     let state = Arc::new(UiState {
         clients,
         default_profile: opts.default_profile,
@@ -362,10 +386,15 @@ async fn build_state_and_session(
         secrets: secrets::SecretStore::new(),
         session_store: session_store.clone(),
         origin_url: opts.origin.clone(),
+        recovery_transport_secure: loopback_http || https_origin,
     });
 
+    let secure_cookies = !loopback_http;
     let session_layer = SessionManagerLayer::new(session_store)
         .with_name("rostra_session")
+        .with_http_only(true)
+        .with_same_site(SameSite::Strict)
+        .with_secure(secure_cookies)
         .with_expiry(Expiry::OnInactivity(time::Duration::days(30)));
 
     Ok((state, assets, session_layer))

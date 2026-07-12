@@ -17,6 +17,33 @@ pub struct TestServer {
 
 impl TestServer {
     pub async fn start() -> Self {
+        Self::start_on(SocketAddr::from(([127, 0, 0, 1], 0)), None).await
+    }
+
+    /// Start an HTTP server on a non-loopback bind address.
+    pub async fn start_non_loopback_http() -> Self {
+        Self::start_on(SocketAddr::from(([0, 0, 0, 0], 0)), None).await
+    }
+
+    /// Start a loopback server configured with a public plaintext origin.
+    pub async fn start_public_http_origin() -> Self {
+        Self::start_on(
+            SocketAddr::from(([127, 0, 0, 1], 0)),
+            Some("http://public.example".to_string()),
+        )
+        .await
+    }
+
+    /// Start a loopback server configured with a loopback HTTPS origin.
+    pub async fn start_loopback_https_origin() -> Self {
+        Self::start_on(
+            SocketAddr::from(([127, 0, 0, 1], 0)),
+            Some("https://localhost".to_string()),
+        )
+        .await
+    }
+
+    async fn start_on(listen: SocketAddr, origin: Option<String>) -> Self {
         // Use dev mode so assets are served from the source tree
         // (avoids needing compiled/bundled assets).
         // SAFETY: Integration tests run as separate binaries, so no other
@@ -32,8 +59,8 @@ impl TestServer {
         let clients = MultiClient::new(data_dir.clone(), 10, false, pkarr_client);
 
         let opts = Opts::new(
-            rostra_util_bind_addr::BindAddr::Tcp(SocketAddr::from(([127, 0, 0, 1], 0))),
-            None,  // origin
+            rostra_util_bind_addr::BindAddr::Tcp(listen),
+            origin,
             None,  // assets_dir (uses default)
             false, // reuseport
             data_dir,
@@ -46,7 +73,13 @@ impl TestServer {
             .await
             .expect("Failed to start test server");
 
-        let base_url = format!("http://{}", server.local_addr());
+        let server_addr = server.local_addr();
+        let connect_ip = if server_addr.ip().is_unspecified() {
+            std::net::IpAddr::V4(std::net::Ipv4Addr::LOCALHOST)
+        } else {
+            server_addr.ip()
+        };
+        let base_url = format!("http://{}:{}", connect_ip, server_addr.port());
 
         Self {
             server,
@@ -174,6 +207,16 @@ impl UiDriver {
             .expect("GET request failed")
     }
 
+    /// Send a GET with an explicitly supplied Cookie header.
+    pub async fn get_with_cookie(&self, path: &str, cookie: &str) -> reqwest::Response {
+        self.client
+            .get(self.url(path))
+            .header("Cookie", cookie)
+            .send()
+            .await
+            .expect("GET request failed")
+    }
+
     /// Send a GET request with an `If-None-Match` header (for ETag validation).
     pub async fn get_if_none_match(&self, path: &str, etag: &str) -> reqwest::Response {
         self.client
@@ -198,6 +241,73 @@ impl UiDriver {
     pub async fn post_form(&self, path: &str, form: &[(&str, &str)]) -> reqwest::Response {
         self.client
             .post(self.url(path))
+            .form(form)
+            .send()
+            .await
+            .expect("POST request failed")
+    }
+
+    /// Send a same-origin browser-style form POST.
+    pub async fn same_origin_post_form(
+        &self,
+        path: &str,
+        form: &[(&str, &str)],
+    ) -> reqwest::Response {
+        self.client
+            .post(self.url(path))
+            .header("Origin", &self.base_url)
+            .header("Sec-Fetch-Site", "same-origin")
+            .form(form)
+            .send()
+            .await
+            .expect("POST request failed")
+    }
+
+    /// Send a same-origin form POST while advertising Brotli support.
+    pub async fn same_origin_post_form_accept_br(
+        &self,
+        path: &str,
+        form: &[(&str, &str)],
+    ) -> reqwest::Response {
+        self.client
+            .post(self.url(path))
+            .header("Origin", &self.base_url)
+            .header("Sec-Fetch-Site", "same-origin")
+            .header("Accept-Encoding", "br")
+            .form(form)
+            .send()
+            .await
+            .expect("POST request failed")
+    }
+
+    /// Send a form POST marked as a cross-site browser request.
+    pub async fn cross_site_post_form(
+        &self,
+        path: &str,
+        form: &[(&str, &str)],
+    ) -> reqwest::Response {
+        self.client
+            .post(self.url(path))
+            .header("Origin", "https://attacker.invalid")
+            .header("Sec-Fetch-Site", "cross-site")
+            .form(form)
+            .send()
+            .await
+            .expect("POST request failed")
+    }
+
+    /// Send a same-origin form POST with an explicitly supplied Cookie header.
+    pub async fn same_origin_post_form_with_cookie(
+        &self,
+        path: &str,
+        cookie: &str,
+        form: &[(&str, &str)],
+    ) -> reqwest::Response {
+        self.client
+            .post(self.url(path))
+            .header("Cookie", cookie)
+            .header("Origin", &self.base_url)
+            .header("Sec-Fetch-Site", "same-origin")
             .form(form)
             .send()
             .await

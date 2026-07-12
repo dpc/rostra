@@ -1,9 +1,11 @@
+pub(crate) mod local_redirect;
 pub mod session;
 
 use axum::Form;
 use axum::extract::{Query, State};
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Redirect, Response};
+use local_redirect::LocalRedirect;
 use maud::{Markup, html};
 use rostra_core::id::{RostraId, RostraIdSecretKey};
 use rostra_util_error::FmtCompact as _;
@@ -12,7 +14,7 @@ use session::{OptionalUserSession, SESSION_KEY, UserSessionData};
 use snafu::ResultExt as _;
 use tower_sessions::Session;
 
-use super::{Maud, fragment};
+use super::{Maud, fragment, recovery};
 use crate::error::{
     OtherSnafu, PublicKeyMissingSnafu, RequestResult, UnlockResult, UnlockSnafu, UserErrorResponse,
 };
@@ -49,29 +51,27 @@ pub async fn get(
     // Pre-populate the RostraId field if we have existing session data
     let existing_id = existing_session.map(|s| s.id());
 
+    let redirect = query.redirect.as_deref().and_then(LocalRedirect::parse);
     Ok(Maud(
         state
-            .unlock_page(existing_id, None, None, query.redirect)
+            .unlock_page(existing_id, None, None, redirect.as_ref())
             .await?,
     )
     .into_response())
 }
 
-pub async fn get_random(
-    state: State<SharedState>,
-    Query(query): Query<RedirectQuery>,
-) -> RequestResult<impl IntoResponse> {
-    let random_secret_key = RostraIdSecretKey::generate();
-    Ok(Maud(
-        state
-            .unlock_page(
-                Some(random_secret_key.id()),
-                Some(random_secret_key),
-                None,
-                query.redirect,
-            )
-            .await?,
-    ))
+/// Generate an account credential and return its protected backup controls.
+pub async fn post_generate(state: State<SharedState>, Form(form): Form<RedirectQuery>) -> Response {
+    if !state.recovery_transport_secure() {
+        return StatusCode::FORBIDDEN.into_response();
+    }
+    let redirect = form.redirect.as_deref().and_then(LocalRedirect::parse);
+    recovery::sensitive_response(Maud(recovery::phrase_panel(
+        rostra_core::id::RostraIdSecretKey::generate(),
+        recovery::PhrasePanelContext::AccountCreation {
+            redirect: redirect.as_ref(),
+        },
+    )))
 }
 
 #[derive(Deserialize)]
@@ -100,7 +100,7 @@ pub async fn post_unlock(
     session: Session,
     Form(form): Form<Input>,
 ) -> RequestResult<Response> {
-    let redirect_path = form.redirect.clone();
+    let redirect_path = form.redirect.as_deref().and_then(LocalRedirect::parse);
     let rostra_id = form.rostra_id().context(UnlockSnafu)?;
 
     // 1. Load the client and unlock if secret provided
@@ -108,7 +108,7 @@ pub async fn post_unlock(
         Ok(secret) => secret,
         Err(e) => {
             let error_message = e.fmt_compact().to_string();
-            return Ok(Maud(
+            return Ok(recovery::sensitive_response(Maud(
                 state
                     .unlock_page(
                         form.rostra_id,
@@ -116,11 +116,10 @@ pub async fn post_unlock(
                         html! {
                             span ."o-unlockScreen_notice" { (error_message)}
                         },
-                        redirect_path,
+                        redirect_path.as_ref(),
                     )
                     .await?,
-            )
-            .into_response());
+            )));
         }
     };
 
@@ -141,13 +140,17 @@ pub async fn post_unlock(
     }
 
     // 5. Redirect to the original path if provided, otherwise to root
-    let target = redirect_path
-        .filter(|p| p.starts_with('/'))
-        .unwrap_or_else(|| "/".to_string());
-    Ok(Redirect::to(&target).into_response())
+    let target = redirect_path.as_ref().map_or("/", LocalRedirect::as_str);
+    Ok(Redirect::to(target).into_response())
 }
 
-pub async fn logout(session: Session) -> RequestResult<impl IntoResponse> {
+pub async fn logout(
+    state: State<SharedState>,
+    session: Session,
+) -> RequestResult<impl IntoResponse> {
+    if let Some(token) = SessionToken::from_session(&session) {
+        state.set_session_secret(token, None);
+    }
     session.delete().await.boxed().context(OtherSnafu)?;
 
     // Use standard HTTP redirect for Alpine-ajax
@@ -160,11 +163,8 @@ impl UiState {
         current_rostra_id: Option<RostraId>,
         current_secret_key: Option<RostraIdSecretKey>,
         notification: impl Into<Option<Markup>>,
-        redirect: Option<String>,
+        redirect: Option<&LocalRedirect>,
     ) -> RequestResult<Markup> {
-        let random_rostra_id_secret = &RostraIdSecretKey::generate();
-        let random_mnemonic = random_rostra_id_secret.to_string();
-        let random_rostra_id = random_rostra_id_secret.id().to_string();
         let notification = notification.into();
         let content = html! {
             div id="unlock-screen" ."o-unlockScreen" {
@@ -174,7 +174,7 @@ impl UiState {
                     method="post"
                     autocomplete="on"
                 {
-                    @if let Some(ref redirect_path) = redirect {
+                    @if let Some(redirect_path) = redirect {
                         input type="hidden" name="redirect" value=(redirect_path) {}
                     }
                     @if let Some(n) = notification {
@@ -185,7 +185,7 @@ impl UiState {
                         p { "Provide existing RostraID (public key) only to log in in read-only mode," }
                         p { "or Rostra secret passphrase to log in normally." }
                         p {
-                            "Create Account to generate new RostraId/account. Saved it in the password manager."
+                            "Create Account to generate a new Rostra identity. Save its recovery phrase in your password manager."
                         }
                     }
                     div."o-unlockScreen__idLine" {
@@ -206,7 +206,7 @@ impl UiState {
                             name="password"
                             autocomplete="current-password"
                             placeholder="Mnemonic (Secret Key) - if empty, read-only mode"
-                            title="Mnemonic is 12 words passphrase encoding secret key of your identity"
+                            title="The mnemonic is a 24-word phrase encoding your identity's secret key"
                             value=(current_secret_key.as_ref().map(ToString::to_string).unwrap_or_default())
                             { }
                         (fragment::button("o-unlockScreen__roButton", "Clear\u{a0}secret")
@@ -215,17 +215,26 @@ impl UiState {
                             .title("Clear the mnemonic to login in read-only mode")
                             .call())
                     }
-                    @let generate_onclick = format!(
-                        "document.querySelector('.o-unlockScreen__id').value = '{random_rostra_id}'; document.querySelector('.o-unlockScreen__mnemonic').value = '{random_mnemonic}';"
-                    );
-                    div."o-unlockScreen__unlockLine" {
-                        (fragment::button("o-unlockScreen__generateButton", "Create Account")
-                            .button_type("button")
-                            .onclick(&generate_onclick)
-                            .title("Create a new Rostra account. Make sure to save the generated secret passphrase.")
-                            .call())
+                }
+                form ."o-unlockScreen__unlockLine"
+                    action="/unlock/generate"
+                    method="post"
+                    x-target="account-recovery-target"
+                {
+                    @if let Some(redirect_path) = redirect {
+                        input type="hidden" name="redirect" value=(redirect_path) {}
+                    }
+                    (fragment::button("o-unlockScreen__generateButton", "Create Account")
+                        .disabled(!self.recovery_transport_secure())
+                        .title("Generate a new account and show its 24-word recovery phrase.")
+                        .call())
+                }
+                @if !self.recovery_transport_secure() {
+                    p ."o-unlockScreen_notice" {
+                        "Account creation is disabled because this server is not configured for HTTPS or loopback-only access."
                     }
                 }
+                div id="account-recovery-target" {}
             }
         };
         self.render_html_page("Sign in", content, None, None, None, false)

@@ -11,6 +11,7 @@ mod new_post;
 mod post;
 mod profile;
 pub(crate) mod profile_self;
+mod recovery;
 mod search;
 mod settings;
 mod shoutbox;
@@ -240,7 +241,7 @@ pub fn route_handler(state: SharedState) -> Router<Arc<UiState>> {
         .route("/shoutbox/preview", post(shoutbox::post_shoutbox_preview))
         .route("/unlock", get(unlock::get).post(unlock::post_unlock))
         .route("/unlock/logout", get(unlock::get).post(unlock::logout))
-        .route("/unlock/random", get(unlock::get_random))
+        .route("/unlock/generate", post(unlock::post_generate))
         .route(
             "/replies/{post_thread_id}/{event_id}",
             get(timeline::get_post_replies),
@@ -248,6 +249,11 @@ pub fn route_handler(state: SharedState) -> Router<Arc<UiState>> {
         .route("/self/edit", post(profile_self::post_self_account_edit))
         .route("/search/profiles", get(search::search_profiles))
         .route("/settings", get(settings::get_settings))
+        .route("/settings/identity", get(settings::get_settings_identity))
+        .route(
+            "/settings/identity/recovery-phrase",
+            post(settings::post_settings_recovery_phrase),
+        )
         .route(
             "/settings/profile",
             get(settings::get_settings_profile).post(settings::post_settings_profile),

@@ -13,6 +13,88 @@ function copyIdToClipboard(event) {
   }, 1000);
 }
 
+const recoveryPhraseTimers = new WeakMap();
+
+function eraseRecoveryPhrase(panel) {
+  if (!panel) return;
+  const textarea = panel.querySelector("textarea");
+  if (textarea) textarea.value = "";
+  const timer = recoveryPhraseTimers.get(panel);
+  if (timer) clearTimeout(timer);
+  recoveryPhraseTimers.delete(panel);
+  panel.remove();
+}
+
+function hideRecoveryPhrase(button) {
+  eraseRecoveryPhrase(button.closest("[data-recovery-phrase]"));
+}
+
+function armRecoveryPhraseTimeout(panel) {
+  const previous = recoveryPhraseTimers.get(panel);
+  if (previous) clearTimeout(previous);
+  recoveryPhraseTimers.set(
+    panel,
+    setTimeout(() => eraseRecoveryPhrase(panel), 120000),
+  );
+}
+
+function initializeRecoveryPhrase(panel) {
+  if (!panel) return;
+  armRecoveryPhraseTimeout(panel);
+  panel.addEventListener("pointerdown", () => armRecoveryPhraseTimeout(panel));
+  panel.addEventListener("keydown", () => armRecoveryPhraseTimeout(panel));
+
+  const acknowledgement = panel.querySelector("[data-recovery-ack]");
+  const continueButton = panel.querySelector(
+    ".m-recoveryPhrase__continueButton",
+  );
+  if (acknowledgement && continueButton) {
+    acknowledgement.addEventListener("change", () => {
+      continueButton.disabled = !acknowledgement.checked;
+    });
+  }
+}
+
+async function copyRecoveryPhrase(button) {
+  const panel = button.closest("[data-recovery-phrase]");
+  const textarea = panel?.querySelector("textarea");
+  const status = panel?.querySelector(".m-recoveryPhrase__status");
+  if (!textarea || !status) return;
+
+  textarea.focus();
+  textarea.select();
+  textarea.setSelectionRange(0, textarea.value.length);
+
+  let copied = false;
+  try {
+    if (navigator.clipboard?.writeText) {
+      await navigator.clipboard.writeText(textarea.value);
+      copied = true;
+    }
+  } catch (_) {
+    copied = false;
+  }
+
+  if (!copied) {
+    try {
+      copied = document.execCommand("copy");
+    } catch (_) {
+      copied = false;
+    }
+  }
+
+  status.textContent = copied
+    ? "Copied — paste it into your trusted password manager now."
+    : "Automatic copy was blocked. The phrase is selected; copy it manually.";
+  armRecoveryPhraseTimeout(panel);
+}
+
+window.addEventListener("pagehide", () => {
+  document
+    .querySelectorAll("[data-recovery-phrase]")
+    .forEach(eraseRecoveryPhrase);
+});
+
 function previewAvatar(event) {
   document.querySelector(".m-profileSummary__userImage").src =
     URL.createObjectURL(event.target.files[0]);
