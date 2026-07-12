@@ -4,6 +4,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 Read ./CONVENTIONS.md file.
 
+This project uses the Linked Specs convention; consult the `linked-specs`
+skill before working with specs or governed code.
+
 ## Project Overview
 
 Rostra is a p2p (friend-to-friend) social network built in Rust. It uses a lightweight event DAG system where all data is propagated as signed Events, enabling decentralized social networking with sovereign identities and multi-device support.

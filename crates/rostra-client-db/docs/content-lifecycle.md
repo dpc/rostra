@@ -356,7 +356,7 @@ Both cases indicate bugs in the calling code and will panic in debug builds.
 ### Property-Based Tests
 
 - `proptest_rc_counting` - Randomized RC correctness
-- `proptest_follow_unfollow_delivery_order` - Follow/unfollow ordering
+- `test_follow_unfollow_delivery_order` - Follow/unfollow ordering
 
 ## Summary
 

@@ -1,7 +1,8 @@
 //! Database table definitions for the Rostra client.
 //!
 //! For detailed documentation on content lifecycle, state transitions, and
-//! edge cases, see `docs/content-lifecycle.md` in this crate.
+//! edge cases, see `specs/SPEC-event-content-lifecycle.md` and
+//! `docs/content-lifecycle.md` in this crate.
 //!
 //! # Data Model Overview
 //!
@@ -74,7 +75,8 @@
 //! 2. RC is decremented in [`content_rc`]
 //!
 //! **Garbage Collection**:
-//! When RC reaches 0, content is removed from [`content_store`].
+//! When RC reaches 0, content is eligible for removal from [`content_store`].
+//! Removal is not currently automatic.
 //!
 //! ### Interpreting `events_content_state`
 //!
