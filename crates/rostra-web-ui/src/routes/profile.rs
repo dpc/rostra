@@ -293,6 +293,7 @@ impl UiState {
                             .button_type("button")
                             .data_value(&profile_id.to_string())
                             .onclick("copyIdToClipboard(event)")
+                            .aria_label("Copy RostraId")
                             .call())
                         @if session.id() != profile_id {
                             @let label = if following { "Following..." } else { "Follow..." };

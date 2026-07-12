@@ -111,8 +111,27 @@ fn csrf_token(page: &str) -> &str {
         .0
 }
 
+fn assert_identity_action_controls(page: &str, disabled: bool) {
+    assert!(!page.contains("Identity &amp; recovery"));
+    assert!(page.contains("m-identityRecovery__copyButton u-button"));
+    assert!(page.contains("m-identityRecovery__copyButtonIcon u-buttonIcon"));
+    assert!(page.contains("aria-label=\"Copy RostraId\""));
+    assert!(page.contains(">RostraId</button>"));
+    assert!(page.contains("m-identityRecovery__revealButton u-button"));
+    assert!(page.contains("m-identityRecovery__revealButtonIcon u-buttonIcon"));
+    assert!(page.contains(">Reveal</button>"));
+    let reveal_button = page
+        .split_once("m-identityRecovery__revealButton u-button")
+        .expect("identity page should contain the reveal button")
+        .1
+        .split_once("</button>")
+        .expect("reveal button should have a closing tag")
+        .0;
+    assert_eq!(reveal_button.contains("disabled"), disabled);
+}
+
 #[test_log::test(tokio::test(flavor = "multi_thread"))]
-async fn recovery_phrase_reveal_is_protected_and_session_scoped() {
+async fn identity_actions_and_recovery_reveal_are_protected_and_session_scoped() {
     let server = TestServer::start().await;
     let rw = server.driver();
     let (id, secret) = rw.login_new_identity().await;
@@ -131,6 +150,7 @@ async fn recovery_phrase_reveal_is_protected_and_session_scoped() {
     );
     let page = resp.text().await.unwrap();
     assert!(!page.contains(&phrase));
+    assert_identity_action_controls(&page, false);
     let csrf = csrf_token(&page);
 
     let resp = rw
@@ -174,6 +194,7 @@ async fn recovery_phrase_reveal_is_protected_and_session_scoped() {
     let page = ro.get("/settings/identity").await.text().await.unwrap();
     assert!(page.contains("This session does not hold the recovery phrase"));
     assert!(!page.contains(&phrase));
+    assert_identity_action_controls(&page, true);
     let ro_csrf = csrf_token(&page);
     let resp = ro
         .same_origin_post_form(

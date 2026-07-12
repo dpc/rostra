@@ -2,7 +2,7 @@
 
 The recovery phrase UI deliberately uses browser APIs that HTTP-level tests
 cannot fully exercise. Before release, repeat this matrix against
-Settings → Identity & recovery and the Create Account flow.
+Settings → Identity and the Create Account flow.
 
 | Platform | Clipboard allowed | Clipboard denied/unavailable |
 | --- | --- | --- |

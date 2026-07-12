@@ -2,14 +2,50 @@
 // Global utility functions
 // =============================================================================
 
-function copyIdToClipboard(event) {
-  const target = event.target;
-  const id = target.getAttribute("data-value");
-  navigator.clipboard.writeText(id);
-  target.classList.add("-active");
+const copyIdStates = new WeakMap();
 
-  setTimeout(() => {
+function copyIdToClipboard(event) {
+  const target = event.currentTarget;
+  const id = target.getAttribute("data-value");
+  const previous = copyIdStates.get(target);
+  if (previous?.timer) clearTimeout(previous.timer);
+  previous?.status?.remove();
+
+  const state = {};
+  copyIdStates.set(target, state);
+  target.classList.remove("-active");
+
+  let copy;
+  try {
+    copy = navigator.clipboard?.writeText(id);
+  } catch {
+    copy = Promise.reject();
+  }
+
+  (copy ?? Promise.reject()).then(
+    () => {
+      if (copyIdStates.get(target) !== state) return;
+      target.classList.add("-active");
+      showCopyIdStatus(target, state, "Copied RostraId");
+    },
+    () => {
+      if (copyIdStates.get(target) !== state) return;
+      showCopyIdStatus(target, state, "Copy RostraId failed");
+    },
+  );
+}
+
+function showCopyIdStatus(target, state, message) {
+  const status = document.createElement("span");
+  status.className = "u-copyStatus";
+  status.role = "status";
+  status.textContent = message;
+  target.insertAdjacentElement("afterend", status);
+  state.status = status;
+  state.timer = setTimeout(() => {
     target.classList.remove("-active");
+    status.remove();
+    if (copyIdStates.get(target) === state) copyIdStates.delete(target);
   }, 1000);
 }
 

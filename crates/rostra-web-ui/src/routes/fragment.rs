@@ -47,6 +47,8 @@ pub fn button(
     data_value: Option<&str>,
     /// Optional title/tooltip
     title: Option<&str>,
+    /// Optional accessible name when the visible label does not name the action
+    aria_label: Option<&str>,
 ) -> Markup {
     let disabled = disabled.unwrap_or(false);
     let disabled_class = disabled_class.unwrap_or(false);
@@ -67,6 +69,7 @@ pub fn button(
             form=[form]
             data-value=[data_value]
             title=[title]
+            aria-label=[aria_label]
         {
             span .(icon_class) ."u-buttonIcon" {}
             (label)

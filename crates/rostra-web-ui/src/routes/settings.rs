@@ -50,7 +50,7 @@ pub async fn get_settings_identity(
     let navbar = state.render_settings_navbar(&session, "identity").await?;
     let content = state.render_identity_settings(&session);
     let page = state
-        .render_settings_page(&session, navbar, "Identity & recovery", content)
+        .render_settings_page(&session, navbar, "Identity", content)
         .await?;
 
     Ok(recovery::sensitive_response(Maud(page)))
@@ -446,7 +446,7 @@ impl UiState {
                             ."-active"[active_category == "identity"]
                             href="/settings/identity"
                         {
-                            "Identity & recovery"
+                            "Identity"
                         }
                     }
                     div ."o-settingsNav__group" {
@@ -502,12 +502,12 @@ impl UiState {
                 h3 ."o-settingsContent__sectionHeader" { "Public identity" }
                 div ."m-identityRecovery__publicId" {
                     code { (id) }
-                    button type="button"
-                        data-value=(id)
-                        onclick="copyIdToClipboard(event)"
-                    {
-                        "Copy ID"
-                    }
+                    (fragment::button("m-identityRecovery__copyButton", "RostraId")
+                        .button_type("button")
+                        .data_value(&id)
+                        .onclick("copyIdToClipboard(event)")
+                        .aria_label("Copy RostraId")
+                        .call())
                 }
             }
             div ."o-settingsContent__section m-identityRecovery" {
@@ -534,14 +534,14 @@ impl UiState {
                     }
                     (fragment::button(
                         "m-identityRecovery__revealButton",
-                        "Reveal recovery phrase",
+                        "Reveal",
                     )
                     .disabled(true)
                     .call())
                 } @else {
                     (fragment::button(
                         "m-identityRecovery__revealButton",
-                        "Reveal recovery phrase",
+                        "Reveal",
                     )
                     .button_type("button")
                     .onclick("document.getElementById('recovery-confirmation').showModal()")

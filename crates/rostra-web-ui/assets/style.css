@@ -319,6 +319,11 @@ img.u-userImage {
   filter: invert(var(--invert));
 }
 
+.u-copyStatus {
+  align-self: center;
+  font-size: 0.85rem;
+}
+
 /* Loading spinner for buttons */
 @keyframes u-spin {
   to {
@@ -2251,6 +2256,22 @@ h4.o-settingsContent__sectionHeader {
 
 .m-identityRecovery__publicId code {
   overflow-wrap: anywhere;
+}
+
+.m-identityRecovery__copyButtonIcon {
+  background: url('/assets/icons/id-card.svg') center/contain no-repeat;
+}
+
+.m-identityRecovery__copyButton:hover .m-identityRecovery__copyButtonIcon {
+  background-image: url('/assets/icons/copy.svg');
+}
+
+.m-identityRecovery__copyButton.-active .m-identityRecovery__copyButtonIcon {
+  background-image: url('/assets/icons/circle-check.svg');
+}
+
+.m-identityRecovery__revealButtonIcon {
+  background: url('/assets/icons/eye.svg') center/contain no-repeat;
 }
 
 .m-identityRecovery__insecureWarning,
