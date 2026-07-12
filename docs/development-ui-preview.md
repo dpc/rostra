@@ -38,10 +38,27 @@ called directly. The default viewport is 1280×900; use
 an interactive terminal, enter one action per line and press Ctrl-D to close
 the browser. Run `just ui-inspect --help` for all flags.
 
+`hover-label LABEL` and `hover-id ID` scroll a target into view and move
+Chromium's pointer to its center. Subsequent inspection therefore observes real
+`:hover` computed styles, pseudo-elements, and transitions. Use `unhover` before
+collecting an unrelated state.
+
+Failed `inspect-label` lookups print up to five bounded nearby accessible-label
+suggestions. Missing labels and IDs do not prevent later inspection actions
+from running; later non-inspection actions are skipped for safety. The process
+still exits nonzero with an aggregate failure count. Failures of click, hover,
+navigation, authentication, or non-lookup inspection work remain immediate.
+
 The command checks the existing `http://[::1]:2345` endpoint before starting
 Chromium and never owns or stops `just dev`. This attach-first split means
 cleanup cannot accidentally terminate another developer's server. A custom
 literal loopback origin can be supplied with `--origin`.
+
+Attach tolerates a transient hot-reload outage for up to roughly ten seconds. Each
+navigation also retries for up to three seconds when the requested same-origin
+document loads without Rostra's application marker, covering the short error
+page race observed during `cargo watch` replacement. Cross-origin and protocol
+failures are never retried.
 
 ## Safety and lifecycle
 
@@ -124,7 +141,8 @@ $ cargo test -p rostra-ui-preview
 The ignored smoke test starts a controlled loopback HTML fixture, launches the
 pinned Chromium, exercises both activation methods and scrolling, and verifies
 structured inspection (including visible toggle context and output bounds), the
-exact unlock control with redacted secret errors, and a PNG capture. Run it
+exact unlock control with redacted secret errors, transient marker recovery,
+nearby label suggestions, real hover/unhover state, and a PNG capture. Run it
 after changing CDP, Chromium, web-UI marker/unlock markup, or lifecycle code:
 
 ```console

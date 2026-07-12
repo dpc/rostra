@@ -3,7 +3,7 @@ use std::net::TcpStream;
 use std::path::Path;
 use std::process::{Child, Command, Stdio};
 use std::sync::mpsc;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 use std::{fs, thread};
 
 use anyhow::{Context, Result, bail};
@@ -14,6 +14,21 @@ use tempfile::TempDir;
 use crate::cdp::Cdp;
 use crate::command::ScrollDirection;
 use crate::endpoint::SiteOrigin;
+
+/// Exact element lookup failure eligible for deferred inspection reporting.
+#[derive(Debug)]
+struct ElementLookupError {
+    /// Safe, bounded lookup diagnostic and suggestions.
+    message: String,
+}
+
+impl std::fmt::Display for ElementLookupError {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        self.message.fmt(formatter)
+    }
+}
+
+impl std::error::Error for ElementLookupError {}
 
 /// Owned isolated Chromium process and its page-level DevTools client.
 pub struct Browser {
@@ -26,6 +41,20 @@ pub struct Browser {
 }
 
 impl Browser {
+    /// Return whether an action error is only an exact element lookup miss.
+    pub fn is_lookup_error(error: &anyhow::Error) -> bool {
+        error.downcast_ref::<ElementLookupError>().is_some()
+    }
+
+    /// Construct a lookup miss for focused stream-policy tests.
+    #[cfg(test)]
+    pub(crate) fn lookup_error_for_test() -> anyhow::Error {
+        ElementLookupError {
+            message: "test lookup miss".into(),
+        }
+        .into()
+    }
+
     /// Launch Chromium with a fresh profile and connect to its initial page.
     pub fn launch(
         executable: &Path,
@@ -105,16 +134,23 @@ impl Browser {
             .context("enabling page inspection")?;
         self.cdp
             .call("Page.setLifecycleEventsEnabled", json!({ "enabled": true }))?;
-        self.cdp
-            .call_and_wait(
-                "Page.navigate",
-                json!({ "url": url.as_str() }),
-                "Page.lifecycleEvent",
-            )
-            .context("navigating Chromium")?;
-        self.ready()?;
-        self.ensure_rostra_page()?;
-        Ok(())
+        let deadline = Instant::now() + Duration::from_secs(3);
+        loop {
+            self.cdp
+                .call_and_wait_with_timeout(
+                    "Page.navigate",
+                    json!({ "url": url.as_str() }),
+                    "Page.lifecycleEvent",
+                    remaining(deadline)?,
+                )
+                .context("navigating Chromium")?;
+            self.ready_with_timeout(remaining(deadline)?)?;
+            self.ensure_same_origin_with_timeout(remaining(deadline)?)?;
+            if self.is_rostra_page_with_timeout(remaining(deadline)?)? {
+                return Ok(());
+            }
+            thread::sleep(Duration::from_millis(250).min(remaining(deadline)?));
+        }
     }
 
     /// Activate the unique interactive accessibility node with an exact label.
@@ -159,6 +195,31 @@ impl Browser {
         self.ensure_rostra_page()?;
         let object_id = self.id_object_id(id)?;
         self.inspect_object(&object_id)
+    }
+
+    /// Move Chromium's pointer onto an exact accessible-label target.
+    pub fn hover_label(&mut self, label: &str) -> Result<()> {
+        self.ensure_rostra_page()?;
+        let object_id = self.label_object_id(label, false)?;
+        self.hover_object(&object_id)
+    }
+
+    /// Move Chromium's pointer onto an exact element-ID target.
+    pub fn hover_id(&mut self, id: &str) -> Result<()> {
+        self.ensure_rostra_page()?;
+        let object_id = self.id_object_id(id)?;
+        self.hover_object(&object_id)
+    }
+
+    /// Move Chromium's pointer outside the page viewport.
+    pub fn unhover(&mut self) -> Result<()> {
+        self.ensure_rostra_page()?;
+        self.cdp.call(
+            "Input.dispatchMouseEvent",
+            json!({ "type": "mouseMoved", "x": -1, "y": -1, "buttons": 0 }),
+        )?;
+        self.animation_frames()?;
+        self.ensure_rostra_page()
     }
 
     /// Return the development-server port used to bind its expected secret
@@ -225,7 +286,12 @@ impl Browser {
 
     /// Wait for document readiness, fonts, and two animation frames.
     pub fn ready(&mut self) -> Result<()> {
-        self.cdp.call(
+        self.ready_with_timeout(Duration::from_secs(15))
+    }
+
+    /// Wait for visual readiness within a caller-provided budget.
+    fn ready_with_timeout(&mut self, timeout: Duration) -> Result<()> {
+        self.cdp.call_with_timeout(
             "Runtime.evaluate",
             json!({
                 "expression": "new Promise(async resolve => {\
@@ -238,6 +304,7 @@ impl Browser {
                 "awaitPromise": true,
                 "returnByValue": true,
             }),
+            timeout,
         )?;
         Ok(())
     }
@@ -273,7 +340,12 @@ impl Browser {
 
     /// Evaluate JavaScript and return the DevTools result wrapper.
     fn evaluate(&mut self, expression: &str) -> Result<Value> {
-        self.cdp.call(
+        self.evaluate_with_timeout(expression, Duration::from_secs(15))
+    }
+
+    /// Evaluate JavaScript within a caller-provided budget.
+    fn evaluate_with_timeout(&mut self, expression: &str, timeout: Duration) -> Result<Value> {
+        self.cdp.call_with_timeout(
             "Runtime.evaluate",
             json!({
                 "expression": expression,
@@ -281,6 +353,7 @@ impl Browser {
                 "returnByValue": true,
                 "userGesture": true,
             }),
+            timeout,
         )
     }
 
@@ -323,10 +396,18 @@ impl Browser {
             } else {
                 "inspectable element"
             };
-            bail!(
-                "expected one {kind} labelled `{label}`, found {}",
-                matching.len()
-            );
+            let suggestions = if matching.is_empty() {
+                self.label_suggestions(label, interactive_only)?
+            } else {
+                String::new()
+            };
+            return Err(ElementLookupError {
+                message: format!(
+                    "expected one {kind} labelled `{label}`, found {}{suggestions}",
+                    matching.len(),
+                ),
+            }
+            .into());
         };
         let backend_node_id = node["backendDOMNodeId"]
             .as_u64()
@@ -339,6 +420,53 @@ impl Browser {
             .as_str()
             .map(ToOwned::to_owned)
             .context("could not resolve labelled element")
+    }
+
+    /// Build a bounded nearby-name hint after an exact AX lookup misses.
+    fn label_suggestions(&mut self, label: &str, interactive_only: bool) -> Result<String> {
+        let tree = self.cdp.call("Accessibility.getFullAXTree", json!({}))?;
+        let mut candidates = tree["nodes"]
+            .as_array()
+            .context("accessibility tree has no nodes")?
+            .iter()
+            .filter(|node| {
+                if interactive_only {
+                    is_interactive(node)
+                } else {
+                    is_inspectable(node)
+                }
+            })
+            .filter_map(|node| {
+                let name = ax_value(node, "name")?;
+                if name.is_empty() {
+                    return None;
+                }
+                let name = name.chars().take(120).collect::<String>();
+                let role = ax_value(node, "role")
+                    .unwrap_or("unknown")
+                    .chars()
+                    .take(40)
+                    .collect::<String>();
+                Some((label_score(label, &name), name, role))
+            })
+            .collect::<Vec<_>>();
+        candidates.sort();
+        candidates.dedup_by(|left, right| left.1 == right.1 && left.2 == right.2);
+        candidates.truncate(5);
+        if candidates.is_empty() {
+            return Ok(String::new());
+        }
+        let suggestions = candidates
+            .into_iter()
+            .map(|(_, name, role)| {
+                format!(
+                    "{} ({role})",
+                    serde_json::to_string(&name).unwrap_or_else(|_| "\"?\"".into())
+                )
+            })
+            .collect::<Vec<_>>()
+            .join(", ");
+        Ok(format!("; nearby labels: {suggestions}"))
     }
 
     /// Resolve an exact HTML element ID to a remote object.
@@ -354,12 +482,13 @@ impl Browser {
         result["result"]["objectId"]
             .as_str()
             .map(ToOwned::to_owned)
-            .with_context(|| {
-                format!(
+            .ok_or_else(|| ElementLookupError {
+                message: format!(
                     "no element has ID `{}`",
                     serde_json::from_str::<String>(&id).unwrap_or_default()
-                )
+                ),
             })
+            .map_err(Into::into)
     }
 
     /// Build a bounded JSON snapshot of an element's rendered and accessible
@@ -402,6 +531,62 @@ impl Browser {
         Ok(Value::Object(snapshot))
     }
 
+    /// Scroll a resolved object into view and move Chromium's real pointer to
+    /// it.
+    fn hover_object(&mut self, object_id: &str) -> Result<()> {
+        self.cdp.call(
+            "Runtime.callFunctionOn",
+            json!({
+                "functionDeclaration": "function () {\
+                    this.scrollIntoView({ block: 'center', inline: 'center', behavior: 'instant' });\
+                }",
+                "objectId": object_id,
+            }),
+        )?;
+        self.animation_frames()?;
+        let result = self.cdp.call(
+            "Runtime.callFunctionOn",
+            json!({
+                "functionDeclaration": "function () {\
+                    const rect = this.getBoundingClientRect();\
+                    return { x: rect.x + rect.width / 2, y: rect.y + rect.height / 2,\
+                             width: rect.width, height: rect.height };\
+                }",
+                "objectId": object_id,
+                "returnByValue": true,
+            }),
+        )?;
+        let geometry = &result["result"]["value"];
+        let width = geometry["width"]
+            .as_f64()
+            .context("hover target has no width")?;
+        let height = geometry["height"]
+            .as_f64()
+            .context("hover target has no height")?;
+        if width <= 0.0 || height <= 0.0 {
+            bail!("hover target has no rendered area");
+        }
+        let x = geometry["x"].as_f64().context("hover target has no x")?;
+        let y = geometry["y"].as_f64().context("hover target has no y")?;
+        self.cdp.call(
+            "Input.dispatchMouseEvent",
+            json!({ "type": "mouseMoved", "x": x, "y": y, "buttons": 0 }),
+        )?;
+        self.animation_frames()?;
+        let hovered = self.cdp.call(
+            "Runtime.callFunctionOn",
+            json!({
+                "functionDeclaration": "function () { return this.matches(':hover'); }",
+                "objectId": object_id,
+                "returnByValue": true,
+            }),
+        )?;
+        if hovered["result"]["value"] != Value::Bool(true) {
+            bail!("hover target is occluded at its rendered center");
+        }
+        self.ensure_rostra_page()
+    }
+
     /// Allow a local async update to start, then wait for a quiet DOM interval.
     fn settle_after_interaction(&mut self) -> Result<()> {
         thread::sleep(Duration::from_millis(100));
@@ -423,7 +608,12 @@ impl Browser {
 
     /// Reject redirects or activated controls that leave the configured origin.
     fn ensure_same_origin(&mut self) -> Result<()> {
-        let result = self.evaluate("location.href")?;
+        self.ensure_same_origin_with_timeout(Duration::from_secs(15))
+    }
+
+    /// Enforce the origin boundary within a caller-provided budget.
+    fn ensure_same_origin_with_timeout(&mut self, timeout: Duration) -> Result<()> {
+        let result = self.evaluate_with_timeout("location.href", timeout)?;
         let url = result["result"]["value"]
             .as_str()
             .context("browser did not report its current URL")?;
@@ -436,15 +626,26 @@ impl Browser {
     /// Verify the current page carries Rostra's stable application marker.
     fn ensure_rostra_page(&mut self) -> Result<()> {
         self.ensure_same_origin()?;
-        let result = self.evaluate(
-            "document.querySelector('meta[name=\"description\"]')?.content\
-                === 'Rostra — a peer-to-peer social network'\
-             && Boolean(document.querySelector('.o-pageLayout'))",
-        )?;
-        if result["result"]["value"] != Value::Bool(true) {
+        if !self.is_rostra_page()? {
             bail!("current loopback page is not recognizably Rostra");
         }
         Ok(())
+    }
+
+    /// Return whether the page carries Rostra's stable application marker.
+    fn is_rostra_page(&mut self) -> Result<bool> {
+        self.is_rostra_page_with_timeout(Duration::from_secs(15))
+    }
+
+    /// Check Rostra's marker within a caller-provided budget.
+    fn is_rostra_page_with_timeout(&mut self, timeout: Duration) -> Result<bool> {
+        let result = self.evaluate_with_timeout(
+            "document.querySelector('meta[name=\"description\"]')?.content\
+                === 'Rostra — a peer-to-peer social network'\
+             && Boolean(document.querySelector('.o-pageLayout'))",
+            timeout,
+        )?;
+        Ok(result["result"]["value"] == Value::Bool(true))
     }
 }
 
@@ -621,6 +822,13 @@ impl Drop for Browser {
     }
 }
 
+/// Return the remaining portion of one absolute retry budget.
+fn remaining(deadline: Instant) -> Result<Duration> {
+    deadline
+        .checked_duration_since(Instant::now())
+        .context("Rostra navigation retry budget expired")
+}
+
 /// Cleanup owner established immediately after Chromium is spawned.
 struct BrowserProcess {
     /// Chromium child, killed and waited on during cleanup.
@@ -745,12 +953,51 @@ fn is_inspectable(node: &Value) -> bool {
         )
 }
 
+/// Rank a candidate name, strongly preferring case-insensitive containment.
+fn label_score(expected: &str, candidate: &str) -> usize {
+    let expected = expected
+        .to_lowercase()
+        .chars()
+        .take(120)
+        .collect::<String>();
+    let candidate = candidate
+        .to_lowercase()
+        .chars()
+        .take(120)
+        .collect::<String>();
+    if candidate.contains(&expected) || expected.contains(&candidate) {
+        expected.len().abs_diff(candidate.len())
+    } else {
+        128 + levenshtein(&expected, &candidate)
+    }
+}
+
+/// Compute bounded Unicode-scalar Levenshtein distance.
+fn levenshtein(left: &str, right: &str) -> usize {
+    let right = right.chars().collect::<Vec<_>>();
+    let mut previous = (0..=right.len()).collect::<Vec<_>>();
+    for (left_index, left_char) in left.chars().enumerate() {
+        let mut current = vec![left_index + 1];
+        for (right_index, right_char) in right.iter().enumerate() {
+            current.push(
+                (current[right_index] + 1)
+                    .min(previous[right_index + 1] + 1)
+                    .min(previous[right_index] + usize::from(left_char != *right_char)),
+            );
+        }
+        previous = current;
+    }
+    previous[right.len()]
+}
+
 #[cfg(test)]
 mod tests {
     use std::io::{Read, Write};
     use std::net::TcpListener;
     use std::path::Path;
-    use std::time::Duration;
+    use std::sync::Arc;
+    use std::sync::atomic::{AtomicBool, Ordering};
+    use std::time::{Duration, Instant};
     use std::{env, thread};
 
     use tempfile::tempdir;
@@ -764,11 +1011,20 @@ mod tests {
     fn chromium_smoke() {
         let listener = TcpListener::bind("127.0.0.1:0").unwrap();
         let address = listener.local_addr().unwrap();
+        let transient_served = Arc::new(AtomicBool::new(false));
+        let server_transient_served = transient_served.clone();
         thread::spawn(move || {
             for mut stream in listener.incoming().flatten() {
                 let mut request = [0; 4096];
-                let _ = stream.read(&mut request);
-                let body = r#"<!doctype html>
+                let read = stream.read(&mut request).unwrap_or(0);
+                let request = String::from_utf8_lossy(&request[..read]);
+                let transient = request.starts_with("GET /transient ")
+                    && !server_transient_served.swap(true, Ordering::SeqCst);
+                let persistent = request.starts_with("GET /missing-marker ");
+                let body = if transient || persistent {
+                    "<!doctype html><title>Development server rebuilding</title>"
+                } else {
+                    r#"<!doctype html>
                     <title>Rostra smoke fixture</title>
                     <meta charset="utf-8">
                     <meta name="description" content="Rostra — a peer-to-peer social network">
@@ -776,24 +1032,31 @@ mod tests {
                       #fixture-toggle { opacity: 0; width: 0; height: 0; }
                       .slider { display: inline-block; width: 40px; height: 20px; }
                       .slider::before { content: ''; display: block; width: 16px; height: 16px; }
+                      .hover-target:hover { background-color: rgb(1, 2, 3); }
+                      .hover-target .icon { background-image: url('/base.svg'); width: 16px; height: 16px; }
+                      .hover-target:hover .icon { background-image: url('/hover.svg'); }
                     </style>
                     <div class="o-pageLayout">
                     <h2 aria-label="Fixture section">Visible heading</h2>
-                    <button aria-label="Change label" onclick="this.firstChild.textContent='changed'">label<span style="display:none"><span>NESTED-HIDDEN-SENTINEL</span></span></button>
+                    <button class="hover-target" aria-label="Change label" onclick="this.firstChild.textContent='changed'">label<span class="icon"></span><span style="display:none"><span>NESTED-HIDDEN-SENTINEL</span></span></button>
                     <button id="change-id" onclick="this.textContent='changed'">id</button>
+                    <div style="position:relative;width:80px;height:30px">
+                      <button id="occluded" style="width:80px;height:30px">occluded</button>
+                      <span style="position:absolute;inset:0;z-index:2"></span>
+                    </div>
                     <button id="leave" onclick="setTimeout(() => location.href='http://127.0.0.1:9/', 300)">leave</button>
                     <label><input id="fixture-toggle" type="checkbox"><span class="slider"></span></label>
                     <div class="o-unlockScreen"><form class="o-unlockScreen__form" action="/unlock">
                     <input id="secret-input" name="password" type="password"></form></div>
                     <div id="hidden-root" style="display:none"><span>HIDDEN-ROOT-SENTINEL</span></div>
-                    <div style="height: 2000px"></div></div>"#;
-                write!(
+                    <div style="height: 2000px"></div></div>"#
+                };
+                let _ = write!(
                     stream,
                     "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\n\
                      Content-Length: {}\r\nConnection: close\r\n\r\n{body}",
                     body.len()
-                )
-                .unwrap();
+                );
             }
         });
 
@@ -801,6 +1064,13 @@ mod tests {
         let executable = env::var_os("ROSTRA_CHROMIUM").unwrap_or_else(|| "chromium".into());
         let mut browser =
             Browser::launch(Path::new(&executable), &origin, 640, 480, false).unwrap();
+        browser.open("/").unwrap();
+        browser.open("/transient").unwrap();
+        assert!(transient_served.load(Ordering::SeqCst));
+        let retry_start = Instant::now();
+        let retry_error = browser.open("/missing-marker").unwrap_err();
+        assert!(retry_error.to_string().contains("retry budget"));
+        assert!(retry_start.elapsed() < Duration::from_secs(4));
         browser.open("/").unwrap();
         browser.open("/#fragment").unwrap();
         let fragment = browser.evaluate("location.hash").unwrap();
@@ -812,6 +1082,41 @@ mod tests {
         assert_eq!(inspection["text"], "changed");
         assert!(!inspection.to_string().contains("NESTED-HIDDEN-SENTINEL"));
         assert!(inspection.to_string().len() < 64 * 1024);
+        let missing = browser.inspect_label("Change labl").unwrap_err();
+        assert!(Browser::is_lookup_error(&missing));
+        assert!(missing.to_string().contains("\"Change label\" (button)"));
+        browser.hover_label("Change label").unwrap();
+        let hovered = browser.inspect_label("Change label").unwrap();
+        assert_eq!(hovered["state"]["hovered"], true);
+        assert_eq!(hovered["styles"]["backgroundColor"], "rgb(1, 2, 3)");
+        assert!(
+            hovered["decoration"]["decorativeChildren"][0]["backgroundImage"]
+                .as_str()
+                .unwrap()
+                .ends_with("/hover.svg\")")
+        );
+        browser.unhover().unwrap();
+        let unhovered = browser.inspect_label("Change label").unwrap();
+        assert_eq!(unhovered["state"]["hovered"], false);
+        assert!(
+            unhovered["decoration"]["decorativeChildren"][0]["backgroundImage"]
+                .as_str()
+                .unwrap()
+                .ends_with("/base.svg\")")
+        );
+        browser.hover_id("change-id").unwrap();
+        assert_eq!(
+            browser.inspect_id("change-id").unwrap()["state"]["hovered"],
+            true
+        );
+        browser.unhover().unwrap();
+        assert!(
+            browser
+                .hover_id("occluded")
+                .unwrap_err()
+                .to_string()
+                .contains("occluded")
+        );
         let hidden_root = browser.inspect_id("hidden-root").unwrap();
         assert!(!hidden_root.to_string().contains("HIDDEN-ROOT-SENTINEL"));
         let heading = browser.inspect_label("Fixture section").unwrap();

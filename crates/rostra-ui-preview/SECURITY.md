@@ -38,3 +38,11 @@ Navigation readiness must remain tied to the requested page lifecycle, and
 CDP operations must stay bounded. Revisit these assumptions whenever the CDP
 transport, browser flags, origin policy, supported actions, or process
 lifecycle changes.
+
+Initial attach retries remain bounded. Navigation retries only a loaded
+same-origin document that lacks Rostra's marker, under one three-second budget;
+cross-origin, protocol, readiness, and other CDP failures abort. Retries repeat
+the requested GET, so inspected routes must be safe to load repeatedly. Only
+exact `inspect-label` and `inspect-id` lookup misses are aggregated; after one,
+later non-inspection actions are skipped. Hover succeeds only when Chromium
+reports the resolved target in `:hover` state.

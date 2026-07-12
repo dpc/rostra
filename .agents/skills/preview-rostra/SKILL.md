@@ -33,7 +33,27 @@ regions and treat captured stdout as a retained artifact.
 Use this evidence to compare controls, but call it **structured rendered
 inspection**, not pixel-level visual inspection.
 
-3. Capture PNGs only when an image-capable human or tool will actually read them:
+If an `inspect-label` lookup fails, the tool prints bounded nearby accessible
+label suggestions. Missing labels and IDs continue later inspection actions,
+skip later non-inspection actions for safety, and produce a nonzero exit after
+the stream. Click, hover, navigation, authentication, and non-lookup inspection
+failures still stop immediately.
+
+3. Use real browser hover only when the state itself matters:
+
+```bash
+just ui-inspect --path /settings/identity <<'EOF'
+hover-label Copy RostraId
+inspect-label Copy RostraId
+unhover
+EOF
+```
+
+`hover-label` and `hover-id` scroll the target into view and move Chromium's
+pointer to its center, so `:hover`, pseudo-elements, and transitions are real
+browser state. Always `unhover` before unrelated evidence.
+
+4. Capture PNGs only when an image-capable human or tool will actually read them:
 
 ```bash
 just ui-inspect --path /news <<'EOF'
@@ -48,9 +68,9 @@ Use `click-label Accessible name` for a uniquely labelled control or
 later navigation. Input lines execute from top to bottom. For mobile inspection
 add `--width 390 --height 844` before the here-document.
 
-4. Read each PNG with an image-capable tool. Do not claim visual inspection
+5. Read each PNG with an image-capable tool. Do not claim visual inspection
    based only on a successful command.
-5. Delete screenshots after reporting findings.
+6. Delete screenshots after reporting findings.
 
 ## Existing development identity
 
@@ -93,3 +113,7 @@ cannot prevent the initial request. Do not activate signing/destructive
 controls, external links, or the recovery-phrase reveal flow. Loading live
 development data can still update sessions and synchronization state. See
 `docs/development-ui-preview.md` for lifecycle and troubleshooting details.
+
+During `just dev` rebuilds, initial attach retries recognizable readiness for up
+to roughly ten seconds and navigation retries a same-origin non-Rostra transient page
+for up to three seconds. Other failures remain bounded and explicit.

@@ -27,6 +27,12 @@ pub enum Action {
     Ready,
     /// Capture the current viewport as a PNG.
     Screenshot(PathBuf),
+    /// Move the real browser pointer onto an accessible label.
+    HoverLabel(String),
+    /// Move the real browser pointer onto an element ID.
+    HoverId(String),
+    /// Move the browser pointer away from the inspected page.
+    Unhover,
     /// Print structured rendered evidence for an accessible label.
     InspectLabel(String),
     /// Print structured rendered evidence for an element ID.
@@ -62,6 +68,12 @@ impl FromStr for Action {
             ("ready", _) => bail!("ready does not accept an argument"),
             ("screenshot", "") => bail!("screenshot requires an output path"),
             ("screenshot", path) => Ok(Self::Screenshot(path.into())),
+            ("hover-label", "") => bail!("hover-label requires an accessible label"),
+            ("hover-label", label) => Ok(Self::HoverLabel(label.to_owned())),
+            ("hover-id", "") => bail!("hover-id requires an element ID"),
+            ("hover-id", id) => Ok(Self::HoverId(id.to_owned())),
+            ("unhover", "") => Ok(Self::Unhover),
+            ("unhover", _) => bail!("unhover does not accept an argument"),
             ("inspect-label", "") => bail!("inspect-label requires an accessible label"),
             ("inspect-label", label) => Ok(Self::InspectLabel(label.to_owned())),
             ("inspect-id", "") => bail!("inspect-id requires an element ID"),
@@ -72,6 +84,14 @@ impl FromStr for Action {
             ("unlock-from-dev-secret", path) => Ok(Self::UnlockFromDevSecret { path: path.into() }),
             _ => bail!("unknown action `{command}`"),
         }
+    }
+}
+
+impl Action {
+    /// Return whether a runtime lookup failure may defer until later
+    /// inspections run.
+    pub fn is_inspection(&self) -> bool {
+        matches!(self, Self::InspectLabel(_) | Self::InspectId(_))
     }
 }
 
@@ -108,5 +128,13 @@ mod tests {
                 path: "dev/2345/secret".into(),
             }
         );
+    }
+
+    #[test]
+    fn only_inspections_have_nonfatal_lookup_policy() {
+        assert!(Action::InspectLabel("Missing".into()).is_inspection());
+        assert!(Action::InspectId("missing".into()).is_inspection());
+        assert!(!Action::HoverLabel("Missing".into()).is_inspection());
+        assert!(!Action::ClickLabel("Missing".into()).is_inspection());
     }
 }

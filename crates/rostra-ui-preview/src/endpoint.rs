@@ -1,7 +1,7 @@
-use std::fmt;
 use std::io::{Read, Write};
 use std::net::{IpAddr, SocketAddr, TcpStream};
 use std::time::Duration;
+use std::{fmt, thread};
 
 use anyhow::{Context, Result, bail};
 use url::{Host, Url};
@@ -66,11 +66,11 @@ impl SiteOrigin {
         self.socket.port()
     }
 
-    /// Verify that the endpoint is an HTTP page recognizably served by Rostra.
-    pub fn probe(&self) -> Result<()> {
-        let mut stream = TcpStream::connect_timeout(&self.socket, Duration::from_secs(2))
-            .context("could not connect")?;
-        stream.set_read_timeout(Some(Duration::from_secs(3)))?;
+    /// Probe with one shared short connect/read timeout.
+    fn probe_with_timeout(&self, timeout: Duration) -> Result<()> {
+        let mut stream =
+            TcpStream::connect_timeout(&self.socket, timeout).context("could not connect")?;
+        stream.set_read_timeout(Some(timeout))?;
         stream.write_all(
             format!(
                 "GET / HTTP/1.0\r\nHost: {}\r\nConnection: close\r\n\r\n",
@@ -85,6 +85,22 @@ impl SiteOrigin {
             bail!("endpoint did not return a recognizable Rostra page");
         }
         Ok(())
+    }
+
+    /// Wait through a bounded development-server rebuild for a recognizable
+    /// page.
+    pub fn wait_until_ready(&self) -> Result<()> {
+        let mut last_error = None;
+        for attempt in 0..20 {
+            match self.probe_with_timeout(Duration::from_millis(250)) {
+                Ok(()) => return Ok(()),
+                Err(error) => last_error = Some(error),
+            }
+            if attempt != 19 {
+                thread::sleep(Duration::from_millis(250));
+            }
+        }
+        Err(last_error.expect("readiness loop always records an error"))
     }
 }
 

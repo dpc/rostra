@@ -7,6 +7,8 @@ mod browser;
 mod cdp;
 mod command;
 mod endpoint;
+#[cfg(test)]
+mod main_tests;
 mod secret_file;
 
 use std::io::{self, BufRead};
@@ -51,8 +53,9 @@ struct Args {
     /// from stdin.
     ///
     /// Supported values include: "open PATH", "click-label LABEL", "click-id
-    /// ID", "inspect-label LABEL", "inspect-id ID", "scroll up", "scroll
-    /// down", "ready", "screenshot PATH", and "unlock-from-dev-secret PATH".
+    /// ID", "inspect-label LABEL", "inspect-id ID", "hover-label LABEL",
+    /// "hover-id ID", "unhover", "scroll up", "scroll down", "ready",
+    /// "screenshot PATH", and "unlock-from-dev-secret PATH".
     #[arg(long = "action", value_name = "COMMAND")]
     actions: Vec<Action>,
 
@@ -64,7 +67,7 @@ struct Args {
 fn main() -> Result<()> {
     let args = Args::parse();
     let origin = SiteOrigin::parse(&args.origin)?;
-    origin.probe().with_context(|| {
+    origin.wait_until_ready().with_context(|| {
         format!("Rostra is not ready at {origin}; run `just dev-no-open` first")
     })?;
 
@@ -77,21 +80,61 @@ fn main() -> Result<()> {
     )?;
     browser.open(&args.path)?;
 
+    let mut deferred_failures = 0;
     if args.actions.is_empty() {
         for line in io::stdin().lock().lines() {
             let line = line?;
             if line.trim().is_empty() || line.trim_start().starts_with('#') {
                 continue;
             }
-            execute(&mut browser, &line.parse()?, args.allow_secret_input)?;
+            let action: Action = line.parse()?;
+            if should_skip_after_lookup_failure(deferred_failures, &action) {
+                eprintln!("skipping non-inspection action after a deferred lookup failure");
+                continue;
+            }
+            if let Err(error) = execute(&mut browser, &action, args.allow_secret_input) {
+                if should_defer(&action, &error) {
+                    deferred_failures += 1;
+                    eprintln!("inspection failed: {error:#}");
+                    continue;
+                }
+                return Err(error);
+            }
         }
     } else {
         for action in &args.actions {
-            execute(&mut browser, action, args.allow_secret_input)?;
+            if should_skip_after_lookup_failure(deferred_failures, action) {
+                eprintln!("skipping non-inspection action after a deferred lookup failure");
+                continue;
+            }
+            if let Err(error) = execute(&mut browser, action, args.allow_secret_input) {
+                if should_defer(action, &error) {
+                    deferred_failures += 1;
+                    eprintln!("inspection failed: {error:#}");
+                    continue;
+                }
+                return Err(error);
+            }
         }
     }
 
+    if deferred_failures != 0 {
+        anyhow::bail!(
+            "{deferred_failures} inspection action(s) failed; remaining inspections were completed"
+        );
+    }
     Ok(())
+}
+
+/// Return whether an exact inspection lookup miss may be reported at stream
+/// end.
+fn should_defer(action: &Action, error: &anyhow::Error) -> bool {
+    action.is_inspection() && Browser::is_lookup_error(error)
+}
+
+/// Return whether safety policy skips this action after a deferred miss.
+fn should_skip_after_lookup_failure(deferred_failures: usize, action: &Action) -> bool {
+    deferred_failures != 0 && !action.is_inspection()
 }
 
 /// Execute one parsed action against the active browser page.
@@ -107,6 +150,9 @@ fn execute(browser: &mut Browser, action: &Action, allow_secret_input: bool) -> 
             println!("{}", path.display());
             Ok(())
         }
+        Action::HoverLabel(label) => browser.hover_label(label),
+        Action::HoverId(id) => browser.hover_id(id),
+        Action::Unhover => browser.unhover(),
         Action::InspectLabel(label) => {
             println!(
                 "{}",

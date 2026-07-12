@@ -46,19 +46,46 @@ impl Cdp {
 
     /// Invoke a CDP method and return its result object.
     pub fn call(&mut self, method: &str, params: Value) -> Result<Value> {
-        self.call_inner(method, params, None)
+        self.call_inner(method, params, None, Duration::from_secs(15))
     }
 
-    /// Invoke a CDP method and wait for a subsequent named lifecycle event.
-    pub fn call_and_wait(&mut self, method: &str, params: Value, event: &str) -> Result<Value> {
-        self.call_inner(method, params, Some(event))
+    /// Invoke a CDP method within a caller-provided call budget.
+    pub fn call_with_timeout(
+        &mut self,
+        method: &str,
+        params: Value,
+        timeout: Duration,
+    ) -> Result<Value> {
+        self.call_inner(method, params, None, timeout)
+    }
+
+    /// Invoke a CDP method and lifecycle wait within one caller-provided
+    /// budget.
+    pub fn call_and_wait_with_timeout(
+        &mut self,
+        method: &str,
+        params: Value,
+        event: &str,
+        timeout: Duration,
+    ) -> Result<Value> {
+        self.call_inner(method, params, Some(event), timeout)
     }
 
     /// Send one method and collect its response and optional event in either
     /// order.
-    fn call_inner(&mut self, method: &str, params: Value, event: Option<&str>) -> Result<Value> {
+    fn call_inner(
+        &mut self,
+        method: &str,
+        params: Value,
+        event: Option<&str>,
+        timeout: Duration,
+    ) -> Result<Value> {
         let id = self.next_id;
         self.next_id += 1;
+        let deadline = Instant::now() + timeout;
+        if let MaybeTlsStream::Plain(stream) = self.socket.get_mut() {
+            stream.set_write_timeout(Some(timeout))?;
+        }
         self.socket.send(Message::Text(
             json!({ "id": id, "method": method, "params": params })
                 .to_string()
@@ -68,11 +95,10 @@ impl Cdp {
         let mut result: Option<Value> = None;
         let mut event_seen = event.is_none();
         let mut lifecycle_loaders = Vec::new();
-        let deadline = Instant::now() + Duration::from_secs(15);
         while result.is_none() || !event_seen {
             let remaining = deadline
                 .checked_duration_since(Instant::now())
-                .context("DevTools call exceeded its 15-second deadline")?;
+                .context("DevTools call exceeded its deadline")?;
             if let MaybeTlsStream::Plain(stream) = self.socket.get_mut() {
                 stream.set_read_timeout(Some(remaining))?;
             }
