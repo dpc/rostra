@@ -89,7 +89,7 @@ just ui-inspect --allow-secret-input --path /unlock <<'EOF'
 unlock-from-dev-secret dev/2345/secret
 click-label Login
 open /settings/identity
-inspect-label Reveal recovery phrase
+inspect-label Reveal
 EOF
 ```
 
