@@ -1,9 +1,9 @@
 ---
 name: preview-rostra
 description: >
-  Use this skill to visually inspect Rostra's live development UI by navigating,
-  activating a labelled control or element ID, scrolling, and taking screenshots
-  without Python or JavaScript tooling.
+  Use this skill to inspect Rostra's live development UI through structured
+  rendered evidence or human-readable screenshots while navigating, activating
+  controls, and scrolling without Python or JavaScript tooling.
 user-invocable: true
 ---
 
@@ -14,7 +14,26 @@ Use the project-local Rust CDP client against the live development server.
 1. Check whether `http://[::1]:2345` is already running. Attach to it when it is.
    Otherwise ask the user to run `just dev-no-open` in a separate terminal.
    Never stop a server the inspection process did not start.
-2. Capture the viewport and any needed interaction states:
+2. Prefer structured rendered evidence when no image-capable tool is available:
+
+```bash
+just ui-inspect --path /news <<'EOF'
+inspect-label Settings
+inspect-id self-profile-summary
+EOF
+```
+
+`inspect-label` and `inspect-id` print bounded JSON containing browser-computed
+accessibility name/role, rendered non-hidden text, classes, geometry, relevant computed
+styles, disabled/pressed/focus/checked state, pseudo-element and SVG/icon
+evidence, and rendered evidence for nearby elements (including a hidden input's
+visible toggle sibling). They omit form values but can include sensitive live
+page text, labels, CSS URLs, and context; inspect only approved non-secret
+regions and treat captured stdout as a retained artifact.
+Use this evidence to compare controls, but call it **structured rendered
+inspection**, not pixel-level visual inspection.
+
+3. Capture PNGs only when an image-capable human or tool will actually read them:
 
 ```bash
 just ui-inspect --path /news <<'EOF'
@@ -29,9 +48,43 @@ Use `click-label Accessible name` for a uniquely labelled control or
 later navigation. Input lines execute from top to bottom. For mobile inspection
 add `--width 390 --height 844` before the here-document.
 
-3. Read each PNG with an image-capable tool. Do not claim visual inspection
+4. Read each PNG with an image-capable tool. Do not claim visual inspection
    based only on a successful command.
-4. Delete screenshots after reporting findings.
+5. Delete screenshots after reporting findings.
+
+## Existing development identity
+
+The fresh browser profile has no Rostra session. When authenticated Settings
+inspection is necessary, first obtain explicit approval to unlock the existing
+development identity. Never generate/recover an account and never put its
+mnemonic in a command, argument, environment variable, prompt, log, or retained
+artifact.
+
+Ensure the normal development recipe has hardened the local files (`just
+dev-no-open` now enforces directory mode 0700 and secret mode 0600), then pass
+only the secret **path**:
+
+```bash
+just ui-inspect --allow-secret-input --path /unlock <<'EOF'
+unlock-from-dev-secret dev/2345/secret
+click-label Login
+open /settings/identity
+inspect-label Reveal recovery phrase
+EOF
+```
+
+`unlock-from-dev-secret` is bound to the configured port's
+`dev/<port>/secret`, the `/unlock` route, and Rostra's exact password control.
+It rejects symlinked path components, special files, files readable by group or others,
+empty/non-UTF-8 values, NUL bytes, and files over 16 KiB. It never
+prints the value and structured inspection omits form values. Do not inspect or
+screenshot the password control; click Login immediately after filling it.
+Unlocking gives the browser signing authority and may start network-visible
+client activity; close the inspector immediately after the approved evidence is
+collected. The mnemonic traverses the unauthenticated loopback CDP connection
+and exists briefly in browser memory, so use this only on a single-user host
+with trusted local processes. Rostra page scripts receive input events and must
+not reflect it into inspectable content. Do not activate the recovery-phrase control.
 
 The browser profile is isolated and temporary, and its CDP endpoint is
 loopback-only. Explicit navigation is restricted to the configured literal

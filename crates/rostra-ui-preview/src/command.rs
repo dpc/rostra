@@ -27,6 +27,15 @@ pub enum Action {
     Ready,
     /// Capture the current viewport as a PNG.
     Screenshot(PathBuf),
+    /// Print structured rendered evidence for an accessible label.
+    InspectLabel(String),
+    /// Print structured rendered evidence for an element ID.
+    InspectId(String),
+    /// Unlock Rostra using the protected secret for this development port.
+    UnlockFromDevSecret {
+        /// Protected file containing the value.
+        path: PathBuf,
+    },
 }
 
 impl FromStr for Action {
@@ -53,6 +62,14 @@ impl FromStr for Action {
             ("ready", _) => bail!("ready does not accept an argument"),
             ("screenshot", "") => bail!("screenshot requires an output path"),
             ("screenshot", path) => Ok(Self::Screenshot(path.into())),
+            ("inspect-label", "") => bail!("inspect-label requires an accessible label"),
+            ("inspect-label", label) => Ok(Self::InspectLabel(label.to_owned())),
+            ("inspect-id", "") => bail!("inspect-id requires an element ID"),
+            ("inspect-id", id) => Ok(Self::InspectId(id.to_owned())),
+            ("unlock-from-dev-secret", "") => {
+                bail!("unlock-from-dev-secret requires the dev secret path")
+            }
+            ("unlock-from-dev-secret", path) => Ok(Self::UnlockFromDevSecret { path: path.into() }),
             _ => bail!("unknown action `{command}`"),
         }
     }
@@ -78,6 +95,18 @@ mod tests {
         assert_eq!(
             "scroll down".parse::<Action>().unwrap(),
             Action::Scroll(ScrollDirection::Down)
+        );
+    }
+
+    #[test]
+    fn parses_secret_file_without_reading_it() {
+        assert_eq!(
+            "unlock-from-dev-secret dev/2345/secret"
+                .parse::<Action>()
+                .unwrap(),
+            Action::UnlockFromDevSecret {
+                path: "dev/2345/secret".into(),
+            }
         );
     }
 }

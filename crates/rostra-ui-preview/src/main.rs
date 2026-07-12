@@ -7,6 +7,7 @@ mod browser;
 mod cdp;
 mod command;
 mod endpoint;
+mod secret_file;
 
 use std::io::{self, BufRead};
 use std::path::PathBuf;
@@ -42,11 +43,16 @@ struct Args {
     #[arg(long)]
     headed: bool,
 
+    /// Permit secret-file input actions for an explicitly approved dev login.
+    #[arg(long)]
+    allow_secret_input: bool,
+
     /// Browser action, repeated in execution order. If absent, read actions
     /// from stdin.
     ///
-    /// Supported values are: "open PATH", "click-label LABEL", "click-id ID",
-    /// "scroll up", "scroll down", "ready", and "screenshot PATH".
+    /// Supported values include: "open PATH", "click-label LABEL", "click-id
+    /// ID", "inspect-label LABEL", "inspect-id ID", "scroll up", "scroll
+    /// down", "ready", "screenshot PATH", and "unlock-from-dev-secret PATH".
     #[arg(long = "action", value_name = "COMMAND")]
     actions: Vec<Action>,
 
@@ -77,11 +83,11 @@ fn main() -> Result<()> {
             if line.trim().is_empty() || line.trim_start().starts_with('#') {
                 continue;
             }
-            execute(&mut browser, &line.parse()?)?;
+            execute(&mut browser, &line.parse()?, args.allow_secret_input)?;
         }
     } else {
         for action in &args.actions {
-            execute(&mut browser, action)?;
+            execute(&mut browser, action, args.allow_secret_input)?;
         }
     }
 
@@ -89,7 +95,7 @@ fn main() -> Result<()> {
 }
 
 /// Execute one parsed action against the active browser page.
-fn execute(browser: &mut Browser, action: &Action) -> Result<()> {
+fn execute(browser: &mut Browser, action: &Action, allow_secret_input: bool) -> Result<()> {
     match action {
         Action::Open(target) => browser.open(target),
         Action::ClickLabel(label) => browser.click_label(label),
@@ -100,6 +106,27 @@ fn execute(browser: &mut Browser, action: &Action) -> Result<()> {
             browser.screenshot(path)?;
             println!("{}", path.display());
             Ok(())
+        }
+        Action::InspectLabel(label) => {
+            println!(
+                "{}",
+                serde_json::to_string_pretty(&browser.inspect_label(label)?)?
+            );
+            Ok(())
+        }
+        Action::InspectId(id) => {
+            println!(
+                "{}",
+                serde_json::to_string_pretty(&browser.inspect_id(id)?)?
+            );
+            Ok(())
+        }
+        Action::UnlockFromDevSecret { path } => {
+            if !allow_secret_input {
+                anyhow::bail!("secret-file input requires --allow-secret-input");
+            }
+            let secret = secret_file::read_dev_secret(path, browser.origin_port())?;
+            browser.fill_rostra_unlock_password(&secret)
         }
     }
 }

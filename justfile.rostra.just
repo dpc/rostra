@@ -31,10 +31,18 @@ _dev PORT OPEN_BROWSER:
     export ROSTRA_DATA_DIR
     ROSTRA_DATA_DIR=dev/{{PORT}}
 
+    umask 077
     mkdir -p "$ROSTRA_DATA_DIR"
+    chmod 700 "$ROSTRA_DATA_DIR"
+    if [[ -L "$ROSTRA_DATA_DIR/secret" ]] \
+      || [[ -e "$ROSTRA_DATA_DIR/secret" && ! -f "$ROSTRA_DATA_DIR/secret" ]]; then
+      echo "Refusing non-regular development secret: $ROSTRA_DATA_DIR/secret" >&2
+      exit 1
+    fi
     if [ ! -e "$ROSTRA_DATA_DIR/secret" ]; then
       cargo run gen-id | jq -r '.secret' > "$ROSTRA_DATA_DIR/secret"
     fi
+    chmod 600 "$ROSTRA_DATA_DIR/secret"
 
     if [[ "{{OPEN_BROWSER}}" == 1 ]]; then
       ( sleep 1 ; xdg-open "http://[::1]:{{PORT}}" ) &

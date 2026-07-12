@@ -61,6 +61,11 @@ impl SiteOrigin {
         Url::parse(target).is_ok_and(|target| target.origin() == self.url.origin())
     }
 
+    /// Return the configured development-server TCP port.
+    pub fn port(&self) -> u16 {
+        self.socket.port()
+    }
+
     /// Verify that the endpoint is an HTTP page recognizably served by Rostra.
     pub fn probe(&self) -> Result<()> {
         let mut stream = TcpStream::connect_timeout(&self.socket, Duration::from_secs(2))

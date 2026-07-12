@@ -2,7 +2,8 @@
 
 `rostra-ui-preview` is a small Rust CDP client for repeatable visual inspection.
 It deliberately supports only navigation, activation by accessible label or
-element ID, viewport scrolling, readiness waits, and screenshots. It does not
+element ID, viewport scrolling, readiness waits, structured element evidence,
+screenshots, and explicitly approved existing-dev-identity unlock. It does not
 introduce a Python, Node.js, WebDriver, or general browser-test project.
 
 ## Start and inspect
@@ -24,7 +25,12 @@ EOF
 ```
 
 Other actions are `open PATH`, `click-id ID`, `scroll up`, `scroll down`, and
-`ready`. Standard input is the most reliable interface through `just` and
+`ready`. `inspect-label LABEL` and `inspect-id ID` emit bounded JSON with the
+element's computed accessibility role/name, text, classes, geometry, selected
+visual styles, state, pseudo-elements, SVG/icon evidence, and nearby context.
+They intentionally omit form values. This supports honest structural/rendered
+comparison when an agent cannot read pixels; it is not a substitute for
+pixel-level visual judgment. Standard input is the most reliable interface through `just` and
 executes one action per line; blank lines and lines beginning with `#` are
 ignored. The binary also accepts repeated `--action 'COMMAND'` options when
 called directly. The default viewport is 1280×900; use
@@ -55,6 +61,9 @@ literal loopback origin can be supplied with `--origin`.
 - Screenshots contain live page data. Keep them under `/tmp`, inspect them with
   an image-capable tool, and delete them when finished. Never reveal or capture
   the recovery phrase.
+- Structured JSON can likewise contain live text, accessibility labels, CSS
+  URLs, and nearby context. It omits form values but has no generic secret
+  detector; retain or share it only as deliberately as a screenshot.
 - The tool waits for a complete document, loaded fonts, and two animation
   frames. During a hot-reload disconnect, rerun the command after `just dev`
   finishes rebuilding.
@@ -67,6 +76,43 @@ The crate's [security and reliability notes](../crates/rostra-ui-preview/SECURIT
 record the accepted local-CDP tradeoff and invariants to revisit when changing
 the tool.
 
+## Approved development-identity login
+
+An isolated profile starts without an authenticated session. If inspection
+requires authenticated Settings, obtain explicit approval to unlock the
+existing development identity. Never generate a new account, reveal a recovery
+phrase, or put the mnemonic in arguments, environment variables, command text,
+logs, screenshots, or retained artifacts.
+
+`just dev` and `just dev-no-open` enforce mode 0700 on `dev/<port>` and 0600 on
+its existing or newly created `secret`. Then use the protected file path only:
+
+```console
+$ just ui-inspect --allow-secret-input --path /unlock <<'EOF'
+unlock-from-dev-secret dev/2345/secret
+click-label Login
+open /settings/identity
+inspect-label Reveal recovery phrase
+EOF
+```
+
+The unlock action requires an explicit CLI opt-in and is hard-bound to the
+configured port's `dev/<port>/secret`, the Rostra `/unlock` route, and its exact
+password control. It requires a regular non-symlink file, owner-only
+permissions, UTF-8 text, and a 16 KiB maximum. It sends the value without
+printing it, and structured inspection omits form values. Only use this against
+the trusted local Rostra development server: page scripts receive input events
+and could reflect entered data into otherwise inspectable content. Unlocking
+grants signing authority and may start network-visible client activity. Close
+the process immediately after collecting approved non-secret evidence, and
+never activate the recovery-phrase control.
+
+The mnemonic traverses Chromium's unauthenticated loopback CDP connection and
+exists briefly in browser/profile memory. Authenticated inspection is supported
+only on a single-user host with trusted local processes. Forced termination or
+cleanup failure can leave a residual temporary profile; remove any
+`/tmp/rostra-ui-preview-*` directory before continuing.
+
 ## Testing and verification
 
 Parser and loopback-origin unit tests run with:
@@ -77,7 +123,9 @@ $ cargo test -p rostra-ui-preview
 
 The ignored smoke test starts a controlled loopback HTML fixture, launches the
 pinned Chromium, exercises both activation methods and scrolling, and verifies
-a PNG capture. Run it after changing CDP, Chromium, or lifecycle code:
+structured inspection (including visible toggle context and output bounds), the
+exact unlock control with redacted secret errors, and a PNG capture. Run it
+after changing CDP, Chromium, web-UI marker/unlock markup, or lifecycle code:
 
 ```console
 $ cargo test -p rostra-ui-preview browser::tests::chromium_smoke -- --ignored
