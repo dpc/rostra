@@ -44,9 +44,9 @@ failures still stop immediately.
 3. Use real browser hover only when the state itself matters:
 
 ```bash
-just ui-inspect --path /settings/identity <<'EOF'
-hover-label Copy RostraId
-inspect-label Copy RostraId
+just ui-inspect --path /unlock <<'EOF'
+hover-label Login
+inspect-label Login
 unhover
 EOF
 ```
@@ -76,11 +76,11 @@ add `--width 390 --height 844` before the here-document.
 
 ## Existing development identity
 
-The fresh browser profile has no Rostra session. When authenticated Settings
-inspection is necessary, first obtain explicit approval to unlock the existing
-development identity. Never generate/recover an account and never put its
-mnemonic in a command, argument, environment variable, prompt, log, or retained
-artifact.
+The fresh browser profile has no Rostra session. When inspection of an
+authenticated route other than Identity settings is necessary, first obtain
+explicit approval to unlock the existing development identity. Never
+generate/recover an account, open `/settings/identity`, or put its mnemonic in a
+command, argument, environment variable, prompt, log, or retained artifact.
 
 Ensure the normal development recipe has hardened the local files (`just
 dev-no-open` now enforces directory mode 0700 and secret mode 0600), then pass
@@ -90,8 +90,8 @@ only the secret **path**:
 just ui-inspect --allow-secret-input --path /unlock <<'EOF'
 unlock-from-dev-secret dev/2345/secret
 click-label Login
-open /settings/identity
-inspect-label Reveal
+open /settings/profile
+inspect-label My Profile
 EOF
 ```
 
@@ -106,37 +106,13 @@ client activity; close the inspector immediately after the approved evidence is
 collected. The mnemonic traverses the unauthenticated loopback CDP connection
 and exists briefly in browser memory, so use this only on a single-user host
 with trusted local processes. Rostra page scripts receive input events and must
-not reflect it into inspectable content. Do not activate the phrase-rendering
-confirmation action. Every `--allow-secret-input` run automatically closes open
-dialogs and posts Rostra logout on both success and ordinary action errors.
+not reflect it into inspectable content. Every `--allow-secret-input` run
+automatically closes open dialogs and posts Rostra logout on both success and
+ordinary action errors.
 
-### Authorized confirmation-only inspection
-
-The first Identity action labelled **Reveal** only opens a non-secret warning
-dialog. Opening that warning is allowed only when confirmation-dialog inspection
-was explicitly authorized. The dialog contains another action also labelled
-**Reveal**; activating that second action submits the form and renders the
-recovery phrase, and is forbidden in the normal preview workflow.
-
-Use this exact open/inspect/cancel sequence. There is intentionally only one
-`click-label Reveal`:
-
-```bash
-just ui-inspect --allow-secret-input --path /unlock <<'EOF'
-unlock-from-dev-secret dev/2345/secret
-click-label Login
-open /settings/identity
-click-label Reveal
-inspect-id recovery-confirmation
-inspect-id recovery-phrase-target
-click-label Cancel
-EOF
-```
-
-Do not add a second `click-label Reveal`, do not submit the confirmation form,
-and do not screenshot or inspect any phrase panel. `Cancel` closes the warning
-without rendering the phrase. The tool's authenticated cleanup also closes any
-still-open dialog and logs out, including when either inspection lookup fails.
+Identity settings include the masked recovery phrase in the authenticated page
+for a read-write session. Masking does not remove it from the DOM or browser
+memory, so this tool must not open, capture, or inspect `/settings/identity`.
 If Chromium/CDP itself is unavailable, cleanup can fail; report the error and
 restart `just dev` to clear residual server-memory authority.
 
@@ -144,7 +120,7 @@ The browser profile is isolated and temporary, and its CDP endpoint is
 loopback-only. Explicit navigation is restricted to the configured literal
 loopback origin; leaving it through a redirect or control aborts the tool but
 cannot prevent the initial request. Do not activate signing/destructive
-controls, external links, or the phrase-rendering confirmation step. Loading live
+controls, external links, or Identity settings. Loading live
 development data can still update sessions and synchronization state. See
 `docs/development-ui-preview.md` for lifecycle and troubleshooting details.
 

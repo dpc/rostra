@@ -99,68 +99,8 @@ async fn ajax_request_to_unlock_returns_401_not_redirect_loop() {
     );
 }
 
-fn csrf_token(page: &str) -> &str {
-    let marker = "name=\"csrf_token\" value=\"";
-    let remainder = page
-        .split_once(marker)
-        .expect("page should contain a CSRF token")
-        .1;
-    remainder
-        .split_once('"')
-        .expect("CSRF token value should be quoted")
-        .0
-}
-
-fn assert_identity_action_controls(page: &str, disabled: bool) {
-    assert!(!page.contains("Identity &amp; recovery"));
-    assert!(page.contains("m-identityRecovery__copyButton u-button"));
-    assert!(page.contains("m-identityRecovery__copyButtonIcon u-buttonIcon"));
-    assert!(page.contains("aria-label=\"Copy RostraId\""));
-    assert!(page.contains(">RostraId</button>"));
-    assert!(page.contains("m-identityRecovery__revealButton u-button"));
-    assert!(page.contains("m-identityRecovery__revealButtonIcon u-buttonIcon"));
-    assert!(page.contains(">Reveal</button>"));
-    assert!(page.contains("aria-labelledby=\"recovery-confirmation-title\""));
-    assert!(page.contains("m-identityRecovery__dialogContent"));
-    assert!(page.contains("m-identityRecovery__dialogTitle"));
-    assert!(page.contains(">Reveal recovery phrase</h4>"));
-    assert!(page.contains("m-identityRecovery__confirmButtonIcon u-buttonIcon"));
-    assert!(page.contains("m-identityRecovery__cancelButtonIcon u-buttonIcon"));
-    assert!(!page.contains("Reveal your recovery phrase?"));
-    assert!(!page.contains("I understand — reveal"));
-    let dialog = page
-        .split_once("id=\"recovery-confirmation\"")
-        .expect("identity page should contain the recovery confirmation dialog")
-        .1;
-    let cancel_position = dialog
-        .find("m-identityRecovery__cancelButton u-button")
-        .expect("dialog should contain its Cancel action");
-    let reveal_position = dialog
-        .find("m-identityRecovery__confirmButton u-button")
-        .expect("dialog should contain its Reveal action");
-    assert!(cancel_position < reveal_position);
-    let cancel_button = dialog[cancel_position..]
-        .split_once("</button>")
-        .expect("dialog Cancel action should have a closing tag")
-        .0;
-    let reveal_button = dialog[reveal_position..]
-        .split_once("</button>")
-        .expect("dialog Reveal action should have a closing tag")
-        .0;
-    assert!(cancel_button.contains(">Cancel"));
-    assert!(reveal_button.contains(">Reveal"));
-    let reveal_button = page
-        .split_once("m-identityRecovery__revealButton u-button")
-        .expect("identity page should contain the reveal button")
-        .1
-        .split_once("</button>")
-        .expect("reveal button should have a closing tag")
-        .0;
-    assert_eq!(reveal_button.contains("disabled"), disabled);
-}
-
 #[test_log::test(tokio::test(flavor = "multi_thread"))]
-async fn identity_actions_and_recovery_reveal_are_protected_and_session_scoped() {
+async fn identity_recovery_phrase_is_masked_protected_and_session_scoped() {
     let server = TestServer::start().await;
     let rw = server.driver();
     let (id, secret) = rw.login_new_identity().await;
@@ -172,95 +112,31 @@ async fn identity_actions_and_recovery_reveal_are_protected_and_session_scoped()
         resp.headers().get(header::CACHE_CONTROL).unwrap(),
         "no-store, private"
     );
+    assert_eq!(resp.headers().get(header::PRAGMA).unwrap(), "no-cache");
     assert_eq!(resp.headers().get("x-frame-options").unwrap(), "DENY");
     assert_eq!(
         resp.headers().get("content-security-policy").unwrap(),
         "frame-ancestors 'none'"
     );
-    let page = resp.text().await.unwrap();
-    assert!(!page.contains(&phrase));
-    assert_identity_action_controls(&page, false);
-    let csrf = csrf_token(&page);
-
-    let resp = rw
-        .same_origin_post_form_accept_br(
-            "/settings/identity/recovery-phrase",
-            &[("csrf_token", csrf)],
-        )
-        .await;
-    assert_eq!(resp.status(), 200);
-    assert_eq!(
-        resp.headers().get(header::CACHE_CONTROL).unwrap(),
-        "no-store, private"
-    );
     assert_eq!(
         resp.headers().get(header::CONTENT_ENCODING).unwrap(),
         "identity"
     );
-    let body = resp.text().await.unwrap();
-    assert!(
-        body.starts_with("<div id=\"recovery-phrase-target\">"),
-        "AJAX response should contain the form's requested replacement target"
-    );
-    assert!(body.contains(&phrase));
-    assert!(body.contains("readonly"));
-    assert!(body.contains("Copy recovery phrase"));
-
-    let resp = rw
-        .same_origin_post_form(
-            "/settings/identity/recovery-phrase",
-            &[("csrf_token", "invalid")],
-        )
-        .await;
-    assert_eq!(resp.status(), 403);
-
-    let resp = rw
-        .cross_site_post_form(
-            "/settings/identity/recovery-phrase",
-            &[("csrf_token", csrf)],
-        )
-        .await;
-    assert_eq!(resp.status(), 403);
+    let page = resp.text().await.unwrap();
+    assert!(page.contains(&phrase));
+    assert!(page.contains("type=\"password\""));
+    assert!(page.contains("readonly"));
+    assert!(page.contains("aria-label=\"Copy recovery phrase\""));
+    assert!(page.contains(">Copy</button>"));
+    assert!(page.contains("role=\"status\" aria-live=\"polite\""));
+    assert!(!page.contains("<dialog"));
+    assert!(!page.contains(">Reveal"));
 
     let ro = server.driver();
     ro.login_readonly(id).await;
     let page = ro.get("/settings/identity").await.text().await.unwrap();
     assert!(page.contains("This session does not hold the recovery phrase"));
     assert!(!page.contains(&phrase));
-    assert_identity_action_controls(&page, true);
-    let ro_csrf = csrf_token(&page);
-    let resp = ro
-        .same_origin_post_form(
-            "/settings/identity/recovery-phrase",
-            &[("csrf_token", ro_csrf)],
-        )
-        .await;
-    assert_eq!(resp.status(), 403);
-}
-
-#[test_log::test(tokio::test(flavor = "multi_thread"))]
-async fn recovery_phrase_has_no_get_or_unauthenticated_access() {
-    let server = TestServer::start().await;
-    let driver = server.driver();
-
-    let resp = driver.get("/settings/identity/recovery-phrase").await;
-    assert_eq!(resp.status(), 405);
-
-    let resp = driver
-        .same_origin_post_form(
-            "/settings/identity/recovery-phrase",
-            &[("csrf_token", "invalid")],
-        )
-        .await;
-    assert_eq!(resp.status(), 303);
-    assert!(
-        resp.headers()
-            .get(header::LOCATION)
-            .unwrap()
-            .to_str()
-            .unwrap()
-            .starts_with("/unlock")
-    );
 }
 
 #[test_log::test(tokio::test(flavor = "multi_thread"))]
@@ -283,8 +159,19 @@ async fn account_creation_generates_selectable_24_word_phrase_by_post() {
         resp.headers().get(header::CONTENT_ENCODING).unwrap(),
         "identity"
     );
+    assert_eq!(resp.headers().get(header::PRAGMA).unwrap(), "no-cache");
+    assert_eq!(resp.headers().get("x-frame-options").unwrap(), "DENY");
+    assert_eq!(
+        resp.headers().get("content-security-policy").unwrap(),
+        "frame-ancestors 'none'"
+    );
     let body = resp.text().await.unwrap();
-    assert!(body.contains("I saved this recovery phrase"));
+    assert!(body.starts_with("<!DOCTYPE html>"));
+    assert!(body.contains("<html lang=\"en\"><head>"));
+    assert!(body.contains("<title>Save recovery phrase</title>"));
+    assert!(body.contains("<h1>Create account</h1>"));
+    assert!(!body.contains("I saved this recovery phrase"));
+    assert!(body.contains(">Continue with new account</button>"));
     assert!(body.contains("name=\"redirect\" value=\"/following\""));
     assert!(body.contains("readonly"));
     assert!(!body.contains("12 words"));
@@ -300,6 +187,38 @@ async fn account_creation_generates_selectable_24_word_phrase_by_post() {
         .unwrap()
         .0;
     assert_eq!(phrase.split_whitespace().count(), 24);
+    let generated_id = body
+        .split_once("name=\"username\" value=\"")
+        .unwrap()
+        .1
+        .split_once('"')
+        .unwrap()
+        .0;
+    let resp = driver
+        .post_form(
+            "/unlock",
+            &[
+                ("username", generated_id),
+                ("password", phrase),
+                ("redirect", "/following"),
+            ],
+        )
+        .await;
+    assert_eq!(resp.status(), 303);
+    assert_eq!(resp.headers().get(header::LOCATION).unwrap(), "/following");
+
+    let resp = driver
+        .ajax_post_form("/unlock/generate", &[("redirect", "/following")])
+        .await;
+    assert_eq!(resp.status(), 200);
+    assert_eq!(
+        resp.headers().get(header::CACHE_CONTROL).unwrap(),
+        "no-store, private"
+    );
+    let body = resp.text().await.unwrap();
+    assert!(!body.contains("<!DOCTYPE html>"));
+    assert!(body.contains("<form id=\"create-account-form\""));
+    assert!(body.contains("name=\"redirect\" value=\"/following\""));
 
     for invalid in [
         "//attacker.example",
@@ -382,16 +301,8 @@ async fn credential_export_requires_https_off_loopback() {
         .text()
         .await
         .unwrap();
-    assert!(page.contains("Recovery phrase reveal is disabled"));
-    let csrf = csrf_token(&page);
-    let resp = driver
-        .same_origin_post_form_with_cookie(
-            "/settings/identity/recovery-phrase",
-            cookie_pair,
-            &[("csrf_token", csrf)],
-        )
-        .await;
-    assert_eq!(resp.status(), 403);
+    assert!(page.contains("Recovery phrase display is disabled"));
+    assert!(!page.contains(&phrase));
 }
 
 #[test_log::test(tokio::test(flavor = "multi_thread"))]

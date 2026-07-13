@@ -102,10 +102,10 @@ mod tests {
     #[test]
     fn parses_labels_with_spaces() {
         assert_eq!(
-            "click-label Reveal recovery phrase"
+            "click-label Copy recovery phrase"
                 .parse::<Action>()
                 .unwrap(),
-            Action::ClickLabel("Reveal recovery phrase".into())
+            Action::ClickLabel("Copy recovery phrase".into())
         );
     }
 

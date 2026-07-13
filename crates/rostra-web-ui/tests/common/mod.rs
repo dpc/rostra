@@ -237,26 +237,21 @@ impl UiDriver {
             .expect("AJAX GET request failed")
     }
 
+    /// Send a form POST with the Alpine request header.
+    pub async fn ajax_post_form(&self, path: &str, form: &[(&str, &str)]) -> reqwest::Response {
+        self.client
+            .post(self.url(path))
+            .header("X-Alpine-Request", "true")
+            .form(form)
+            .send()
+            .await
+            .expect("AJAX form POST request failed")
+    }
+
     /// Send a form POST to the given path.
     pub async fn post_form(&self, path: &str, form: &[(&str, &str)]) -> reqwest::Response {
         self.client
             .post(self.url(path))
-            .form(form)
-            .send()
-            .await
-            .expect("POST request failed")
-    }
-
-    /// Send a same-origin browser-style form POST.
-    pub async fn same_origin_post_form(
-        &self,
-        path: &str,
-        form: &[(&str, &str)],
-    ) -> reqwest::Response {
-        self.client
-            .post(self.url(path))
-            .header("Origin", &self.base_url)
-            .header("Sec-Fetch-Site", "same-origin")
             .form(form)
             .send()
             .await
@@ -274,40 +269,6 @@ impl UiDriver {
             .header("Origin", &self.base_url)
             .header("Sec-Fetch-Site", "same-origin")
             .header("Accept-Encoding", "br")
-            .form(form)
-            .send()
-            .await
-            .expect("POST request failed")
-    }
-
-    /// Send a form POST marked as a cross-site browser request.
-    pub async fn cross_site_post_form(
-        &self,
-        path: &str,
-        form: &[(&str, &str)],
-    ) -> reqwest::Response {
-        self.client
-            .post(self.url(path))
-            .header("Origin", "https://attacker.invalid")
-            .header("Sec-Fetch-Site", "cross-site")
-            .form(form)
-            .send()
-            .await
-            .expect("POST request failed")
-    }
-
-    /// Send a same-origin form POST with an explicitly supplied Cookie header.
-    pub async fn same_origin_post_form_with_cookie(
-        &self,
-        path: &str,
-        cookie: &str,
-        form: &[(&str, &str)],
-    ) -> reqwest::Response {
-        self.client
-            .post(self.url(path))
-            .header("Cookie", cookie)
-            .header("Origin", &self.base_url)
-            .header("Sec-Fetch-Site", "same-origin")
             .form(form)
             .send()
             .await

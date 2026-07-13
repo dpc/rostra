@@ -1,5 +1,8 @@
 //! Reusable HTML fragments for the web UI.
 
+#[cfg(test)]
+mod tests;
+
 use std::collections::BTreeSet;
 
 use maud::{Markup, html};
@@ -49,9 +52,12 @@ pub fn button(
     title: Option<&str>,
     /// Optional accessible name when the visible label does not name the action
     aria_label: Option<&str>,
+    /// Hide the button when JavaScript is disabled.
+    requires_js: Option<bool>,
 ) -> Markup {
     let disabled = disabled.unwrap_or(false);
     let disabled_class = disabled_class.unwrap_or(false);
+    let requires_js = requires_js.unwrap_or(false);
     let button_type = button_type.unwrap_or("submit");
     let icon_class = format!("{class}Icon");
 
@@ -61,6 +67,7 @@ pub fn button(
         button
             .(class)
             ."u-button"
+            ."u-requiresJs"[requires_js]
             .(variant_class)
             ."-disabled"[disabled_class]
             type=(button_type)

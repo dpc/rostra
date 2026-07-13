@@ -61,17 +61,43 @@ pub async fn get(
 }
 
 /// Generate an account credential and return its protected backup controls.
-pub async fn post_generate(state: State<SharedState>, Form(form): Form<RedirectQuery>) -> Response {
+pub async fn post_generate(
+    state: State<SharedState>,
+    AjaxRequest(is_ajax): AjaxRequest,
+    Form(form): Form<RedirectQuery>,
+) -> RequestResult<Response> {
     if !state.recovery_transport_secure() {
-        return StatusCode::FORBIDDEN.into_response();
+        return Ok(StatusCode::FORBIDDEN.into_response());
     }
     let redirect = form.redirect.as_deref().and_then(LocalRedirect::parse);
-    recovery::sensitive_response(Maud(recovery::phrase_panel(
+    let panel = recovery::account_creation_panel(
         rostra_core::id::RostraIdSecretKey::generate(),
-        recovery::PhrasePanelContext::AccountCreation {
-            redirect: redirect.as_ref(),
-        },
-    )))
+        redirect.as_ref(),
+    );
+    let body = if is_ajax {
+        Maud(panel).into_response()
+    } else {
+        Maud(
+            state
+                .render_html_page(
+                    "Save recovery phrase",
+                    html! {
+                        main ."o-unlockScreen" {
+                            h1 { "Create account" }
+                            (panel)
+                        }
+                    },
+                    None,
+                    None,
+                    None,
+                    true,
+                )
+                .await?,
+        )
+        .into_response()
+    };
+
+    Ok(recovery::sensitive_response(body))
 }
 
 #[derive(Deserialize)]

@@ -251,10 +251,6 @@ pub fn route_handler(state: SharedState) -> Router<Arc<UiState>> {
         .route("/settings", get(settings::get_settings))
         .route("/settings/identity", get(settings::get_settings_identity))
         .route(
-            "/settings/identity/recovery-phrase",
-            post(settings::post_settings_recovery_phrase),
-        )
-        .route(
             "/settings/profile",
             get(settings::get_settings_profile).post(settings::post_settings_profile),
         )

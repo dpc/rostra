@@ -52,12 +52,11 @@ exact `inspect-label` and `inspect-id` lookup misses are aggregated; after one,
 later non-inspection actions are skipped. Hover succeeds only when Chromium
 reports the resolved target in `:hover` state.
 
-The Identity page has two actions with the accessible label `Reveal`. The first
-opens a non-secret confirmation dialog and may be used only for an explicitly
-authorized confirmation-only inspection. The second submits the dialog and
-renders the recovery phrase; normal preview workflows must never activate it.
-Safe confirmation inspection cancels the dialog and logs out without rendering
-the phrase. Every `--allow-secret-input` action stream has a final cleanup step
-that closes open dialogs and posts Rostra logout after success or ordinary
-errors. Chromium/CDP loss or forced termination can prevent that cleanup and
-leave server-memory signing authority until server restart or later GC.
+For an authenticated read-write session, `/settings/identity` contains the
+masked recovery phrase in the DOM and browser memory as soon as the page loads.
+Masking is not a confidentiality boundary. Preview workflows must never open,
+capture, or inspect that route. Every `--allow-secret-input` action stream has a
+final cleanup step that closes open dialogs and posts Rostra logout after
+success or ordinary errors. Chromium/CDP loss or forced termination can prevent
+that cleanup and leave server-memory signing authority until server restart or
+later GC.

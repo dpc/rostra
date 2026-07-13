@@ -49,87 +49,35 @@ function showCopyIdStatus(target, state, message) {
   }, 1000);
 }
 
-const recoveryPhraseTimers = new WeakMap();
-
-function eraseRecoveryPhrase(panel) {
-  if (!panel) return;
-  const textarea = panel.querySelector("textarea");
-  if (textarea) textarea.value = "";
-  const timer = recoveryPhraseTimers.get(panel);
-  if (timer) clearTimeout(timer);
-  recoveryPhraseTimers.delete(panel);
-  panel.remove();
-}
-
-function hideRecoveryPhrase(button) {
-  eraseRecoveryPhrase(button.closest("[data-recovery-phrase]"));
-}
-
-function armRecoveryPhraseTimeout(panel) {
-  const previous = recoveryPhraseTimers.get(panel);
-  if (previous) clearTimeout(previous);
-  recoveryPhraseTimers.set(
-    panel,
-    setTimeout(() => eraseRecoveryPhrase(panel), 120000),
-  );
-}
-
-function initializeRecoveryPhrase(panel) {
-  if (!panel) return;
-  armRecoveryPhraseTimeout(panel);
-  panel.addEventListener("pointerdown", () => armRecoveryPhraseTimeout(panel));
-  panel.addEventListener("keydown", () => armRecoveryPhraseTimeout(panel));
-
-  const acknowledgement = panel.querySelector("[data-recovery-ack]");
-  const continueButton = panel.querySelector(
-    ".m-recoveryPhrase__continueButton",
-  );
-  if (acknowledgement && continueButton) {
-    acknowledgement.addEventListener("change", () => {
-      continueButton.disabled = !acknowledgement.checked;
-    });
-  }
-}
+const recoveryPhraseCopyStates = new WeakMap();
 
 async function copyRecoveryPhrase(button) {
-  const panel = button.closest("[data-recovery-phrase]");
-  const textarea = panel?.querySelector("textarea");
-  const status = panel?.querySelector(".m-recoveryPhrase__status");
-  if (!textarea || !status) return;
+  const container = button.closest(
+    ".m-recoveryPhrase, .m-recoveryPhrase__settingsControl",
+  );
+  const field = container?.querySelector("#recovery-phrase");
+  const status = container?.querySelector(".m-recoveryPhrase__status");
+  if (!field || !status) return;
 
-  textarea.focus();
-  textarea.select();
-  textarea.setSelectionRange(0, textarea.value.length);
-
-  let copied = false;
+  const state = {};
+  recoveryPhraseCopyStates.set(button, state);
+  button.classList.remove("-active");
   try {
-    if (navigator.clipboard?.writeText) {
-      await navigator.clipboard.writeText(textarea.value);
-      copied = true;
-    }
-  } catch (_) {
-    copied = false;
+    if (!navigator.clipboard?.writeText) throw new Error("Clipboard unavailable");
+    await navigator.clipboard.writeText(field.value);
+    if (recoveryPhraseCopyStates.get(button) !== state) return;
+    button.classList.add("-active");
+    status.textContent = "Recovery phrase copied.";
+  } catch {
+    if (recoveryPhraseCopyStates.get(button) !== state) return;
+    field.focus();
+    field.select();
+    field.setSelectionRange(0, field.value.length);
+    status.textContent =
+      "Copy failed. The recovery phrase is selected; copy it manually.";
   }
-
-  if (!copied) {
-    try {
-      copied = document.execCommand("copy");
-    } catch (_) {
-      copied = false;
-    }
-  }
-
-  status.textContent = copied
-    ? "Copied — paste it into your trusted password manager now."
-    : "Automatic copy was blocked. The phrase is selected; copy it manually.";
-  armRecoveryPhraseTimeout(panel);
+  recoveryPhraseCopyStates.delete(button);
 }
-
-window.addEventListener("pagehide", () => {
-  document
-    .querySelectorAll("[data-recovery-phrase]")
-    .forEach(eraseRecoveryPhrase);
-});
 
 function previewAvatar(event) {
   document.querySelector(".m-profileSummary__userImage").src =

@@ -15,14 +15,14 @@ Rostra is a p2p (friend-to-friend) social network built in Rust. It uses a light
 
 - **Core principle**: All data propagates as cryptographically signed `Event`s forming a DAG structure
 - **Network layer**: Uses Pkarr for distributed identity/naming and iroh-net for p2p transport
-- **UI**: Web-based interface using Axum, htmx, and Maud for server-side rendering
+- **UI**: Web-based interface using Axum, Maud, Alpine, and alpine-ajax
 - **Storage**: Local database for tracking events and content
 
 ## Project Structure
 
 - `crates/rostra-core` - Core domain types used across the project
 - `crates/rostra-client-db` - Database for tracking all events
-- `crates/rostra-web-ui` - Default web-based UI (Axum + htmx)
+- `crates/rostra-web-ui` - Default web-based UI (Axum + Maud + Alpine/alpine-ajax)
 - `crates/rostra-client` - Client implementation (includes shared RPC utilities in `util::rpc`)
 - `crates/rostra-p2p` - P2P networking layer
 - `crates/rostra-p2p-api` - P2P API definitions
@@ -96,9 +96,9 @@ cargo test test_name
 The web UI (`crates/rostra-web-ui`) uses:
 - **Axum** for the web server framework
 - **Maud** for HTML templating
-- **htmx** for dynamic frontend interactions
+- **Alpine + alpine-ajax** for progressive enhancement
 - **Tower** middleware for sessions, cookies, compression
-- Server-side rendering with htmx for interactivity
+- Server-rendered HTML as the primary interaction architecture
 
 Key web UI files:
 - `src/routes/` - Route handlers for different pages
@@ -115,8 +115,12 @@ Key web UI files:
 
 ## Web UI Conventions
 
+- Follow
+  [`DESIGN-server-rendered-hypermedia`](crates/rostra-web-ui/specs/DESIGN-server-rendered-hypermedia.md):
+  changed workflows must work through ordinary HTTP without JavaScript. Alpine
+  is progressive enhancement; justify any new custom JavaScript in review.
 - For keyboard shortcuts that trigger `requestSubmit()`, always use `keyup` (not `keydown`). `keydown` fires repeatedly with key auto-repeat, which can cause duplicate form submissions and race conditions in alpine-ajax.
-- Keep Identity recovery `Reveal`/`Cancel` labels and the
-  `recovery-confirmation`/`recovery-phrase-target` IDs synchronized with the
-  confirmation-only workflow in `.agents/skills/preview-rostra/SKILL.md` and
-  the preview security notes.
+- Keep credential-bearing pages server-rendered, session-scoped, unavailable to
+  read-only sessions, and protected by the sensitive response headers in
+  `routes/recovery.rs`. Recovery phrases use a masked read-only field and a
+  conventional copy control; do not add reveal dialogs or confirmation steps.

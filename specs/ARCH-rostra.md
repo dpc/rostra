@@ -30,8 +30,10 @@ friend-to-friend and persona product motivations.
   [ARCH-client-runtime](../crates/rostra-client/specs/ARCH-client-runtime.md).
 - `rostra-web-ui` is the primary presentation and HTTP API layer. It manages
   multiple clients, sessions, and in-memory unlocked credentials, and uses
-  client and database APIs rather than owning protocol state. The external API
-  is documented in [docs/web-api.md](../docs/web-api.md).
+  client and database APIs rather than owning protocol state. Its HTML-first
+  interaction boundary is governed by
+  [DESIGN-server-rendered-hypermedia](../crates/rostra-web-ui/specs/DESIGN-server-rendered-hypermedia.md).
+  The external API is documented in [docs/web-api.md](../docs/web-api.md).
 - The `rostra` binary is the composition root for command-line operation and
   the web UI. Bot and utility crates are consumers or supporting
   infrastructure rather than independent architectural layers.

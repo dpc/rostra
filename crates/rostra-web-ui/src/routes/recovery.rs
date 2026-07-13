@@ -6,33 +6,26 @@ use rostra_core::id::RostraIdSecretKey;
 use super::fragment;
 use super::unlock::local_redirect::LocalRedirect;
 
-/// Context-specific controls surrounding the shared recovery phrase field.
+/// Semantic presentation of a recovery phrase field.
 #[derive(Clone, Copy)]
-pub(crate) enum PhrasePanelContext<'a> {
-    /// A reveal from the authenticated Settings page.
-    Settings,
-    /// A newly generated account that has not yet been unlocked.
-    AccountCreation {
-        /// Safe local destination to visit after account creation.
-        redirect: Option<&'a LocalRedirect>,
-    },
+enum PhraseFieldMode {
+    /// Selectable credential submitted during account creation.
+    AccountCreation,
+    /// Masked credential displayed in authenticated Settings.
+    MaskedSettings,
 }
 
-/// Render the recovery phrase controls shared by account creation and Settings.
-pub(crate) fn phrase_panel(secret: RostraIdSecretKey, context: PhrasePanelContext<'_>) -> Markup {
+/// Render the generated credential and account creation form.
+pub(crate) fn account_creation_panel(
+    secret: RostraIdSecretKey,
+    redirect: Option<&LocalRedirect>,
+) -> Markup {
     let id = secret.id();
     let phrase = secret.to_string();
-    let account_creation = matches!(context, PhrasePanelContext::AccountCreation { .. });
-    let redirect = match context {
-        PhrasePanelContext::Settings => None,
-        PhrasePanelContext::AccountCreation { redirect } => redirect,
-    };
 
     html! {
-        div id="recovery-phrase-panel" ."m-recoveryPhrase -revealed"
-            data-recovery-phrase
-        {
-            h3 ."m-recoveryPhrase__title" { "Recovery phrase" }
+        div ."m-recoveryPhrase" {
+            h2 ."m-recoveryPhrase__title" { "Recovery phrase" }
             p ."m-recoveryPhrase__warning" {
                 strong { "Keep this secret." }
                 " Anyone with these 24 words can permanently act as you. "
@@ -42,57 +35,35 @@ pub(crate) fn phrase_panel(secret: RostraIdSecretKey, context: PhrasePanelContex
                 "Save the phrase only in a trusted password manager or offline backup. "
                 "Never send it to support or paste it into chat."
             }
-            @if account_creation {
-                form id="create-account-form" action="/unlock" method="post" {
-                    input type="hidden" name="username" value=(id) {}
-                    @if let Some(redirect) = redirect {
-                        input type="hidden" name="redirect" value=(redirect) {}
-                    }
-                    (phrase_field(&phrase, Some("password")))
-                    label ."m-recoveryPhrase__acknowledgement" {
-                        input type="checkbox" data-recovery-ack {}
-                        "I saved this recovery phrase in a safe place."
-                    }
-                    div ."m-recoveryPhrase__actions" {
-                        (fragment::button(
-                            "m-recoveryPhrase__copyButton",
-                            "Copy recovery phrase",
-                        )
-                        .button_type("button")
-                        .onclick("copyRecoveryPhrase(this)")
-                        .call())
-                        (fragment::button(
-                            "m-recoveryPhrase__continueButton",
-                            "Continue with new account",
-                        )
-                        .disabled(true)
-                        .call())
-                        (fragment::button("m-recoveryPhrase__hideButton", "Hide")
-                            .button_type("button")
-                            .onclick("hideRecoveryPhrase(this)")
-                            .call())
-                    }
+            form id="create-account-form" action="/unlock" method="post" {
+                input type="hidden" name="username" value=(id) {}
+                @if let Some(redirect) = redirect {
+                    input type="hidden" name="redirect" value=(redirect) {}
                 }
-            } @else {
-                (phrase_field(&phrase, None))
+                (phrase_field(&phrase, PhraseFieldMode::AccountCreation))
                 div ."m-recoveryPhrase__actions" {
+                    (copy_button())
                     (fragment::button(
-                        "m-recoveryPhrase__copyButton",
-                        "Copy recovery phrase",
+                        "m-recoveryPhrase__continueButton",
+                        "Continue with new account",
                     )
-                    .button_type("button")
-                    .onclick("copyRecoveryPhrase(this)")
-                    .call())
-                    (fragment::button("m-recoveryPhrase__hideButton", "Hide")
-                        .button_type("button")
-                        .onclick("hideRecoveryPhrase(this)")
                         .call())
                 }
             }
             p ."m-recoveryPhrase__status" role="status" aria-live="polite" {}
-            script {
-                "initializeRecoveryPhrase(document.getElementById('recovery-phrase-panel'));"
-            }
+        }
+    }
+}
+
+/// Render a masked, read-only recovery phrase with a copy control.
+pub(crate) fn settings_phrase(secret: RostraIdSecretKey) -> Markup {
+    let phrase = secret.to_string();
+
+    html! {
+        div ."m-recoveryPhrase__settingsControl" {
+            (phrase_field(&phrase, PhraseFieldMode::MaskedSettings))
+            (copy_button())
+            p ."m-recoveryPhrase__status" role="status" aria-live="polite" {}
         }
     }
 }
@@ -121,21 +92,42 @@ pub(crate) fn sensitive_response(body: impl IntoResponse) -> Response {
     response
 }
 
-fn phrase_field(phrase: &str, name: Option<&str>) -> Markup {
+fn phrase_field(phrase: &str, mode: PhraseFieldMode) -> Markup {
     html! {
         label ."m-recoveryPhrase__label" for="recovery-phrase" {
             "24-word recovery phrase"
         }
-        textarea id="recovery-phrase" ."m-recoveryPhrase__phrase"
-            name=[name]
-            readonly
-            rows="5"
-            spellcheck="false"
-            autocapitalize="none"
-            autocorrect="off"
-            autocomplete="off"
-        {
-            (phrase)
+        @if matches!(mode, PhraseFieldMode::MaskedSettings) {
+            input id="recovery-phrase" ."m-recoveryPhrase__phrase"
+                type="password"
+                value=(phrase)
+                readonly
+                spellcheck="false"
+                autocapitalize="none"
+                autocorrect="off"
+                autocomplete="off"
+            {}
+        } @else {
+            textarea id="recovery-phrase" ."m-recoveryPhrase__phrase"
+                name="password"
+                readonly
+                rows="5"
+                spellcheck="false"
+                autocapitalize="none"
+                autocorrect="off"
+                autocomplete="off"
+            {
+                (phrase)
+            }
         }
     }
+}
+
+fn copy_button() -> Markup {
+    fragment::button("m-recoveryPhrase__copyButton", "Copy")
+        .button_type("button")
+        .onclick("copyRecoveryPhrase(this)")
+        .aria_label("Copy recovery phrase")
+        .requires_js(true)
+        .call()
 }

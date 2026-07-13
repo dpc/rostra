@@ -308,8 +308,9 @@ img.u-userImage {
   display: flex;
   gap: 0.5rem;
   min-width: 5rem;
-  max-width: 140px;
+  max-width: none;
   padding: 0.0rem .5rem;
+  white-space: nowrap;
 }
 
 .u-buttonIcon {
@@ -2270,51 +2271,11 @@ h4.o-settingsContent__sectionHeader {
   background-image: url('/assets/icons/circle-check.svg');
 }
 
-.m-identityRecovery__revealButtonIcon {
-  background: url('/assets/icons/eye.svg') center/contain no-repeat;
-}
-
 .m-identityRecovery__insecureWarning,
 .m-recoveryPhrase__warning {
   padding: 0.75rem;
   border: 2px solid var(--color-notification-error-bg, #b91c1c);
   border-radius: var(--border-radius-std);
-}
-
-.m-identityRecovery__dialog {
-  max-width: 34rem;
-  margin: auto;
-  border: 1px solid var(--color-timeline-item-border);
-  border-radius: var(--border-radius-std);
-  color: var(--color-text-default);
-  background: var(--color-timeline-bg);
-}
-
-.m-identityRecovery__dialog::backdrop {
-  background: rgb(0 0 0 / 65%);
-}
-
-.m-identityRecovery__dialogContent {
-  padding: 1.25rem;
-}
-
-.m-identityRecovery__dialogTitle {
-  margin-top: 0;
-  margin-bottom: 0.75rem;
-  color: var(--color-link);
-}
-
-.m-identityRecovery__dialog .m-recoveryPhrase__actions {
-  justify-content: flex-end;
-  margin-top: 1.25rem;
-}
-
-.m-identityRecovery__confirmButtonIcon {
-  background: url('/assets/icons/eye.svg') center/contain no-repeat;
-}
-
-.m-identityRecovery__cancelButtonIcon {
-  background: url('/assets/icons/xmark.svg') center/contain no-repeat;
 }
 
 .m-recoveryPhrase {
@@ -2348,9 +2309,32 @@ h4.o-settingsContent__sectionHeader {
   -webkit-user-select: text;
 }
 
-.m-recoveryPhrase__acknowledgement {
-  display: block;
-  margin-top: 0.75rem;
+.m-recoveryPhrase__settingsControl {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: end;
+  gap: 0.35rem 0.5rem;
+}
+
+.m-recoveryPhrase__settingsControl .m-recoveryPhrase__label {
+  grid-column: 1 / -1;
+}
+
+.m-recoveryPhrase__settingsControl .m-recoveryPhrase__phrase {
+  min-height: auto;
+  height: 2.75rem;
+}
+
+.m-recoveryPhrase__settingsControl .m-recoveryPhrase__status {
+  grid-column: 1 / -1;
+}
+
+.m-recoveryPhrase__copyButtonIcon {
+  background: url('/assets/icons/copy.svg') center/contain no-repeat;
+}
+
+.m-recoveryPhrase__copyButton.-active .m-recoveryPhrase__copyButtonIcon {
+  background-image: url('/assets/icons/circle-check.svg');
 }
 
 .m-recoveryPhrase__actions {
