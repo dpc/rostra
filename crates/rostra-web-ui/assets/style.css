@@ -2309,23 +2309,31 @@ h4.o-settingsContent__sectionHeader {
 }
 
 .m-recoveryPhrase__settingsControl {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  align-items: end;
-  gap: 0.35rem 0.5rem;
+  max-width: 100%;
 }
 
-.m-recoveryPhrase__settingsControl .m-recoveryPhrase__label {
-  grid-column: 1 / -1;
+.m-recoveryPhrase__settingsControlRow {
+  display: flex;
+  align-items: stretch;
+  flex-wrap: wrap;
+  gap: 0.5rem;
 }
 
 .m-recoveryPhrase__settingsControl .m-recoveryPhrase__phrase {
+  flex: 1 1 20rem;
+  min-width: 0;
   min-height: auto;
-  height: 2.75rem;
+  height: 1.75rem;
+  padding: 0 0.5rem;
+}
+
+.m-recoveryPhrase__settingsControl .m-recoveryPhrase__copyButton {
+  flex: 0 0 auto;
+  min-height: 1.75rem;
 }
 
 .m-recoveryPhrase__settingsControl .m-recoveryPhrase__status {
-  grid-column: 1 / -1;
+  margin: 0;
 }
 
 .m-recoveryPhrase__copyButtonIcon {

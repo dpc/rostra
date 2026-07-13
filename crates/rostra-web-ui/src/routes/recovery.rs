@@ -61,8 +61,11 @@ pub(crate) fn settings_phrase(secret: RostraIdSecretKey) -> Markup {
 
     html! {
         div ."m-recoveryPhrase__settingsControl" {
-            (phrase_field(&phrase, PhraseFieldMode::MaskedSettings))
-            (copy_button())
+            (phrase_label())
+            div ."m-recoveryPhrase__settingsControlRow" {
+                (phrase_control(&phrase, PhraseFieldMode::MaskedSettings))
+                (copy_button())
+            }
             p ."m-recoveryPhrase__status" role="status" aria-live="polite" {}
         }
     }
@@ -94,9 +97,21 @@ pub(crate) fn sensitive_response(body: impl IntoResponse) -> Response {
 
 fn phrase_field(phrase: &str, mode: PhraseFieldMode) -> Markup {
     html! {
+        (phrase_label())
+        (phrase_control(phrase, mode))
+    }
+}
+
+fn phrase_label() -> Markup {
+    html! {
         label ."m-recoveryPhrase__label" for="recovery-phrase" {
             "24-word recovery phrase"
         }
+    }
+}
+
+fn phrase_control(phrase: &str, mode: PhraseFieldMode) -> Markup {
+    html! {
         @if matches!(mode, PhraseFieldMode::MaskedSettings) {
             input id="recovery-phrase" ."m-recoveryPhrase__phrase"
                 type="password"
@@ -131,3 +146,6 @@ fn copy_button() -> Markup {
         .requires_js(true)
         .call()
 }
+
+#[cfg(test)]
+mod tests;

@@ -4341,6 +4341,7 @@ dependencies = [
  "bon",
  "brotli",
  "bytes",
+ "cssparser",
  "data-encoding",
  "futures",
  "futures-util",
