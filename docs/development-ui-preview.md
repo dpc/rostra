@@ -28,7 +28,9 @@ Other actions are `open PATH`, `click-id ID`, `scroll up`, `scroll down`, and
 `ready`. `inspect-label LABEL` and `inspect-id ID` emit bounded JSON with the
 element's computed accessibility role/name, text, classes, geometry, selected
 visual styles, state, pseudo-elements, SVG/icon evidence, and nearby context.
-They intentionally omit form values. This supports honest structural/rendered
+Container output additionally includes at most 16 rendered children through
+depth two, with class, accessibility role/name, geometry, and key
+spacing/typography styles. They intentionally omit form values. This supports honest structural/rendered
 comparison when an agent cannot read pixels; it is not a substitute for
 pixel-level visual judgment. Standard input is the most reliable interface through `just` and
 executes one action per line; blank lines and lines beginning with `#` are
@@ -122,13 +124,45 @@ the trusted local Rostra development server: page scripts receive input events
 and could reflect entered data into otherwise inspectable content. Unlocking
 grants signing authority and may start network-visible client activity. Close
 the process immediately after collecting approved non-secret evidence, and
-never activate the recovery-phrase control.
+never activate the phrase-rendering confirmation action. Runs using
+`--allow-secret-input` automatically close open dialogs and post Rostra logout
+after actions succeed or return an ordinary error.
 
 The mnemonic traverses Chromium's unauthenticated loopback CDP connection and
 exists briefly in browser/profile memory. Authenticated inspection is supported
 only on a single-user host with trusted local processes. Forced termination or
 cleanup failure can leave a residual temporary profile; remove any
 `/tmp/rostra-ui-preview-*` directory before continuing.
+
+### Confirmation-only recovery inspection
+
+On Identity, the first control labelled `Reveal` opens a non-secret warning.
+That opening is safe only when confirmation-dialog inspection was explicitly
+authorized. Inside the modal, a second control is also labelled `Reveal`; it
+submits the form and renders the phrase, so normal inspection must never
+activate it.
+
+The safe sequence contains exactly one Reveal activation, inspects the dialog
+and still-empty phrase target, cancels, and logs out:
+
+```console
+$ just ui-inspect --allow-secret-input --path /unlock <<'EOF'
+unlock-from-dev-secret dev/2345/secret
+click-label Login
+open /settings/identity
+click-label Reveal
+inspect-id recovery-confirmation
+inspect-id recovery-phrase-target
+click-label Cancel
+EOF
+```
+
+Never add a second `click-label Reveal`, submit the confirmation form, or
+capture/inspect a rendered phrase panel. `Cancel` validates the normal close
+path; authenticated cleanup additionally closes any open dialog and logs out on
+successful and failed action streams. Cleanup cannot be guaranteed after
+Chromium/CDP loss or forced termination; restart the dev server to clear any
+residual in-memory signing authority.
 
 ## Testing and verification
 
@@ -142,7 +176,8 @@ The ignored smoke test starts a controlled loopback HTML fixture, launches the
 pinned Chromium, exercises both activation methods and scrolling, and verifies
 structured inspection (including visible toggle context and output bounds), the
 exact unlock control with redacted secret errors, transient marker recovery,
-nearby label suggestions, real hover/unhover state, and a PNG capture. Run it
+nearby label suggestions, real hover/unhover state, bounded child-layout
+cardinality/form-value omission, authenticated error cleanup, and a PNG capture. Run it
 after changing CDP, Chromium, web-UI marker/unlock markup, or lifecycle code:
 
 ```console

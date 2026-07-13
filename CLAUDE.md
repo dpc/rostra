@@ -116,3 +116,7 @@ Key web UI files:
 ## Web UI Conventions
 
 - For keyboard shortcuts that trigger `requestSubmit()`, always use `keyup` (not `keydown`). `keydown` fires repeatedly with key auto-repeat, which can cause duplicate form submissions and race conditions in alpine-ajax.
+- Keep Identity recovery `Reveal`/`Cancel` labels and the
+  `recovery-confirmation`/`recovery-phrase-target` IDs synchronized with the
+  confirmation-only workflow in `.agents/skills/preview-rostra/SKILL.md` and
+  the preview security notes.

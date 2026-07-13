@@ -270,6 +270,30 @@ impl Browser {
         Ok(())
     }
 
+    /// Close open dialogs and delete the current Rostra server session.
+    pub fn cleanup_authenticated_preview(&mut self) -> Result<()> {
+        self.ensure_same_origin()?;
+        let result = self.cdp.call_with_timeout(
+            "Runtime.evaluate",
+            json!({
+                "expression": "(async () => {\
+                    document.querySelectorAll('dialog[open]').forEach(dialog => dialog.close());\
+                    const response = await fetch('/unlock/logout', {\
+                        method: 'POST', credentials: 'same-origin', redirect: 'follow'\
+                    });\
+                    return response.ok;\
+                })()",
+                "awaitPromise": true,
+                "returnByValue": true,
+            }),
+            Duration::from_secs(5),
+        )?;
+        if result["result"]["value"] != Value::Bool(true) {
+            bail!("Rostra logout request did not succeed");
+        }
+        Ok(())
+    }
+
     /// Scroll vertically by three quarters of the viewport height.
     pub fn scroll(&mut self, direction: ScrollDirection) -> Result<()> {
         self.ensure_rostra_page()?;
@@ -528,7 +552,127 @@ impl Browser {
                 "ignored": ax_node.and_then(|node| node["ignored"].as_bool()),
             }),
         );
+        snapshot.insert(
+            "renderedChildLayout".into(),
+            Value::Array(self.inspect_rendered_child_layout(object_id)?),
+        );
         Ok(Value::Object(snapshot))
+    }
+
+    /// Inspect rendered DOM children through depth two with browser AX
+    /// semantics.
+    fn inspect_rendered_child_layout(&mut self, object_id: &str) -> Result<Vec<Value>> {
+        const OBJECT_GROUP: &str = "rostra-child-layout";
+        let deadline = Instant::now() + Duration::from_secs(10);
+        let result = (|| {
+            let children = self.cdp.call_with_timeout(
+                "Runtime.callFunctionOn",
+                json!({
+                    "functionDeclaration": CHILD_LAYOUT_ELEMENTS_SCRIPT,
+                    "objectId": object_id,
+                    "objectGroup": OBJECT_GROUP,
+                    "returnByValue": false,
+                }),
+                remaining(deadline)?,
+            )?;
+            let children_object_id = children["result"]["objectId"]
+                .as_str()
+                .context("child layout traversal did not return an array")?;
+            let properties = self.cdp.call_with_timeout(
+                "Runtime.getProperties",
+                json!({
+                    "objectId": children_object_id,
+                    "ownProperties": true,
+                    "accessorPropertiesOnly": false,
+                    "generatePreview": false,
+                }),
+                remaining(deadline)?,
+            )?;
+            let child_objects = properties["result"]
+                .as_array()
+                .context("child layout array has no properties")?
+                .iter()
+                .filter_map(|property| {
+                    property["name"].as_str()?.parse::<usize>().ok()?;
+                    let object_id = property["value"]["objectId"].as_str()?;
+                    Some(object_id.to_owned())
+                })
+                .take(16)
+                .collect::<Vec<_>>();
+
+            let mut summaries = Vec::new();
+            for wrapper_object_id in child_objects {
+                let wrapper = self.cdp.call_with_timeout(
+                    "Runtime.getProperties",
+                    json!({
+                        "objectId": wrapper_object_id,
+                        "ownProperties": true,
+                        "accessorPropertiesOnly": false,
+                        "generatePreview": false,
+                    }),
+                    remaining(deadline)?,
+                )?;
+                let wrapper_properties = wrapper["result"]
+                    .as_array()
+                    .context("child layout wrapper has no properties")?;
+                let depth = wrapper_properties
+                    .iter()
+                    .find(|property| property["name"] == "depth")
+                    .and_then(|property| property["value"]["value"].as_u64())
+                    .context("child layout wrapper has no depth")?;
+                let child_object_id = wrapper_properties
+                    .iter()
+                    .find(|property| property["name"] == "element")
+                    .and_then(|property| property["value"]["objectId"].as_str())
+                    .context("child layout wrapper has no element")?
+                    .to_owned();
+                let rendered = self.cdp.call_with_timeout(
+                    "Runtime.callFunctionOn",
+                    json!({
+                        "functionDeclaration": CHILD_LAYOUT_INSPECTION_SCRIPT,
+                        "objectId": &child_object_id,
+                        "objectGroup": OBJECT_GROUP,
+                        "returnByValue": true,
+                    }),
+                    remaining(deadline)?,
+                )?;
+                let Some(mut summary) = rendered["result"]["value"].as_object().cloned() else {
+                    continue;
+                };
+                let accessibility = self.cdp.call_with_timeout(
+                    "Accessibility.getPartialAXTree",
+                    json!({ "objectId": child_object_id, "fetchRelatives": false }),
+                    remaining(deadline)?,
+                )?;
+                let ax_node = accessibility["nodes"]
+                    .as_array()
+                    .and_then(|nodes| nodes.first());
+                summary.insert("depth".into(), depth.into());
+                summary.insert(
+                    "accessibility".into(),
+                    json!({
+                        "name": ax_node
+                            .and_then(|node| ax_value(node, "name"))
+                            .map(|name| name.chars().take(160).collect::<String>()),
+                        "role": ax_node
+                            .and_then(|node| ax_value(node, "role"))
+                            .map(|role| role.chars().take(80).collect::<String>()),
+                        "ignored": ax_node.and_then(|node| node["ignored"].as_bool()),
+                    }),
+                );
+                summaries.push(Value::Object(summary));
+            }
+            Ok(summaries)
+        })();
+        let release_result = self.cdp.call(
+            "Runtime.releaseObjectGroup",
+            json!({ "objectGroup": OBJECT_GROUP }),
+        );
+        match (result, release_result) {
+            (Err(error), _) => Err(error),
+            (Ok(_), Err(error)) => Err(error.context("releasing child layout objects")),
+            (Ok(summaries), Ok(_)) => Ok(summaries),
+        }
     }
 
     /// Scroll a resolved object into view and move Chromium's real pointer to
@@ -816,6 +960,56 @@ const ELEMENT_INSPECTION_SCRIPT: &str = r#"function () {
     };
 }"#;
 
+/// JavaScript returning at most sixteen rendered child handles through depth
+/// two.
+const CHILD_LAYOUT_ELEMENTS_SCRIPT: &str = r#"function () {
+    const output = [];
+    let visited = 0;
+    for (const child of this.children) {
+        if (++visited > 64 || output.length >= 16) break;
+        if (!child.checkVisibility({ checkOpacity: true, checkVisibilityCSS: true })) continue;
+        output.push({ element: child, depth: 1 });
+        for (const grandchild of child.children) {
+            if (++visited > 64 || output.length >= 16) break;
+            if (!grandchild.checkVisibility({ checkOpacity: true, checkVisibilityCSS: true })) continue;
+            output.push({ element: grandchild, depth: 2 });
+        }
+    }
+    return output;
+}"#;
+
+/// JavaScript returning a compact rendered-layout summary for one child.
+const CHILD_LAYOUT_INSPECTION_SCRIPT: &str = r#"function () {
+    if (!this.checkVisibility({ checkOpacity: true, checkVisibilityCSS: true })) return null;
+    const short = (value, limit = 240) => String(value ?? '').slice(0, limit);
+    const rect = this.getBoundingClientRect();
+    const style = getComputedStyle(this);
+    return {
+        tag: short(this.tagName.toLowerCase(), 80),
+        id: this.id ? short(this.id, 160) : null,
+        classes: [...this.classList].slice(0, 12).map(name => short(name, 120)),
+        text: short(this.innerText, 240).replace(/\s+/g, ' ').trim(),
+        geometry: {
+            x: rect.x, y: rect.y, width: rect.width, height: rect.height,
+            top: rect.top, right: rect.right, bottom: rect.bottom, left: rect.left
+        },
+        styles: {
+            display: short(style.display),
+            position: short(style.position),
+            padding: short(style.padding),
+            margin: short(style.margin),
+            gap: short(style.gap),
+            alignItems: short(style.alignItems),
+            justifyContent: short(style.justifyContent),
+            fontFamily: short(style.fontFamily),
+            fontSize: short(style.fontSize),
+            fontWeight: short(style.fontWeight),
+            lineHeight: short(style.lineHeight),
+            textAlign: short(style.textAlign)
+        }
+    };
+}"#;
+
 impl Drop for Browser {
     fn drop(&mut self) {
         let _ = self.cdp.call("Browser.close", json!({}));
@@ -1013,11 +1207,21 @@ mod tests {
         let address = listener.local_addr().unwrap();
         let transient_served = Arc::new(AtomicBool::new(false));
         let server_transient_served = transient_served.clone();
+        let logout_seen = Arc::new(AtomicBool::new(false));
+        let server_logout_seen = logout_seen.clone();
+        let forbidden_submit_seen = Arc::new(AtomicBool::new(false));
+        let server_forbidden_submit_seen = forbidden_submit_seen.clone();
         thread::spawn(move || {
             for mut stream in listener.incoming().flatten() {
                 let mut request = [0; 4096];
                 let read = stream.read(&mut request).unwrap_or(0);
                 let request = String::from_utf8_lossy(&request[..read]);
+                if request.starts_with("POST /unlock/logout ") {
+                    server_logout_seen.store(true, Ordering::SeqCst);
+                }
+                if request.starts_with("POST /forbidden ") {
+                    server_forbidden_submit_seen.store(true, Ordering::SeqCst);
+                }
                 let transient = request.starts_with("GET /transient ")
                     && !server_transient_served.swap(true, Ordering::SeqCst);
                 let persistent = request.starts_with("GET /missing-marker ");
@@ -1049,6 +1253,18 @@ mod tests {
                     <div class="o-unlockScreen"><form class="o-unlockScreen__form" action="/unlock">
                     <input id="secret-input" name="password" type="password"></form></div>
                     <div id="hidden-root" style="display:none"><span>HIDDEN-ROOT-SENTINEL</span></div>
+                    <section id="layout-container">
+                      <form class="dialog-content" style="padding:20px">
+                        <input type="hidden" value="FORM-SECRET-SENTINEL">
+                        <h4 class="dialog-title">Layout title</h4>
+                        <div class="dialog-actions" style="display:flex;justify-content:flex-end;gap:8px">
+                          <button>Cancel</button><button>Confirm</button>
+                        </div>
+                      </form>
+                    </section>
+                    <dialog id="cleanup-dialog" open>
+                      <form action="/forbidden" method="post"><button>Reveal</button></form>
+                    </dialog>
                     <div style="height: 2000px"></div></div>"#
                 };
                 let _ = write!(
@@ -1146,6 +1362,49 @@ mod tests {
             toggle["context"]["nextSibling"]["decoration"]["before"]["width"],
             "16px"
         );
+        browser
+            .evaluate(
+                "(() => {\
+                    const container = document.getElementById('layout-container');\
+                    for (let index = 0; index < 24; index++) {\
+                        const child = document.createElement('span');\
+                        child.className = `wide-child-${index}`;\
+                        child.textContent = `wide ${index}`;\
+                        container.append(child);\
+                    }\
+                    return true;\
+                })()",
+            )
+            .unwrap();
+        let container = browser.inspect_id("layout-container").unwrap();
+        let child_layout = container["renderedChildLayout"].as_array().unwrap();
+        assert_eq!(child_layout.len(), 16);
+        assert!(
+            child_layout
+                .iter()
+                .all(|child| child["depth"].as_u64().unwrap() <= 2)
+        );
+        assert!(!container.to_string().contains("FORM-SECRET-SENTINEL"));
+        assert!(container.to_string().len() < 96 * 1024);
+        let content = child_layout
+            .iter()
+            .find(|child| child["classes"][0] == "dialog-content")
+            .unwrap();
+        assert_eq!(content["depth"], 1);
+        assert_eq!(content["styles"]["padding"], "20px");
+        let title = child_layout
+            .iter()
+            .find(|child| child["classes"][0] == "dialog-title")
+            .unwrap();
+        assert_eq!(title["depth"], 2);
+        assert_eq!(title["accessibility"]["role"], "heading");
+        assert_eq!(title["accessibility"]["name"], "Layout title");
+        let actions = child_layout
+            .iter()
+            .find(|child| child["classes"][0] == "dialog-actions")
+            .unwrap();
+        assert_eq!(actions["styles"]["justifyContent"], "flex-end");
+        assert!(actions["geometry"]["width"].as_f64().unwrap() > 0.0);
         let changed = browser
             .evaluate(
                 "document.querySelector('[aria-label=\"Change label\"]').firstChild.textContent === 'changed'\
@@ -1179,6 +1438,19 @@ mod tests {
             .fill_rostra_unlock_password("SECRET-ERROR-SENTINEL")
             .unwrap_err();
         assert!(!format!("{redacted:#}").contains("SECRET-ERROR-SENTINEL"));
+        let failed_inspection = browser.inspect_id("missing-after-dialog").unwrap_err();
+        assert!(Browser::is_lookup_error(&failed_inspection));
+        assert!(
+            crate::finalize_authenticated_preview::<()>(Err(failed_inspection), true, || browser
+                .cleanup_authenticated_preview(),)
+            .is_err()
+        );
+        let dialog_closed = browser
+            .evaluate("document.getElementById('cleanup-dialog').open === false")
+            .unwrap();
+        assert_eq!(dialog_closed["result"]["value"], true);
+        assert!(logout_seen.load(Ordering::SeqCst));
+        assert!(!forbidden_submit_seen.load(Ordering::SeqCst));
 
         let output_dir = tempdir().unwrap();
         let output = output_dir.path().join("smoke.png");

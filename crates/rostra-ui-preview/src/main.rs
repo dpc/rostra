@@ -80,6 +80,31 @@ fn main() -> Result<()> {
     )?;
     browser.open(&args.path)?;
 
+    let action_result = run_actions(&mut browser, &args);
+    finalize_authenticated_preview(action_result, args.allow_secret_input, || {
+        browser.cleanup_authenticated_preview()
+    })
+}
+
+/// Combine an action result with mandatory authenticated-session cleanup.
+fn finalize_authenticated_preview<T>(
+    action_result: Result<T>,
+    cleanup_required: bool,
+    cleanup: impl FnOnce() -> Result<()>,
+) -> Result<T> {
+    let cleanup_result = if cleanup_required { cleanup() } else { Ok(()) };
+    match (action_result, cleanup_result) {
+        (Err(action), Err(cleanup)) => Err(anyhow::anyhow!(
+            "preview action failed: {action:#}; authenticated cleanup also failed: {cleanup:#}"
+        )),
+        (Err(action), Ok(())) => Err(action),
+        (Ok(_), Err(cleanup)) => Err(cleanup.context("authenticated preview cleanup failed")),
+        (Ok(value), Ok(())) => Ok(value),
+    }
+}
+
+/// Execute the requested action stream while aggregating exact lookup misses.
+fn run_actions(browser: &mut Browser, args: &Args) -> Result<()> {
     let mut deferred_failures = 0;
     if args.actions.is_empty() {
         for line in io::stdin().lock().lines() {
@@ -92,7 +117,7 @@ fn main() -> Result<()> {
                 eprintln!("skipping non-inspection action after a deferred lookup failure");
                 continue;
             }
-            if let Err(error) = execute(&mut browser, &action, args.allow_secret_input) {
+            if let Err(error) = execute(browser, &action, args.allow_secret_input) {
                 if should_defer(&action, &error) {
                     deferred_failures += 1;
                     eprintln!("inspection failed: {error:#}");
@@ -107,7 +132,7 @@ fn main() -> Result<()> {
                 eprintln!("skipping non-inspection action after a deferred lookup failure");
                 continue;
             }
-            if let Err(error) = execute(&mut browser, action, args.allow_secret_input) {
+            if let Err(error) = execute(browser, action, args.allow_secret_input) {
                 if should_defer(action, &error) {
                     deferred_failures += 1;
                     eprintln!("inspection failed: {error:#}");

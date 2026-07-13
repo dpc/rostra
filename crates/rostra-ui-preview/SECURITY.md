@@ -32,6 +32,11 @@ Structured JSON may contain live page text, accessibility labels, CSS URLs, and
 nearby context. It has no generic secret detector and must target only approved
 non-secret regions; retain it with the same care as a screenshot.
 
+Child-layout inspection visits at most 64 DOM elements, retains at most 16
+rendered child handles through depth two, and releases their CDP object group on
+success and error when CDP remains available. It does not request DOM attributes or form values, bounds
+every emitted field, and shares one ten-second inspection budget.
+
 Chromium ownership begins immediately after `spawn`. Post-spawn errors and
 normal exits must kill and reap the browser before deleting its profile.
 Navigation readiness must remain tied to the requested page lifecycle, and
@@ -46,3 +51,13 @@ the requested GET, so inspected routes must be safe to load repeatedly. Only
 exact `inspect-label` and `inspect-id` lookup misses are aggregated; after one,
 later non-inspection actions are skipped. Hover succeeds only when Chromium
 reports the resolved target in `:hover` state.
+
+The Identity page has two actions with the accessible label `Reveal`. The first
+opens a non-secret confirmation dialog and may be used only for an explicitly
+authorized confirmation-only inspection. The second submits the dialog and
+renders the recovery phrase; normal preview workflows must never activate it.
+Safe confirmation inspection cancels the dialog and logs out without rendering
+the phrase. Every `--allow-secret-input` action stream has a final cleanup step
+that closes open dialogs and posts Rostra logout after success or ordinary
+errors. Chromium/CDP loss or forced termination can prevent that cleanup and
+leave server-memory signing authority until server restart or later GC.

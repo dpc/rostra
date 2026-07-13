@@ -27,7 +27,9 @@ EOF
 accessibility name/role, rendered non-hidden text, classes, geometry, relevant computed
 styles, disabled/pressed/focus/checked state, pseudo-element and SVG/icon
 evidence, and rendered evidence for nearby elements (including a hidden input's
-visible toggle sibling). They omit form values but can include sensitive live
+visible toggle sibling). Container evidence also includes up to 16 rendered
+children through depth two with accessibility role/name, geometry, and key
+spacing/typography styles. They omit form values but can include sensitive live
 page text, labels, CSS URLs, and context; inspect only approved non-secret
 regions and treat captured stdout as a retained artifact.
 Use this evidence to compare controls, but call it **structured rendered
@@ -104,13 +106,45 @@ client activity; close the inspector immediately after the approved evidence is
 collected. The mnemonic traverses the unauthenticated loopback CDP connection
 and exists briefly in browser memory, so use this only on a single-user host
 with trusted local processes. Rostra page scripts receive input events and must
-not reflect it into inspectable content. Do not activate the recovery-phrase control.
+not reflect it into inspectable content. Do not activate the phrase-rendering
+confirmation action. Every `--allow-secret-input` run automatically closes open
+dialogs and posts Rostra logout on both success and ordinary action errors.
+
+### Authorized confirmation-only inspection
+
+The first Identity action labelled **Reveal** only opens a non-secret warning
+dialog. Opening that warning is allowed only when confirmation-dialog inspection
+was explicitly authorized. The dialog contains another action also labelled
+**Reveal**; activating that second action submits the form and renders the
+recovery phrase, and is forbidden in the normal preview workflow.
+
+Use this exact open/inspect/cancel sequence. There is intentionally only one
+`click-label Reveal`:
+
+```bash
+just ui-inspect --allow-secret-input --path /unlock <<'EOF'
+unlock-from-dev-secret dev/2345/secret
+click-label Login
+open /settings/identity
+click-label Reveal
+inspect-id recovery-confirmation
+inspect-id recovery-phrase-target
+click-label Cancel
+EOF
+```
+
+Do not add a second `click-label Reveal`, do not submit the confirmation form,
+and do not screenshot or inspect any phrase panel. `Cancel` closes the warning
+without rendering the phrase. The tool's authenticated cleanup also closes any
+still-open dialog and logs out, including when either inspection lookup fails.
+If Chromium/CDP itself is unavailable, cleanup can fail; report the error and
+restart `just dev` to clear residual server-memory authority.
 
 The browser profile is isolated and temporary, and its CDP endpoint is
 loopback-only. Explicit navigation is restricted to the configured literal
 loopback origin; leaving it through a redirect or control aborts the tool but
 cannot prevent the initial request. Do not activate signing/destructive
-controls, external links, or the recovery-phrase reveal flow. Loading live
+controls, external links, or the phrase-rendering confirmation step. Loading live
 development data can still update sessions and synchronization state. See
 `docs/development-ui-preview.md` for lifecycle and troubleshooting details.
 
