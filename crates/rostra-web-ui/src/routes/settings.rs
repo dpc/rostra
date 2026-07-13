@@ -548,8 +548,12 @@ impl UiState {
                     .call())
                 }
                 div id="recovery-phrase-target" {}
-                dialog id="recovery-confirmation" ."m-identityRecovery__dialog" {
+                dialog id="recovery-confirmation"
+                    ."m-identityRecovery__dialog"
+                    aria-labelledby="recovery-confirmation-title"
+                {
                     form action="/settings/identity/recovery-phrase"
+                        ."m-identityRecovery__dialogContent"
                         method="post"
                         x-target="recovery-phrase-target"
                         "@ajax:after"="document.getElementById('recovery-confirmation').close()"
@@ -558,23 +562,27 @@ impl UiState {
                             name="csrf_token"
                             value=(session.csrf_token())
                         {}
-                        h3 { "Reveal your recovery phrase?" }
+                        h4 id="recovery-confirmation-title"
+                            ."m-identityRecovery__dialogTitle"
+                        {
+                            "Reveal recovery phrase"
+                        }
                         p {
                             "Make sure nobody can see your screen. Reveal it only to save it "
                             "directly in a trusted password manager or offline backup."
                         }
                         div ."m-recoveryPhrase__actions" {
                             (fragment::button(
-                                "m-identityRecovery__confirmButton",
-                                "I understand — reveal",
-                            )
-                            .call())
-                            (fragment::button(
                                 "m-identityRecovery__cancelButton",
                                 "Cancel",
                             )
                             .button_type("button")
                             .onclick("document.getElementById('recovery-confirmation').close()")
+                            .call())
+                            (fragment::button(
+                                "m-identityRecovery__confirmButton",
+                                "Reveal",
+                            )
                             .call())
                         }
                     }

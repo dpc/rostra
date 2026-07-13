@@ -120,6 +120,35 @@ fn assert_identity_action_controls(page: &str, disabled: bool) {
     assert!(page.contains("m-identityRecovery__revealButton u-button"));
     assert!(page.contains("m-identityRecovery__revealButtonIcon u-buttonIcon"));
     assert!(page.contains(">Reveal</button>"));
+    assert!(page.contains("aria-labelledby=\"recovery-confirmation-title\""));
+    assert!(page.contains("m-identityRecovery__dialogContent"));
+    assert!(page.contains("m-identityRecovery__dialogTitle"));
+    assert!(page.contains(">Reveal recovery phrase</h4>"));
+    assert!(page.contains("m-identityRecovery__confirmButtonIcon u-buttonIcon"));
+    assert!(page.contains("m-identityRecovery__cancelButtonIcon u-buttonIcon"));
+    assert!(!page.contains("Reveal your recovery phrase?"));
+    assert!(!page.contains("I understand — reveal"));
+    let dialog = page
+        .split_once("id=\"recovery-confirmation\"")
+        .expect("identity page should contain the recovery confirmation dialog")
+        .1;
+    let cancel_position = dialog
+        .find("m-identityRecovery__cancelButton u-button")
+        .expect("dialog should contain its Cancel action");
+    let reveal_position = dialog
+        .find("m-identityRecovery__confirmButton u-button")
+        .expect("dialog should contain its Reveal action");
+    assert!(cancel_position < reveal_position);
+    let cancel_button = dialog[cancel_position..]
+        .split_once("</button>")
+        .expect("dialog Cancel action should have a closing tag")
+        .0;
+    let reveal_button = dialog[reveal_position..]
+        .split_once("</button>")
+        .expect("dialog Reveal action should have a closing tag")
+        .0;
+    assert!(cancel_button.contains(">Cancel"));
+    assert!(reveal_button.contains(">Reveal"));
     let reveal_button = page
         .split_once("m-identityRecovery__revealButton u-button")
         .expect("identity page should contain the reveal button")

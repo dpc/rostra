@@ -2283,6 +2283,7 @@ h4.o-settingsContent__sectionHeader {
 
 .m-identityRecovery__dialog {
   max-width: 34rem;
+  margin: auto;
   border: 1px solid var(--color-timeline-item-border);
   border-radius: var(--border-radius-std);
   color: var(--color-text-default);
@@ -2291,6 +2292,29 @@ h4.o-settingsContent__sectionHeader {
 
 .m-identityRecovery__dialog::backdrop {
   background: rgb(0 0 0 / 65%);
+}
+
+.m-identityRecovery__dialogContent {
+  padding: 1.25rem;
+}
+
+.m-identityRecovery__dialogTitle {
+  margin-top: 0;
+  margin-bottom: 0.75rem;
+  color: var(--color-link);
+}
+
+.m-identityRecovery__dialog .m-recoveryPhrase__actions {
+  justify-content: flex-end;
+  margin-top: 1.25rem;
+}
+
+.m-identityRecovery__confirmButtonIcon {
+  background: url('/assets/icons/eye.svg') center/contain no-repeat;
+}
+
+.m-identityRecovery__cancelButtonIcon {
+  background: url('/assets/icons/xmark.svg') center/contain no-repeat;
 }
 
 .m-recoveryPhrase {

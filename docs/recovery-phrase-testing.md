@@ -14,7 +14,10 @@ Settings → Identity and the Create Account flow.
 For each platform:
 
 1. Confirm the Settings page source does not contain the phrase before reveal.
-2. Confirm reveal requires opening and accepting the warning dialog.
+2. Confirm Reveal opens a centered, padded warning dialog whose accessible title
+   is “Reveal recovery phrase”. Confirm its meaningful Cancel and Reveal icons and
+   right-aligned Cancel-then-Reveal order, that the phrase remains absent until
+   confirmation, and that accepting the dialog is required to reveal it.
 3. Confirm the phrase can be selected directly in the read-only textarea.
 4. Confirm Copy reports success without displaying the phrase elsewhere.
 5. Switch to a password manager and paste; changing app focus must not erase it.
