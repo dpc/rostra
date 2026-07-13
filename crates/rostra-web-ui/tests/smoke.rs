@@ -198,6 +198,10 @@ async fn identity_actions_and_recovery_reveal_are_protected_and_session_scoped()
         "identity"
     );
     let body = resp.text().await.unwrap();
+    assert!(
+        body.starts_with("<div id=\"recovery-phrase-target\">"),
+        "AJAX response should contain the form's requested replacement target"
+    );
     assert!(body.contains(&phrase));
     assert!(body.contains("readonly"));
     assert!(body.contains("Copy recovery phrase"));

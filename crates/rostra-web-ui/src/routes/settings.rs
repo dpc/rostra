@@ -87,10 +87,14 @@ pub async fn post_settings_recovery_phrase(
         return StatusCode::FORBIDDEN.into_response();
     }
 
-    recovery::sensitive_response(Maud(recovery::phrase_panel(
-        secret,
-        recovery::PhrasePanelContext::Settings,
-    )))
+    recovery::sensitive_response(Maud(html! {
+        div id="recovery-phrase-target" {
+            (recovery::phrase_panel(
+                secret,
+                recovery::PhrasePanelContext::Settings,
+            ))
+        }
+    }))
 }
 
 pub async fn post_settings_profile(
