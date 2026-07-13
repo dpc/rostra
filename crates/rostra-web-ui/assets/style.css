@@ -308,9 +308,8 @@ img.u-userImage {
   display: flex;
   gap: 0.5rem;
   min-width: 5rem;
-  max-width: none;
+  max-width: 140px;
   padding: 0.0rem .5rem;
-  white-space: nowrap;
 }
 
 .u-buttonIcon {

@@ -11,9 +11,12 @@ familiar visible value name, such as “RostraId”, when it also has an accessi
 action name and state-aware icons communicate identity, copy availability, and
 success.
 
-Button labels stay on one line and the control grows to fit them. Copy actions
-use a concise visible label such as “Copy”, a contextual accessible name when
-needed, and the established copy icon rather than a long wrapping label.
+Shared buttons retain a bounded width and may wrap by default. A specific
+control may opt into single-line growth when wrapping would obscure a concise
+action label and its container can safely accommodate the wider control. Copy
+actions use a concise visible label such as “Copy”, a contextual accessible
+name when needed, and the established copy icon rather than a long wrapping
+label.
 
 ## Rationale
 

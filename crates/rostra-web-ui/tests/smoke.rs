@@ -3,7 +3,23 @@ mod common;
 use common::TestServer;
 use reqwest::header;
 use rostra_core::id::RostraIdSecretKey;
+use scraper::{ElementRef, Html, Selector};
 use serde_json::json;
+
+fn owning_form<'a>(document: &'a Html, control: ElementRef<'a>) -> Option<ElementRef<'a>> {
+    if let Some(form_id) = control.value().attr("form") {
+        let any_element = Selector::parse("*").unwrap();
+        return document
+            .select(&any_element)
+            .find(|element| element.value().id() == Some(form_id))
+            .filter(|element| element.value().name() == "form");
+    }
+
+    control
+        .ancestors()
+        .filter_map(ElementRef::wrap)
+        .find(|element| element.value().name() == "form")
+}
 
 #[test_log::test(tokio::test(flavor = "multi_thread"))]
 async fn unauthenticated_landing_page_returns_200() {
@@ -266,6 +282,89 @@ async fn account_creation_generates_selectable_24_word_phrase_by_post() {
     assert_eq!(
         resp.headers().get(header::LOCATION).unwrap(),
         "/path?query=value"
+    );
+}
+
+#[test_log::test(tokio::test(flavor = "multi_thread"))]
+async fn create_account_control_is_contained_by_login_card_and_targets_generate_form() {
+    let server = TestServer::start().await;
+    let body = server
+        .driver()
+        .get("/unlock?redirect=%2Ffollowing")
+        .await
+        .text()
+        .await
+        .unwrap();
+    let document = Html::parse_document(&body);
+
+    let login_form_selector = Selector::parse("form.o-unlockScreen__form").unwrap();
+    let generate_form_selector = Selector::parse("form#generate-account-form").unwrap();
+    let generate_id_selector = Selector::parse("#generate-account-form").unwrap();
+    let generate_button_selector = Selector::parse("button[form='generate-account-form']").unwrap();
+    let controls_selector = Selector::parse("input, textarea, select, button").unwrap();
+    let username_selector = Selector::parse("[name='username']").unwrap();
+    let password_selector = Selector::parse("[name='password']").unwrap();
+
+    let login_forms = document.select(&login_form_selector).collect::<Vec<_>>();
+    assert_eq!(login_forms.len(), 1, "login form must be unique");
+    let login_form = login_forms[0];
+    assert_eq!(
+        login_form.select(&generate_button_selector).count(),
+        1,
+        "Create Account control must be uniquely contained by the login card"
+    );
+    assert!(
+        login_form.select(&generate_form_selector).next().is_none(),
+        "generation form must not be nested in the login form"
+    );
+    for credential_selector in [&username_selector, &password_selector] {
+        let credentials = document.select(credential_selector).collect::<Vec<_>>();
+        assert_eq!(credentials.len(), 1, "login credential must be unique");
+        assert_eq!(
+            owning_form(&document, credentials[0]),
+            Some(login_form),
+            "login credential must remain owned by the login form"
+        );
+    }
+
+    let generate_id_matches = document.select(&generate_id_selector).collect::<Vec<_>>();
+    assert_eq!(
+        generate_id_matches.len(),
+        1,
+        "generation form ID must be unique document-wide"
+    );
+    let generate_forms = document.select(&generate_form_selector).collect::<Vec<_>>();
+    assert_eq!(generate_forms.len(), 1, "generation form ID must be unique");
+    let generate_form = generate_forms[0];
+    assert_eq!(generate_id_matches[0], generate_form);
+    assert_eq!(
+        generate_form.value().attr("action"),
+        Some("/unlock/generate")
+    );
+    assert_eq!(generate_form.value().attr("method"), Some("post"));
+    let generation_controls = document
+        .select(&controls_selector)
+        .filter(|control| owning_form(&document, *control) == Some(generate_form))
+        .collect::<Vec<_>>();
+    assert_eq!(
+        generation_controls.len(),
+        2,
+        "generation form owns only its submitter and redirect"
+    );
+    assert_eq!(
+        generation_controls
+            .iter()
+            .filter_map(|control| control.value().attr("name"))
+            .collect::<Vec<_>>(),
+        ["redirect"]
+    );
+    assert_eq!(
+        generation_controls
+            .iter()
+            .filter(|control| control.value().name() == "button")
+            .count(),
+        1,
+        "generation form must own exactly one submitter"
     );
 }
 

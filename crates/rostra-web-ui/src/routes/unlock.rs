@@ -241,8 +241,15 @@ impl UiState {
                             .title("Clear the mnemonic to login in read-only mode")
                             .call())
                     }
+                    div ."o-unlockScreen__unlockLine" {
+                        (fragment::button("o-unlockScreen__generateButton", "Create Account")
+                            .form("generate-account-form")
+                            .disabled(!self.recovery_transport_secure())
+                            .title("Generate a new account and show its 24-word recovery phrase.")
+                            .call())
+                    }
                 }
-                form ."o-unlockScreen__unlockLine"
+                form id="generate-account-form"
                     action="/unlock/generate"
                     method="post"
                     x-target="account-recovery-target"
@@ -250,10 +257,6 @@ impl UiState {
                     @if let Some(redirect_path) = redirect {
                         input type="hidden" name="redirect" value=(redirect_path) {}
                     }
-                    (fragment::button("o-unlockScreen__generateButton", "Create Account")
-                        .disabled(!self.recovery_transport_secure())
-                        .title("Generate a new account and show its 24-word recovery phrase.")
-                        .call())
                 }
                 @if !self.recovery_transport_secure() {
                     p ."o-unlockScreen_notice" {
