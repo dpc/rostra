@@ -16,6 +16,15 @@ separately to enable:
 2. **Content pruning**: Large content can be discarded while keeping DAG structure
 3. **Out-of-order delivery**: Events can arrive before their content
 
+The public `Database::process_event_content` method also accepts the reverse
+arrival order. `VerifiedEventContent` includes the verified envelope, so the
+method inserts a missing envelope and processes the content atomically. Calling
+`process_event` before or after it, or delivering either item repeatedly, does
+not repeat reference counts, usage accounting, lifecycle transitions, or
+content-derived projections. The lower-level `process_event_content_tx` helper
+assumes an existing envelope and remains internal for transaction composition
+and migration replay.
+
 Content may be empty (`content_len == 0`). Empty content is handled as normal
 content — it gets an RC entry and is stored in `content_store` immediately at
 event insertion time unless the event starts in Deleted.
@@ -144,6 +153,24 @@ during envelope processing and never enters Missing.
    - Remove from `events_content_missing`
    - Remove Missing marker
 ```
+
+### Flow 2b: Content Arrives at the Public Boundary Before the Envelope
+
+```
+1. process_event_content receives VerifiedEventContent:
+   - Insert its carried verified envelope
+   - Establish Missing, Deleted, or Pruned state using normal envelope rules
+   - Process eligible content in the same transaction
+
+2. The envelope later arrives separately:
+   - Event insertion reports AlreadyPresent
+   - RC, usage accounting, scheduling, and projections remain unchanged
+```
+
+This path is semantically the same as `process_event_with_content`. If the
+carried envelope was already inserted, only eligible Missing content is
+processed. Processed, Deleted, Pruned, and Invalid states retain their usual
+idempotent behavior.
 
 Latest-event projections apply one order while processing side effects:
 follow/unfollow state, profiles, generic singletons, and individual votes keep
@@ -411,10 +438,11 @@ should periodically clean up content with RC=0. (Future work)
 
 ### 2. Missing Events / Missing RC
 
-These abnormal conditions are detected and logged:
+These abnormal internal conditions are detected and logged:
 
-- **Processing content for non-existent event**: `debug_assert!` + `error!` log,
-  then silently skipped in release mode.
+- **Calling `process_event_content_tx` for a non-existent event**:
+  `debug_assert!` + `error!` log, then silently skipped in release mode. The
+  public `process_event_content` boundary inserts the carried envelope first.
 - **Decrementing RC with no RC entry**: `debug_assert!` + `error!` log, then
   defaults to 1 to avoid underflow.
 
@@ -426,6 +454,12 @@ Both cases indicate bugs in the calling code and will panic in debug builds.
 
 - `test_event_arrives_before_content` - Event before content flow
 - `test_content_exists_when_event_arrives` - Content before event flow
+- `public_content_ingestion_matches_combined_for_both_arrival_orders` - Public
+  content-only, envelope-first, and combined ingestion converge across duplicate
+  calls, reopen, and total replay, including Processed state, RC, queue, usage,
+  and projections
+- `public_content_ingestion_preserves_terminal_states` - Repeated public content
+  ingestion preserves Deleted, Pruned, and Invalid lifecycle outcomes
 - `test_multiple_events_share_content` - Deduplication + pruning
 - `test_multiple_events_waiting_for_content` - Multiple events, same hash
 - `test_delete_event_arrives_before_target` - Delete before target

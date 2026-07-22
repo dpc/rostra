@@ -13,6 +13,13 @@ deduplicating, pruning, or deleting payloads. This behavior implements
 [SPEC-event-graph](../../rostra-core/specs/SPEC-event-graph.md) within
 [ARCH-client-database](ARCH-client-database.md).
 
+The public high-level content-ingestion boundary accepts either arrival order.
+`VerifiedEventContent` carries its verified envelope, so content ingestion first
+inserts that envelope when it is absent and then applies the ordinary content
+lifecycle in the same transaction. Supplying the envelope separately before or
+afterward is idempotent. Existing-envelope-only transaction helpers are internal
+implementation and migration interfaces, not caller preconditions.
+
 ## States
 
 Every inserted event has one effective content state:

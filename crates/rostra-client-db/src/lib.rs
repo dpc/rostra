@@ -711,6 +711,10 @@ impl Database {
             .expect("Storage error")
     }
 
+    /// Process a verified event envelope together with its verified content.
+    ///
+    /// This operation is idempotent whether or not the envelope or content was
+    /// processed previously.
     pub async fn process_event_with_content(
         &self,
         content: &VerifiedEventContent,
@@ -725,14 +729,15 @@ impl Database {
         .expect("Storage error")
     }
 
-    /// Process event content
+    /// Process verified event content and its carried event envelope.
     ///
-    /// Note: Must only be called for an event that was already processed
+    /// This is the safe public content-ingestion boundary. If the envelope is
+    /// absent, it is inserted before content processing in the same
+    /// transaction. If the envelope is already present, normal
+    /// lifecycle-state checks make the operation idempotent and prevent
+    /// repeated accounting or projections.
     pub async fn process_event_content(&self, event_content: &VerifiedEventContent) {
-        let now = Timestamp::now();
-        self.write_with(|tx| self.process_event_content_tx(event_content, now, tx))
-            .await
-            .expect("Storage error")
+        self.process_event_with_content(event_content).await;
     }
 
     /// Process event content.
@@ -748,7 +753,7 @@ impl Database {
     ///
     /// The `now` parameter should be `Timestamp::now()` for normal operation,
     /// but can be set to a specific value for testing or migration.
-    pub fn process_event_content_tx(
+    pub(crate) fn process_event_content_tx(
         &self,
         event_content: &VerifiedEventContent,
         now: Timestamp,
@@ -1304,6 +1309,8 @@ impl ProcessEventState {
         }
     }
 }
+#[cfg(test)]
+mod content_ingestion_tests;
 #[cfg(test)]
 mod deleted_replacement_tests;
 #[cfg(test)]
