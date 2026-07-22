@@ -18,6 +18,12 @@ replay. Existing version-24 databases are not proactively scanned, so a mapping
 written before the guard may remain until encountered. The final rebuild tracked
 by `t4vh` validates retained event authors under the guard.
 
+New social-post projection insertion and reversion use the symmetric
+applicability rule below. Existing version-24 databases are not scanned or
+repaired by this staged change: reply or reaction counts that the former
+asymmetric blank-post reversion already decremented can remain incorrect until
+the final total rebuild tracked by `t4vh`.
+
 `rostra-client-db` is the authoritative state and projection layer for one
 local Rostra identity during a database instance's lifetime. It stores
 verified graph data, tracks incomplete replication, and materializes
@@ -120,6 +126,11 @@ wrapping and reusing values.
   content. Deletion of a processed social post reverts its post-specific
   projections; other content kinds currently retain their derived
   projections.
+- Social-post projection reversion has the same applicability as insertion.
+  A blank or whitespace-only post whose header deletes its auxiliary parent's
+  content neither adds nor removes ordinary authored-time, reply, reaction,
+  news, or self-mention projections. Nonblank edits apply and revert those
+  projections normally; counter mismatches fail closed rather than saturating.
 - Social-post replacement lineage remains available across a Deleted
   intermediate. Verified Deleted content may establish only immutable edit
   metadata, whose canonical forward rows survive total migration; it cannot

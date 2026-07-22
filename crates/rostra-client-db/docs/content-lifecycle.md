@@ -268,6 +268,24 @@ bytes remain independently GC-eligible. Deleted content never becomes visible
 or retrievable and does not update RC, queues, usage, time/reception indexes,
 reply/reaction counts, news, mentions, votes, singletons, or notifications.
 
+For an ordinarily processed SOCIAL_POST, insertion and later deletion
+reversion use the same projection-applicability classification:
+
+- a post without the delete-aux flag applies ordinary projections;
+- a post with the delete-aux flag but no auxiliary parent applies no ordinary
+  projections, even when its body is nonblank;
+- a deleting post with an auxiliary parent and nonempty trimmed
+  `djot_content` is an edit and applies ordinary projections;
+- a deleting post with absent, empty, or whitespace-only `djot_content`
+  applies no ordinary projections, even when reply, reaction, or news fields
+  are populated.
+
+The symmetric rule covers the authored-time, reply, reaction, news, and
+self-mention projections. Reversion does not compensate with saturating
+arithmetic: an eligible projection with inconsistent counters remains an
+invariant failure. Immutable replacement lineage follows its separate,
+Deleted-state exception above.
+
 ### Flow 5: Content Deduplication (Multiple Events, Same Hash)
 
 ```
@@ -488,6 +506,18 @@ Both cases indicate bugs in the calling code and will panic in debug builds.
 - `over_limit_deleted_edit_derives_no_lineage_from_retained_or_supplied_bytes`
   - Both Deleted-content activation paths reject over-limit replacement content
 - `test_content_processing_idempotency` - Duplicate content delivery
+- `deleting_post_projection_reversion_is_symmetric` - Absent-body, empty, and
+  whitespace deleting posts leave zero or unrelated nonzero reply/reaction
+  state unchanged, while nonblank edits apply and revert authored-time, reply,
+  news, and mention projections across target-first/delete-first delivery,
+  duplicates, reopen, and total replay
+- `ordinary_reaction_projection_still_reverts` - Eligible reaction projection
+  insertion and checked deletion reversion remain active
+- `delete_flag_without_aux_is_projection_inert` - A signed delete-aux flag
+  without an auxiliary parent remains inert even with nonblank projection fields
+- `inconsistent_eligible_reaction_reversion_fails_and_rolls_back` - An eligible
+  projection with a corrupt zero aggregate fails checked reversion and rolls
+  back deletion lifecycle and index changes
 
 ### Edge Case Tests
 

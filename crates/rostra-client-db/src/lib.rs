@@ -1514,4 +1514,6 @@ mod identity_collision_tests;
 #[cfg(test)]
 mod reception_order_tests;
 #[cfg(test)]
+mod social_post_projection_tests;
+#[cfg(test)]
 mod tests;

@@ -81,6 +81,15 @@ invalidates an already processed social post, the database reverts its
 post-specific projections. Derived projections for other content kinds are
 currently retained.
 
+Ordinary social-post projection insertion and reversion use one applicability
+rule. A social post whose header deletes its auxiliary parent's content applies
+ordinary projections only when it is an edit: it has an auxiliary parent and a
+nonempty trimmed body. A blank or whitespace-only deleting post therefore adds
+and removes no authored-time, reply, reaction, news, or self-mention
+projections. This rule is semantic rather than an arithmetic guard: genuine
+counter mismatches still fail instead of saturating or silently decrementing
+unrelated state.
+
 An at-or-below-limit `SOCIAL_POST` that has the delete-auxiliary-parent flag,
 has an auxiliary parent, decodes successfully, and has `djot_content` whose
 trimmed body is nonempty is an edit. It records exactly two immutable,

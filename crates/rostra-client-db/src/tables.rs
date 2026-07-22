@@ -481,6 +481,10 @@ def_table! {
 // ============================================================================
 // SOCIAL TABLES
 // Derived data extracted from social-related events for efficient querying.
+// A social post with the delete-aux flag contributes ordinary projections only
+// when it has an auxiliary parent and its trimmed body is nonempty. Projection
+// insertion and deletion reversion use the same eligibility rule; immutable
+// replacement mappings have their separately documented lifecycle.
 // ============================================================================
 
 def_table! {

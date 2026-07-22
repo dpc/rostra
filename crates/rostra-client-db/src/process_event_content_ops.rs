@@ -31,6 +31,14 @@ pub enum ProcessEventError {
 }
 pub type ProcessEventResult<T> = std::result::Result<T, ProcessEventError>;
 
+#[derive(Debug, Clone, Copy)]
+enum SocialPostProjectionPlan {
+    Skip,
+    Apply {
+        replaced_event_id: Option<rostra_core::ShortEventId>,
+    },
+}
+
 impl Database {
     fn social_post_replaced_event_id(
         event_content: &VerifiedEventContent,
@@ -47,6 +55,18 @@ impl Database {
                     .as_deref()
                     .is_some_and(|text| !text.trim().is_empty())
             })
+    }
+
+    fn social_post_projection_plan(
+        event_content: &VerifiedEventContent,
+        content: &content_kind::SocialPost,
+    ) -> SocialPostProjectionPlan {
+        let replaced_event_id = Self::social_post_replaced_event_id(event_content, content);
+        if event_content.event.is_delete_parent_aux_content_set() && replaced_event_id.is_none() {
+            SocialPostProjectionPlan::Skip
+        } else {
+            SocialPostProjectionPlan::Apply { replaced_event_id }
+        }
     }
 
     fn insert_social_post_replacement_tx(
@@ -308,14 +328,14 @@ impl Database {
                             debug!(target: LOG_TARGET, err = %err.fmt_compact(), "Ignoring malformed SocialComment payload");
                         }).boxed().context(InvalidSnafu)?;
 
-                    let event_id = event_content.event_id().to_short();
                     let replaced_event_id =
-                        Self::social_post_replaced_event_id(event_content, &content);
-                    if event_content.event.is_delete_parent_aux_content_set()
-                        && replaced_event_id.is_none()
-                    {
-                        return Ok(());
-                    }
+                        match Self::social_post_projection_plan(event_content, &content) {
+                            SocialPostProjectionPlan::Skip => return Ok(()),
+                            SocialPostProjectionPlan::Apply { replaced_event_id } => {
+                                replaced_event_id
+                            }
+                        };
+                    let event_id = event_content.event_id().to_short();
 
                     let mut social_post_by_time_tbl = tx
                         .open_table(&social_posts_by_time::TABLE)
@@ -536,6 +556,10 @@ impl Database {
                     .deserialize_cbor::<content_kind::SocialPost>()
                     .boxed()
                     .context(InvalidSnafu)?;
+                match Self::social_post_projection_plan(event_content, &content) {
+                    SocialPostProjectionPlan::Skip => return Ok(()),
+                    SocialPostProjectionPlan::Apply { .. } => {}
+                }
                 let mut social_post_by_time_tbl = tx
                     .open_table(&social_posts_by_time::TABLE)
                     .map_err(DbError::from)?;
