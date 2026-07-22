@@ -9,7 +9,7 @@ use std::borrow::Cow;
 
 use bincode::{Decode, Encode};
 use rostra_core::event::{EventContentRaw, EventContentUnsized, EventExt, SignedEvent};
-use rostra_core::{ShortEventId, Timestamp};
+use rostra_core::{ExternalEventId, ShortEventId, Timestamp};
 use serde::Serialize;
 
 /// Record for the main `events` table.
@@ -54,15 +54,74 @@ pub struct EventsMissingRecord {
 #[derive(Decode, Encode, Debug)]
 pub struct EventsHeadsTableRecord;
 
+/// Authoritative value retained for a social-vote singleton winner.
+#[derive(Debug, Encode, Decode, Clone, Copy, PartialEq, Eq, Serialize)]
+pub enum SocialVoteValue {
+    /// A vote against the target.
+    Down,
+    /// No vote for or against the target.
+    Neutral,
+    /// A vote for the target.
+    Up,
+}
+
+impl SocialVoteValue {
+    /// Return the vote's contribution to the target's aggregate.
+    pub fn score(self) -> i64 {
+        match self {
+            Self::Down => -1,
+            Self::Neutral => 0,
+            Self::Up => 1,
+        }
+    }
+
+    /// Return the public optional-boolean representation.
+    pub fn as_upvote(self) -> Option<bool> {
+        match self {
+            Self::Down => Some(false),
+            Self::Neutral => None,
+            Self::Up => Some(true),
+        }
+    }
+}
+
+impl From<Option<bool>> for SocialVoteValue {
+    fn from(upvote: Option<bool>) -> Self {
+        match upvote {
+            Some(false) => Self::Down,
+            None => Self::Neutral,
+            Some(true) => Self::Up,
+        }
+    }
+}
+
+/// Authoritative current projection retained for a social-vote winner.
+#[derive(Debug, Encode, Decode, Clone, Copy, PartialEq, Eq, Serialize)]
+pub struct SocialVoteProjection {
+    /// Full post identity needed to disambiguate equal shortened event IDs.
+    pub target: ExternalEventId,
+    /// Winner's contribution to the target aggregate.
+    pub value: SocialVoteValue,
+}
+
 /// Record for singleton event tables (`events_singletons`,
 /// `events_singletons_new`).
 ///
-/// For singleton event types (where only the latest matters), we just need to
-/// track the event ID; the rest can be looked up in the main `events` table.
+/// All singleton records retain their source ID for deterministic ordering and
+/// attribution. Social-vote records also retain their authoritative current
+/// full-target/value projection so incremental updates do not depend on
+/// GC-eligible source content.
 #[derive(Debug, Encode, Decode, Clone, Serialize)]
 pub struct EventSingletonRecord {
-    /// The event ID of the latest singleton event
+    /// The event ID of the latest singleton event.
     pub event_id: ShortEventId,
+    /// Current vote projection for a well-shaped vote; absent for other kinds.
+    ///
+    /// Every retained `SOCIAL_VOTE` winner must contain `Some`, and every other
+    /// singleton kind must contain `None`; either opposite is corruption. A
+    /// retained target's shortened event ID must also equal its row auxiliary
+    /// key.
+    pub social_vote: Option<SocialVoteProjection>,
 }
 
 impl super::LatestEventValue for EventSingletonRecord {

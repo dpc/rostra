@@ -186,15 +186,30 @@ the maximum `(event.timestamp, ShortEventId)`. The vote aggregate changes only
 when the same candidate wins the individual-vote comparison. Equal-second
 events therefore converge independently of payload delivery order.
 
-Replacing an individual-vote winner first validates its complete stored source
-relationship: source key/ID, author, kind, singleton and auxiliary-parent flags,
-timestamp, verified retained bytes, decoded vote, and target must agree. A
-Deleted or Pruned source remains resolvable while those bytes remain because
-non-post projections survive those terminal transitions. A Missing, Invalid,
-absent, or mismatched source is corruption. Transaction processing fails and
-rolls back the whole transaction, including the candidate envelope, without
-changing the winner or aggregate; the current infallible public ingestion
-boundary then panics on that storage-corruption error.
+An individual-vote singleton retains its source event ID, full target, and
+authoritative current-projection `Down`, `Neutral`, or `Up` value. Replacement
+computes the aggregate delta from that inline old projection and updates every
+affected aggregate and the winner in the same transaction. When two full
+targets share the shortened event ID used as the singleton auxiliary key, a
+winning replacement transfers the contribution between their aggregates and
+vote reads return a value only for the retained full target. Reads and
+replacement do not resolve the old source payload, so a source legitimately
+removed after delete, prune, or garbage collection does not make the retained
+projection unavailable.
+Only singleton-shaped `SOCIAL_VOTE` events whose auxiliary key matches the
+payload target enter this coupled winner/aggregate projection. A missing inline
+projection or cached target outside its shortened row key is corruption and
+fails closed.
+Retained signed source remains authoritative for total replay and explicit
+audits. A detected source/cache mismatch requires quarantine or recomputation
+of the affected projection rather than changing only the cached winner value.
+
+The inline vote projection is an optional field in the shared singleton record,
+so every pre-series version-24 singleton row, not only vote rows, uses a
+decode-incompatible encoding. The database may open its raw tables, but
+singleton operations are not safely usable until the final total rebuild
+tracked by `t4vh`. See
+[ARCH-client-database status](../specs/ARCH-client-database.md#status).
 
 Active follows also retain the latest unfollow as an exclusive epoch boundary
 and retain processed follow-event orders. `first_ts` is the timestamp of the
@@ -586,12 +601,19 @@ Both cases indicate bugs in the calling code and will panic in debug builds.
   conflicts converge in both orders
 - `test_equal_timestamp_vote_conflicts_converge` - Vote winner and aggregate use
   one equal-second comparison
-- `test_unresolved_vote_winners_abort_and_roll_back` - Missing, mismatched, or
-  cryptographically invalid stored vote sources abort replacement without
-  changing the winner, aggregate, or candidate envelope across reopen
-- `deleted_vote_winner_with_retained_content_can_be_replaced` - Normal
-  vote-delete-revote flow replaces a terminal winner while its verified content
-  remains retained
+- `social_vote_winner_and_sum_update_atomically` - An aborted replacement
+  transaction rolls back its event, winner, and aggregate together
+- `colliding_full_vote_targets_converge_and_replay` - Different target authors
+  sharing one shortened post ID transfer the winner contribution
+  deterministically across delivery order and total replay
+- `malformed_vote_shape_does_not_poison_projection` - A mismatched vote
+  header/payload relationship cannot enter or block the vote projection
+- `invalid_cached_vote_projection_fails_closed` - A vote row with a missing
+  projection or a cached target outside its shortened key aborts reads and
+  replacement without partial mutation
+- `vote_winner_survives_deleted_and_collected_source` - Vote reads and
+  replacements use the inline winner value after delete and source-byte
+  collection
 - `latest_singleton_query_is_isolated_ordered_and_strict` - Public singleton
   enumeration is identity/kind isolated, deterministically newest-first, and
   rejects malformed stored keys
@@ -617,8 +639,9 @@ Both cases indicate bugs in the calling code and will panic in debug builds.
   canonical epochs, and retained unfollow boundaries converge
 - `prop_profile_and_singleton_semantics_converge` - Profile fields and
   profile/generic singleton winners converge
-- `prop_vote_semantics_converge` - Per-voter winners and normalized numerical
-  vote aggregates converge
+- `prop_vote_semantics_converge` - Per-voter shortened-key winners, full-target
+  reads, and normalized numerical aggregates converge, including target-author
+  collisions
 - `test_shuffled_singleton_events_converge` - Shuffled finite latest-event sets
   select the total-order maximum
 

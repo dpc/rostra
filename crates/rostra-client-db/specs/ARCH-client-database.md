@@ -24,6 +24,12 @@ repaired by this staged change: reply or reaction counts that the former
 asymmetric blank-post reversion already decremented can remain incorrect until
 the final total rebuild tracked by `t4vh`.
 
+Current-schema social-vote singleton rows retain the winning full target and
+value inline. Pre-series production version-24 singleton rows use a
+decode-incompatible encoding and are not safely usable with the current
+singleton projection until `t4vh` rebuilds winners and vote aggregates from
+retained source events.
+
 New and total-replay-built social receipt rows have the reverse mapping required
 for exact reversion. Existing version-24 `social_posts_by_received_at` rows are
 not scanned or backfilled by this staged change. If one of those legacy posts is
@@ -151,12 +157,20 @@ deletion transaction.
   apply ordinary content projections or change lifecycle bookkeeping.
 - Follow state, profiles, generic singletons, and individual votes select the
   maximum `(event.timestamp, ShortEventId)`. Vote aggregates use the same
-  winner as the individual-vote projection. An existing vote winner must
-  resolve to its source event and a vote for the same target. A terminal
-  Deleted or Pruned source remains resolvable while its verified content bytes
-  are retained because those states retain non-post projections;
-  otherwise the database is corrupt and the replacing transaction aborts
-  without changing the aggregate.
+  winner as the individual-vote projection. Each vote winner retains its full
+  target and authoritative current-projection `Down`, `Neutral`, or `Up` value
+  beside its event ID. A replacement computes its aggregate delta from that
+  retained projection. If different full targets share one shortened auxiliary
+  key, the winning change transfers the contribution between their aggregates.
+  Winner and all aggregate updates commit atomically. Only singleton-shaped
+  votes whose auxiliary key matches their payload target enter this coupled
+  projection. A cached target whose shortened event ID differs from its retained
+  row key is corruption and fails reads and replacement.
+  Vote reads and replacements do not require source payload bytes, which may
+  legitimately be absent after deletion or pruning makes them
+  garbage-collection eligible. Retained signed source remains authoritative
+  for replay and explicit audits; a detected source/cache disagreement requires
+  quarantine or projection recomputation, never an isolated cache rewrite.
 - An active follow's `first_ts` is the timestamp of the earliest follow in the
   current uninterrupted follow epoch, not the first-ever follow. The latest
   unfollow is the exclusive epoch boundary under the same total event order.

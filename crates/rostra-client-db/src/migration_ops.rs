@@ -63,6 +63,11 @@ pub type LegacyContentStoreRecordOwned = LegacyContentStoreRecord<'static>;
 /// Current schema version.
 ///
 /// Increment this when making schema changes that require migration.
+///
+/// The stacked pre-release schema intentionally includes decode-incompatible
+/// version-24 rows, including inline social-vote winner projections. The final
+/// `t4vh` integration owns the single production version bump and total
+/// rebuild.
 const DB_VER: u64 = 24;
 
 /// Versions older than this require a total migration.

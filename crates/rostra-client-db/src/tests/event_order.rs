@@ -359,7 +359,11 @@ async fn test_equal_timestamp_vote_conflicts_converge() -> BoxedErrorResult<()> 
         let expected_index = winning_event_index(&events);
         let expected_id = events[expected_index].event_id().to_short();
         let expected_vote = values[expected_index];
-        let expected_sum = Database::social_vote_value(expected_vote);
+        let expected_sum = match expected_vote {
+            Some(true) => 1,
+            None => 0,
+            Some(false) => -1,
+        };
         let singleton_key = (
             voter,
             EventKind::SOCIAL_VOTE,
@@ -392,177 +396,317 @@ async fn test_equal_timestamp_vote_conflicts_converge() -> BoxedErrorResult<()> 
     Ok(())
 }
 
-/// A vote winner that does not resolve to its exact source relationship is
-/// corruption, so replacement aborts without changing the aggregate.
+/// Winner and aggregate updates roll back together when their transaction
+/// aborts.
 #[test_log::test(tokio::test(flavor = "multi_thread"))]
-async fn test_unresolved_vote_winners_abort_and_roll_back() -> BoxedErrorResult<()> {
+async fn social_vote_winner_and_sum_update_atomically() -> BoxedErrorResult<()> {
     use rostra_core::{ExternalEventId, ShortEventId, Timestamp};
 
-    use crate::event::EventSingletonRecord;
-    use crate::{DbError, Latest, events_singletons_new};
+    use crate::events_singletons_new;
+
+    let voter_secret = RostraIdSecretKey::generate();
+    let voter = voter_secret.id();
+    let shared_post_id = ShortEventId::random();
+    let old_post = ExternalEventId::new(RostraIdSecretKey::generate().id(), shared_post_id);
+    let replacement_post = ExternalEventId::new(RostraIdSecretKey::generate().id(), shared_post_id);
+    let (_dir, db) = temp_db(voter).await?;
+
+    let old_vote = build_content_event_at(
+        voter_secret,
+        &content_kind::SocialVote::new(old_post, Some(true)),
+        50_000,
+    );
+    let old_id = old_vote.event_id().to_short();
+    db.process_event_with_content(&old_vote).await;
+
+    let replacement = build_content_event_at(
+        voter_secret,
+        &content_kind::SocialVote::new(replacement_post, Some(false)),
+        50_001,
+    );
+    let replacement_id = replacement.event_id().to_short();
+    let error = db
+        .write_with(|tx| {
+            db.process_event_tx(&replacement.event, Timestamp::from(50_002), tx)?;
+            db.process_event_content_tx(&replacement, Timestamp::from(50_002), tx)?;
+            crate::OverflowSnafu.fail::<()>()
+        })
+        .await
+        .expect_err("injected failure must abort vote update");
+    assert!(matches!(error, crate::DbError::Overflow));
+
+    assert!(!db.has_event(replacement_id).await);
+    assert_eq!(db.get_social_vote(voter, old_post).await, Some(Some(true)));
+    assert_eq!(db.get_social_vote(voter, replacement_post).await, None);
+    assert_eq!(db.get_social_vote_sum(old_post).await, 1);
+    assert_eq!(db.get_social_vote_sum(replacement_post).await, 0);
+    db.read_with(|tx| {
+        let winner = tx
+            .open_table(&events_singletons_new::TABLE)?
+            .get(&(
+                voter,
+                EventKind::SOCIAL_VOTE,
+                Database::social_vote_aux_key(old_post),
+            ))?
+            .map(|record| record.value().inner.event_id);
+        assert_eq!(winner, Some(old_id));
+        Ok(())
+    })
+    .await?;
+
+    Ok(())
+}
+
+/// Full vote targets that share one shortened event ID transfer one winner's
+/// contribution deterministically across both aggregates and total replay.
+#[test_log::test(tokio::test(flavor = "multi_thread"))]
+async fn colliding_full_vote_targets_converge_and_replay() -> BoxedErrorResult<()> {
+    use rostra_core::{ExternalEventId, ShortEventId};
+
+    let voter_secret = RostraIdSecretKey::generate();
+    let voter = voter_secret.id();
+    let shared_post_id = ShortEventId::random();
+    let post_a = ExternalEventId::new(RostraIdSecretKey::generate().id(), shared_post_id);
+    let post_b = ExternalEventId::new(RostraIdSecretKey::generate().id(), shared_post_id);
+    let events = [
+        build_content_event_at(
+            voter_secret,
+            &content_kind::SocialVote::new(post_a, Some(true)),
+            50_100,
+        ),
+        build_content_event_at(
+            voter_secret,
+            &content_kind::SocialVote::new(post_b, Some(true)),
+            50_101,
+        ),
+        build_content_event_at(
+            voter_secret,
+            &content_kind::SocialVote::new(post_a, Some(false)),
+            50_102,
+        ),
+        build_content_event_at(
+            voter_secret,
+            &content_kind::SocialVote::new(post_b, None),
+            50_103,
+        ),
+    ];
+
+    for order in [[0, 1, 2, 3], [3, 2, 1, 0]] {
+        let (dir, db) = temp_db(voter).await?;
+        for index in order {
+            db.process_event_with_content(&events[index]).await;
+        }
+        assert_eq!(db.get_social_vote(voter, post_a).await, None);
+        assert_eq!(db.get_social_vote(voter, post_b).await, Some(None));
+        assert_eq!(db.get_social_vote_sum(post_a).await, 0);
+        assert_eq!(db.get_social_vote_sum(post_b).await, 0);
+
+        drop(db);
+        let db_path = dir.path().join("db.redb");
+        let raw_db = redb_bincode::Database::from(redb::Database::open(&db_path)?);
+        let write_txn = raw_db.begin_write()?;
+        {
+            let mut version = write_txn.open_table(&crate::db_version::TABLE)?;
+            version.insert(&(), &23)?;
+        }
+        write_txn.commit()?;
+        drop(raw_db);
+
+        let replayed = Database::open(&db_path, voter).await?;
+        assert_eq!(replayed.get_social_vote(voter, post_a).await, None);
+        assert_eq!(replayed.get_social_vote(voter, post_b).await, Some(None));
+        assert_eq!(replayed.get_social_vote_sum(post_a).await, 0);
+        assert_eq!(replayed.get_social_vote_sum(post_b).await, 0);
+    }
+
+    Ok(())
+}
+
+/// A mismatched vote payload does not enter the coupled winner/aggregate
+/// projection or block a correctly shaped older vote.
+#[test_log::test(tokio::test(flavor = "multi_thread"))]
+async fn malformed_vote_shape_does_not_poison_projection() -> BoxedErrorResult<()> {
+    use rostra_core::{ExternalEventId, ShortEventId};
+
+    let voter_secret = RostraIdSecretKey::generate();
+    let voter = voter_secret.id();
+    let post_id = ExternalEventId::new(
+        RostraIdSecretKey::generate().id(),
+        ShortEventId::from_bytes([0x11; 16]),
+    );
+    let (_dir, db) = temp_db(voter).await?;
+
+    let malformed = [
+        build_social_vote_event_at(
+            voter_secret,
+            &content_kind::SocialVote::new(post_id, Some(true)),
+            51_003,
+            Some(EventAuxKey::from_bytes([0x55; 16])),
+        ),
+        build_social_vote_event_at(
+            voter_secret,
+            &content_kind::SocialVote::new(post_id, Some(true)),
+            51_002,
+            None,
+        ),
+        build_social_vote_event_at(
+            voter_secret,
+            &content_kind::SocialVote {
+                reply_to: None,
+                upvote: Some(true),
+            },
+            51_001,
+            Some(Database::social_vote_aux_key(post_id)),
+        ),
+    ];
+    for event in malformed {
+        db.process_event_with_content(&event).await;
+    }
+    assert_eq!(db.get_social_vote(voter, post_id).await, None);
+    assert_eq!(db.get_social_vote_sum(post_id).await, 0);
+    db.read_with(|tx| {
+        let vote_winners = tx
+            .open_table(&crate::events_singletons_new::TABLE)?
+            .range(..)?
+            .filter(|entry| {
+                entry
+                    .as_ref()
+                    .is_ok_and(|(key, _)| key.value().1 == EventKind::SOCIAL_VOTE)
+            })
+            .count();
+        assert_eq!(vote_winners, 0);
+        Ok(())
+    })
+    .await?;
+
+    let valid = build_content_event_at(
+        voter_secret,
+        &content_kind::SocialVote::new(post_id, Some(false)),
+        51_000,
+    );
+    db.process_event_with_content(&valid).await;
+    assert_eq!(db.get_social_vote(voter, post_id).await, Some(Some(false)));
+    assert_eq!(db.get_social_vote_sum(post_id).await, -1);
+
+    Ok(())
+}
+
+/// A vote winner with missing or key-inconsistent cached state fails closed on
+/// reads and replacement without changing its aggregate or candidate event.
+#[test_log::test(tokio::test(flavor = "multi_thread"))]
+async fn invalid_cached_vote_projection_fails_closed() -> BoxedErrorResult<()> {
+    use futures::FutureExt as _;
+    use rostra_core::{ExternalEventId, ShortEventId, Timestamp};
 
     #[derive(Clone, Copy, Debug)]
     enum Corruption {
-        MissingSource,
-        WrongAuthor,
-        NonSingleton,
-        WrongAux,
-        WrongTarget,
-        InvalidSignature,
-        ContentMismatch,
+        Missing,
+        WrongShortTarget,
     }
 
-    for corruption in [
-        Corruption::MissingSource,
-        Corruption::WrongAuthor,
-        Corruption::NonSingleton,
-        Corruption::WrongAux,
-        Corruption::WrongTarget,
-        Corruption::InvalidSignature,
-        Corruption::ContentMismatch,
-    ] {
+    for corruption in [Corruption::Missing, Corruption::WrongShortTarget] {
         let voter_secret = RostraIdSecretKey::generate();
         let voter = voter_secret.id();
-        let other_secret = RostraIdSecretKey::generate();
-        let post_id =
-            ExternalEventId::new(RostraIdSecretKey::generate().id(), ShortEventId::random());
-        let other_post_id =
-            ExternalEventId::new(RostraIdSecretKey::generate().id(), ShortEventId::random());
-        let now = Timestamp::from(50_002);
-        let (dir, db) = temp_db(voter).await?;
+        let post_id = ExternalEventId::new(
+            RostraIdSecretKey::generate().id(),
+            ShortEventId::from_bytes([0x66; 16]),
+        );
+        let wrong_target = ExternalEventId::new(
+            RostraIdSecretKey::generate().id(),
+            ShortEventId::from_bytes([0x77; 16]),
+        );
+        let (_dir, db) = temp_db(voter).await?;
+        let singleton_key = (
+            voter,
+            EventKind::SOCIAL_VOTE,
+            Database::social_vote_aux_key(post_id),
+        );
 
-        let (old_id, baseline_sum) = if matches!(corruption, Corruption::MissingSource) {
-            let old_vote = build_content_event_at(
-                voter_secret,
-                &content_kind::SocialVote::new(post_id, Some(true)),
-                50_000,
-            );
-            let old_id = old_vote.event_id().to_short();
-            db.write_with(|tx| {
-                db.process_event_content_inserted_tx(&old_vote, now, tx)
-                    .expect("synthetic vote content is valid");
-                Ok(())
-            })
-            .await?;
-            assert!(!db.has_event(old_id).await);
-            (old_id, 1)
-        } else {
-            let source_secret = if matches!(corruption, Corruption::WrongAuthor) {
-                other_secret
-            } else {
-                voter_secret
-            };
-            let source_post = if matches!(corruption, Corruption::WrongTarget) {
-                other_post_id
-            } else {
-                post_id
-            };
-            let source_aux = match corruption {
-                Corruption::NonSingleton => None,
-                Corruption::WrongAux => Some(EventAuxKey::from_bytes([0x55; 16])),
-                _ => Some(Database::social_vote_aux_key(source_post)),
-            };
-            let source = build_social_vote_event_at(
-                source_secret,
-                &content_kind::SocialVote::new(source_post, Some(true)),
-                50_000,
-                source_aux,
-            );
-            let old_id = source.event_id().to_short();
-            db.process_event_with_content(&source).await;
-            let baseline_sum = db.get_social_vote_sum(post_id).await;
-            db.write_with(|tx| {
-                tx.open_table(&events_singletons_new::TABLE)?.insert(
-                    &(
-                        voter,
-                        EventKind::SOCIAL_VOTE,
-                        Database::social_vote_aux_key(post_id),
-                    ),
-                    &Latest {
-                        ts: source.timestamp(),
-                        inner: EventSingletonRecord { event_id: old_id },
-                    },
-                )?;
+        let old_vote = build_content_event_at(
+            voter_secret,
+            &content_kind::SocialVote::new(post_id, Some(true)),
+            52_000,
+        );
+        let old_id = old_vote.event_id().to_short();
+        db.process_event_with_content(&old_vote).await;
+        let corrupt_winner = db
+            .write_with(|tx| {
+                let mut table = tx.open_table(&crate::events_singletons_new::TABLE)?;
+                let mut winner = table
+                    .get(&singleton_key)?
+                    .expect("vote winner exists")
+                    .value();
                 match corruption {
-                    Corruption::InvalidSignature => {
-                        let mut events_table = tx.open_table(&crate::events::TABLE)?;
-                        let mut record = events_table
-                            .get(&old_id)?
-                            .expect("source event exists")
-                            .value();
-                        record.signed.sig = rostra_core::event::EventSignature::ZERO;
-                        events_table.insert(&old_id, &record)?;
+                    Corruption::Missing => winner.inner.social_vote = None,
+                    Corruption::WrongShortTarget => {
+                        winner
+                            .inner
+                            .social_vote
+                            .as_mut()
+                            .expect("valid winner has a projection")
+                            .target = wrong_target;
                     }
-                    Corruption::ContentMismatch => {
-                        use std::borrow::Cow;
-
-                        use rostra_core::event::EventContentRaw;
-
-                        use crate::event::ContentStoreRecord;
-
-                        let event = tx
-                            .open_table(&crate::events::TABLE)?
-                            .get(&old_id)?
-                            .expect("source event exists")
-                            .value();
-                        tx.open_table(&crate::content_store::TABLE)?.insert(
-                            &event.content_hash(),
-                            &ContentStoreRecord(Cow::Owned(EventContentRaw::new(vec![0xff]))),
-                        )?;
-                    }
-                    _ => {}
                 }
-                Ok(())
+                table.insert(&singleton_key, &winner)?;
+                Ok(winner)
             })
             .await?;
-            (old_id, baseline_sum)
-        };
 
-        let new_vote = build_content_event_at(
+        let read = std::panic::AssertUnwindSafe(db.get_social_vote(voter, post_id))
+            .catch_unwind()
+            .await;
+        assert!(
+            read.is_err(),
+            "{corruption:?}: corrupt cached projection must fail the read"
+        );
+
+        let replacement = build_content_event_at(
             voter_secret,
             &content_kind::SocialVote::new(post_id, Some(false)),
-            50_001,
+            52_001,
         );
-        let new_id = new_vote.event_id().to_short();
+        let replacement_id = replacement.event_id().to_short();
         let error = db
             .write_with(|tx| {
-                db.process_event_tx(&new_vote.event, now, tx)?;
-                db.process_event_content_tx(&new_vote, now, tx)
+                db.process_event_tx(&replacement.event, Timestamp::from(52_002), tx)?;
+                db.process_event_content_tx(&replacement, Timestamp::from(52_002), tx)
             })
             .await
-            .expect_err("unresolved existing winner must abort");
+            .expect_err("invalid cached projection must abort replacement");
         assert!(
-            matches!(
-                error,
-                DbError::UnresolvedVoteSingleton { event_id, .. } if event_id == old_id
-            ),
-            "{corruption:?}"
+            match corruption {
+                Corruption::Missing => matches!(
+                    error,
+                    crate::DbError::MissingVoteSingletonProjection { event_id, .. }
+                        if event_id == old_id
+                ),
+                Corruption::WrongShortTarget => matches!(
+                    error,
+                    crate::DbError::InvalidVoteSingletonProjection { event_id, .. }
+                        if event_id == old_id
+                ),
+            },
+            "{corruption:?}: {error:?}"
         );
+        assert!(!db.has_event(replacement_id).await, "{corruption:?}");
+        assert_eq!(db.get_social_vote_sum(post_id).await, 1, "{corruption:?}");
         assert_eq!(
-            db.get_social_vote_sum(post_id).await,
-            baseline_sum,
+            db.get_social_vote_sum(wrong_target).await,
+            0,
             "{corruption:?}"
         );
-        assert!(!db.has_event(new_id).await, "{corruption:?}");
-
-        drop(db);
-        let db = Database::open(dir.path().join("db.redb"), voter).await?;
-        assert_eq!(
-            db.get_social_vote_sum(post_id).await,
-            baseline_sum,
-            "{corruption:?}"
-        );
-        assert!(!db.has_event(new_id).await, "{corruption:?}");
         db.read_with(|tx| {
             let winner = tx
-                .open_table(&events_singletons_new::TABLE)?
-                .get(&(
-                    voter,
-                    EventKind::SOCIAL_VOTE,
-                    Database::social_vote_aux_key(post_id),
-                ))?
-                .map(|record| record.value().inner.event_id);
-            assert_eq!(winner, Some(old_id), "{corruption:?}");
+                .open_table(&crate::events_singletons_new::TABLE)?
+                .get(&singleton_key)?
+                .expect("old winner remains")
+                .value();
+            assert_eq!(winner.ts, corrupt_winner.ts, "{corruption:?}");
+            assert_eq!(winner.inner.event_id, old_id, "{corruption:?}");
+            assert_eq!(
+                winner.inner.social_vote, corrupt_winner.inner.social_vote,
+                "{corruption:?}"
+            );
             Ok(())
         })
         .await?;
@@ -571,27 +715,28 @@ async fn test_unresolved_vote_winners_abort_and_roll_back() -> BoxedErrorResult<
     Ok(())
 }
 
-/// Deleted and locally pruned content retains non-post projections. A later
-/// vote can therefore resolve and replace such a winner while its verified
-/// bytes remain in the content store.
+/// A retained vote remains readable and replaceable after its source becomes
+/// legitimately unavailable through delete and content garbage collection.
 #[test_log::test(tokio::test(flavor = "multi_thread"))]
-async fn deleted_vote_winner_with_retained_content_can_be_replaced() -> BoxedErrorResult<()> {
+async fn vote_winner_survives_deleted_and_collected_source() -> BoxedErrorResult<()> {
     use rostra_core::{ExternalEventId, ShortEventId, Timestamp};
 
     use crate::event::EventContentState;
-    use crate::events_content_state;
+    use crate::{content_store, events_content_state};
 
     let voter_secret = RostraIdSecretKey::generate();
     let voter = voter_secret.id();
     let post_id = ExternalEventId::new(RostraIdSecretKey::generate().id(), ShortEventId::random());
-    let (_dir, db) = temp_db(voter).await?;
+    let (dir, db) = temp_db(voter).await?;
 
     let old_vote = build_content_event_at(
         voter_secret,
         &content_kind::SocialVote::new(post_id, Some(true)),
         55_000,
     );
+    let old_content_hash = old_vote.content_hash();
     db.process_event_with_content(&old_vote).await;
+    assert_eq!(db.get_social_vote(voter, post_id).await, Some(Some(true)));
     assert_eq!(db.get_social_vote_sum(post_id).await, 1);
 
     let delete = super::build_delete_event(voter_secret, old_vote.event_id(), old_vote.event_id());
@@ -608,6 +753,17 @@ async fn deleted_vote_winner_with_retained_content_can_be_replaced() -> BoxedErr
     })
     .await?;
 
+    db.write_with(|tx| {
+        assert!(
+            tx.open_table(&content_store::TABLE)?
+                .remove(&old_content_hash)?
+                .is_some()
+        );
+        Ok(())
+    })
+    .await?;
+    assert_eq!(db.get_social_vote(voter, post_id).await, Some(Some(true)));
+
     let replacement = build_content_event_at(
         voter_secret,
         &content_kind::SocialVote::new(post_id, Some(false)),
@@ -619,8 +775,27 @@ async fn deleted_vote_winner_with_retained_content_can_be_replaced() -> BoxedErr
     })
     .await?;
 
+    assert_eq!(db.get_social_vote(voter, post_id).await, Some(Some(false)));
     assert_eq!(db.get_social_vote_sum(post_id).await, -1);
     assert!(db.has_event(replacement.event_id().to_short()).await);
+
+    drop(db);
+    let db_path = dir.path().join("db.redb");
+    let raw_db = redb_bincode::Database::from(redb::Database::open(&db_path)?);
+    let write_txn = raw_db.begin_write()?;
+    {
+        let mut version = write_txn.open_table(&crate::db_version::TABLE)?;
+        version.insert(&(), &23)?;
+    }
+    write_txn.commit()?;
+    drop(raw_db);
+
+    let replayed = Database::open(&db_path, voter).await?;
+    assert_eq!(
+        replayed.get_social_vote(voter, post_id).await,
+        Some(Some(false))
+    );
+    assert_eq!(replayed.get_social_vote_sum(post_id).await, -1);
 
     Ok(())
 }
@@ -689,7 +864,10 @@ async fn latest_singleton_query_is_isolated_ordered_and_strict() -> BoxedErrorRe
                 &(key_author, kind, aux),
                 &Latest {
                     ts: Timestamp::from(timestamp),
-                    inner: EventSingletonRecord { event_id },
+                    inner: EventSingletonRecord {
+                        event_id,
+                        social_vote: None,
+                    },
                 },
             )?;
         }
@@ -713,6 +891,7 @@ async fn latest_singleton_query_is_isolated_ordered_and_strict() -> BoxedErrorRe
             ts: Timestamp::from(60_002),
             inner: EventSingletonRecord {
                 event_id: rostra_core::ShortEventId::random(),
+                social_vote: None,
             },
         };
         let mut raw_key = bincode::encode_to_vec(key, redb_bincode::BINCODE_CONFIG)

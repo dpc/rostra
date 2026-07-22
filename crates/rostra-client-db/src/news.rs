@@ -1,21 +1,20 @@
 use std::collections::BTreeSet;
 
-use rostra_core::event::{
-    EventAuxKey, EventExt as _, EventKind, VerifiedEvent, VerifiedEventContent, content_kind,
-};
-use rostra_core::id::{RostraId, ToShort as _};
-use rostra_core::{ExternalEventId, ShortEventId, Timestamp};
+use rostra_core::event::{EventAuxKey, EventExt as _, EventKind, content_kind};
+use rostra_core::id::RostraId;
+use rostra_core::{ExternalEventId, Timestamp};
 use serde::{Deserialize, Serialize};
-use tracing::{debug, warn};
+use tracing::warn;
 
-use crate::event::{ContentStoreRecord, EventContentState};
+use crate::event::{EventSingletonRecord, SocialVoteProjection};
 use crate::event_order::EventOrder;
 use crate::social::SocialPostRecord;
 use crate::{
-    Database, DbResult, LOG_TARGET, SocialNewsRankRecord, SocialVoteScore, SocialVoteSumRecord,
-    UnresolvedVoteSingletonSnafu, content_store, events, events_content_state,
-    events_singletons_new, social_news_rank_by_post_id, social_news_rank_by_score,
-    social_news_rank_by_time, social_posts, social_vote_sums,
+    Database, DbResult, InvalidVoteSingletonProjectionSnafu, LOG_TARGET,
+    MissingVoteSingletonProjectionSnafu, SocialNewsRankRecord, SocialVoteScore,
+    SocialVoteSumRecord, content_store, events, events_content_state, events_singletons_new,
+    social_news_rank_by_post_id, social_news_rank_by_score, social_news_rank_by_time, social_posts,
+    social_vote_sums,
 };
 
 pub(crate) const NEWS_MAX_AGE_SECS: u64 = 4 * 365 * 24 * 60 * 60;
@@ -61,12 +60,23 @@ impl Database {
         EventAuxKey::from_bytes(reply_to.event_id().to_bytes())
     }
 
-    pub(crate) fn social_vote_value(upvote: Option<bool>) -> i64 {
-        match upvote {
-            Some(true) => 1,
-            None => 0,
-            Some(false) => -1,
+    fn validate_social_vote_projection(
+        record: &EventSingletonRecord,
+        aux_key: EventAuxKey,
+    ) -> DbResult<SocialVoteProjection> {
+        let Some(vote) = record.social_vote else {
+            return MissingVoteSingletonProjectionSnafu {
+                event_id: record.event_id,
+            }
+            .fail();
+        };
+        if Self::social_vote_aux_key(vote.target) != aux_key {
+            return InvalidVoteSingletonProjectionSnafu {
+                event_id: record.event_id,
+            }
+            .fail();
         }
+        Ok(vote)
     }
 
     pub(crate) fn calculate_news_score(
@@ -81,78 +91,22 @@ impl Database {
         score.clamp(i128::from(i64::MIN), i128::from(i64::MAX)) as i64
     }
 
-    pub(crate) fn get_social_vote_from_event_tx(
-        event_id: ShortEventId,
-        voter: RostraId,
-        post_id: ExternalEventId,
-        singleton_ts: Timestamp,
-        events_table: &impl events::ReadableTable,
-        events_content_state_table: &impl events_content_state::ReadableTable,
-        content_store_table: &impl content_store::ReadableTable,
-    ) -> DbResult<Option<content_kind::SocialVote>> {
-        let Some(event) = Database::get_event_tx(event_id, events_table)? else {
-            return Ok(None);
-        };
-        let Ok(verified_event) = VerifiedEvent::verify_received_as_is(event.signed) else {
-            return Ok(None);
-        };
-
-        if verified_event.event_id.to_short() != event_id
-            || event.author() != voter
-            || event.kind() != EventKind::SOCIAL_VOTE
-            || !event.is_singleton()
-            || event.aux_key() != Self::social_vote_aux_key(post_id)
-            || event.timestamp() != singleton_ts
-        {
-            return Ok(None);
-        }
-
-        match Database::get_event_content_state_tx(event_id, events_content_state_table)? {
-            None | Some(EventContentState::Deleted { .. }) | Some(EventContentState::Pruned) => {}
-            Some(EventContentState::Missing { .. } | EventContentState::Invalid) => {
-                return Ok(None);
-            }
-        }
-
-        let Some(store_record) = content_store_table
-            .get(&event.content_hash())?
-            .map(|g| g.value())
-        else {
-            return Ok(None);
-        };
-        let ContentStoreRecord(content) = store_record;
-        let Ok(verified_content) =
-            VerifiedEventContent::verify(verified_event, content.into_owned())
-        else {
-            return Ok(None);
-        };
-        let Some(content) = verified_content.content else {
-            return Ok(None);
-        };
-
-        Ok(content
-            .deserialize_cbor::<content_kind::SocialVote>()
-            .inspect_err(|err| {
-                debug!(target: LOG_TARGET, %event_id, %err, "Invalid social vote content");
-            })
-            .ok())
-    }
-
+    /// Apply the aggregate half of a validated social-vote winner update.
+    ///
+    /// The caller must validate the singleton header/payload relationship and
+    /// persist this exact projection as the paired winner later in the same
+    /// transaction. Transaction rollback keeps both halves atomic on failure.
     pub(crate) fn process_social_vote_tx(
         &self,
-        vote: &content_kind::SocialVote,
+        vote: SocialVoteProjection,
         author: RostraId,
         event_order: EventOrder,
         tx: &crate::WriteTransactionCtx,
     ) -> DbResult<()> {
-        let Some(reply_to) = vote.reply_to else {
-            return Ok(());
-        };
-
         let singleton_key = (
             author,
             EventKind::SOCIAL_VOTE,
-            Self::social_vote_aux_key(reply_to),
+            Self::social_vote_aux_key(vote.target),
         );
         let singletons_table = tx.open_table(&events_singletons_new::TABLE)?;
         let existing_singleton = singletons_table.get(&singleton_key)?.map(|g| g.value());
@@ -162,51 +116,54 @@ impl Database {
             return Ok(());
         }
 
-        let events_table = tx.open_table(&events::TABLE)?;
-        let events_content_state_table = tx.open_table(&events_content_state::TABLE)?;
-        let content_store_table = tx.open_table(&content_store::TABLE)?;
-        let previous_vote_value = if let Some(existing) = existing_singleton {
-            let previous_event_id = existing.inner.event_id;
-            let previous_vote = Self::get_social_vote_from_event_tx(
-                previous_event_id,
-                author,
-                reply_to,
-                existing.ts,
-                &events_table,
-                &events_content_state_table,
-                &content_store_table,
-            )?
-            .filter(|vote| vote.reply_to == Some(reply_to));
-            let Some(previous_vote) = previous_vote else {
-                return UnresolvedVoteSingletonSnafu {
-                    event_id: previous_event_id,
-                }
-                .fail();
-            };
-            Self::social_vote_value(previous_vote.upvote)
+        let previous_vote = if let Some(existing) = existing_singleton {
+            Some(Self::validate_social_vote_projection(
+                &existing.inner,
+                singleton_key.2,
+            )?)
         } else {
-            0
+            None
         };
 
-        let new_vote_value = Self::social_vote_value(vote.upvote);
-        let delta = new_vote_value - previous_vote_value;
-        if delta == 0 {
-            return Ok(());
+        let adjustments = match previous_vote {
+            Some(previous) if previous.target == vote.target => [
+                Some((vote.target, vote.value.score() - previous.value.score())),
+                None,
+            ],
+            Some(previous) => [
+                Some((previous.target, -previous.value.score())),
+                Some((vote.target, vote.value.score())),
+            ],
+            None => [Some((vote.target, vote.value.score())), None],
+        };
+        let mut changed_sum = false;
+        for (target, delta) in adjustments.into_iter().flatten() {
+            if delta == 0 {
+                continue;
+            }
+            changed_sum = true;
+            let mut vote_sums_table = tx.open_table(&social_vote_sums::TABLE)?;
+            let mut record =
+                vote_sums_table
+                    .get(&target)?
+                    .map(|g| g.value())
+                    .unwrap_or(SocialVoteSumRecord {
+                        last_vote_time: Timestamp::ZERO,
+                        current_sum: 0,
+                    });
+            record.last_vote_time = record.last_vote_time.max(event_order.timestamp());
+            record.current_sum = record.current_sum.saturating_add(delta);
+            vote_sums_table.insert(&target, &record)?;
         }
 
-        let mut vote_sums_table = tx.open_table(&social_vote_sums::TABLE)?;
-        let mut record = vote_sums_table
-            .get(&reply_to)?
-            .map(|g| g.value())
-            .unwrap_or(SocialVoteSumRecord {
-                last_vote_time: Timestamp::ZERO,
-                current_sum: 0,
-            });
-        record.last_vote_time = record.last_vote_time.max(event_order.timestamp());
-        record.current_sum = record.current_sum.saturating_add(delta);
-        vote_sums_table.insert(&reply_to, &record)?;
-
-        self.notify_news_score_update_on_commit(tx, reply_to);
+        match previous_vote {
+            Some(previous) if previous.target != vote.target => {
+                self.notify_news_score_update_on_commit(tx, previous.target);
+                self.notify_news_score_update_on_commit(tx, vote.target);
+            }
+            _ if changed_sum => self.notify_news_score_update_on_commit(tx, vote.target),
+            _ => {}
+        }
         Ok(())
     }
 
@@ -334,6 +291,17 @@ impl Database {
         .expect("Storage error")
     }
 
+    /// Return a voter's current projected vote for one full post identity.
+    ///
+    /// The outer `None` means this post is not the winner for its shortened
+    /// singleton key. The inner `None` is a retained neutral vote. This query
+    /// reads the inline current projection and does not require retained source
+    /// payload bytes.
+    ///
+    /// # Panics
+    ///
+    /// Panics on storage failure or a vote singleton with a missing or invalid
+    /// inline projection.
     pub async fn get_social_vote(
         &self,
         voter: RostraId,
@@ -351,20 +319,14 @@ impl Database {
             let Some(singleton) = singleton else {
                 return Ok(None);
             };
-            let events_table = tx.open_table(&events::TABLE)?;
-            let events_content_state_table = tx.open_table(&events_content_state::TABLE)?;
-            let content_store_table = tx.open_table(&content_store::TABLE)?;
-            Ok(Self::get_social_vote_from_event_tx(
-                singleton.inner.event_id,
-                voter,
-                post_id,
-                singleton.ts,
-                &events_table,
-                &events_content_state_table,
-                &content_store_table,
-            )?
-            .filter(|vote| vote.reply_to == Some(post_id))
-            .map(|vote| vote.upvote))
+            let vote = Self::validate_social_vote_projection(
+                &singleton.inner,
+                Self::social_vote_aux_key(post_id),
+            )?;
+            if vote.target != post_id {
+                return Ok(None);
+            }
+            Ok(Some(vote.value.as_upvote()))
         })
         .await
         .expect("Storage error")

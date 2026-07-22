@@ -257,8 +257,16 @@ pub enum DbError {
     },
     #[snafu(display("Extension access to built-in table `{name}` is forbidden"))]
     ReservedExtensionTable { name: String },
-    #[snafu(display("Stored vote singleton references unresolved event {event_id}"))]
-    UnresolvedVoteSingleton {
+    #[snafu(display("Stored vote singleton {event_id} has no inline vote projection"))]
+    MissingVoteSingletonProjection {
+        event_id: ShortEventId,
+        #[snafu(implicit)]
+        location: Location,
+    },
+    #[snafu(display(
+        "Stored vote singleton {event_id} has a cached target outside its shortened key"
+    ))]
+    InvalidVoteSingletonProjection {
         event_id: ShortEventId,
         #[snafu(implicit)]
         location: Location,
@@ -842,8 +850,9 @@ impl Database {
     /// # Panics
     ///
     /// Panics after rolling back if storage fails or a stored invariant is
-    /// violated, including an unresolved existing vote winner or a shortened
-    /// identity prefix mapped to a different full identity.
+    /// violated, including a vote winner with a missing or invalid inline
+    /// projection or a shortened identity prefix mapped to a different full
+    /// identity.
     pub async fn process_event_with_content(
         &self,
         content: &VerifiedEventContent,

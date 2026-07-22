@@ -339,6 +339,8 @@ def_table! {
     /// Key: (author, event_kind, aux_key)
     /// For events like profile updates where we only care about the maximum
     /// `(event.timestamp, ShortEventId)` per author/kind/aux_key combination.
+    /// Social-vote rows also retain the winner's authoritative current full
+    /// target and vote value.
     events_singletons_new: (RostraId, EventKind, EventAuxKey) => Latest<event::EventSingletonRecord>
 }
 

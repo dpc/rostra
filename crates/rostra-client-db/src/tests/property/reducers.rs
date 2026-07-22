@@ -581,9 +581,12 @@ struct VoteInput {
     value: Option<bool>,
 }
 
+type VoteKey = (RostraId, ExternalEventId);
+type ProjectedVote = Option<(ShortEventId, Option<bool>)>;
+
 #[derive(Debug, PartialEq, Eq)]
 struct VoteSnapshot {
-    votes: BTreeMap<(RostraId, ExternalEventId), (ShortEventId, Option<bool>)>,
+    votes: BTreeMap<VoteKey, ProjectedVote>,
     winners: BTreeMap<(RostraId, [u8; 16]), (Timestamp, ShortEventId)>,
     sums: BTreeMap<ExternalEventId, i64>,
 }
@@ -591,7 +594,7 @@ struct VoteSnapshot {
 fn vote_strategy() -> impl Strategy<Value = (Vec<VoteSpec>, Plan, Plan)> {
     (
         prop::collection::vec(
-            (0u8..3, 0u8..2, 0u8..4, 0u8..3).prop_map(|(voter, post, timestamp, value)| VoteSpec {
+            (0u8..3, 0u8..4, 0u8..4, 0u8..3).prop_map(|(voter, post, timestamp, value)| VoteSpec {
                 voter,
                 post,
                 timestamp,
@@ -610,10 +613,15 @@ fn vote_inputs(specs: &[VoteSpec]) -> Vec<VoteInput> {
         RostraIdSecretKey::from_bytes([52; 32]),
         RostraIdSecretKey::from_bytes([53; 32]),
     ];
-    let post_author = RostraIdSecretKey::from_bytes([54; 32]).id();
+    let post_authors = [
+        RostraIdSecretKey::from_bytes([54; 32]).id(),
+        RostraIdSecretKey::from_bytes([55; 32]).id(),
+    ];
     let posts = [
-        ExternalEventId::new(post_author, ShortEventId::from_bytes([1; 16])),
-        ExternalEventId::new(post_author, ShortEventId::from_bytes([2; 16])),
+        ExternalEventId::new(post_authors[0], ShortEventId::from_bytes([1; 16])),
+        ExternalEventId::new(post_authors[1], ShortEventId::from_bytes([1; 16])),
+        ExternalEventId::new(post_authors[0], ShortEventId::from_bytes([2; 16])),
+        ExternalEventId::new(post_authors[1], ShortEventId::from_bytes([2; 16])),
     ];
     specs
         .iter()
@@ -640,10 +648,13 @@ fn vote_inputs(specs: &[VoteSpec]) -> Vec<VoteInput> {
 }
 
 fn vote_model(inputs: &[VoteInput]) -> VoteSnapshot {
-    let mut winning: BTreeMap<(RostraId, ExternalEventId), &VoteInput> = BTreeMap::new();
+    let mut winning: BTreeMap<(RostraId, [u8; 16]), &VoteInput> = BTreeMap::new();
     for input in inputs {
         winning
-            .entry((input.voter, input.post))
+            .entry((
+                input.voter,
+                Database::social_vote_aux_key(input.post).to_bytes(),
+            ))
             .and_modify(|current| {
                 if order(&current.event) < order(&input.event) {
                     *current = input;
@@ -651,18 +662,18 @@ fn vote_model(inputs: &[VoteInput]) -> VoteSnapshot {
             })
             .or_insert(input);
     }
-    let mut votes = BTreeMap::new();
+    let mut votes = inputs
+        .iter()
+        .map(|input| ((input.voter, input.post), None))
+        .collect::<BTreeMap<_, _>>();
     let mut winners = BTreeMap::new();
     let mut sums = BTreeMap::new();
-    for (key, input) in winning {
-        votes.insert(key, (input.event.event_id().to_short(), input.value));
-        winners.insert(
-            (
-                input.voter,
-                Database::social_vote_aux_key(input.post).to_bytes(),
-            ),
-            order(&input.event),
+    for ((voter, aux_key), input) in winning {
+        votes.insert(
+            (voter, input.post),
+            Some((input.event.event_id().to_short(), input.value)),
         );
+        winners.insert((voter, aux_key), order(&input.event));
         *sums.entry(input.post).or_default() += match input.value {
             Some(true) => 1,
             Some(false) => -1,
@@ -700,15 +711,15 @@ async fn vote_snapshot(
     let mut votes = BTreeMap::new();
     for &(voter, post) in keys {
         let aux = Database::social_vote_aux_key(post);
-        let (_, winner) = winners
-            .get(&(voter, aux.to_bytes()))
-            .copied()
-            .expect("generated vote has singleton winner");
-        let vote = db
-            .get_social_vote(voter, post)
-            .await
-            .expect("generated vote resolves");
-        votes.insert((voter, post), (winner, vote));
+        let vote = db.get_social_vote(voter, post).await;
+        let vote = vote.map(|vote| {
+            let (_, winner) = winners
+                .get(&(voter, aux.to_bytes()))
+                .copied()
+                .expect("projected vote has singleton winner");
+            (winner, vote)
+        });
+        votes.insert((voter, post), vote);
     }
     let sums = db
         .read_with(|tx| {

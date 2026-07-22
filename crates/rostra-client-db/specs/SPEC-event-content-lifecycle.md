@@ -17,6 +17,12 @@ lifecycle state remains until duplicate processing or total replay; previously
 derived replacement lineage remains until the final total rebuild tracked by
 `t4vh`.
 
+Current-schema social-vote singleton rows also retain their authoritative
+projection inline. That optional field changes the shared singleton-record
+encoding for every event kind: all pre-series production version-24 shared
+singleton rows are decode-incompatible and are not safely usable until the final
+total rebuild reconstructs current-schema winners and vote aggregates.
+
 ## Record justification
 
 The lifecycle spans event and content tables, reference counting, fetch
@@ -81,14 +87,26 @@ Projections that retain one latest source event use the maximum
 unfollow, profile, generic singleton, and individual-vote reducers all use this
 order. A vote changes its aggregate only when it wins that same comparison, so
 the aggregate and retained vote cannot select different equal-second events.
-Before replacing an existing vote winner, its singleton row must resolve to the
-stored event with the same ID, author, kind, singleton/auxiliary-parent shape,
-timestamp, verified retained content, and vote target. The source must have
-reached Processed; a later Deleted or Pruned state remains resolvable while
-those verified bytes are retained because non-post projections survive those
-transitions. Missing, Invalid, absent/mismatched content, or any relationship
-mismatch is database corruption and aborts the complete ingestion transaction,
-leaving the aggregate, winner, and newly submitted envelope unchanged.
+Each individual-vote winner retains its authoritative current-projection full
+target and closed vote value beside the source event ID. A newer winner changes
+the aggregate by the difference between its value and the retained old value,
+then updates the aggregate and winner in one transaction. If different full
+targets have the same shortened event ID used by the singleton auxiliary key,
+replacement subtracts the old contribution from its full target and adds the
+new contribution to its full target in that transaction. A query returns the
+cached value only when the requested full target matches. Reading or replacing
+a vote does not resolve the old source event or payload. Missing source bytes
+after delete, prune, or garbage collection are therefore valid and do not make
+the projection unavailable.
+Only a `SOCIAL_VOTE` whose header is singleton-shaped and whose auxiliary key
+matches its payload target enters this coupled winner/aggregate projection; a
+mismatched shape cannot block a valid vote. A retained cached target must keep
+the same shortened event ID as its singleton row key; a missing projection or
+key mismatch is corruption and fails reads and replacement without mutation.
+Retained signed events and payloads remain the authority for total replay and
+explicit integrity audits. An audit that detects disagreement with an inline
+value must quarantine or recompute the affected projection; it must not patch
+only the winner cache and leave the aggregate unchanged.
 
 Invalid content is not stored and transitions to Invalid. Deletion, pruning,
 or invalidation removes the event's reference to the content hash exactly

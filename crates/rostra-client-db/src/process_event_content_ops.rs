@@ -8,7 +8,7 @@ use rostra_util_error::{BoxedError, FmtCompact as _};
 use snafu::{Location, OptionExt as _, ResultExt as _, Snafu};
 use tracing::debug;
 
-use crate::event::EventSingletonRecord;
+use crate::event::{EventSingletonRecord, SocialVoteProjection, SocialVoteValue};
 use crate::event_order::EventOrder;
 use crate::{
     Database, DbError, IdSocialProfileRecord, IrohNodeRecord, LOG_TARGET, OverflowSnafu,
@@ -239,6 +239,10 @@ impl Database {
             event_content.timestamp(),
             event_content.event_id().to_short(),
         );
+        let mut singleton_record = Some(EventSingletonRecord {
+            event_id: event_order.event_id(),
+            social_vote: None,
+        });
         #[allow(clippy::single_match)]
         match event_content.event.event.kind {
             EventKind::FOLLOW | EventKind::UNFOLLOW => {
@@ -529,12 +533,22 @@ impl Database {
                         .deserialize_cbor::<content_kind::SocialVote>()
                         .boxed()
                         .context(InvalidSnafu)?;
-                    if let Some(reply_to) = content.reply_to {
-                        if event_content.event.is_singleton()
-                            && event_content.aux_key() == Self::social_vote_aux_key(reply_to)
-                        {
-                            self.process_social_vote_tx(&content, author, event_order, tx)?;
-                        }
+                    let vote = content
+                        .reply_to
+                        .filter(|reply_to| {
+                            event_content.event.is_singleton()
+                                && event_content.aux_key() == Self::social_vote_aux_key(*reply_to)
+                        })
+                        .map(|target| SocialVoteProjection {
+                            target,
+                            value: SocialVoteValue::from(content.upvote),
+                        });
+                    singleton_record = vote.map(|vote| EventSingletonRecord {
+                        event_id: event_order.event_id(),
+                        social_vote: Some(vote),
+                    });
+                    if let Some(vote) = vote {
+                        self.process_social_vote_tx(vote, author, event_order, tx)?;
                     }
                 }
                 EventKind::SHOUTBOX => {
@@ -582,6 +596,9 @@ impl Database {
         };
 
         if event_content.event.is_singleton() {
+            let Some(singleton_record) = singleton_record else {
+                return Ok(());
+            };
             let mut events_singletons_tbl = tx
                 .open_table(&events_singletons_new::TABLE)
                 .map_err(DbError::from)?;
@@ -593,9 +610,7 @@ impl Database {
                     event_content.kind(),
                     event_content.aux_key(),
                 ),
-                EventSingletonRecord {
-                    event_id: event_order.event_id(),
-                },
+                singleton_record,
                 &mut events_singletons_tbl,
             )?;
         }
