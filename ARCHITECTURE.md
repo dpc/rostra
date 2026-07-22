@@ -31,9 +31,12 @@ and [iroh-net][iroh-net] as a p2p transport layer.
 [iroh-net]: https://github.com/n0-computer/iroh
 
 Any Rostra node can connect with any other node, and
-identity's connectivity information and latest state
+identity's connectivity information and one representative graph head
 can be bootstrapped using Pkarr, after which nodes
 can communicate using Iroh's built-in discovery mechanism.
+The representative is only a discovery entry point; the signed event graph may
+have multiple current heads as specified by
+[`SPEC-event-graph`](crates/rostra-core/specs/SPEC-event-graph.md).
 
 
 Rostra node can be "full" (download and store data) or "light" (no persistence),

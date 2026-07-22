@@ -52,11 +52,21 @@ matching row exists. The two parents may be equal. Together, events from one
 author form a graph that can merge concurrently produced branches and can be
 traversed from newer events toward older history.
 
-The previous parent normally identifies the latest event known to the author.
-The auxiliary parent may merge another branch, carry kind-specific meaning,
-or point farther into history to accelerate traversal. Storage and replication
+The previous parent normally identifies a current event known to the author.
+The auxiliary parent may merge another branch, carry kind-specific meaning, or
+point farther into history to accelerate traversal. Storage and replication
 must tolerate unknown parents and fetch them later rather than rejecting an
 otherwise valid event.
+
+For one author, the current **head set** contains every accepted event with no
+known same-author child. Concurrent writers and out-of-order replication can
+make this set contain multiple members; no member is intrinsically canonical,
+newest, or preferred. A singleton-returning interface therefore does not prove
+that only one head exists. Local append may use a deterministic representative
+as its default previous parent, incremental propagation should identify the
+event that caused the signal, repeated one-head discovery may sample the set,
+and synchronization that requires every branch must use explicit complete-set
+or set-difference semantics.
 
 ## Content semantics
 

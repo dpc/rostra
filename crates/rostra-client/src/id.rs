@@ -52,7 +52,11 @@ impl From<CompactTicket> for EndpointAddr {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct IdPublishedData {
+    /// Published transport endpoint.
     pub ticket: Option<CompactTicket>,
+    /// Deterministic representative of the publisher's current head set.
+    ///
+    /// This value does not assert that the graph has only one current head.
     pub head: Option<ShortEventId>,
 }
 

@@ -1,4 +1,5 @@
 pub(crate) mod head_merger;
+pub(crate) mod head_selection;
 pub(crate) mod head_update_broadcaster;
 pub(crate) mod missing_event_content_fetcher;
 pub(crate) mod missing_event_fetcher;

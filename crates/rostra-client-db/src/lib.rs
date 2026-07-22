@@ -555,7 +555,12 @@ impl Database {
         self.self_wot_updated.subscribe()
     }
 
-    /// Subscribes to the retained current canonical self-head projection.
+    /// Subscribe to the retained deterministic self-head representative.
+    ///
+    /// The value is the minimum current `ShortEventId`. It is a stable default,
+    /// not a claim that the current head set is a singleton. Every committed
+    /// self-event insertion publishes, even when the representative is
+    /// unchanged.
     ///
     /// Drop values borrowed from the receiver before awaiting or calling the
     /// database; publication waits for outstanding watch borrows.
@@ -578,6 +583,10 @@ impl Database {
         self.new_shoutbox_tx.subscribe()
     }
 
+    /// Subscribe to incremental exact new-head signals.
+    ///
+    /// This lossy channel carries the event that became a head. Consumers that
+    /// lag must recover from the durable complete head set.
     pub fn new_heads_subscribe(&self) -> broadcast::Receiver<(RostraId, ShortEventId)> {
         self.new_heads_tx.subscribe()
     }
@@ -767,6 +776,30 @@ impl Database {
         .expect("Database panic")
     }
 
+    /// Return the lifecycle state for event content that is not currently
+    /// stored.
+    ///
+    /// For an existing event, `None` normally means the content was processed.
+    /// A terminal state such as `Deleted`, `Pruned`, or `Invalid` means callers
+    /// must not wait for payload availability.
+    pub async fn get_event_content_state(
+        &self,
+        event_id: impl Into<ShortEventId>,
+    ) -> Option<EventContentState> {
+        let event_id = event_id.into();
+        self.read_with(|tx| {
+            Self::get_event_content_state_tx(
+                event_id,
+                &tx.open_table(&events_content_state::TABLE)?,
+            )
+        })
+        .await
+        .expect("Database panic")
+    }
+
+    /// Return the minimum current self-head as a deterministic representative.
+    ///
+    /// Use [`Self::get_heads_self`] when the complete set is required.
     pub async fn get_self_current_head(&self) -> Option<ShortEventId> {
         self.read_with(|tx| {
             let events_heads_table = tx.open_table(&events_heads::TABLE)?;
@@ -1245,6 +1278,9 @@ impl Database {
         Ok(())
     }
 
+    /// Return the minimum current head as a deterministic representative.
+    ///
+    /// Use [`Self::get_heads`] when the complete set is required.
     pub async fn get_head(&self, id: RostraId) -> Option<ShortEventId> {
         self.read_with(|tx| {
             let events_heads = tx.open_table(&events_heads::TABLE)?;
@@ -1255,6 +1291,7 @@ impl Database {
         .expect("Database panic")
     }
 
+    /// Return the complete current head set for an identity.
     pub async fn get_heads(&self, id: RostraId) -> HashSet<ShortEventId> {
         self.read_with(|tx| {
             let events_heads = tx.open_table(&events_heads::TABLE)?;
@@ -1265,6 +1302,7 @@ impl Database {
         .expect("Database panic")
     }
 
+    /// Return the complete current head set for the local identity.
     pub async fn get_heads_self(&self) -> HashSet<ShortEventId> {
         self.read_with(|tx| {
             let events_heads = tx.open_table(&events_heads::TABLE)?;

@@ -15,6 +15,7 @@ use tracing::{debug, instrument, trace, warn};
 use crate::client::{Client, INITIAL_BACKOFF_DURATION, MAX_BACKOFF_DURATION};
 use crate::connection_cache::ConnectionCache;
 use crate::net::ClientNetworking;
+use crate::task::head_selection::representative_head;
 
 const LOG_TARGET: &str = "rostra::poll_followee_heads";
 const MAX_ACTIVE_POLLS: usize = 32;
@@ -69,8 +70,10 @@ type SharedBackoffState = Arc<RwLock<HashMap<RostraId, PeerBackoffState>>>;
 /// Polls direct followees for head updates using the WAIT_HEAD_UPDATE RPC.
 ///
 /// For each followee, connects and sends our current known head. The server
-/// responds immediately if the head is stale, or waits until it changes.
-/// This gives fast catch-up when reconnecting after being offline.
+/// responds immediately if that head is stale, or waits until it stops being a
+/// current head. An undiscovered sibling does not complete this legacy
+/// single-head wait while the known head remains current. Periodic sampled
+/// `GET_HEAD` discovery complements this fast update path.
 pub struct PollFolloweeHeadUpdates {
     client: crate::client::ClientHandle,
     networking: Arc<ClientNetworking>,
@@ -286,10 +289,8 @@ impl PollFolloweeHeadUpdates {
     ) -> Result<(), String> {
         // Get our current known head for this followee
         let known_heads = db.get_heads(followee_id).await;
-        let known_head = known_heads
-            .into_iter()
-            .next()
-            .unwrap_or(rostra_core::ShortEventId::ZERO);
+        let known_head =
+            representative_head(&known_heads).unwrap_or(rostra_core::ShortEventId::ZERO);
 
         debug!(
             target: LOG_TARGET,

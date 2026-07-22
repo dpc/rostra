@@ -24,6 +24,7 @@ use tokio::sync::{Semaphore, watch};
 use tracing::{debug, info, instrument, trace};
 
 use crate::client::Client;
+use crate::task::head_selection::sample_head;
 use crate::{ClientHandle, ClientRefError, ClientRefSnafu};
 
 const LOG_TARGET: &str = "rostra::req_handler";
@@ -388,8 +389,9 @@ impl RequestHandler {
         loop {
             heads = self.client.db()?.get_heads_self().await;
 
-            // Respond when our head differs from what the client knows.
-            // Also wait if we have no heads yet.
+            // This single-head cursor only detects replacement/removal of the
+            // known head. An existing sibling does not satisfy the predicate
+            // while `event_id` remains in the current head set.
             if !heads.is_empty() && !heads.contains(&event_id) {
                 break;
             }
@@ -402,10 +404,7 @@ impl RequestHandler {
         Connection::write_message(
             &mut send,
             &WaitHeadUpdateResponse(
-                heads
-                    .into_iter()
-                    .next()
-                    .expect("Must have at least one element"),
+                sample_head(&heads).expect("loop exits only for a nonempty head set"),
             ),
         )
         .await
@@ -428,7 +427,7 @@ impl RequestHandler {
 
         let heads = self.client.db()?.get_heads(id).await;
 
-        Connection::write_message(&mut send, &GetHeadResponse(heads.into_iter().next()))
+        Connection::write_message(&mut send, &GetHeadResponse(sample_head(&heads)))
             .await
             .context(RpcSnafu)?;
         Ok(())
@@ -452,7 +451,7 @@ impl RequestHandler {
         let mut new_heads_rx = self.client.db()?.new_heads_subscribe();
 
         loop {
-            let (author, _head) = match new_heads_rx.recv().await {
+            let (author, head) = match new_heads_rx.recv().await {
                 Ok(msg) => msg,
                 Err(tokio::sync::broadcast::error::RecvError::Closed) => {
                     return Err(ClientRefSnafu.build().into());
@@ -474,13 +473,9 @@ impl RequestHandler {
                 continue;
             }
 
-            // Get the full event from the database
+            // Return the exact head that caused this notification. Selecting
+            // another current tip here can hide the newly discovered branch.
             let db = self.client.db()?;
-            let heads = db.get_heads(author).await;
-            let Some(head) = heads.into_iter().next() else {
-                continue;
-            };
-
             let Some(event) = db.get_event(head).await else {
                 continue;
             };

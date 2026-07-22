@@ -22,8 +22,10 @@ data, and expose stored state without possessing the identity secret.
 
 ## Network composition
 
-Pkarr maps a Rostra identity to its advertised iroh endpoint and current graph
-head. Iroh supplies encrypted peer transport under the Rostra v0 ALPN.
+Pkarr maps a Rostra identity to its advertised iroh endpoint and a deterministic
+representative of its current graph-head set. The representative does not imply
+that the set is a singleton. Iroh supplies encrypted peer transport under the
+Rostra v0 ALPN.
 `rostra-p2p` provides typed RPC connections; the client decides whom to
 connect to, caches connections, tracks per-identity and per-node backoff, and
 passes verified data to
@@ -50,8 +52,30 @@ than owning a second graph state. They must tolerate duplicate wakeups,
 temporary peer failure, and out-of-order delivery. Task handles are owned by
 the client, so dropping the client stops its background work.
 
-Publication constructs content events through `rostra-core`, selects current
-graph parents, signs with the unlocked identity key, and stores through the
+Head handling depends on the operation. Local publication and retained state
+use the minimum event ID as a deterministic representative. Incremental
+broadcasts carry the exact newly accepted head. The broadcaster initially
+reconciles the complete durable set, retains current header-first heads until
+their content becomes available, and reconciles again after signal lag or
+follower-set changes. A newer current descendant subsumes a pending historical
+ancestor. Heads in the `Missing` lifecycle state wait for content; explicit
+terminal states are discarded. The broadcaster loads at most one ready payload
+at a time. Repeated `GET_HEAD` requests independently and uniformly sample the
+current set so persistent siblings remain discoverable without changing the v0
+wire shape. Paths that require every branch iterate the complete durable set
+rather than treating a sample as complete.
+
+`WAIT_HEAD_UPDATE` retains its compatible single-head cursor: it waits while
+the caller-provided head remains in the server's current set. It therefore
+cannot reveal an already-existing sibling while that known head stays current;
+complete immediate fork discovery would require a future bounded full-set or
+set-difference RPC. The signing-only head merger scans durable heads immediately
+when it starts or the identity is unlocked, then reacts to later changes and
+stitches pairs until fewer than two remain.
+
+Publication constructs content events through `rostra-core`, selects the
+deterministic representative as its default previous parent, signs with the
+unlocked identity key, and stores through the
 same database processing path used for received data. This keeps local and
 remote validation and projections aligned with
 [SPEC-event-graph](../../rostra-core/specs/SPEC-event-graph.md).

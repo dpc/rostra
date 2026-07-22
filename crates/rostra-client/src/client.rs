@@ -625,6 +625,10 @@ impl Client {
         Ok(sanitize_endpoint_addr(self.networking.endpoint.addr()))
     }
 
+    /// Subscribe to the minimum current self-head representative.
+    ///
+    /// The retained value is a deterministic default and does not imply that
+    /// the complete current head set is a singleton.
     pub fn self_head_subscribe(&self) -> watch::Receiver<Option<ShortEventId>> {
         self.db.self_head_subscribe()
     }
@@ -645,6 +649,10 @@ impl Client {
         self.db.new_shoutbox_subscribe()
     }
 
+    /// Subscribe to lossy incremental exact new-head signals.
+    ///
+    /// Each signal names the accepted event that became a head. Consumers that
+    /// lag must recover from the database's complete durable head set.
     pub fn new_heads_subscribe(&self) -> broadcast::Receiver<(RostraId, ShortEventId)> {
         self.db.new_heads_subscribe()
     }
@@ -660,6 +668,7 @@ impl Client {
         &self.db
     }
 
+    /// Return the deterministic representative of the current self-head set.
     pub async fn events_head(&self) -> Option<ShortEventId> {
         self.db.get_self_current_head().await
     }

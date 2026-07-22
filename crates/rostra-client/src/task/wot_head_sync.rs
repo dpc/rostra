@@ -15,20 +15,24 @@
 //!   follower already knows — if a follower never heard about an update for a
 //!   2nd-degree ID, neither will we.
 //!
-//! Neither task performs a full sweep asking "what is the latest head you
-//! know for every ID in my Web of Trust?"  If a node was offline when an
+//! Neither task performs a full sweep asking "what current head sample do you
+//! have for every ID in my Web of Trust?" If a node was offline when an
 //! update propagated, or the update came through a path that doesn't
-//! reach any of our polled peers, we can end up permanently behind.
+//! reach any of our polled peers, we can end up permanently behind on the
+//! current head set.
 //!
 //! ## What this task does
 //!
 //! On startup and then every hour, it iterates over every ID in the
 //! current Web of Trust (self + direct followees + extended followees).
 //! For each ID it asks that ID's known followers (plus the ID itself and
-//! ourselves) what head they have via the lightweight `GET_HEAD` RPC.
+//! ourselves) for an independently sampled head via the lightweight `GET_HEAD`
+//! RPC.
 //! If any peer reports a head event we don't have locally, we call
 //! `download_events_from_child` to fetch the full DAG — the same
-//! function used by `NewHeadFetcher`.
+//! function used by `NewHeadFetcher`. Repeated cycles can discover durable
+//! sibling heads because each `GET_HEAD` response samples the peer's complete
+//! current set; no individual response has complete-set semantics.
 //!
 //! Because this is a background maintenance sweep (not latency-critical),
 //! it processes IDs sequentially and moves on after finding one new head

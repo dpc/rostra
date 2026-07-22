@@ -117,6 +117,16 @@ channels remain lossy or incremental signals for new content and work queues.
 The database remains authoritative; these watch payloads are retained
 current-state projections.
 
+The durable head table is authoritative when an identity has concurrent graph
+tips. The retained self-head watch projects that set to its minimum
+`ShortEventId`, matching reopen and replay. This value is only a deterministic
+representative and default append parent: it carries no freshness, preference,
+or uniqueness meaning. Consumers that require every branch read the complete
+durable set. The incremental new-head broadcast instead carries the exact
+accepted event that became a head and may be recovered from durable state after
+lag. Event content readiness is a separate incremental signal because envelopes
+can become heads before their payload is available.
+
 Reception order is database-local state, not a replicated ordering contract.
 One durable sequence supplies all reception-order indexes, and each allocation
 commits atomically with its index insertion. Aborted transactions do not consume

@@ -189,16 +189,28 @@ define_rpc!(
 define_rpc!(
     RpcId::WAIT_HEAD_UPDATE,
     WaitHeadUpdateRequest,
+    /// Request a current self-head after `known_head` stops being a head.
+    ///
+    /// The server waits while `known_head` remains in its current head set.
+    /// Consequently, this RPC cannot reveal an existing sibling head while the
+    /// caller-known head remains current.
     pub struct WaitHeadUpdateRequest(pub ShortEventId);,
     WaitHeadUpdateResponse,
+    /// One current self-head sampled after the requested head stops being
+    /// current.
     pub struct WaitHeadUpdateResponse(pub ShortEventId);
 );
 
 define_rpc!(
     RpcId::GET_HEAD,
     GetHeadRequest,
+    /// Request an independently sampled current head for an identity.
     pub struct GetHeadRequest(pub RostraId);,
     GetHeadResponse,
+    /// An independent uniform sample of the current head set, if it is
+    /// nonempty.
+    ///
+    /// A singleton response does not imply that the identity has only one head.
     pub struct GetHeadResponse(pub Option<ShortEventId>);
 );
 
@@ -221,7 +233,8 @@ define_rpc!(
     /// followers or self.
     pub struct WaitFollowersNewHeadsRequest;,
     WaitFollowersNewHeadsResponse,
-    /// Response containing the author and their new head event.
+    /// Response containing the author and exact event that caused the
+    /// incremental new-head notification.
     pub struct WaitFollowersNewHeadsResponse {
         pub author: RostraId,
         pub event: SignedEvent,
@@ -575,6 +588,11 @@ impl Connection {
         Ok(self.make_rpc(&PingRequest(n)).await?.0)
     }
 
+    /// Return an independent uniform sample of the identity's current head set.
+    ///
+    /// The response does not provide complete-set semantics. Repeated calls can
+    /// discover sibling heads, but synchronization that requires every head
+    /// needs an explicit full-set or set-difference protocol.
     pub async fn get_head(&self, id: RostraId) -> RpcResult<Option<ShortEventId>> {
         Ok(self.make_rpc(&GetHeadRequest(id)).await?.0)
     }
@@ -582,16 +600,19 @@ impl Connection {
     /// Wait for the server to receive a new head update from any of its direct
     /// followers or self.
     ///
-    /// This is a blocking call that returns when the server has a new head
-    /// event to share.
+    /// This is a blocking incremental call. The response contains the exact
+    /// event that caused the server notification rather than another selected
+    /// member of that author's current head set.
     pub async fn wait_followers_new_heads(&self) -> RpcResult<WaitFollowersNewHeadsResponse> {
         self.make_rpc(&WaitFollowersNewHeadsRequest).await
     }
 
-    /// Wait for the server's head to differ from `known_head`.
+    /// Wait until `known_head` is absent from the server's current head set.
     ///
-    /// If the server's head already differs, responds immediately.
-    /// Otherwise blocks until the head changes.
+    /// If absent, returns a sampled current head immediately. Otherwise this
+    /// blocks even when the server already has an undiscovered sibling head.
+    /// This compatibility-preserving single-head RPC therefore cannot provide
+    /// complete head discovery.
     pub async fn wait_head_update(&self, known_head: ShortEventId) -> RpcResult<ShortEventId> {
         Ok(self.make_rpc(&WaitHeadUpdateRequest(known_head)).await?.0)
     }
