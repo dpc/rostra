@@ -139,6 +139,12 @@ collection when no events need the content.
    - Remove Missing marker
 ```
 
+Latest-event projections apply one order while processing side effects:
+follow/unfollow state, profiles, generic singletons, and individual votes keep
+the maximum `(event.timestamp, ShortEventId)`. The vote aggregate changes only
+when the same candidate wins the individual-vote comparison. Equal-second
+events therefore converge independently of payload delivery order.
+
 ### Flow 3: Content Deletion Before Target Event Arrives
 
 Parent IDs resolve only within the deleting event's author graph, as specified
@@ -151,7 +157,7 @@ and cannot be mutated.
    - T added to `events_missing` with deleted_by = D
    - An ordinary child referencing T preserves deleted_by = D
    - Another direct deleter is merged canonically; the maximum
-     `(signed timestamp, ShortEventId)` becomes deleted_by
+     `(event.timestamp, ShortEventId)` becomes deleted_by
 
 2. Same-author target event T finally arrives:
    - Check `events_missing`: found with deleted_by
@@ -382,11 +388,19 @@ Both cases indicate bugs in the calling code and will panic in debug builds.
 - `test_process_content_for_nonexistent_event` - Silent skip (release only)
 - `test_data_usage_payload_invalid` - Invalid content: Missing→Invalid, RC decremented
 - `test_data_usage_invalid_payload_deletion` - Deleting invalid: Invalid→Deleted, no RC change
+- `test_equal_timestamp_follow_conflicts_converge` - Follow/unfollow and selector
+  conflicts converge in both orders
+- `test_equal_timestamp_latest_values_converge` - Profile and generic singleton
+  conflicts converge in both orders
+- `test_equal_timestamp_vote_conflicts_converge` - Vote winner and aggregate use
+  one equal-second comparison
 
-### Property-Based Tests
+### Property and Shuffled-Order Tests
 
 - `proptest_rc_counting` - Randomized RC correctness
 - `test_follow_unfollow_delivery_order` - Follow/unfollow ordering
+- `test_shuffled_singleton_events_converge` - Shuffled finite latest-event sets
+  select the total-order maximum
 
 ## Summary
 

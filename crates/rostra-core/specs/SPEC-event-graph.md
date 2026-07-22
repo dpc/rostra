@@ -53,9 +53,11 @@ The delete-parent-content flag declares that the content of the same-author
 auxiliary parent is deleted; the graph header remains available. It must never
 delete or otherwise mutate an event signed by another author whose raw event
 ID matches the auxiliary parent field. The singleton flag declares that only
-the latest event for the same kind and auxiliary key matters. Consumers must
-preserve these graph-level semantics even when the affected payload is absent
-locally.
+the latest event for the same kind and auxiliary key matters. "Latest" is the
+maximum `(event.timestamp, ShortEventId)`, so distinct events in the same
+timestamp second have one canonical winner. Consumers must use this complete
+order for singleton-derived state and preserve graph-level semantics even when
+the affected payload is absent locally.
 
 Deletion affects only the target payload. It does not disable the target header
 or any parent or deletion instruction encoded by that header. Deleting a

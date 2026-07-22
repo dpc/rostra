@@ -44,6 +44,13 @@ the bytes by content hash, removes fetch scheduling, and transitions to
 Processed. Repeated delivery of an envelope or payload must not duplicate
 reference counts, reply counts, follow changes, or other projections.
 
+Projections that retain one latest source event use the maximum
+`(event.timestamp, ShortEventId)` defined by
+[SPEC-event-graph](../../rostra-core/specs/SPEC-event-graph.md). Follow and
+unfollow, profile, generic singleton, and individual-vote reducers all use this
+order. A vote changes its aggregate only when it wins that same comparison, so
+the aggregate and retained vote cannot select different equal-second events.
+
 Invalid content is not stored and transitions to Invalid. Deletion, pruning,
 or invalidation removes the event's reference to the content hash exactly
 once. A later transition from Invalid or Pruned to Deleted records the
@@ -55,7 +62,7 @@ currently retained.
 Deletion intent is monotone: once a valid direct deleting child has been
 observed, ordinary child references and later lifecycle changes cannot erase
 it. If several direct same-author children delete the same target, `deleted_by`
-is the child with the maximum `(signed timestamp, ShortEventId)`. A deleting
+is the child with the maximum `(event.timestamp, ShortEventId)`. A deleting
 child remains a candidate even when its own content is deleted. This attribution
 is direct rather than transitive; in a chain where D2 deletes D1's content and
 D1 deletes T's content, T is deleted by D1 and D1 is deleted by D2.

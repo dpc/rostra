@@ -1,3 +1,5 @@
+mod event_order;
+
 use rostra_core::EventId;
 use rostra_core::event::{Event, EventContentRaw, EventExt as _, EventKind, VerifiedEvent};
 use rostra_core::id::{RostraId, RostraIdSecretKey, ToShort as _};
@@ -7,6 +9,7 @@ use tempfile::{TempDir, tempdir};
 use tracing::info;
 
 use crate::event::EventContentState;
+use crate::event_order::EventOrder;
 use crate::{
     Database, content_rc, content_store, events, events_by_time, events_content_missing,
     events_content_state, events_heads, events_missing, ids_full,
@@ -1066,7 +1069,7 @@ async fn test_delete_event_arrives_before_target() -> BoxedErrorResult<()> {
 ///
 /// Verifies that:
 /// - A follow with newer timestamp replaces older follow record
-/// - A follow with older or equal timestamp is rejected
+/// - A follow with an older event order is rejected
 /// - Same logic applies to unfollows
 #[test_log::test(tokio::test(flavor = "multi_thread"))]
 async fn test_follow_unfollow_timestamp_ordering() -> BoxedErrorResult<()> {
@@ -1098,7 +1101,7 @@ async fn test_follow_unfollow_timestamp_ordering() -> BoxedErrorResult<()> {
         };
         let result = Database::insert_follow_tx(
             author,
-            ts_100,
+            EventOrder::new(ts_100, rostra_core::ShortEventId::ZERO),
             follow_content.clone(),
             &mut followees_table,
             &mut followers_table,
@@ -1113,7 +1116,7 @@ async fn test_follow_unfollow_timestamp_ordering() -> BoxedErrorResult<()> {
         // Try to follow with older timestamp - should be rejected
         let result = Database::insert_follow_tx(
             author,
-            Timestamp::from(50),
+            EventOrder::new(Timestamp::from(50), rostra_core::ShortEventId::ZERO),
             follow_content.clone(),
             &mut followees_table,
             &mut followers_table,
@@ -1121,21 +1124,21 @@ async fn test_follow_unfollow_timestamp_ordering() -> BoxedErrorResult<()> {
         )?;
         assert!(!result, "Follow with older timestamp should be rejected");
 
-        // Try to follow with same timestamp - should be rejected
+        // The same timestamp and event ID is idempotently rejected.
         let result = Database::insert_follow_tx(
             author,
-            ts_100,
+            EventOrder::new(ts_100, rostra_core::ShortEventId::ZERO),
             follow_content.clone(),
             &mut followees_table,
             &mut followers_table,
             &mut unfollowed_table,
         )?;
-        assert!(!result, "Follow with same timestamp should be rejected");
+        assert!(!result, "Duplicate follow should be rejected");
 
         // Follow with newer timestamp - should succeed
         let result = Database::insert_follow_tx(
             author,
-            ts_200,
+            EventOrder::new(ts_200, rostra_core::ShortEventId::ZERO),
             follow_content,
             &mut followees_table,
             &mut followers_table,
@@ -1151,7 +1154,7 @@ async fn test_follow_unfollow_timestamp_ordering() -> BoxedErrorResult<()> {
         // Unfollow with older timestamp than current follow - should be rejected
         let result = Database::insert_unfollow_tx(
             author,
-            ts_150, // older than ts_200
+            EventOrder::new(ts_150, rostra_core::ShortEventId::ZERO),
             followee,
             &mut followees_table,
             &mut followers_table,
@@ -1166,7 +1169,7 @@ async fn test_follow_unfollow_timestamp_ordering() -> BoxedErrorResult<()> {
         let ts_300 = Timestamp::from(300);
         let result = Database::insert_unfollow_tx(
             author,
-            ts_300,
+            EventOrder::new(ts_300, rostra_core::ShortEventId::ZERO),
             followee,
             &mut followees_table,
             &mut followers_table,
@@ -1184,7 +1187,7 @@ async fn test_follow_unfollow_timestamp_ordering() -> BoxedErrorResult<()> {
         };
         let result = Database::insert_follow_tx(
             author,
-            ts_200, // older than ts_300 unfollow
+            EventOrder::new(ts_200, rostra_core::ShortEventId::ZERO),
             follow_content2.clone(),
             &mut followees_table,
             &mut followers_table,
@@ -1199,7 +1202,7 @@ async fn test_follow_unfollow_timestamp_ordering() -> BoxedErrorResult<()> {
         let ts_400 = Timestamp::from(400);
         let result = Database::insert_follow_tx(
             author,
-            ts_400,
+            EventOrder::new(ts_400, rostra_core::ShortEventId::ZERO),
             follow_content2,
             &mut followees_table,
             &mut followers_table,
@@ -1210,11 +1213,11 @@ async fn test_follow_unfollow_timestamp_ordering() -> BoxedErrorResult<()> {
             "Follow with timestamp newer than unfollow should succeed"
         );
 
-        // Try to unfollow with timestamp older than both current follow and unfollow
-        // This tests the second <= check in insert_unfollow_tx
+        // An unfollow equal to the old unfollow is still older than the current
+        // follow and exercises the second stored-order guard.
         let result = Database::insert_unfollow_tx(
             author,
-            ts_300, // equal to old unfollow, older than current follow
+            EventOrder::new(ts_300, rostra_core::ShortEventId::ZERO),
             followee,
             &mut followees_table,
             &mut followers_table,
@@ -1388,7 +1391,7 @@ async fn test_duplicate_unfollow_rejected() -> BoxedErrorResult<()> {
         // Initial unfollow at timestamp 100 (no prior follow)
         let result = Database::insert_unfollow_tx(
             author,
-            ts_100,
+            EventOrder::new(ts_100, rostra_core::ShortEventId::ZERO),
             followee,
             &mut followees_table,
             &mut followers_table,
@@ -1400,21 +1403,21 @@ async fn test_duplicate_unfollow_rejected() -> BoxedErrorResult<()> {
         let record = unfollowed_table.get(&(author, followee))?.unwrap().value();
         assert_eq!(record.ts, ts_100);
 
-        // Try to unfollow again with same timestamp - should be rejected
+        // The same timestamp and event ID is idempotently rejected.
         let result = Database::insert_unfollow_tx(
             author,
-            ts_100,
+            EventOrder::new(ts_100, rostra_core::ShortEventId::ZERO),
             followee,
             &mut followees_table,
             &mut followers_table,
             &mut unfollowed_table,
         )?;
-        assert!(!result, "Unfollow with same timestamp should be rejected");
+        assert!(!result, "Duplicate unfollow should be rejected");
 
         // Try to unfollow with older timestamp - should be rejected
         let result = Database::insert_unfollow_tx(
             author,
-            Timestamp::from(50),
+            EventOrder::new(Timestamp::from(50), rostra_core::ShortEventId::ZERO),
             followee,
             &mut followees_table,
             &mut followers_table,
@@ -1425,7 +1428,7 @@ async fn test_duplicate_unfollow_rejected() -> BoxedErrorResult<()> {
         // Unfollow with newer timestamp - should succeed and update record
         let result = Database::insert_unfollow_tx(
             author,
-            ts_200,
+            EventOrder::new(ts_200, rostra_core::ShortEventId::ZERO),
             followee,
             &mut followees_table,
             &mut followers_table,
@@ -1446,8 +1449,8 @@ async fn test_duplicate_unfollow_rejected() -> BoxedErrorResult<()> {
 
 /// Test: insert_latest_value_tx respects timestamp ordering.
 ///
-/// Verifies that values with older or equal timestamps are rejected while
-/// newer timestamps update the stored value.
+/// Verifies that older or duplicate event orders are rejected while newer
+/// event orders update the stored value.
 #[test_log::test(tokio::test(flavor = "multi_thread"))]
 async fn test_insert_latest_value_timestamp_ordering() -> BoxedErrorResult<()> {
     use rostra_core::Timestamp;
@@ -1497,14 +1500,14 @@ async fn test_insert_latest_value_timestamp_ordering() -> BoxedErrorResult<()> {
             avatar: None,
         };
 
-        // Try to insert with same timestamp - should be rejected
+        // The same timestamp and event ID is idempotently rejected.
         let result = Database::insert_latest_value_tx(
             ts_100,
             &author,
             profile_bob.clone(),
             &mut profiles_table,
         )?;
-        assert!(!result, "Insert with same timestamp should be rejected");
+        assert!(!result, "Duplicate value should be rejected");
 
         // Verify value unchanged
         let record = profiles_table.get(&author)?.unwrap().value();
@@ -3661,26 +3664,40 @@ async fn test_social_posts_by_received_at_pagination() -> BoxedErrorResult<()> {
 /// 2. DB version is updated to current
 /// 3. Followees/followers are correctly re-derived
 /// 4. Social posts are in the correct index tables
+/// 5. Exact winner event IDs are recovered after derived rows are removed
+/// 6. Stable database initialization metadata is preserved
+/// 7. Present same-author parents replay before their children
 #[test_log::test(tokio::test(flavor = "multi_thread"))]
 async fn test_total_migration() -> BoxedErrorResult<()> {
     use rostra_core::Timestamp;
     use rostra_core::event::content_kind::PersonaSelector;
     use rostra_core::event::{VerifiedEventContent, content_kind};
 
-    use crate::{db_version, ids_followees, ids_followers, social_posts_by_time};
+    use crate::{db_init_time, db_version, ids_followees, ids_followers, social_posts_by_time};
 
-    let user_a_secret = RostraIdSecretKey::generate();
+    let user_a_secret = RostraIdSecretKey::from_bytes([1; 32]);
     let user_a = user_a_secret.id();
 
-    let user_b_secret = RostraIdSecretKey::generate();
+    let user_b_secret = RostraIdSecretKey::from_bytes([2; 32]);
     let user_b = user_b_secret.id();
 
     let dir = tempfile::tempdir()?;
     let db_path = dir.path().join("db.redb");
+    let expected_follow_event_id;
+    let db_init_time_before;
 
     // Phase 1: Create database with data
     {
         let db = Database::open(&db_path, user_a).await.boxed()?;
+        db_init_time_before = db
+            .read_with(|tx| {
+                Ok(tx
+                    .open_table(&db_init_time::TABLE)?
+                    .get(&())?
+                    .map(|g| g.value())
+                    .expect("database initialization time"))
+            })
+            .await?;
 
         // Create a follow event (user_a follows user_b)
         // Note: selector must be Some to be a follow, None means unfollow
@@ -3699,10 +3716,30 @@ async fn test_total_migration() -> BoxedErrorResult<()> {
                 .author(user_a)
                 .kind(EventKind::FOLLOW)
                 .content(&follow_content_raw)
+                .timestamp(time::OffsetDateTime::from_unix_timestamp(100).expect("valid timestamp"))
                 .build();
             let signed = event.signed_by(user_a_secret);
             VerifiedEvent::verify_signed(user_a, signed).expect("Valid event")
         };
+        expected_follow_event_id = follow_event.event_id.to_short();
+
+        // Use a deleting child whose ID sorts before the target. Raw-ID replay
+        // would stage deletion before the follow and produce a different derived
+        // result; dependency-ordered replay must process the target first.
+        let deleting_follow_event = {
+            let event = Event::builder_raw_content()
+                .author(user_a)
+                .kind(EventKind::NULL)
+                .delete(expected_follow_event_id)
+                .timestamp(time::OffsetDateTime::UNIX_EPOCH)
+                .build();
+            let signed = event.signed_by(user_a_secret);
+            VerifiedEvent::verify_signed(user_a, signed).expect("valid deleting event")
+        };
+        assert!(
+            deleting_follow_event.event_id.to_short() < expected_follow_event_id,
+            "fixed deleting child must sort before its target"
+        );
 
         // Create a follow event (user_b follows user_a) - to test "who follows me"
         let reverse_follow_content = content_kind::Follow {
@@ -3764,6 +3801,7 @@ async fn test_total_migration() -> BoxedErrorResult<()> {
             db.process_event_tx(&post_event, now, tx)?;
             let verified_post = VerifiedEventContent::assume_verified(post_event, post_content_raw);
             db.process_event_content_tx(&verified_post, now, tx)?;
+            db.process_event_tx(&deleting_follow_event, now, tx)?;
             Ok(())
         })
         .await?;
@@ -3863,6 +3901,17 @@ async fn test_total_migration() -> BoxedErrorResult<()> {
         );
         assert_eq!(posts_before.len(), 1, "Should have 1 post before migration");
 
+        // Remove the latest-event rows so reopening can restore them only by
+        // replaying source events with the current reducer and schema.
+        db.write_with(|tx| {
+            tx.open_table(&ids_followees::TABLE)?
+                .remove(&(user_a, user_b))?;
+            tx.open_table(&ids_followers::TABLE)?
+                .remove(&(user_b, user_a))?;
+            Ok(())
+        })
+        .await?;
+
         // Database is dropped here
     }
 
@@ -3872,11 +3921,10 @@ async fn test_total_migration() -> BoxedErrorResult<()> {
         let write_txn = raw_db.begin_write().boxed()?;
         {
             let mut table = write_txn.open_table(&db_version::TABLE).boxed()?;
-            // Set version to 17 to trigger total migration (current is 18).
-            // Using 17 (not 1) because the test writes data with the current
-            // ContentStoreRecord tuple struct format, and versions <= 16 are
-            // treated as legacy enum format during migration.
-            let old_version: u64 = 17;
+            // Exercise the established total-replay path without changing the
+            // production schema counter; the final stacked-series migration
+            // owns that single bump.
+            let old_version: u64 = 23;
             table.insert(&(), &old_version).boxed()?;
         }
         write_txn.commit().boxed()?;
@@ -3891,12 +3939,7 @@ async fn test_total_migration() -> BoxedErrorResult<()> {
         let db_ver_table = tx.open_table(&db_version::TABLE)?;
         let current_ver = db_ver_table.first()?.map(|g| g.1.value());
         info!("DB version after migration: {:?}", current_ver);
-        // Note: We can't directly check against DB_VER since it's private,
-        // but we can check it's greater than 1
-        assert!(
-            current_ver.is_some() && current_ver.unwrap() > 1,
-            "DB version should be updated after migration"
-        );
+        assert_eq!(current_ver, Some(24), "DB version should be updated");
 
         // Check followees table in detail
         let followees = tx.open_table(&ids_followees::TABLE)?;
@@ -3914,6 +3957,13 @@ async fn test_total_migration() -> BoxedErrorResult<()> {
             "Followee record after migration: latest_ts={:?}",
             followee_record.latest_ts,
         );
+        assert_eq!(followee_record.latest_event_id, expected_follow_event_id);
+
+        let db_init_time_after = tx
+            .open_table(&db_init_time::TABLE)?
+            .get(&())?
+            .map(|g| g.value());
+        assert_eq!(db_init_time_after, Some(db_init_time_before));
 
         // Check followers table in detail
         let followers = tx.open_table(&ids_followers::TABLE)?;

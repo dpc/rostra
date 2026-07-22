@@ -4,8 +4,8 @@
 //! (follows, followers, personas).
 
 use bincode::{Decode, Encode};
-use rostra_core::Timestamp;
 use rostra_core::event::{PersonaSelector, PersonaTag, PersonasTagsSelector};
+use rostra_core::{ShortEventId, Timestamp};
 
 /// Record for the `ids_followees` table.
 ///
@@ -17,9 +17,10 @@ use rostra_core::event::{PersonaSelector, PersonaTag, PersonasTagsSelector};
 /// in `ids_unfollowed` instead).
 #[derive(Debug, Encode, Decode, Clone)]
 pub struct IdsFolloweesRecord {
-    /// Timestamp of the latest follow/unfollow event (used as idempotency
-    /// guard)
+    /// Timestamp of the winning follow event.
     pub latest_ts: Timestamp,
+    /// Event ID of the winning follow event.
+    pub latest_event_id: ShortEventId,
     /// Timestamp of the first follow event that established this relationship.
     ///
     /// Used for notification timestamp heuristics: posts from before this
@@ -39,12 +40,14 @@ impl IdsFolloweesRecord {
     /// Create a new followee record.
     pub fn new(
         latest_ts: Timestamp,
+        latest_event_id: ShortEventId,
         first_ts: Timestamp,
         selector: Option<PersonaSelector>,
         tags_selector: Option<PersonasTagsSelector>,
     ) -> Self {
         Self {
             latest_ts,
+            latest_event_id,
             first_ts,
             selector,
             tags_selector,
@@ -91,12 +94,14 @@ pub struct IdsFollowersRecord {}
 
 /// Record for the `ids_unfollowed` table.
 ///
-/// Tracks when an unfollow happened to prevent reprocessing old follow events
-/// that have timestamps before the unfollow.
+/// Tracks the winning unfollow order so follow/unfollow candidates at or below
+/// its `(event.timestamp, ShortEventId)` do not replace it.
 #[derive(Debug, Encode, Decode, Clone)]
 pub struct IdsUnfollowedRecord {
-    /// Timestamp when the unfollow occurred
+    /// Timestamp of the winning unfollow event.
     pub ts: Timestamp,
+    /// Event ID of the winning unfollow event.
+    pub event_id: ShortEventId,
 }
 
 /// Record for the `ids_personas` table.

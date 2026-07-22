@@ -18,6 +18,7 @@ use tables::event::{
 use tables::ids::IdsFolloweesRecord;
 use tracing::{debug, error};
 
+use super::event_order::EventOrder;
 use super::id_self::IdSelfAccountRecord;
 use super::{
     Database, DbError, DbResult, EventsHeadsTableRecord, InsertEventOutcome, content_rc,
@@ -26,8 +27,9 @@ use super::{
     ids_self, tables,
 };
 use crate::{
-    IdSocialProfileRecord, IdsDataUsageRecord, LOG_TARGET, Latest, SocialPostRecord, WotData,
-    events_content_missing, ids_data_usage, ids_full, social_posts, social_profiles,
+    IdSocialProfileRecord, IdsDataUsageRecord, LOG_TARGET, Latest, LatestEventValue,
+    SocialPostRecord, WotData, events_content_missing, ids_data_usage, ids_full, social_posts,
+    social_profiles,
 };
 
 pub(crate) trait RandomTableKey: Copy + Ord {
@@ -76,18 +78,18 @@ impl Database {
     /// Merge a direct content-deletion candidate into stored attribution.
     ///
     /// Deletion presence is monotone. Multiple direct deleters select the
-    /// greatest `(signed timestamp, event ID)` so delivery order cannot affect
-    /// attribution.
+    /// greatest `(event.timestamp, ShortEventId)` so delivery order cannot
+    /// affect attribution.
     fn merge_deleted_by_tx(
         current: Option<ShortEventId>,
-        candidate: Option<(Timestamp, ShortEventId)>,
+        candidate: Option<EventOrder>,
         events_table: &impl events::ReadableTable,
     ) -> DbResult<Option<ShortEventId>> {
         let Some(candidate) = candidate else {
             return Ok(current);
         };
         let Some(current_id) = current else {
-            return Ok(Some(candidate.1));
+            return Ok(Some(candidate.event_id()));
         };
 
         let current_timestamp = events_table
@@ -98,7 +100,11 @@ impl Database {
                 location: snafu::Location::new(file!(), line!(), column!()),
             })?;
 
-        Ok(Some((current_timestamp, current_id).max(candidate).1))
+        Ok(Some(
+            EventOrder::new(current_timestamp, current_id)
+                .max(candidate)
+                .event_id(),
+        ))
     }
 
     pub fn read_followees_tx(
@@ -273,7 +279,7 @@ impl Database {
                             Some(EventContentState::Deleted { deleted_by }) => Some(deleted_by),
                             _ => None,
                         },
-                        Some((event.timestamp(), event_id)),
+                        Some(EventOrder::new(event.timestamp(), event_id)),
                         events_table,
                     )?
                     .expect("a direct deletion candidate always produces attribution");
@@ -335,7 +341,7 @@ impl Database {
                 let deleted_by = Self::merge_deleted_by_tx(
                     old_deleted_by,
                     (event.is_delete_parent_aux_content_set() && parent_is_aux)
-                        .then_some((event.timestamp(), event_id)),
+                        .then_some(EventOrder::new(event.timestamp(), event_id)),
                     events_table,
                 )?;
                 events_missing_table
@@ -702,7 +708,7 @@ impl Database {
 
     pub(crate) fn insert_follow_tx(
         author: RostraId,
-        timestamp: Timestamp,
+        event_order: EventOrder,
         content: content_kind::Follow,
         followees_table: &mut Table<(RostraId, RostraId), IdsFolloweesRecord>,
         followers_table: &mut Table<(RostraId, RostraId), IdsFollowersRecord>,
@@ -712,16 +718,17 @@ impl Database {
         let db_key = (author, followee);
         let existing = followees_table.get(&db_key)?.map(|v| v.value());
         if let Some(ref followees) = existing {
-            if timestamp <= followees.latest_ts {
+            if event_order <= EventOrder::new(followees.latest_ts, followees.latest_event_id) {
                 return Ok(false);
             }
         }
         if let Some(unfollowed) = unfollowed_table.get(&db_key)?.map(|v| v.value()) {
-            if timestamp <= unfollowed.ts {
+            if event_order <= EventOrder::new(unfollowed.ts, unfollowed.event_id) {
                 return Ok(false);
             }
         }
 
+        let timestamp = event_order.timestamp();
         let first_ts = existing
             .map(|r| std::cmp::min(r.first_ts, timestamp))
             .unwrap_or(timestamp);
@@ -733,7 +740,13 @@ impl Database {
         }
         followees_table.insert(
             &db_key,
-            &IdsFolloweesRecord::new(timestamp, first_ts, selector, tags_selector),
+            &IdsFolloweesRecord::new(
+                timestamp,
+                event_order.event_id(),
+                first_ts,
+                selector,
+                tags_selector,
+            ),
         )?;
         followers_table.insert(&(followee, author), &IdsFollowersRecord {})?;
 
@@ -745,7 +758,7 @@ impl Database {
     #[allow(deprecated)]
     pub(crate) fn insert_unfollow_tx(
         author: RostraId,
-        timestamp: Timestamp,
+        event_order: EventOrder,
         followee: RostraId,
         followees_table: &mut Table<(RostraId, RostraId), IdsFolloweesRecord>,
         followers_table: &mut Table<(RostraId, RostraId), IdsFollowersRecord>,
@@ -753,19 +766,25 @@ impl Database {
     ) -> DbResult<bool> {
         let db_key = (author, followee);
         if let Some(followees) = followees_table.get(&db_key)?.map(|v| v.value()) {
-            if timestamp <= followees.latest_ts {
+            if event_order <= EventOrder::new(followees.latest_ts, followees.latest_event_id) {
                 return Ok(false);
             }
         }
         if let Some(unfollowed) = unfollowed_table.get(&db_key)?.map(|v| v.value()) {
-            if timestamp <= unfollowed.ts {
+            if event_order <= EventOrder::new(unfollowed.ts, unfollowed.event_id) {
                 return Ok(false);
             }
         }
 
         followees_table.remove(&db_key)?;
         followers_table.remove(&(followee, author))?;
-        unfollowed_table.insert(&db_key, &IdsUnfollowedRecord { ts: timestamp })?;
+        unfollowed_table.insert(
+            &db_key,
+            &IdsUnfollowedRecord {
+                ts: event_order.timestamp(),
+                event_id: event_order.event_id(),
+            },
+        )?;
         debug!(target: LOG_TARGET, follower = %author.to_short(), followee=%followee.to_short(), "Unfollow update");
 
         Ok(true)
@@ -780,9 +799,11 @@ impl Database {
     where
         K: bincode::Encode + bincode::Decode<()>,
         V: bincode::Encode + bincode::Decode<()>,
+        V: LatestEventValue,
     {
+        let event_order = EventOrder::new(timestamp, value.event_id());
         if let Some(existing_value) = table.get(key)?.map(|v| v.value()) {
-            if timestamp <= existing_value.ts {
+            if event_order <= EventOrder::new(existing_value.ts, existing_value.inner.event_id()) {
                 return Ok(false);
             }
         }

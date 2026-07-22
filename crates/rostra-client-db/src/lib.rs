@@ -1,3 +1,4 @@
+mod event_order;
 mod events_content_missing_ops;
 mod id_nodes_ops;
 mod migration_ops;
@@ -203,6 +204,8 @@ pub enum DbError {
         #[snafu(implicit)]
         location: Location,
     },
+    #[snafu(display("Stored event graph contains a migration dependency cycle"))]
+    MigrationDependencyCycle,
 }
 pub type DbResult<T> = std::result::Result<T, DbError>;
 

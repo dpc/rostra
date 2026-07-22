@@ -4,7 +4,9 @@
 local Rostra identity during a database instance's lifetime. It stores
 verified graph data, tracks incomplete replication, and materializes
 content-specific views used by clients and user interfaces. Disk-backed
-instances preserve this state across runs; light clients use an in-memory
+instances preserve retained source data and stable identity and initialization
+metadata across runs. Total migrations may discard and canonically rebuild
+disposable lifecycle and projection state. Light clients use an in-memory
 instance. The crate implements the storage role in
 [ARCH-rostra](../../../specs/ARCH-rostra.md) for the event contract in
 [SPEC-event-graph](../../rostra-core/specs/SPEC-event-graph.md).
@@ -56,6 +58,9 @@ incremental observations and use database state as the authority.
   content. Deletion of a processed social post reverts its post-specific
   projections; other content kinds currently retain their derived
   projections.
+- Follow state, profiles, generic singletons, and individual votes select the
+  maximum `(event.timestamp, ShortEventId)`. Vote aggregates use the same
+  winner as the individual-vote projection.
 - Locally imposed payload limits may prune content without removing the event
   envelope or breaking graph traversal.
 

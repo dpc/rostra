@@ -7,6 +7,7 @@ use serde::{Deserialize, Serialize};
 use tracing::{debug, warn};
 
 use crate::event::ContentStoreRecord;
+use crate::event_order::EventOrder;
 use crate::social::SocialPostRecord;
 use crate::{
     Database, DbResult, LOG_TARGET, SocialNewsRankRecord, SocialVoteScore, SocialVoteSumRecord,
@@ -116,7 +117,7 @@ impl Database {
         &self,
         vote: &content_kind::SocialVote,
         author: RostraId,
-        event_ts: Timestamp,
+        event_order: EventOrder,
         tx: &crate::WriteTransactionCtx,
     ) -> DbResult<()> {
         let Some(reply_to) = vote.reply_to else {
@@ -130,10 +131,9 @@ impl Database {
         );
         let singletons_table = tx.open_table(&events_singletons_new::TABLE)?;
         let existing_singleton = singletons_table.get(&singleton_key)?.map(|g| g.value());
-        if existing_singleton
-            .as_ref()
-            .is_some_and(|existing| event_ts <= existing.ts)
-        {
+        if existing_singleton.as_ref().is_some_and(|existing| {
+            event_order <= EventOrder::new(existing.ts, existing.inner.event_id)
+        }) {
             return Ok(());
         }
 
@@ -172,7 +172,7 @@ impl Database {
                 last_vote_time: Timestamp::ZERO,
                 current_sum: 0,
             });
-        record.last_vote_time = record.last_vote_time.max(event_ts);
+        record.last_vote_time = record.last_vote_time.max(event_order.timestamp());
         record.current_sum = record.current_sum.saturating_add(delta);
         vote_sums_table.insert(&reply_to, &record)?;
 

@@ -2,10 +2,11 @@
 //!
 //! This module handles schema versioning and migrations. The approach is
 //! simple: if the database version is older than the current schema version, we
-//! perform a "total migration" that re-derives all state from the
+//! perform a "total migration" that re-derives all disposable state from the
 //! source-of-truth tables.
 
 use std::borrow::Cow;
+use std::collections::{BTreeSet, HashMap};
 
 use bincode::{Decode, Encode};
 use redb::{ReadableTable as _, ReadableTableMetadata as _, TableHandle as _};
@@ -19,8 +20,8 @@ use tracing::{debug, info};
 
 use crate::id_self::IdSelfAccountRecord;
 use crate::{
-    Database, DbResult, DbVersionTooHighSnafu, LOG_TARGET, WriteTransactionCtx, content_store,
-    db_version, events, ids_self,
+    Database, DbResult, DbVersionTooHighSnafu, LOG_TARGET, MigrationDependencyCycleSnafu,
+    WriteTransactionCtx, content_store, db_version, events, ids_self,
 };
 
 /// Legacy content state from old event-id-based content store.
@@ -159,10 +160,11 @@ impl Database {
     /// Handle database version check and migrations.
     ///
     /// If total migration is needed, this function:
-    /// 1. Copies events, content_store, ids_self to temp tables
+    /// 1. Copies events, content_store, ids_self, and db_init_time to temp
+    ///    tables
     /// 2. Deletes all tables except temp and db_version
     /// 3. Initializes fresh tables with current schema
-    /// 4. Restores ids_self from temp
+    /// 4. Restores ids_self and db_init_time from temp
     ///
     /// The actual reprocessing of events happens later via
     /// `reprocess_migration_stash`. Use `has_pending_migration_stash` to check
@@ -200,7 +202,7 @@ impl Database {
                 target: LOG_TARGET,
                 from_ver = cur_db_ver,
                 to_ver = DB_VER,
-                "Database schema very old, preparing total migration"
+                "Database schema requires total migration"
             );
             Self::prepare_total_migration(dbtx, cur_db_ver)?;
         }
@@ -233,9 +235,10 @@ impl Database {
 
     /// Prepare for total migration by stashing source-of-truth tables.
     ///
-    /// This copies events/content_store/ids_self to temp tables, deletes all
-    /// other tables, and initializes fresh schema. The ids_self is restored
-    /// immediately so the Database can be created normally.
+    /// This copies events, content_store, ids_self, and db_init_time to temp
+    /// tables, deletes all other tables, and initializes fresh schema. Stable
+    /// identity and initialization metadata are restored immediately so the
+    /// Database can be created normally.
     fn prepare_total_migration(dbtx: &WriteTransactionCtx, source_ver: u64) -> DbResult<()> {
         // Define temp table definitions
         let events_temp: redb_bincode::TableDefinition<
@@ -251,6 +254,8 @@ impl Database {
         > = redb_bincode::TableDefinition::new("_total_migration_content_store");
         let ids_self_temp: redb_bincode::TableDefinition<'_, (), IdSelfAccountRecord> =
             redb_bincode::TableDefinition::new("_total_migration_ids_self");
+        let db_init_time_temp: redb_bincode::TableDefinition<'_, (), Timestamp> =
+            redb_bincode::TableDefinition::new("_total_migration_db_init_time");
         let source_ver_temp: redb_bincode::TableDefinition<'_, (), u64> =
             redb_bincode::TableDefinition::new(MIGRATION_SOURCE_VER_TEMP_TABLE);
 
@@ -271,6 +276,7 @@ impl Database {
         Self::copy_table_raw(dbtx, &events::TABLE, &events_temp)?;
         Self::copy_table_raw(dbtx, &content_store::TABLE, &content_store_temp)?;
         Self::copy_table_raw(dbtx, &ids_self::TABLE, &ids_self_temp)?;
+        Self::copy_table_raw(dbtx, &crate::db_init_time::TABLE, &db_init_time_temp)?;
 
         // Try to copy legacy events_content table if it exists
         if Self::copy_table_raw_if_exists(
@@ -309,12 +315,19 @@ impl Database {
         info!(target: LOG_TARGET, "Initializing fresh tables...");
         Self::init_tables_tx(dbtx)?;
 
-        // Step 4: Restore ids_self from temp (needed for Database creation)
+        // Step 4: Restore stable database metadata.
         {
             let temp_table = dbtx.open_table(&ids_self_temp)?;
             let mut ids_self_table = dbtx.open_table(&ids_self::TABLE)?;
             if let Some(record) = temp_table.get(&())?.map(|g| g.value()) {
                 ids_self_table.insert(&(), &record)?;
+            }
+        }
+        {
+            let temp_table = dbtx.open_table(&db_init_time_temp)?;
+            let mut db_init_time_table = dbtx.open_table(&crate::db_init_time::TABLE)?;
+            if let Some(timestamp) = temp_table.get(&())?.map(|g| g.value()) {
+                db_init_time_table.insert(&(), &timestamp)?;
             }
         }
 
@@ -337,6 +350,8 @@ impl Database {
         > = redb_bincode::TableDefinition::new("_total_migration_events");
         let ids_self_temp: redb_bincode::TableDefinition<'_, (), IdSelfAccountRecord> =
             redb_bincode::TableDefinition::new("_total_migration_ids_self");
+        let db_init_time_temp: redb_bincode::TableDefinition<'_, (), Timestamp> =
+            redb_bincode::TableDefinition::new("_total_migration_db_init_time");
 
         // Read source DB version to determine content store format
         let source_ver_temp: redb_bincode::TableDefinition<'_, (), u64> =
@@ -386,8 +401,15 @@ impl Database {
             LegacyEventContentStateOwned,
         > = redb_bincode::TableDefinition::new("_total_migration_events_content_legacy");
 
-        // Open temp tables for iteration
+        // Open the temp table and establish parent-before-child replay order.
         let events_temp_table = dbtx.open_table(&events_temp)?;
+        let stashed_events = events_temp_table
+            .range(..)?
+            .map(|entry| {
+                entry.map(|(event_id, event_record)| (event_id.value(), event_record.value()))
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        let stashed_events = Self::migration_replay_order(stashed_events)?;
 
         // Try to open legacy content table (may not exist in newer databases)
         let legacy_content_table_exists = dbtx
@@ -406,10 +428,7 @@ impl Database {
         let mut processed_count = 0u64;
         let mut legacy_content_used = 0u64;
 
-        for result in events_temp_table.range(..)? {
-            let (event_id, event_record) = result?;
-            let event_id = event_id.value();
-            let event_record = event_record.value();
+        for (event_id, event_record) in stashed_events {
             let content_hash = event_record.content_hash();
             let timestamp = event_record.timestamp();
             let event_kind = event_record.signed.event.kind;
@@ -570,6 +589,7 @@ impl Database {
         dbtx.as_raw()
             .delete_table(new_content_store_temp.as_raw())?;
         dbtx.as_raw().delete_table(ids_self_temp.as_raw())?;
+        dbtx.as_raw().delete_table(db_init_time_temp.as_raw())?;
         dbtx.as_raw().delete_table(source_ver_temp.as_raw())?;
         // Try to delete legacy temp table (may not exist)
         let _ = dbtx
@@ -584,6 +604,63 @@ impl Database {
         );
 
         Ok(())
+    }
+
+    /// Order stashed events so every present same-author parent precedes its
+    /// children during replay.
+    fn migration_replay_order(
+        events: Vec<(ShortEventId, crate::EventRecord)>,
+    ) -> DbResult<Vec<(ShortEventId, crate::EventRecord)>> {
+        let index_by_id = events
+            .iter()
+            .enumerate()
+            .map(|(index, (event_id, _))| (*event_id, index))
+            .collect::<HashMap<_, _>>();
+        let mut indegree = vec![0usize; events.len()];
+        let mut children = vec![Vec::new(); events.len()];
+
+        for (child_index, (_, child)) in events.iter().enumerate() {
+            for parent_id in child.all_parents() {
+                let Some(&parent_index) = index_by_id.get(&parent_id) else {
+                    continue;
+                };
+                if events[parent_index].1.author() != child.author() {
+                    continue;
+                }
+                indegree[child_index] += 1;
+                children[parent_index].push(child_index);
+            }
+        }
+
+        let mut ready = indegree
+            .iter()
+            .enumerate()
+            .filter_map(|(index, degree)| (*degree == 0).then_some((events[index].0, index)))
+            .collect::<BTreeSet<_>>();
+        let mut events = events.into_iter().map(Some).collect::<Vec<_>>();
+        let mut ordered = Vec::with_capacity(events.len());
+
+        while let Some((_, index)) = ready.pop_first() {
+            ordered.push(events[index].take().expect("ready event is unique"));
+            for child_index in children[index].iter().copied() {
+                indegree[child_index] -= 1;
+                if indegree[child_index] == 0 {
+                    ready.insert((
+                        events[child_index]
+                            .as_ref()
+                            .expect("pending child exists")
+                            .0,
+                        child_index,
+                    ));
+                }
+            }
+        }
+
+        if ordered.len() != events.len() {
+            return MigrationDependencyCycleSnafu.fail();
+        }
+
+        Ok(ordered)
     }
 
     /// Copy a table's contents to another table (both must have compatible raw

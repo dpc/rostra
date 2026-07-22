@@ -40,8 +40,9 @@ pub struct EventsMissingRecord {
     /// When the missing event is finally received, its content should be
     /// marked as deleted immediately rather than processed normally.
     ///
-    /// Multiple direct deleters are merged by maximum signed timestamp and
-    /// event ID. An ordinary child cannot erase existing deletion attribution.
+    /// Multiple direct deleters are merged by maximum
+    /// `(event.timestamp, ShortEventId)`. An ordinary child cannot erase
+    /// existing deletion attribution.
     pub deleted_by: Option<ShortEventId>,
 }
 
@@ -62,6 +63,12 @@ pub struct EventsHeadsTableRecord;
 pub struct EventSingletonRecord {
     /// The event ID of the latest singleton event
     pub event_id: ShortEventId,
+}
+
+impl super::LatestEventValue for EventSingletonRecord {
+    fn event_id(&self) -> ShortEventId {
+        self.event_id
+    }
 }
 
 // ============================================================================
@@ -162,7 +169,8 @@ pub enum EventContentState {
     /// - RC is decremented in `content_rc`
     /// - Content may be garbage collected if RC reaches 0
     Deleted {
-        /// Canonical direct deleter: maximum signed timestamp and event ID.
+        /// Canonical direct deleter: maximum
+        /// `(event.timestamp, ShortEventId)`.
         deleted_by: ShortEventId,
     },
 

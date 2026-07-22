@@ -123,9 +123,9 @@ pub struct Event {
     /// Deleting the content of an event does not disable that event's header or
     /// its own graph-level effects.
     ///
-    /// Big `1` - singleton - only the last value of this event for a given
-    /// `(kind, key)` really matters, and previous ones can be considered
-    /// deleted.
+    /// Bit `1` - singleton - only the event with the maximum
+    /// `(event.timestamp, ShortEventId)` for a given `(kind, key)` matters, and
+    /// previous ones can be considered deleted.
     ///
     /// All other bits MUST be 0 when producing headers, but might
     /// gain meaning in the future, so should still be accepted and

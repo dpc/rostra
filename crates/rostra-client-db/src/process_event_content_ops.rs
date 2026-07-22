@@ -9,6 +9,7 @@ use snafu::{Location, OptionExt as _, ResultExt as _, Snafu};
 use tracing::debug;
 
 use crate::event::EventSingletonRecord;
+use crate::event_order::EventOrder;
 use crate::{
     Database, DbError, IdSocialProfileRecord, IrohNodeRecord, LOG_TARGET, OverflowSnafu,
     SocialPostsReactionsRecord, SocialPostsRepliesRecord, WriteTransactionCtx,
@@ -87,6 +88,10 @@ impl Database {
         tx: &WriteTransactionCtx,
     ) -> ProcessEventResult<()> {
         let author = event_content.event.event.author;
+        let event_order = EventOrder::new(
+            event_content.timestamp(),
+            event_content.event_id().to_short(),
+        );
         #[allow(clippy::single_match)]
         match event_content.event.event.kind {
             EventKind::FOLLOW | EventKind::UNFOLLOW => {
@@ -112,7 +117,7 @@ impl Database {
                     if content.is_unfollow() {
                         Database::insert_unfollow_tx(
                             author,
-                            event_content.event.event.timestamp.into(),
+                            event_order,
                             content.followee,
                             &mut ids_followees_t,
                             &mut ids_followers_t,
@@ -121,7 +126,7 @@ impl Database {
                     } else {
                         Database::insert_follow_tx(
                             author,
-                            event_content.event.event.timestamp.into(),
+                            event_order,
                             content,
                             &mut ids_followees_t,
                             &mut ids_followers_t,
@@ -216,10 +221,10 @@ impl Database {
                         .boxed()
                         .context(InvalidSnafu)?;
                     Database::insert_latest_value_tx(
-                        event_content.event.event.timestamp.into(),
+                        event_order.timestamp(),
                         &author,
                         IdSocialProfileRecord {
-                            event_id: event_content.event.event_id.to_short(),
+                            event_id: event_order.event_id(),
                             display_name: content.display_name,
                             bio: content.bio,
                             avatar: content.avatar,
@@ -407,12 +412,7 @@ impl Database {
                         if event_content.event.is_singleton()
                             && event_content.aux_key() == Self::social_vote_aux_key(reply_to)
                         {
-                            self.process_social_vote_tx(
-                                &content,
-                                author,
-                                event_content.timestamp(),
-                                tx,
-                            )?;
+                            self.process_social_vote_tx(&content, author, event_order, tx)?;
                         }
                     }
                 }
@@ -470,14 +470,14 @@ impl Database {
                 .map_err(DbError::from)?;
 
             Self::insert_latest_value_tx(
-                event_content.timestamp(),
+                event_order.timestamp(),
                 &(
                     event_content.author(),
                     event_content.kind(),
                     event_content.aux_key(),
                 ),
                 EventSingletonRecord {
-                    event_id: event_content.event_id().to_short(),
+                    event_id: event_order.event_id(),
                 },
                 &mut events_singletons_tbl,
             )?;

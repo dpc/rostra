@@ -188,7 +188,7 @@ def_table! {
     /// Who each identity follows.
     ///
     /// Key: (follower, followee)
-    /// Value: timestamp and persona selector (which personas to see from followee)
+    /// Value: winning event order and persona selector
     ///
     /// Entries represent active follows only. Unfollows remove the entry
     /// entirely (and are recorded in `ids_unfollowed` instead).
@@ -204,10 +204,11 @@ def_table! {
 }
 
 def_table! {
-    /// Tracks unfollows with timestamps.
+    /// Tracks winning unfollow event orders.
     ///
     /// Key: (unfollower, unfollowee)
-    /// Used to prevent reprocessing old follow events that predate an unfollow.
+    /// Used to reject follow/unfollow candidates at or below the stored
+    /// `(event.timestamp, ShortEventId)`.
     ids_unfollowed: (RostraId, RostraId) => IdsUnfollowedRecord
 }
 
@@ -313,8 +314,8 @@ def_table! {
     /// Singleton events - events where only the latest matters.
     ///
     /// Key: (author, event_kind, aux_key)
-    /// For events like profile updates where we only care about the latest
-    /// version per author/kind/aux_key combination.
+    /// For events like profile updates where we only care about the maximum
+    /// `(event.timestamp, ShortEventId)` per author/kind/aux_key combination.
     events_singletons_new: (RostraId, EventKind, EventAuxKey) => Latest<event::EventSingletonRecord>
 }
 
@@ -571,14 +572,20 @@ def_table! {
 
 /// Wrapper for values where only the latest version matters.
 ///
-/// Used for singleton-style data where we track timestamps to ensure
-/// we only keep the most recent value (e.g., profile updates).
+/// Used for singleton-style data whose value carries the source event ID and
+/// whose maximum `(event.timestamp, ShortEventId)` is retained.
 #[derive(Debug, Encode, Decode, Clone, Serialize)]
 pub struct Latest<T> {
     /// Timestamp when this value was created/updated
     pub ts: Timestamp,
     /// The actual value
     pub inner: T,
+}
+
+/// Value stored in a latest-event projection.
+pub(crate) trait LatestEventValue {
+    /// Return the source event ID used to break timestamp ties.
+    fn event_id(&self) -> ShortEventId;
 }
 
 /// Marker record for the `social_posts_replies` index.
@@ -606,6 +613,12 @@ pub struct IdSocialProfileRecord {
     pub bio: String,
     /// Avatar image: (mime_type, image_bytes)
     pub avatar: Option<(String, Vec<u8>)>,
+}
+
+impl LatestEventValue for IdSocialProfileRecord {
+    fn event_id(&self) -> ShortEventId {
+        self.event_id
+    }
 }
 
 /// Aggregate metadata for a social post.
