@@ -334,7 +334,9 @@ pub struct Database {
     ///
     /// Acquiring it before transaction creation keeps redb writer order and
     /// publication order identical. Commit hooks run while it is held and must
-    /// not synchronously re-enter `write_with`.
+    /// not synchronously re-enter `write_with`. A hook panic propagates after
+    /// commit and poisons this mutex; the next write recovers the guard because
+    /// the durable transaction is still valid.
     write_and_publish_lock: std::sync::Mutex<()>,
 
     self_followees_updated: watch::Sender<Arc<HashMap<RostraId, IdsFolloweesRecord>>>,
@@ -1186,7 +1188,15 @@ impl Database {
     /// Runs a serialized write transaction and its internal post-commit
     /// actions.
     ///
-    /// The synchronous transaction closure must not re-enter database writes.
+    /// The mutex spans transaction creation, durable commit, and all
+    /// post-commit actions so their publication order matches writer order.
+    /// The synchronous transaction closure and post-commit actions must not
+    /// re-enter database writes.
+    ///
+    /// A post-commit action panic propagates to the caller after the
+    /// transaction has committed. Every registered action is attempted, then
+    /// the first panic resumes. A later write recovers the poisoned
+    /// serialization mutex and proceeds.
     pub(crate) async fn write_with<T>(
         &self,
         f: impl FnOnce(&'_ WriteTransactionCtx) -> DbResult<T>,

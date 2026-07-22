@@ -73,6 +73,20 @@ set-difference RPC. The signing-only head merger scans durable heads immediately
 when it starts or the identity is unlocked, then reacts to later changes and
 stitches pairs until fewer than two remain.
 
+Head synchronization discovers the graph backward: it must fetch a newer
+event's envelope before it can learn that event's parents. It then defers that
+event's payload, traverses backward toward older ancestors, and prioritizes
+queued payloads by effective timestamp, with deeper ancestors first when
+timestamps tie. This older-first, depth-biased traversal deliberately makes
+payload processing order opportunistically approximate author production order.
+Envelope insertion still proceeds from each discovered child toward its parents,
+and sibling-envelope discovery is ordered by event ID rather than strict
+depth-first search. Missing data, concurrent branches, peer availability, retries,
+and previously stored events can change the observed processing order, so this
+is neither a canonical ordering nor a convergence guarantee. Reception order
+remains database-local as specified by
+[ARCH-client-database](../../rostra-client-db/specs/ARCH-client-database.md).
+
 Publication constructs content events through `rostra-core`, selects the
 deterministic representative as its default previous parent, signs with the
 unlocked identity key, and stores through the

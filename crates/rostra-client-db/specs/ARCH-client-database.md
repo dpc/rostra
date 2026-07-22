@@ -108,14 +108,23 @@ another representation of the same key or value. Range iteration validates keys
 before yielding entries, even when the caller does not otherwise inspect a key.
 
 Notifications are registered on `WriteTransactionCtx` and run only after a
-successful commit. Watch channels retain the latest committed identity-scoped
+successful commit. A per-`Database` write mutex spans transaction creation,
+durable commit, and all post-commit hooks. Its primary purpose is to preserve
+redb writer order through hook publication order: without this full span, hooks
+from separate committed transactions could race and publish older state after
+newer state. Watch channels retain the latest committed identity-scoped
 projection, including the self head, followees, followers, and Web of Trust.
-Commit and watch publication are ordered together, so an older transaction
-cannot overwrite a newer projection; subscribing after a period with no
-receivers still yields the latest committed value. Broadcast or deduplicating
-channels remain lossy or incremental signals for new content and work queues.
-The database remains authoritative; these watch payloads are retained
-current-state projections.
+Subscribing after a period with no receivers still yields the latest committed
+value. Broadcast or deduplicating channels remain lossy or incremental signals
+for new content and work queues. The database remains authoritative; these
+watch payloads are retained current-state projections.
+
+Write closures and post-commit hooks must not synchronously re-enter database
+writes: the non-reentrant mutex would deadlock. A hook panic propagates after
+the transaction has committed and poisons the mutex; a later write deliberately
+recovers the guard and continues, so the committed database remains usable.
+Every registered hook is attempted even if one panics, then the first panic
+resumes. Callers must not interpret that panic as transaction rollback.
 
 The durable head table is authoritative when an identity has concurrent graph
 tips. The retained self-head watch projects that set to its minimum

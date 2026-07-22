@@ -91,6 +91,12 @@ deletion event's payload therefore neither cancels that event's deletion of its
 direct auxiliary parent nor transitively changes the earlier target's deleting
 event.
 
+Deletion is signed, after-the-fact metadata for compliant clients, not a secure
+erasure primitive. It controls payload visibility and lifecycle handling on
+replicas that honor it, but the protocol cannot force remote or malicious
+replicas to erase bytes they already received. This best-effort limitation is
+fundamental to replicated peer-to-peer storage.
+
 Unknown flag bits are not produced by the current implementation, but readers
 accept and ignore bits they do not understand so later protocol versions can
 assign them. Current producers emit event version zero. Assigning semantics to

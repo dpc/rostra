@@ -55,6 +55,13 @@ Every inserted event has one effective content state:
 - **Deleted** records an author's graph-level deletion instruction.
 - **Pruned** records a local decision not to retain or process the payload.
 
+Deleted is UX best-effort metadata, not proof of erasure. A compliant replica
+uses the signed instruction to hide the payload, revert applicable social-post
+projections, and make locally stored bytes eligible for garbage collection when
+no references remain. It cannot compel another replica, including a malicious
+operator, to discard bytes already replicated. Local garbage-collection
+eligibility also does not mean immediate removal or secure erasure.
+
 Unless it starts in Deleted, an event with empty content is processed at
 insertion and does not enter Missing. The local maximum payload length is an
 exclusive upper bound: non-Deleted payloads below the maximum are eligible for

@@ -72,14 +72,19 @@ pub async fn get_event_content_from_followers(
     Ok(())
 }
 
-/// Download events from a child event, traversing the DAG depth-first by
-/// timestamp (kinda).
+/// Downloads events from a child event, traversing backward toward older
+/// history.
 ///
-/// Uses a BTreeMap-based queue sorted by (timestamp, depth, event_id) to
-/// process events from oldest to newest. This ensures we fetch parent events
-/// before their children, and we can establish a "cutoff" timestamp beyond
-/// which we don't need to fetch more events (because we already have processed
-/// content for those).
+/// Uses an ordered queue sorted by (timestamp, depth, event_id) to
+/// prioritize payload download and processing from oldest to newest. A child's
+/// envelope must be fetched first to discover its parent IDs, but its payload
+/// is deferred while ancestors are traversed. Equal effective timestamps prefer
+/// deeper ancestors; unfetched sibling envelopes are discovered by event ID, so
+/// this is depth-biased rather than a strict depth-first search. It
+/// opportunistically approximates production order, not a guaranteed receipt or
+/// canonical order. The traversal can also establish a "cutoff" timestamp
+/// beyond which we don't need to fetch more events (because we already have
+/// processed content for those).
 ///
 /// Depth starts at 0 for the head and increments for each parent traversal.
 /// Higher depth (deeper into the DAG) is processed first via `Reverse`.
