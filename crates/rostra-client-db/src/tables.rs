@@ -427,6 +427,12 @@ def_table! {
     /// `next_attempt_ts` (as `next_fetch_attempt`) to enable efficient
     /// removal from this table when the content state changes.
     ///
+    /// In canonical state, each event has at most one row in this table. A row
+    /// is current only when it corresponds to a `Missing` state whose
+    /// `next_fetch_attempt` exactly matches the row timestamp. Queue readers
+    /// filter legacy inconsistent rows, and fetcher peeking removes them when
+    /// they reach the front.
+    ///
     /// **Note**: Events in this table already have their RC counted in
     /// `content_rc`. When content arrives, the event is removed from this
     /// table but RC stays the same.

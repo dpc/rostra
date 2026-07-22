@@ -297,18 +297,26 @@ Missing {
 }
 ```
 
-The `next_fetch_attempt` field mirrors the `Timestamp` component of the
+The `next_fetch_attempt` field mirrors the `Timestamp` component of the current
 `events_content_missing` key, enabling removal (which requires the full
-composite key).
+composite key). In canonical state, each event has at most one queue row. A row
+is current only when the event is `Missing` and its timestamp exactly equals
+`next_fetch_attempt`; non-Missing events have no current queue row. A Missing
+event whose bytes are already available locally can temporarily have no queue
+row while local processing completes. Legacy inconsistent physical rows can
+remain behind valid work until lazy front repair or total replay, but queue
+APIs filter them from current work.
 
 ### Fetcher Loop
 
 Instead of scanning the entire missing table on a fixed interval, the fetcher:
 
-1. Peeks at the first entry (smallest key = earliest due)
-2. If due now: attempts to fetch from peers
-3. If not due: sleeps until the scheduled time
-4. If table is empty: waits for a `Notify` signal
+1. Transactionally deletes inconsistent front rows until it finds an exact
+   state/schedule match
+2. Peeks at that first valid entry (smallest key = earliest due)
+3. If due now: attempts to fetch from peers
+4. If not due: sleeps until the scheduled time
+5. If no valid row remains: waits for a `Notify` signal
 
 A `Notify` channel wakes the fetcher immediately when new missing content is
 inserted (via `on_commit` hook in `process_event_tx`).
@@ -329,14 +337,32 @@ backoff_secs = min(60 * 1.5^(attempt_count - 1), 86400)
 
 The `record_failed_content_fetch` DB method:
 
-1. Reads current `Missing` state to get `fetch_attempt_count`
-2. Removes old schedule entry from `events_content_missing`
-3. Inserts new schedule entry with updated `next_attempt_at`
-4. Updates `events_content_state` with incremented count and timestamps
+1. Reads the current `Missing` state and compares its schedule with the
+   caller-observed schedule
+2. Ignores the completion if the state is no longer Missing or its schedule has
+   changed, or if `next_attempt_at` is not strictly later than the current
+   schedule
+3. Removes the schedule entry mirrored by the current state
+4. Inserts one schedule entry with updated `next_attempt_at`
+5. Updates `events_content_state` with incremented count and timestamps
 
 The caller provides both `attempted_at` (fact) and `next_attempt_at`
 (scheduling decision). The backoff calculation lives in the fetcher, not the
-DB layer.
+DB layer. This compare-and-set behavior makes overlapping fetch completions
+safe: only the completion for the current schedule can advance retry metadata.
+Strictly increasing schedules prevent a duplicate completion from succeeding
+through reuse of the same schedule value.
+
+Queue peeking repairs legacy or otherwise inconsistent front rows in the same
+write transaction used to select work. It removes rows for non-Missing or
+absent events and rows whose timestamp differs from `next_fetch_attempt`, then
+continues to later work without returning an empty result. A total migration
+discards old queue rows and derives the current queue from retained events and
+content; there is no separate queue-repair migration.
+
+Queue pagination omits inconsistent rows even when they remain behind a valid
+front row awaiting lazy repair, so diagnostic/API consumers see only current
+fetch work.
 
 ## Potential Concerns
 
@@ -394,6 +420,15 @@ Both cases indicate bugs in the calling code and will panic in debug builds.
   conflicts converge in both orders
 - `test_equal_timestamp_vote_conflicts_converge` - Vote winner and aggregate use
   one equal-second comparison
+- `test_failed_fetch_completions_are_compare_and_set` - Overlapping failed
+  completions cannot leave stale rows after processing or deletion
+- `test_failed_fetch_rejects_non_forward_schedule` - Equal or backward
+  replacement schedules cannot reuse a current CAS token
+- `test_missing_content_peek_repairs_stale_front_rows` - Fetcher peeking removes
+  inconsistent front rows, pagination filters stale tail rows, later valid work
+  remains reachable, and repairs persist across reopen
+- `test_total_migration` - Total replay discards inconsistent queue rows and
+  derives one exact row for retained Missing content
 
 ### Property and Shuffled-Order Tests
 

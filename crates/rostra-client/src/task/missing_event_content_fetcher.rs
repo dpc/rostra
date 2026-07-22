@@ -164,7 +164,7 @@ impl MissingEventContentFetcher {
                     event_id = %event_id.to_short(),
                     attempt = new_attempt_count,
                     backoff_secs,
-                    "Scheduling next content fetch attempt"
+                    "Recording failed content fetch completion"
                 );
 
                 db.record_failed_content_fetch(

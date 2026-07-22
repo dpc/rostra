@@ -3724,6 +3724,8 @@ async fn test_social_posts_by_received_at_pagination() -> BoxedErrorResult<()> {
 /// 7. Present same-author parents replay before their children
 /// 8. Reception indexes and their durable sequence rebuild from retained
 ///    sources
+/// 9. The missing-content queue rebuilds from source state instead of retaining
+///    inconsistent legacy rows
 #[test_log::test(tokio::test(flavor = "multi_thread"))]
 async fn test_total_migration() -> BoxedErrorResult<()> {
     use rostra_core::Timestamp;
@@ -3745,6 +3747,7 @@ async fn test_total_migration() -> BoxedErrorResult<()> {
     let db_path = dir.path().join("db.redb");
     let expected_follow_event_id;
     let expected_post_event_id;
+    let expected_missing_event_id;
     let db_init_time_before;
 
     // Phase 1: Create database with data
@@ -3844,6 +3847,9 @@ async fn test_total_migration() -> BoxedErrorResult<()> {
         };
         let post_event_id = post_event.event_id;
         expected_post_event_id = post_event_id.to_short();
+        let (missing_event, _missing_content) =
+            build_test_event_with_valid_content(user_b_secret, None, "still missing after replay");
+        expected_missing_event_id = missing_event.event_id.to_short();
 
         // Process events
         let now = Timestamp::now();
@@ -3864,6 +3870,18 @@ async fn test_total_migration() -> BoxedErrorResult<()> {
             let verified_post = VerifiedEventContent::assume_verified(post_event, post_content_raw);
             db.process_event_content_tx(&verified_post, now, tx)?;
             db.process_event_tx(&deleting_follow_event, now, tx)?;
+            db.process_event_tx(&missing_event, now, tx)?;
+            Ok(())
+        })
+        .await?;
+
+        // Seed queue corruption representative of pre-R-06 failed-fetch races.
+        // Total replay must discard these derived rows and recreate one exact
+        // row for the still-Missing event.
+        db.write_with(|tx| {
+            let mut queue = tx.open_table(&events_content_missing::TABLE)?;
+            queue.insert(&(Timestamp::from(123), expected_missing_event_id), &())?;
+            queue.insert(&(Timestamp::from(1), expected_post_event_id), &())?;
             Ok(())
         })
         .await?;
@@ -4062,13 +4080,33 @@ async fn test_total_migration() -> BoxedErrorResult<()> {
             .open_table(&reception_order_next::TABLE)?
             .get(&())?
             .map(|value| value.value());
-        assert_eq!(event_receipts.len(), 4);
+        assert_eq!(event_receipts.len(), 5);
         assert_eq!(social_receipts, vec![expected_post_event_id]);
         assert_eq!(
             next_reception_order,
             Some((event_receipts.len() + social_receipts.len()) as u64),
             "total replay must rebuild the sequence from its receipt allocations"
         );
+
+        let missing_queue = tx
+            .open_table(&events_content_missing::TABLE)?
+            .range(..)?
+            .map(|entry| entry.map(|(key, _)| key.value()))
+            .collect::<Result<Vec<_>, _>>()?;
+        assert_eq!(
+            missing_queue,
+            vec![(Timestamp::ZERO, expected_missing_event_id)],
+            "total replay must derive one exact row for each queued Missing event"
+        );
+        assert!(matches!(
+            tx.open_table(&events_content_state::TABLE)?
+                .get(&expected_missing_event_id)?
+                .map(|state| state.value()),
+            Some(EventContentState::Missing {
+                next_fetch_attempt: Timestamp::ZERO,
+                ..
+            })
+        ));
 
         Ok(())
     })
@@ -5614,6 +5652,258 @@ async fn test_wants_content_for_missing_content() -> BoxedErrorResult<()> {
     }
 
     info!("=== wants_content missing content test passed ===");
+
+    Ok(())
+}
+
+async fn read_missing_content_queue(
+    db: &Database,
+) -> BoxedErrorResult<Vec<(Timestamp, rostra_core::ShortEventId)>> {
+    Ok(db
+        .read_with(|tx| {
+            tx.open_table(&events_content_missing::TABLE)?
+                .range(..)?
+                .map(|entry| entry.map(|(key, _)| key.value()).map_err(Into::into))
+                .collect()
+        })
+        .await?)
+}
+
+/// Stale failed-fetch completions cannot advance retry state or leave queue
+/// rows after content processing or deletion.
+#[test_log::test(tokio::test(flavor = "multi_thread"))]
+async fn test_failed_fetch_completions_are_compare_and_set() -> BoxedErrorResult<()> {
+    let id_secret = RostraIdSecretKey::from_bytes([31; 32]);
+    let author = id_secret.id();
+    let (event, content) =
+        build_test_event_with_valid_content(id_secret, None, "fetch completion CAS");
+    let event_id = event.event_id.to_short();
+    let event_content = VerifiedEventContent::assume_verified(event, content);
+    let deletion = build_delete_event(id_secret, event.event_id, event.event_id);
+    let first_attempt = Timestamp::from(10);
+    let first_retry = Timestamp::from(100);
+    let stale_attempt = Timestamp::from(20);
+    let stale_retry = Timestamp::from(200);
+
+    for (scenario, process_content, stale_before_terminal) in [
+        ("F1,F2,P", true, true),
+        ("F1,P,F2", true, false),
+        ("F1,F2,D", false, true),
+        ("F1,D,F2", false, false),
+    ] {
+        let (_dir, db) = temp_db(author).await?;
+        db.process_event(&event).await;
+
+        db.record_failed_content_fetch(event_id, Timestamp::ZERO, first_attempt, first_retry)
+            .await;
+
+        if stale_before_terminal {
+            db.record_failed_content_fetch(event_id, Timestamp::ZERO, stale_attempt, stale_retry)
+                .await;
+            assert_eq!(
+                read_missing_content_queue(&db).await?,
+                vec![(first_retry, event_id)],
+                "{scenario}: stale or non-forward completion must not replace the current schedule"
+            );
+            db.read_with(|tx| {
+                assert!(
+                    matches!(
+                        tx.open_table(&events_content_state::TABLE)?
+                            .get(&event_id)?
+                            .map(|state| state.value()),
+                        Some(EventContentState::Missing {
+                            last_fetch_attempt: Some(last_fetch_attempt),
+                            fetch_attempt_count: 1,
+                            next_fetch_attempt,
+                        }) if last_fetch_attempt == first_attempt
+                            && next_fetch_attempt == first_retry
+                    ),
+                    "{scenario}: stale or non-forward completion changed retry metadata"
+                );
+                Ok(())
+            })
+            .await?;
+        }
+
+        if process_content {
+            db.process_event_content(&event_content).await;
+        } else {
+            db.process_event(&deletion).await;
+        }
+
+        if !stale_before_terminal {
+            db.record_failed_content_fetch(event_id, Timestamp::ZERO, stale_attempt, stale_retry)
+                .await;
+        }
+
+        assert!(
+            read_missing_content_queue(&db).await?.is_empty(),
+            "{scenario}: terminal content state must have no fetch rows"
+        );
+
+        db.read_with(|tx| {
+            let state = tx
+                .open_table(&events_content_state::TABLE)?
+                .get(&event_id)?
+                .map(|state| state.value());
+            if process_content {
+                assert_eq!(state, None, "{scenario}");
+            } else {
+                assert!(
+                    matches!(state, Some(EventContentState::Deleted { .. })),
+                    "{scenario}"
+                );
+            }
+            Ok(())
+        })
+        .await?;
+    }
+
+    Ok(())
+}
+
+/// Equal or backward replacement schedules cannot reuse a current timestamp as
+/// a compare-and-set token.
+#[test_log::test(tokio::test(flavor = "multi_thread"))]
+async fn test_failed_fetch_rejects_non_forward_schedule() -> BoxedErrorResult<()> {
+    let id_secret = RostraIdSecretKey::from_bytes([33; 32]);
+    let author = id_secret.id();
+    let (event, _content) =
+        build_test_event_with_valid_content(id_secret, None, "non-forward fetch schedule");
+    let event_id = event.event_id.to_short();
+    let (_dir, db) = temp_db(author).await?;
+    let attempted_at = Timestamp::from(10);
+    let current_schedule = Timestamp::from(100);
+
+    db.process_event(&event).await;
+    db.record_failed_content_fetch(event_id, Timestamp::ZERO, attempted_at, current_schedule)
+        .await;
+    for invalid_schedule in [current_schedule, Timestamp::from(99)] {
+        db.record_failed_content_fetch(
+            event_id,
+            current_schedule,
+            Timestamp::from(20),
+            invalid_schedule,
+        )
+        .await;
+    }
+
+    assert_eq!(
+        read_missing_content_queue(&db).await?,
+        vec![(current_schedule, event_id)]
+    );
+    db.read_with(|tx| {
+        assert!(matches!(
+            tx.open_table(&events_content_state::TABLE)?
+                .get(&event_id)?
+                .map(|state| state.value()),
+            Some(EventContentState::Missing {
+                last_fetch_attempt: Some(last_fetch_attempt),
+                fetch_attempt_count: 1,
+                next_fetch_attempt,
+            }) if last_fetch_attempt == attempted_at
+                && next_fetch_attempt == current_schedule
+        ));
+        Ok(())
+    })
+    .await?;
+
+    Ok(())
+}
+
+/// Queue peeking transactionally repairs stale front rows and reaches later
+/// valid work without making the fetcher wait or retry terminal content.
+#[test_log::test(tokio::test(flavor = "multi_thread"))]
+async fn test_missing_content_peek_repairs_stale_front_rows() -> BoxedErrorResult<()> {
+    let id_secret = RostraIdSecretKey::from_bytes([32; 32]);
+    let author = id_secret.id();
+    let dir = tempdir()?;
+    let db_path = dir.path().join("db.redb");
+    let db = Database::open(&db_path, author).await.boxed()?;
+    let processed = build_post_event_content(
+        id_secret,
+        time::OffsetDateTime::UNIX_EPOCH,
+        None,
+        "processed",
+    );
+    let missing = build_post_event_content(
+        id_secret,
+        time::OffsetDateTime::UNIX_EPOCH + time::Duration::seconds(1),
+        Some(processed.event_id()),
+        "valid queued work",
+    );
+    let processed_id = processed.event_id().to_short();
+    let missing_id = missing.event_id().to_short();
+    let valid_schedule = Timestamp::from(100);
+
+    db.process_event_with_content(&processed).await;
+    db.process_event(&missing.event).await;
+    db.record_failed_content_fetch(
+        missing_id,
+        Timestamp::ZERO,
+        Timestamp::from(50),
+        valid_schedule,
+    )
+    .await;
+
+    db.write_with(|tx| {
+        let mut queue = tx.open_table(&events_content_missing::TABLE)?;
+        queue.insert(&(Timestamp::from(1), processed_id), &())?;
+        queue.insert(&(Timestamp::from(2), missing_id), &())?;
+        queue.insert(&(Timestamp::from(3), rostra_core::ShortEventId::ZERO), &())?;
+        queue.insert(&(Timestamp::from(101), processed_id), &())?;
+        queue.insert(&(Timestamp::from(102), missing_id), &())?;
+        Ok(())
+    })
+    .await?;
+
+    let next = db
+        .peek_next_missing_content()
+        .await
+        .expect("valid work behind stale rows");
+    assert_eq!(next.event_id, missing_id);
+    assert_eq!(next.scheduled_time, valid_schedule);
+    assert_eq!(next.fetch_attempt_count, 1);
+    assert_eq!(
+        read_missing_content_queue(&db).await?,
+        vec![
+            (valid_schedule, missing_id),
+            (Timestamp::from(101), processed_id),
+            (Timestamp::from(102), missing_id),
+        ]
+    );
+    let (paginated, cursor) = db.paginate_missing_events_contents(None, 10).await;
+    assert_eq!(paginated, vec![(author, missing_id)]);
+    assert_eq!(cursor, None);
+
+    drop(db);
+    let reopened = Database::open(&db_path, author).await.boxed()?;
+    assert_eq!(
+        read_missing_content_queue(&reopened).await?,
+        vec![
+            (valid_schedule, missing_id),
+            (Timestamp::from(101), processed_id),
+            (Timestamp::from(102), missing_id),
+        ],
+        "front-row repair must survive restart without exposing stale tail rows"
+    );
+    let (paginated, cursor) = reopened.paginate_missing_events_contents(None, 10).await;
+    assert_eq!(paginated, vec![(author, missing_id)]);
+    assert_eq!(cursor, None);
+
+    reopened.process_event_content(&missing).await;
+    reopened
+        .write_with(|tx| {
+            tx.open_table(&events_content_missing::TABLE)?
+                .insert(&(Timestamp::from(1), processed_id), &())?;
+            Ok(())
+        })
+        .await?;
+    assert!(
+        reopened.peek_next_missing_content().await.is_none(),
+        "a stale terminal row must be removed instead of returned for refetch"
+    );
+    assert!(read_missing_content_queue(&reopened).await?.is_empty());
 
     Ok(())
 }

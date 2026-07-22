@@ -149,10 +149,10 @@ pub enum EventContentState {
     /// `events_content_state`, indicating content was successfully
     /// processed.
     ///
-    /// The `next_fetch_attempt` field mirrors the `Timestamp` component of
-    /// the `events_content_missing` table key `(Timestamp, ShortEventId)`,
-    /// enabling removal from that table (which requires the full composite
-    /// key).
+    /// When the event has a current `events_content_missing` row, the
+    /// `next_fetch_attempt` field mirrors the `Timestamp` component of that
+    /// canonical at-most-one `(Timestamp, ShortEventId)` key, enabling removal
+    /// from the table (which requires the full composite key).
     Missing {
         /// When we last attempted to fetch this content from peers.
         last_fetch_attempt: Option<Timestamp>,

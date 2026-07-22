@@ -1,7 +1,7 @@
 use rostra_core::event::EventExt as _;
 use rostra_core::id::RostraId;
 use rostra_core::{ShortEventId, Timestamp};
-use tracing::warn;
+use tracing::{debug, warn};
 
 use crate::tables::event::EventContentState;
 use crate::{Database, LOG_TARGET, events, events_content_state, tables};
@@ -37,48 +37,65 @@ impl Database {
 
     /// Peek at the next missing content entry (earliest scheduled fetch).
     ///
-    /// Returns the entry with the smallest `(Timestamp, ShortEventId)` key
-    /// from `events_content_missing`, which is the next entry due for
-    /// fetching. Returns `None` if the table is empty.
+    /// Transactionally removes inconsistent entries from the front of
+    /// `events_content_missing`, then returns the first entry whose timestamp
+    /// matches the event's current `Missing` state. Returns `None` if no valid
+    /// entry remains.
     pub async fn peek_next_missing_content(&self) -> Option<NextMissingContent> {
-        self.read_with(|tx| {
+        self.write_with(|tx| {
             let events_table = tx.open_table(&events::TABLE)?;
-            let events_content_missing_table =
+            let mut events_content_missing_table =
                 tx.open_table(&tables::events_content_missing::TABLE)?;
             let events_content_state_table = tx.open_table(&events_content_state::TABLE)?;
 
-            let Some(first) = events_content_missing_table.first()? else {
-                return Ok(None);
-            };
+            loop {
+                let Some((scheduled_time, event_id)) = events_content_missing_table
+                    .first()?
+                    .map(|first| first.0.value())
+                else {
+                    return Ok(None);
+                };
 
-            let (scheduled_time, event_id) = first.0.value();
+                let fetch_attempt_count = match events_content_state_table
+                    .get(&event_id)?
+                    .map(|g| g.value())
+                {
+                    Some(EventContentState::Missing {
+                        fetch_attempt_count,
+                        next_fetch_attempt,
+                        ..
+                    }) if next_fetch_attempt == scheduled_time => fetch_attempt_count,
+                    state => {
+                        warn!(
+                            target: LOG_TARGET,
+                            %event_id,
+                            %scheduled_time,
+                            ?state,
+                            "Removing inconsistent content fetch schedule entry"
+                        );
+                        events_content_missing_table.remove(&(scheduled_time, event_id))?;
+                        continue;
+                    }
+                };
 
-            let Some(event) = events_table.get(&event_id)?.map(|e| e.value()) else {
-                warn!(
-                    target: LOG_TARGET,
-                    %event_id,
-                    "Missing event record for content_missing entry"
-                );
-                return Ok(None);
-            };
+                let Some(event) = events_table.get(&event_id)?.map(|e| e.value()) else {
+                    warn!(
+                        target: LOG_TARGET,
+                        %event_id,
+                        %scheduled_time,
+                        "Removing content fetch schedule entry without an event"
+                    );
+                    events_content_missing_table.remove(&(scheduled_time, event_id))?;
+                    continue;
+                };
 
-            let fetch_attempt_count = match events_content_state_table
-                .get(&event_id)?
-                .map(|g| g.value())
-            {
-                Some(EventContentState::Missing {
+                return Ok(Some(NextMissingContent {
+                    scheduled_time,
+                    author: event.signed.author(),
+                    event_id,
                     fetch_attempt_count,
-                    ..
-                }) => fetch_attempt_count,
-                _ => 0,
-            };
-
-            Ok(Some(NextMissingContent {
-                scheduled_time,
-                author: event.signed.author(),
-                event_id,
-                fetch_attempt_count,
-            }))
+                }));
+            }
         })
         .await
         .expect("Storage error")
@@ -92,6 +109,12 @@ impl Database {
     /// The caller provides both the factual time of the attempt
     /// (`attempted_at`) and the scheduling decision (`next_attempt_at`).
     /// The backoff calculation lives in the fetcher, not in the DB layer.
+    ///
+    /// The update is compare-and-set against `old_scheduled_time`. If another
+    /// completion or a terminal content transition already changed the current
+    /// state, this stale completion has no effect. The replacement schedule
+    /// must be strictly later than the observed schedule so a schedule value
+    /// cannot be reused as an ABA-prone compare-and-set token.
     pub async fn record_failed_content_fetch(
         &self,
         event_id: ShortEventId,
@@ -111,6 +134,7 @@ impl Database {
 
             let Some(EventContentState::Missing {
                 fetch_attempt_count,
+                next_fetch_attempt: current_scheduled_time,
                 ..
             }) = old_state
             else {
@@ -119,8 +143,30 @@ impl Database {
                 return Ok(());
             };
 
-            // Remove old schedule entry
-            events_content_missing_table.remove(&(old_scheduled_time, event_id))?;
+            if old_scheduled_time != current_scheduled_time {
+                debug!(
+                    target: LOG_TARGET,
+                    %event_id,
+                    %old_scheduled_time,
+                    %current_scheduled_time,
+                    "Ignoring stale failed content fetch completion"
+                );
+                return Ok(());
+            }
+
+            if next_attempt_at <= current_scheduled_time {
+                warn!(
+                    target: LOG_TARGET,
+                    %event_id,
+                    %current_scheduled_time,
+                    %next_attempt_at,
+                    "Ignoring failed content fetch completion with a non-forward schedule"
+                );
+                return Ok(());
+            }
+
+            // Remove the schedule entry mirrored by the current state.
+            events_content_missing_table.remove(&(current_scheduled_time, event_id))?;
 
             // Insert new schedule entry with updated time
             events_content_missing_table.insert(&(next_attempt_at, event_id), &())?;
@@ -144,7 +190,8 @@ impl Database {
 
     /// Paginate through missing content entries.
     ///
-    /// Returns events sorted by their next scheduled fetch time.
+    /// Returns events sorted by their next scheduled fetch time. Inconsistent
+    /// rows are omitted; fetcher peeking performs their transactional removal.
     pub async fn paginate_missing_events_contents(
         &self,
         cursor: Option<(Timestamp, ShortEventId)>,
@@ -157,12 +204,25 @@ impl Database {
             let events_table = tx.open_table(&events::TABLE)?;
             let events_content_missing_table =
                 tx.open_table(&tables::events_content_missing::TABLE)?;
+            let events_content_state_table = tx.open_table(&events_content_state::TABLE)?;
 
             Self::paginate_table(
                 &events_content_missing_table,
                 cursor,
                 limit,
-                move |(_, event_id), _| {
+                move |(scheduled_time, event_id), _| {
+                    if !matches!(
+                        events_content_state_table
+                            .get(&event_id)?
+                            .map(|state| state.value()),
+                        Some(EventContentState::Missing {
+                            next_fetch_attempt,
+                            ..
+                        }) if next_fetch_attempt == scheduled_time
+                    ) {
+                        return Ok(None);
+                    }
+
                     let Some(event) = events_table.get(&event_id)?.map(|e| e.value()) else {
                         warn!(
                             target: LOG_TARGET,

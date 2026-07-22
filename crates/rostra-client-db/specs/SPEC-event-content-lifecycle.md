@@ -81,6 +81,19 @@ immediately and wakes the client fetcher after commit. Failed attempts update
 attempt metadata and a later retry time; retry policy is chosen by the client,
 while the database owns the schedule and state transition.
 
+In canonical state, each event has at most one fetch-queue row. A current row
+exists only for a Missing event, and its timestamp equals that state's
+`next_fetch_attempt`. Legacy inconsistent physical rows can remain until they
+reach the queue front, but queue APIs never return them as current work. A
+failed fetch completion updates the schedule only when the schedule observed
+by its caller is still current and the replacement schedule is strictly later;
+a stale or non-forward completion has no effect. Strictly increasing schedules
+prevent reuse of a timestamp as an ABA-prone compare-and-set token. Fetcher
+queue peeking removes inconsistent front rows transactionally before returning
+valid work, so stale rows cannot hide later work or cause content that reached
+a terminal state to be fetched again. Total migration rebuilds the queue from
+retained event and content sources rather than preserving old queue rows.
+
 The crate's [content lifecycle guide](../docs/content-lifecycle.md) documents
 the current tables, detailed flows, and test map. It must remain consistent
 with this specification.
