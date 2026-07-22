@@ -601,8 +601,18 @@ Both cases indicate bugs in the calling code and will panic in debug builds.
 
 ### Property and Shuffled-Order Tests
 
-- `proptest_rc_counting` - Randomized RC correctness
-- `test_follow_unfollow_delivery_order` - Follow/unfollow ordering
+- [`property-testing.md`](property-testing.md) documents the shared two-replica
+  schedule runner, semantic models, exclusions, runtime budget, and soak command
+- `prop_author_scoped_event_graph_converges` - Envelope graph indexes and
+  unresolved canonical deletion attribution converge
+- `prop_live_raw_content_lifecycle_converges` - Live RAW content bytes, RC,
+  queue termination, and complete usage accounting converge
+- `prop_follow_semantics_converge` - Follow winners, reverse membership,
+  canonical epochs, and retained unfollow boundaries converge
+- `prop_profile_and_singleton_semantics_converge` - Profile fields and
+  profile/generic singleton winners converge
+- `prop_vote_semantics_converge` - Per-voter winners and normalized numerical
+  vote aggregates converge
 - `test_shuffled_singleton_events_converge` - Shuffled finite latest-event sets
   select the total-order maximum
 
