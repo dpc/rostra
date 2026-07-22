@@ -277,9 +277,9 @@ pub enum EventReceivedSource {
 /// Stored in the `events_received_at` table, keyed by `(Timestamp,
 /// reception_order)`.
 ///
-/// The key `(Timestamp, u64)` is guaranteed unique by the monotonic
-/// reception_order counter. The event_id is stored in the value to allow
-/// lookups and assertions.
+/// The key `(Timestamp, u64)` is allocated durably from the database-local
+/// reception sequence. Insertion fails without replacement if the key is
+/// occupied. The event ID is stored in the value for lookup.
 #[derive(Debug, Encode, Decode, Clone, Serialize)]
 pub struct EventReceivedRecord {
     /// The event that was received.

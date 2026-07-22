@@ -156,6 +156,14 @@ def_table! {
     db_init_time: () => Timestamp
 }
 
+def_table! {
+    /// Next unused sequence for database-local reception ordering.
+    ///
+    /// Allocations occur in the same transaction as the corresponding reception
+    /// index insert. An absent value means zero; `u64::MAX` means exhausted.
+    reception_order_next: () => u64
+}
+
 // ============================================================================
 // IDENTITY TABLES
 // ============================================================================
@@ -439,9 +447,9 @@ def_table! {
     /// Key: (received_timestamp, reception_order)
     /// Value: event_id + reception source information
     ///
-    /// The `reception_order` is a monotonically increasing counter that ensures
-    /// strict ordering even when multiple events arrive at the same timestamp.
-    /// The key `(Timestamp, u64)` is guaranteed unique - insertions assert this.
+    /// The `reception_order` is allocated durably in the insertion transaction
+    /// and ensures strict local ordering when events arrive at the same timestamp.
+    /// Insertions fail rather than replacing an occupied key.
     ///
     /// This enables tracking network propagation delays (by comparing received
     /// timestamp vs event's author timestamp), debugging sync issues, and
@@ -505,8 +513,8 @@ def_table! {
     /// not when they were authored. This is important for notifications where
     /// the order of reception matters more than the order of creation.
     ///
-    /// The `reception_order` is a monotonically increasing counter that ensures
-    /// strict ordering. The key `(Timestamp, u64)` is guaranteed unique.
+    /// The `reception_order` is allocated durably in the insertion transaction.
+    /// Insertions fail rather than replacing an occupied key.
     social_posts_by_received_at: (Timestamp, u64) => ShortEventId
 }
 
@@ -565,8 +573,8 @@ def_table! {
     /// Value: post_event_id
     ///
     /// Similar to `social_posts_by_received_at` but for shoutbox posts.
-    /// The `reception_order` is a monotonically increasing counter that ensures
-    /// strict ordering even when multiple events arrive at the same timestamp.
+    /// The `reception_order` is allocated durably in the insertion transaction.
+    /// Insertions fail rather than replacing an occupied key.
     shoutbox_posts_by_received_at: (Timestamp, u64) => ShortEventId
 }
 

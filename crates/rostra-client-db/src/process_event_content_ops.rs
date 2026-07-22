@@ -285,17 +285,13 @@ impl Database {
                     let mut social_post_by_received_at_tbl = tx
                         .open_table(&social_posts_by_received_at::TABLE)
                         .map_err(DbError::from)?;
-                    let reception_order = self.next_reception_order();
-                    let key = (received_at, reception_order);
-                    // Assert key uniqueness - reception_order is monotonic so this should never
-                    // fail
-                    let prev = social_post_by_received_at_tbl
-                        .insert(&key, &event_id)
-                        .map_err(DbError::from)?;
-                    debug_assert!(
-                        prev.is_none(),
-                        "social_posts_by_received_at key collision: {key:?}"
-                    );
+                    Self::insert_reception_ordered_tx(
+                        tx,
+                        received_at,
+                        &event_id,
+                        &mut social_post_by_received_at_tbl,
+                    )
+                    .map_err(ProcessEventError::from)?;
 
                     if let Some(old_event_id) = replaced_event_id {
                         let mut replaced_by_tbl = tx
@@ -442,17 +438,13 @@ impl Database {
                     let mut shoutbox_by_received_at_tbl = tx
                         .open_table(&shoutbox_posts_by_received_at::TABLE)
                         .map_err(DbError::from)?;
-                    let reception_order = self.next_reception_order();
-                    let key = (received_at, reception_order);
-                    // Assert key uniqueness - reception_order is monotonic so this should never
-                    // fail
-                    let prev = shoutbox_by_received_at_tbl
-                        .insert(&key, &event_content.event_id().to_short())
-                        .map_err(DbError::from)?;
-                    debug_assert!(
-                        prev.is_none(),
-                        "shoutbox_posts_by_received_at key collision: {key:?}"
-                    );
+                    Self::insert_reception_ordered_tx(
+                        tx,
+                        received_at,
+                        &event_content.event_id().to_short(),
+                        &mut shoutbox_by_received_at_tbl,
+                    )
+                    .map_err(ProcessEventError::from)?;
 
                     // Broadcast to subscribers
                     tx.on_commit({

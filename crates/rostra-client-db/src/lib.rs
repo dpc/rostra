@@ -7,6 +7,7 @@ pub mod news;
 mod paginate;
 mod process_event_content_ops;
 mod process_event_ops;
+mod reception_order_ops;
 pub mod social;
 mod table_ops;
 mod tables;
@@ -210,6 +211,16 @@ pub enum DbError {
     },
     #[snafu(display("Integer overflow"))]
     Overflow,
+    #[snafu(display(
+        "Reception-order key ({received_at:?}, {reception_order}) already exists in table {table}"
+    ))]
+    ReceptionOrderCollision {
+        table: String,
+        received_at: Timestamp,
+        reception_order: u64,
+        #[snafu(implicit)]
+        location: Location,
+    },
     #[snafu(display("Deletion attribution references missing event {event_id}"))]
     MissingDeletionAttribution {
         event_id: ShortEventId,
@@ -233,11 +244,6 @@ pub struct Database {
     /// timestamps older than this are likely historical syncs and should
     /// not appear as "just received" in notifications.
     db_init_time: Timestamp,
-
-    /// Monotonically increasing counter for strict ordering of received events.
-    /// Used in `events_received_at` and `social_posts_by_received_at` tables
-    /// to ensure events received at the same timestamp are ordered correctly.
-    reception_order_counter: std::sync::atomic::AtomicU64,
 
     /// Serializes writes through their post-commit current-state publication.
     ///
@@ -266,15 +272,6 @@ pub struct Database {
 
 impl Database {
     const MAX_CONTENT_LEN: u32 = 10_000_000u32;
-
-    /// Get the next reception order counter value.
-    ///
-    /// This is a monotonically increasing counter used to ensure strict
-    /// ordering of events received at the same timestamp.
-    pub fn next_reception_order(&self) -> u64 {
-        self.reception_order_counter
-            .fetch_add(1, std::sync::atomic::Ordering::Relaxed)
-    }
 
     pub async fn mk_db_path(
         data_dir: &Path,
@@ -376,7 +373,6 @@ impl Database {
             self_id,
             iroh_secret,
             db_init_time,
-            reception_order_counter: std::sync::atomic::AtomicU64::new(0),
             write_and_publish_lock: std::sync::Mutex::new(()),
             self_followees_updated,
             self_followers_updated,
@@ -1286,5 +1282,7 @@ impl ProcessEventState {
         }
     }
 }
+#[cfg(test)]
+mod reception_order_tests;
 #[cfg(test)]
 mod tests;

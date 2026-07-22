@@ -116,6 +116,7 @@ impl Database {
     pub(crate) fn init_tables_tx(tx: &WriteTransactionCtx) -> DbResult<()> {
         tx.open_table(&db_version::TABLE)?;
         tx.open_table(&crate::db_init_time::TABLE)?;
+        tx.open_table(&crate::reception_order_next::TABLE)?;
 
         tx.open_table(&crate::ids_self::TABLE)?;
         tx.open_table(&crate::ids_full::TABLE)?;

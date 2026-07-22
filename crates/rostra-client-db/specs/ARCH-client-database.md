@@ -51,6 +51,14 @@ channels remain lossy or incremental signals for new content and work queues.
 The database remains authoritative; these watch payloads are retained
 current-state projections.
 
+Reception order is database-local state, not a replicated ordering contract.
+One durable sequence supplies all reception-order indexes, and each allocation
+commits atomically with its index insertion. Aborted transactions do not consume
+sequence values, and an occupied index key causes the transaction to fail rather
+than replace an existing member. Different replicas need not assign the same
+sequence to an event. Sequence exhaustion fails the transaction instead of
+wrapping and reusing values.
+
 ## Invariants
 
 - Only cryptographically verified event envelopes enter normal processing.
@@ -67,6 +75,9 @@ current-state projections.
   winner as the individual-vote projection.
 - Locally imposed payload limits may prune content without removing the event
   envelope or breaking graph traversal.
+- Total migration rebuilds reception-order indexes and their sequence from
+  retained event envelopes and available retained content. It preserves semantic
+  membership, not historical reception sequence values.
 
 The detailed payload state machine is specified by
 [SPEC-event-content-lifecycle](SPEC-event-content-lifecycle.md). The

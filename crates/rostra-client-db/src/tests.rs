@@ -3722,13 +3722,18 @@ async fn test_social_posts_by_received_at_pagination() -> BoxedErrorResult<()> {
 /// 5. Exact winner event IDs are recovered after derived rows are removed
 /// 6. Stable database initialization metadata is preserved
 /// 7. Present same-author parents replay before their children
+/// 8. Reception indexes and their durable sequence rebuild from retained
+///    sources
 #[test_log::test(tokio::test(flavor = "multi_thread"))]
 async fn test_total_migration() -> BoxedErrorResult<()> {
     use rostra_core::Timestamp;
     use rostra_core::event::content_kind::PersonaSelector;
     use rostra_core::event::{VerifiedEventContent, content_kind};
 
-    use crate::{db_init_time, db_version, ids_followees, ids_followers, social_posts_by_time};
+    use crate::{
+        db_init_time, db_version, events_received_at, ids_followees, ids_followers,
+        reception_order_next, social_posts_by_received_at, social_posts_by_time,
+    };
 
     let user_a_secret = RostraIdSecretKey::from_bytes([1; 32]);
     let user_a = user_a_secret.id();
@@ -3739,6 +3744,7 @@ async fn test_total_migration() -> BoxedErrorResult<()> {
     let dir = tempfile::tempdir()?;
     let db_path = dir.path().join("db.redb");
     let expected_follow_event_id;
+    let expected_post_event_id;
     let db_init_time_before;
 
     // Phase 1: Create database with data
@@ -3837,6 +3843,7 @@ async fn test_total_migration() -> BoxedErrorResult<()> {
             VerifiedEvent::verify_signed(user_a, signed).expect("Valid event")
         };
         let post_event_id = post_event.event_id;
+        expected_post_event_id = post_event_id.to_short();
 
         // Process events
         let now = Timestamp::now();
@@ -4041,6 +4048,28 @@ async fn test_total_migration() -> BoxedErrorResult<()> {
             "Posts should exist in time index after migration"
         );
 
+        let event_receipts = tx
+            .open_table(&events_received_at::TABLE)?
+            .range(..)?
+            .map(|entry| entry.map(|(key, _)| key.value()))
+            .collect::<Result<Vec<_>, _>>()?;
+        let social_receipts = tx
+            .open_table(&social_posts_by_received_at::TABLE)?
+            .range(..)?
+            .map(|entry| entry.map(|(_, event_id)| event_id.value()))
+            .collect::<Result<Vec<_>, _>>()?;
+        let next_reception_order = tx
+            .open_table(&reception_order_next::TABLE)?
+            .get(&())?
+            .map(|value| value.value());
+        assert_eq!(event_receipts.len(), 4);
+        assert_eq!(social_receipts, vec![expected_post_event_id]);
+        assert_eq!(
+            next_reception_order,
+            Some((event_receipts.len() + social_receipts.len()) as u64),
+            "total replay must rebuild the sequence from its receipt allocations"
+        );
+
         Ok(())
     })
     .await?;
@@ -4123,6 +4152,17 @@ async fn test_total_migration() -> BoxedErrorResult<()> {
         posts_after[0].content.djot_content,
         Some("Hello world!".to_string()),
         "Post content should match after migration"
+    );
+    let (received_posts_after, _) = db
+        .paginate_social_posts_by_received_at(None, 10, |_| true)
+        .await;
+    assert_eq!(
+        received_posts_after
+            .iter()
+            .map(|post| post.event_id)
+            .collect::<Vec<_>>(),
+        vec![expected_post_event_id],
+        "total replay must retain reception-index membership"
     );
 
     info!("=== All migration verifications passed ===");
