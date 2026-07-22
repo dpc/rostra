@@ -17,7 +17,7 @@ use super::profile_self::extractor;
 use super::unlock::session::UserSession;
 use super::{Maud, fragment, recovery};
 use crate::error::{ReadOnlyModeSnafu, RequestResult};
-use crate::util::time::format_timestamp;
+use crate::util::time::{format_timestamp, format_timestamp_iso};
 use crate::{SharedState, UiState};
 
 /// dpc's (Rostra author) RostraId as a string.
@@ -1037,13 +1037,7 @@ impl UiState {
         let event_id = event_record.signed.compute_short_id();
         let event_id_str = event_id.to_string();
 
-        // Format timestamp
-        let datetime = ts
-            .to_offset_date_time()
-            .unwrap_or(time::OffsetDateTime::UNIX_EPOCH);
-        let time_str = datetime
-            .format(&time::format_description::well_known::Rfc3339)
-            .unwrap_or_else(|_| ts.to_string());
+        let time_str = format_timestamp_iso(ts);
 
         // Format flags
         let mut flags = Vec::new();

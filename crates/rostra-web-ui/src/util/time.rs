@@ -2,15 +2,27 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use rostra_core::Timestamp;
 
-/// Format a timestamp as ISO 8601 (`YYYY-MM-DDTHH:MM:SSZ`).
+const INVALID_DATE: &str = "Invalid date";
+
+/// Format a valid timestamp as UTC ISO 8601, or return `Invalid date`.
+///
+/// Valid output includes nanosecond precision, for example
+/// `2024-07-01T00:00:00.000000000Z`.
 pub fn format_timestamp_iso(timestamp: Timestamp) -> String {
-    let dt = time::OffsetDateTime::from_unix_timestamp(timestamp.as_u64() as i64)
-        .unwrap_or(time::OffsetDateTime::UNIX_EPOCH);
-    dt.format(&time::format_description::well_known::Iso8601::DEFAULT)
+    let Some(datetime) = timestamp_to_datetime(timestamp) else {
+        return INVALID_DATE.to_string();
+    };
+
+    datetime
+        .format(&time::format_description::well_known::Iso8601::DEFAULT)
         .expect("ISO 8601 formatting can't fail for valid OffsetDateTime")
 }
 
 pub fn format_timestamp(timestamp: Timestamp) -> String {
+    if timestamp_to_datetime(timestamp).is_none() {
+        return INVALID_DATE.to_string();
+    }
+
     let now = SystemTime::now();
     let duration_since = UNIX_EPOCH
         .checked_add(std::time::Duration::from_secs(timestamp.as_u64()))
@@ -27,19 +39,29 @@ pub fn format_timestamp(timestamp: Timestamp) -> String {
 }
 
 fn format_timestamp_date(timestamp: Timestamp) -> String {
-    let dt = i64::try_from(timestamp.as_u64())
+    let Some(datetime) = timestamp_to_datetime(timestamp) else {
+        return INVALID_DATE.to_string();
+    };
+
+    format!(
+        "{}/{}/{}",
+        datetime.month() as u8,
+        datetime.day(),
+        datetime.year()
+    )
+}
+
+fn timestamp_to_datetime(timestamp: Timestamp) -> Option<time::OffsetDateTime> {
+    i64::try_from(timestamp.as_u64())
         .ok()
         .and_then(|timestamp| time::OffsetDateTime::from_unix_timestamp(timestamp).ok())
-        .unwrap_or(time::OffsetDateTime::UNIX_EPOCH);
-
-    format!("{}/{}/{}", dt.month() as u8, dt.day(), dt.year())
 }
 
 #[cfg(test)]
 mod tests {
     use rostra_core::Timestamp;
 
-    use super::format_timestamp_date;
+    use super::{INVALID_DATE, format_timestamp_date, format_timestamp_iso};
 
     #[test]
     fn formats_calendar_dates_in_utc() {
@@ -52,27 +74,28 @@ mod tests {
             (1_640_995_200, "1/1/2022"),
             (1_719_792_000, "7/1/2024"),
             (253_402_300_799, "12/31/9999"),
-            (253_402_300_800, "1/1/1970"),
-            (i64::MAX as u64, "1/1/1970"),
-            (u64::MAX, "1/1/1970"),
+            (253_402_300_800, INVALID_DATE),
+            (i64::MAX as u64, INVALID_DATE),
+            (u64::MAX, INVALID_DATE),
         ];
 
         for (timestamp, expected) in cases {
             let formatted = format_timestamp_date(Timestamp::from(timestamp));
             assert_eq!(formatted, expected, "timestamp {timestamp}");
-
-            let month = formatted
-                .split_once('/')
-                .expect("date contains a month separator")
-                .0
-                .parse::<u8>()
-                .expect("month is numeric");
-            assert!((1..=12).contains(&month), "timestamp {timestamp}");
         }
     }
 
     #[test]
-    fn unrepresentable_system_timestamp_is_treated_as_future() {
-        assert_eq!(super::format_timestamp(Timestamp::MAX), "0s");
+    fn formats_iso_timestamps_in_utc() {
+        assert_eq!(
+            format_timestamp_iso(Timestamp::from(1_719_792_000)),
+            "2024-07-01T00:00:00.000000000Z"
+        );
+        assert_eq!(format_timestamp_iso(Timestamp::MAX), "Invalid date");
+    }
+
+    #[test]
+    fn unrepresentable_timestamp_is_invalid() {
+        assert_eq!(super::format_timestamp(Timestamp::MAX), "Invalid date");
     }
 }
