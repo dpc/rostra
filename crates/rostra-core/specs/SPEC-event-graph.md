@@ -1,5 +1,13 @@
 # SPEC-event-graph: Signed event graph
 
+## Status
+
+The shortened-identity collision guard applies to new event ingestion and total
+replay. Existing version-24 client databases are not proactively scanned, so a
+mapping written before the guard may remain until it is encountered. The final
+total rebuild tracked by `t4vh` will validate retained event authors under the
+guard.
+
 ## Record justification
 
 Graph semantics span core event encoding and verification, client database
@@ -23,6 +31,14 @@ valid for that event only when both values match. Code that accepts
 `VerifiedEvent` or `VerifiedEventContent` may rely on these checks having
 already succeeded; unverified wire or decoded values must cross a verification
 boundary first.
+
+Local storage may abbreviate a `RostraId` by its 128-bit prefix only while
+retaining a one-to-one mapping to the remaining 128 bits. Reusing a prefix for
+the same full identity is idempotent. If two distinct full identities share a
+prefix, ingestion fails without replacing the established, first-committed
+mapping or committing graph, lifecycle, or projection changes. During total
+migration, the replay transaction fails and rolls back while the separately
+prepared source stash remains available for a deterministic retry.
 
 ## Graph structure
 

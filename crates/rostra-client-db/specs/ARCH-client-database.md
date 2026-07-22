@@ -12,9 +12,11 @@ may not open until `t4vh`. Late follow or unfollow changes also do not rewrite
 receipt indexes that were already materialized. The final rebuild supplies the
 follow-history backfill; as specified below, rebuilt receipt indexes use authored
 timestamps because historical local receipt times are unavailable.
-Typed writes use the configured big-endian bincode encoder. Typed reads require
-the decoder to consume the complete stored slice; a trailing byte is reported as
-corruption rather than interpreted as an alias of the encoded logical key.
+
+The shortened-identity collision guard applies to new ingestion and total
+replay. Existing version-24 databases are not proactively scanned, so a mapping
+written before the guard may remain until encountered. The final rebuild tracked
+by `t4vh` validates retained event authors under the guard.
 
 `rostra-client-db` is the authoritative state and projection layer for one
 local Rostra identity during a database instance's lifetime. It stores
@@ -73,6 +75,15 @@ graph, lifecycle bookkeeping, and derived indexes within redb transactions.
 Derived side effects must not become visible without the corresponding source
 event state.
 
+Event ingestion records each retained event author in `ids_full`, keyed by the
+identity's 128-bit prefix with the remaining 128 bits as its value. Current
+consumers reconstruct that author index when enumerating known identities. An
+identical mapping is idempotent. A different identity with the same prefix
+aborts normal ingestion without replacing the established, first-committed
+mapping or changing event state, lifecycle bookkeeping, or projections. During
+total migration, a collision rolls back the replay transaction; the separately
+committed preparation and retryable source stash remain.
+
 Typed writes use redb-bincode's configured big-endian bincode encoding. Decoding
 must consume the complete stored byte slice; a trailing byte is corruption, not
 another representation of the same key or value. Range iteration validates keys
@@ -99,6 +110,8 @@ wrapping and reusing values.
 ## Invariants
 
 - Only cryptographically verified event envelopes enter normal processing.
+- Each shortened identity prefix resolves to at most one full `RostraId`;
+  a later collision fails closed without replacing the first-committed mapping.
 - Duplicate event delivery is idempotent and does not repeat reference-count
   or projection changes.
 - Unknown parents and absent payloads are represented explicitly and can be

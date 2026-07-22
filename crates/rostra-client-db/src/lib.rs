@@ -2,6 +2,7 @@ mod event_order;
 mod events_content_missing_ops;
 mod extension;
 mod id_nodes_ops;
+mod ids_full;
 mod migration_ops;
 mod models;
 pub mod news;
@@ -30,7 +31,7 @@ use rostra_core::event::{
     EventAuxKey, EventContentRaw, EventExt as _, EventKind, IrohNodeId, PersonasTagsSelector,
     VerifiedEvent, VerifiedEventContent, content_kind,
 };
-use rostra_core::id::{RostraId, ToShort as _};
+use rostra_core::id::{RostraId, ShortRostraId, ToShort as _};
 use rostra_core::{ExternalEventId, ShortEventId, Timestamp};
 use rostra_util_error::{BoxedError, FmtCompact as _};
 use snafu::{Location, ResultExt as _, Snafu};
@@ -249,6 +250,16 @@ pub enum DbError {
     },
     #[snafu(display("Stored event graph contains a migration dependency cycle"))]
     MigrationDependencyCycle,
+    #[snafu(display(
+        "Shortened identity prefix {prefix} maps to both {existing_id} and {incoming_id}"
+    ))]
+    IdentityPrefixCollision {
+        prefix: ShortRostraId,
+        existing_id: RostraId,
+        incoming_id: RostraId,
+        #[snafu(implicit)]
+        location: Location,
+    },
 }
 pub type DbResult<T> = std::result::Result<T, DbError>;
 
@@ -753,29 +764,51 @@ impl Database {
         .expect("Storage error")
     }
 
+    /// Fallibly process a verified event envelope.
+    ///
+    /// # Errors
+    ///
+    /// Returns storage and transaction errors, including
+    /// [`DbError::IdentityPrefixCollision`]. An error leaves the ingestion
+    /// transaction uncommitted.
+    pub async fn try_process_event(
+        &self,
+        event: &VerifiedEvent,
+    ) -> DbResult<(InsertEventOutcome, ProcessEventState)> {
+        let now = Timestamp::now();
+        self.write_with(|tx| self.process_event_tx(event, now, tx))
+            .await
+    }
+
+    /// Process a verified event envelope, panicking on storage failure.
+    ///
+    /// # Panics
+    ///
+    /// Panics after rolling back if storage fails or the event author's
+    /// shortened identity prefix is already mapped to a different full
+    /// identity.
     pub async fn process_event(
         &self,
         event: &VerifiedEvent,
     ) -> (InsertEventOutcome, ProcessEventState) {
-        let now = Timestamp::now();
-        self.write_with(|tx| self.process_event_tx(event, now, tx))
-            .await
-            .expect("Storage error")
+        self.try_process_event(event).await.expect("Storage error")
     }
 
-    /// Process a verified event envelope together with its verified content.
+    /// Fallibly process a verified envelope and its verified content
+    /// atomically.
     ///
     /// This operation is idempotent whether or not the envelope or content was
     /// processed previously.
     ///
-    /// # Panics
+    /// # Errors
     ///
-    /// Panics after rolling back if storage fails or a stored projection source
-    /// violates an invariant, including an unresolved existing vote winner.
-    pub async fn process_event_with_content(
+    /// Returns storage and transaction errors, including
+    /// [`DbError::IdentityPrefixCollision`]. An error rolls back the envelope,
+    /// content, lifecycle, and projection changes together.
+    pub async fn try_process_event_with_content(
         &self,
         content: &VerifiedEventContent,
-    ) -> (InsertEventOutcome, ProcessEventState) {
+    ) -> DbResult<(InsertEventOutcome, ProcessEventState)> {
         let now = Timestamp::now();
         self.write_with(|tx| {
             let res = self.process_event_tx(&content.event, now, tx)?;
@@ -783,10 +816,29 @@ impl Database {
             Ok(res)
         })
         .await
-        .expect("Storage error")
     }
 
-    /// Process verified event content and its carried event envelope.
+    /// Process a verified envelope and its verified content, panicking on
+    /// storage failure.
+    ///
+    /// This operation is idempotent whether or not the envelope or content was
+    /// processed previously.
+    ///
+    /// # Panics
+    ///
+    /// Panics after rolling back if storage fails or a stored invariant is
+    /// violated, including an unresolved existing vote winner or a shortened
+    /// identity prefix mapped to a different full identity.
+    pub async fn process_event_with_content(
+        &self,
+        content: &VerifiedEventContent,
+    ) -> (InsertEventOutcome, ProcessEventState) {
+        self.try_process_event_with_content(content)
+            .await
+            .expect("Storage error")
+    }
+
+    /// Fallibly process verified content and its carried envelope atomically.
     ///
     /// This is the safe public content-ingestion boundary. If the envelope is
     /// absent, it is inserted before content processing in the same
@@ -794,12 +846,30 @@ impl Database {
     /// lifecycle-state checks make the operation idempotent and prevent
     /// repeated accounting or projections.
     ///
+    /// # Errors
+    ///
+    /// Returns errors under the same conditions as
+    /// [`Database::try_process_event_with_content`].
+    pub async fn try_process_event_content(
+        &self,
+        event_content: &VerifiedEventContent,
+    ) -> DbResult<()> {
+        self.try_process_event_with_content(event_content)
+            .await
+            .map(|_| ())
+    }
+
+    /// Process verified content and its carried envelope, panicking on storage
+    /// failure.
+    ///
     /// # Panics
     ///
-    /// Panics under the same storage-corruption conditions as
+    /// Panics under the same conditions as
     /// [`Database::process_event_with_content`].
     pub async fn process_event_content(&self, event_content: &VerifiedEventContent) {
-        self.process_event_with_content(event_content).await;
+        self.try_process_event_content(event_content)
+            .await
+            .expect("Storage error");
     }
 
     /// Process event content.
@@ -1316,25 +1386,11 @@ impl Database {
         .expect("Database panic")
     }
 
-    /// Get all known identities (from followees, followers, and events).
+    /// Get all identities that have authored retained events.
     pub async fn get_known_identities(&self) -> Vec<RostraId> {
-        self.read_with(|tx| {
-            let ids_full_table = tx.open_table(&ids_full::TABLE)?;
-
-            let mut ids = HashSet::new();
-
-            for entry in ids_full_table.range(..)? {
-                let entry = entry?;
-                let short_id = entry.0.value();
-                let rest_id = entry.1.value();
-                let full_id = RostraId::assemble(short_id, rest_id);
-                ids.insert(full_id);
-            }
-
-            Ok(ids.into_iter().collect())
-        })
-        .await
-        .expect("Database panic")
+        self.read_with(ids_full::read_all)
+            .await
+            .expect("Database panic")
     }
 }
 
@@ -1370,7 +1426,11 @@ where
 
 #[derive(Debug, Clone)]
 pub enum InsertEventOutcome {
-    /// An event already existed, so it changed nothing
+    /// The event already existed, so graph, lifecycle, and projection state did
+    /// not change.
+    ///
+    /// Identity registration is still validated and may restore an absent
+    /// shortened/full mapping.
     AlreadyPresent,
     Inserted {
         /// An event already had a child reporting its existence.
@@ -1449,6 +1509,8 @@ mod content_ingestion_tests;
 mod deleted_replacement_tests;
 #[cfg(test)]
 mod follow_epoch_tests;
+#[cfg(test)]
+mod identity_collision_tests;
 #[cfg(test)]
 mod reception_order_tests;
 #[cfg(test)]

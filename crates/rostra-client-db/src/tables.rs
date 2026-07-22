@@ -116,7 +116,7 @@ use event::EventsMissingRecord;
 use id_self::IdSelfAccountRecord;
 use ids::{IdsFolloweesRecord, IdsFollowersRecord, IdsPersonaRecord, IdsUnfollowedRecord};
 use rostra_core::event::{EventAuxKey, EventKind, IrohNodeId, PersonaId};
-use rostra_core::id::{RestRostraId, RostraId, ShortRostraId};
+use rostra_core::id::RostraId;
 use rostra_core::{ContentHash, ExternalEventId, ShortEventId, Timestamp};
 use serde::Serialize;
 
@@ -186,14 +186,6 @@ def_table! {
     /// Contains the user's RostraId and the secret key for their iroh network
     /// identity.
     ids_self: () => IdSelfAccountRecord
-}
-
-def_table! {
-    /// Mapping from shortened to full `RostraId`.
-    ///
-    /// We use [`ShortRostraId`] in high-volume tables where an extra lookup
-    /// to reconstruct the full [`RostraId`] is acceptable, to save space.
-    ids_full: ShortRostraId => RestRostraId
 }
 
 def_table! {

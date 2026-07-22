@@ -215,12 +215,11 @@ impl Database {
         let author = event.author();
         let event_id = event.event_id.to_short();
 
+        ids_full_t.register(author)?;
+
         if events_table.get(&event_id)?.is_some() {
             return Ok(InsertEventOutcome::AlreadyPresent);
         }
-
-        let (id_short, id_rest) = event.author().split();
-        ids_full_t.insert(&id_short, &id_rest)?;
 
         let (was_missing, is_deleted) = match events_missing_table
             .remove(&(author, event_id))?

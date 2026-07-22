@@ -121,7 +121,7 @@ async fn test_store_event() -> BoxedErrorResult<()> {
     let event_d_id = event_d.event_id;
 
     db.write_with(|tx| {
-        let mut ids_full_tbl = tx.open_table(&ids_full::TABLE).boxed()?;
+        let mut ids_full_tbl = ids_full::Table::open(tx).boxed()?;
         let mut events_table = tx.open_table(&events::TABLE).boxed()?;
         let mut events_missing_table = tx.open_table(&events_missing::TABLE).boxed()?;
         let mut events_by_time_table = tx.open_table(&events_by_time::TABLE)?;
@@ -229,7 +229,7 @@ async fn test_store_deleted_event() -> BoxedErrorResult<()> {
     .1;
 
     db.write_with(|tx| {
-        let mut ids_full_tbl = tx.open_table(&ids_full::TABLE).boxed()?;
+        let mut ids_full_tbl = ids_full::Table::open(tx).boxed()?;
         let mut events_table = tx.open_table(&events::TABLE).boxed()?;
         let mut events_by_time_table = tx.open_table(&events_by_time::TABLE)?;
         let mut events_content_state_table = tx.open_table(&events_content_state::TABLE).boxed()?;
@@ -542,7 +542,7 @@ async fn test_event_arrives_before_content() -> BoxedErrorResult<()> {
     let content_hash = event.content_hash();
 
     db.write_with(|tx| {
-        let mut ids_full_tbl = tx.open_table(&ids_full::TABLE)?;
+        let mut ids_full_tbl = ids_full::Table::open(tx)?;
         let mut events_table = tx.open_table(&events::TABLE)?;
         let mut events_missing_table = tx.open_table(&events_missing::TABLE)?;
         let mut events_by_time_table = tx.open_table(&events_by_time::TABLE)?;
@@ -641,7 +641,7 @@ async fn test_content_exists_when_event_arrives() -> BoxedErrorResult<()> {
     let content_hash = event.content_hash();
 
     db.write_with(|tx| {
-        let mut ids_full_tbl = tx.open_table(&ids_full::TABLE)?;
+        let mut ids_full_tbl = ids_full::Table::open(tx)?;
         let mut events_table = tx.open_table(&events::TABLE)?;
         let mut events_missing_table = tx.open_table(&events_missing::TABLE)?;
         let mut events_by_time_table = tx.open_table(&events_by_time::TABLE)?;
@@ -742,7 +742,7 @@ async fn test_multiple_events_share_content() -> BoxedErrorResult<()> {
     );
 
     db.write_with(|tx| {
-        let mut ids_full_tbl = tx.open_table(&ids_full::TABLE)?;
+        let mut ids_full_tbl = ids_full::Table::open(tx)?;
         let mut events_table = tx.open_table(&events::TABLE)?;
         let mut events_missing_table = tx.open_table(&events_missing::TABLE)?;
         let mut events_by_time_table = tx.open_table(&events_by_time::TABLE)?;
@@ -863,7 +863,7 @@ async fn test_multiple_events_waiting_for_content() -> BoxedErrorResult<()> {
     let content_hash = event_a.content_hash();
 
     db.write_with(|tx| {
-        let mut ids_full_tbl = tx.open_table(&ids_full::TABLE)?;
+        let mut ids_full_tbl = ids_full::Table::open(tx)?;
         let mut events_table = tx.open_table(&events::TABLE)?;
         let mut events_missing_table = tx.open_table(&events_missing::TABLE)?;
         let mut events_by_time_table = tx.open_table(&events_by_time::TABLE)?;
@@ -1045,7 +1045,7 @@ async fn test_delete_event_arrives_before_target() -> BoxedErrorResult<()> {
     // NOT marked deleted
 
     db.write_with(|tx| {
-        let mut ids_full_tbl = tx.open_table(&ids_full::TABLE)?;
+        let mut ids_full_tbl = ids_full::Table::open(tx)?;
         let mut events_table = tx.open_table(&events::TABLE)?;
         let mut events_missing_table = tx.open_table(&events_missing::TABLE)?;
         let mut events_by_time_table = tx.open_table(&events_by_time::TABLE)?;
@@ -2024,7 +2024,7 @@ async fn test_data_usage_new_event_metadata() -> BoxedErrorResult<()> {
     let event_b = build_test_event(id_secret, event_a.event_id);
 
     db.write_with(|tx| {
-        let mut ids_full_tbl = tx.open_table(&ids_full::TABLE)?;
+        let mut ids_full_tbl = ids_full::Table::open(tx)?;
         let mut events_table = tx.open_table(&events::TABLE)?;
         let mut events_missing_table = tx.open_table(&events_missing::TABLE)?;
         let mut events_heads_table = tx.open_table(&events_heads::TABLE)?;
@@ -2722,7 +2722,7 @@ async fn test_follow_unfollow_refollow_flow() -> BoxedErrorResult<()> {
 
     // Insert the event first (without content in store - content arrives later)
     db.write_with(|tx| {
-        let mut ids_full_tbl = tx.open_table(&ids_full::TABLE)?;
+        let mut ids_full_tbl = ids_full::Table::open(tx)?;
         let mut events_table = tx.open_table(&events::TABLE)?;
         let mut events_missing_table = tx.open_table(&events_missing::TABLE)?;
         let mut events_heads_table = tx.open_table(&events_heads::TABLE)?;
@@ -2789,7 +2789,7 @@ async fn test_follow_unfollow_refollow_flow() -> BoxedErrorResult<()> {
         make_follow_event(user_a_secret, user_b, None, unfollow_time);
 
     db.write_with(|tx| {
-        let mut ids_full_tbl = tx.open_table(&ids_full::TABLE)?;
+        let mut ids_full_tbl = ids_full::Table::open(tx)?;
         let mut events_table = tx.open_table(&events::TABLE)?;
         let mut events_missing_table = tx.open_table(&events_missing::TABLE)?;
         let mut events_heads_table = tx.open_table(&events_heads::TABLE)?;
@@ -2862,7 +2862,7 @@ async fn test_follow_unfollow_refollow_flow() -> BoxedErrorResult<()> {
     );
 
     db.write_with(|tx| {
-        let mut ids_full_tbl = tx.open_table(&ids_full::TABLE)?;
+        let mut ids_full_tbl = ids_full::Table::open(tx)?;
         let mut events_table = tx.open_table(&events::TABLE)?;
         let mut events_missing_table = tx.open_table(&events_missing::TABLE)?;
         let mut events_heads_table = tx.open_table(&events_heads::TABLE)?;
@@ -3229,7 +3229,7 @@ mod proptest_rc {
         // Execute delivery order
         let consistency_result = db
             .write_with(|tx| {
-                let mut ids_full_tbl = tx.open_table(&ids_full::TABLE)?;
+                let mut ids_full_tbl = ids_full::Table::open(tx)?;
                 let mut events_table = tx.open_table(&events::TABLE)?;
                 let mut events_missing_table = tx.open_table(&events_missing::TABLE)?;
                 let mut events_by_time_table = tx.open_table(&events_by_time::TABLE)?;
@@ -3472,7 +3472,7 @@ mod proptest_follow {
                     let (event, _content) = &events_and_content[*idx];
 
                     db.write_with(|tx| {
-                        let mut ids_full_tbl = tx.open_table(&ids_full::TABLE)?;
+                        let mut ids_full_tbl = ids_full::Table::open(tx)?;
                         let mut events_table = tx.open_table(&events::TABLE)?;
                         let mut events_missing_table = tx.open_table(&events_missing::TABLE)?;
                         let mut events_heads_table = tx.open_table(&events_heads::TABLE)?;

@@ -119,7 +119,7 @@ impl Database {
         tx.open_table(&crate::reception_order_next::TABLE)?;
 
         tx.open_table(&crate::ids_self::TABLE)?;
-        tx.open_table(&crate::ids_full::TABLE)?;
+        crate::ids_full::init(tx)?;
         tx.open_table(&crate::ids_followers::TABLE)?;
         tx.open_table(&crate::ids_followees::TABLE)?;
         tx.open_table(&crate::ids_follow_events::TABLE)?;

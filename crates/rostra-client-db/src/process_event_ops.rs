@@ -32,7 +32,7 @@ impl Database {
         let mut events_missing_tbl = tx.open_table(&events_missing::TABLE)?;
         let mut events_heads_tbl = tx.open_table(&events_heads::TABLE)?;
         let mut events_by_time_tbl = tx.open_table(&events_by_time::TABLE)?;
-        let mut ids_full_tbl = tx.open_table(&ids_full::TABLE)?;
+        let mut ids_full_tbl = ids_full::Table::open(tx)?;
         let mut ids_data_usage_tbl = tx.open_table(&ids_data_usage::TABLE)?;
 
         let insert_event_outcome = Database::insert_event_tx(
