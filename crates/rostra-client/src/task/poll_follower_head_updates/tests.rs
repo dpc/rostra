@@ -1,16 +1,18 @@
+use std::collections::HashMap;
 use std::sync::Arc;
+use std::time::Duration;
 
 use rostra_client_db::{Database, WotData};
-use rostra_core::event::{Event, EventContentRaw, EventKind, SignedEvent};
-use rostra_core::id::RostraIdSecretKey;
+use rostra_core::event::{Event, EventContentRaw, EventKind, SignedEvent, VerifiedEvent};
+use rostra_core::id::{RostraId, RostraIdSecretKey};
 use rostra_p2p::connection::{
     Connection, MAX_REQUEST_SIZE, RpcId, RpcMessage as _, WaitFollowersNewHeadsRequest,
     WaitFollowersNewHeadsResponse,
 };
 use rostra_p2p_api::ROSTRA_P2P_V0_ALPN;
-use tokio::sync::{oneshot, watch};
+use tokio::sync::{RwLock, oneshot, watch};
 
-use super::PollFollowerHeadUpdates;
+use super::{PeerBackoffState, PollFollowerHeadUpdates, SharedBackoffState};
 
 fn signed_event(secret: RostraIdSecretKey, content_byte: u8) -> SignedEvent {
     let content = EventContentRaw::new(vec![content_byte]);
@@ -20,6 +22,18 @@ fn signed_event(secret: RostraIdSecretKey, content_byte: u8) -> SignedEvent {
         .content(&content)
         .build()
         .signed_by(secret)
+}
+
+fn verified_event_with_author(
+    secret: RostraIdSecretKey,
+    author: RostraId,
+    content_byte: u8,
+) -> VerifiedEvent {
+    let mut event = VerifiedEvent::verify_signed(secret.id(), signed_event(secret, content_byte))
+        .expect("fixture signature");
+    event.event.author = author;
+    event.event_id = event.event.compute_id();
+    event
 }
 
 async fn connection_returning(
@@ -105,9 +119,13 @@ async fn rpc_ingests_event_when_claimed_and_signed_authors_match() {
         })
         .await;
 
-    PollFollowerHeadUpdates::poll_once(&connection, &db, self_id, &wot_rx)
+    let event = PollFollowerHeadUpdates::poll_once(&connection, self_id, &wot_rx)
         .await
-        .expect("matching self-authored response is admitted");
+        .expect("matching self-authored response is admitted")
+        .expect("self-authored response is in the web of trust");
+    db.try_process_event(&event)
+        .await
+        .expect("admitted response is stored");
     release_server.send(()).expect("release server");
     server.await.expect("test server");
     drop(connection);
@@ -134,7 +152,7 @@ async fn rpc_rejects_trusted_claim_with_event_signed_by_another_author() {
         })
         .await;
 
-    let error = PollFollowerHeadUpdates::poll_once(&connection, &db, self_id, &wot_rx)
+    let error = PollFollowerHeadUpdates::poll_once(&connection, self_id, &wot_rx)
         .await
         .expect_err("claimed author must match the signed event author");
     release_server.send(()).expect("release server");
@@ -147,4 +165,41 @@ async fn rpc_rejects_trusted_claim_with_event_signed_by_another_author() {
         "unexpected verification error: {error}"
     );
     assert!(!db.has_event(attacker_event_id).await);
+}
+
+#[test_log::test(tokio::test(flavor = "multi_thread"))]
+async fn storage_failure_stops_before_resetting_peer_backoff() {
+    let first_secret = RostraIdSecretKey::from_bytes([41; 32]);
+    let second_secret = RostraIdSecretKey::from_bytes([42; 32]);
+    let (prefix, first_rest) = first_secret.id().split();
+    let (_, second_rest) = second_secret.id().split();
+    let first_author = RostraId::assemble(prefix, first_rest);
+    let second_author = RostraId::assemble(prefix, second_rest);
+    let first = verified_event_with_author(first_secret, first_author, 3);
+    let second = verified_event_with_author(second_secret, second_author, 4);
+    let db = Database::new_in_memory(first_author)
+        .await
+        .expect("in-memory database");
+    db.try_process_event(&first)
+        .await
+        .expect("first identity mapping");
+
+    let peer_id = RostraIdSecretKey::from_bytes([43; 32]).id();
+    let backoff_until = tokio::time::Instant::now() + Duration::from_secs(30);
+    let backoff_state: SharedBackoffState = Arc::new(RwLock::new(HashMap::from([(
+        peer_id,
+        PeerBackoffState {
+            consecutive_failures: 2,
+            backoff_until: Some(backoff_until),
+        },
+    )])));
+
+    PollFollowerHeadUpdates::finish_successful_poll(&db, peer_id, Some(&second), &backoff_state)
+        .await
+        .expect_err("identity collision must remain a database failure");
+
+    let state = backoff_state.read().await;
+    let peer_state = state.get(&peer_id).expect("peer backoff state");
+    assert_eq!(peer_state.consecutive_failures, 2);
+    assert_eq!(peer_state.backoff_until, Some(backoff_until));
 }

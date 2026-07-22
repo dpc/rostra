@@ -56,6 +56,15 @@ than owning a second graph state. They must tolerate duplicate wakeups,
 temporary peer failure, and out-of-order delivery. Task handles are owned by
 the client, so dropping the client stops its background work.
 
+Verified-data ingestion uses the database's fallible processing boundary.
+Invariant, transaction, and storage failures are local database failures, not
+peer-availability failures: request and publication paths return them to their
+caller, while a background ingestion loop logs the affected identity or event
+and stops its affected task or worker. Such failures do not enter peer backoff
+or missing-content retry state. The runtime does not globally restart stopped
+tasks; reopening or otherwise recovering the client remains an operational
+decision.
+
 Head handling depends on the operation. Local publication and retained state
 use the minimum event ID as a deterministic representative. Incremental
 broadcasts carry the exact newly accepted head. The broadcaster initially

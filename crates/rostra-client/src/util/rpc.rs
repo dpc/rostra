@@ -1,18 +1,12 @@
 use std::cmp::Reverse;
 use std::collections::{BTreeMap, BTreeSet};
 
-use rostra_client_db::{InsertEventOutcome, ProcessEventState};
+use rostra_client_db::{DbResult, InsertEventOutcome, ProcessEventState};
 use rostra_core::ShortEventId;
 use rostra_core::event::VerifiedEvent;
 use rostra_core::id::{RostraId, ToShort as _};
-use rostra_util_error::{BoxedErrorResult, WhateverResult};
 use rostra_util_fmt::AsFmtOption as _;
-use snafu::{OptionExt as _, Snafu};
 use tracing::debug;
-
-#[derive(Debug, Snafu)]
-#[snafu(display("Event content not found from any peer"))]
-pub struct ContentNotFoundError;
 
 use crate::LOG_TARGET;
 use crate::connection_cache::ConnectionCache;
@@ -26,7 +20,7 @@ pub async fn get_event_content_from_followers(
     connections_cache: &ConnectionCache,
     followers_by_followee_cache: &mut BTreeMap<RostraId, Vec<RostraId>>,
     db: &rostra_client_db::Database,
-) -> BoxedErrorResult<()> {
+) -> DbResult<bool> {
     let followers = if let Some(followers) = followers_by_followee_cache.get(&author_id) {
         followers.clone()
     } else {
@@ -54,22 +48,26 @@ pub async fn get_event_content_from_followers(
             %event_id,
             "Event not in DB, fetching from peers first"
         );
-        let event = connections_cache
+        let Some(event) = connections_cache
             .get_event_from_peers(networking, &peers, author_id, event_id)
             .await
-            .context(ContentNotFoundSnafu)?;
-        db.process_event(&event).await;
+        else {
+            return Ok(false);
+        };
+        db.try_process_event(&event).await?;
         event
     };
 
-    let content = connections_cache
+    let Some(content) = connections_cache
         .get_event_content_from_peers(networking, &peers, event)
         .await
-        .context(ContentNotFoundSnafu)?;
+    else {
+        return Ok(false);
+    };
 
-    db.process_event_content(&content).await;
+    db.try_process_event_content(&content).await?;
 
-    Ok(())
+    Ok(true)
 }
 
 /// Downloads events from a child event, traversing backward toward older
@@ -100,7 +98,7 @@ pub async fn download_events_from_child(
     connections: &ConnectionCache,
     peers: &[RostraId],
     storage: &rostra_client_db::Database,
-) -> WhateverResult<bool> {
+) -> DbResult<bool> {
     use rostra_core::event::EventExt as _;
 
     struct QueueItemData {
@@ -181,7 +179,7 @@ pub async fn download_events_from_child(
                     .get_event_content_from_peers(networking, peers, event)
                     .await
                 {
-                    storage.process_event_content(&content).await;
+                    storage.try_process_event_content(&content).await?;
                     new_contents += 1;
                 }
             }
@@ -230,7 +228,7 @@ pub async fn download_events_from_child(
                 };
                 downloaded_anything = true;
                 new_events += 1;
-                let (insert_outcome, process_state) = storage.process_event(&new_event).await;
+                let (insert_outcome, process_state) = storage.try_process_event(&new_event).await?;
                 (new_event, process_state, insert_outcome)
             };
 

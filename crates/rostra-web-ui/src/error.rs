@@ -6,7 +6,9 @@ use rostra_client::ClientRefError;
 use rostra_client::error::{ActivateError, InitError, PostError};
 use rostra_client::multiclient::MultiClientError;
 use rostra_client_db::DbError;
+use rostra_core::ShortEventId;
 use rostra_core::event::ContentValidationError;
+use rostra_core::id::RostraId;
 use rostra_util_error::{BoxedError, FmtCompact as _};
 use serde::Serialize;
 use snafu::Snafu;
@@ -103,6 +105,14 @@ pub enum RequestError {
     },
     #[snafu(visibility(pub(crate)))]
     Other { source: BoxedError },
+    #[snafu(visibility(pub(crate)))]
+    #[snafu(display("Failed to store content for event {event_id} by {author_id}: {source}"))]
+    EventContentStorage {
+        author_id: RostraId,
+        event_id: ShortEventId,
+        #[snafu(source(from(DbError, Box::new)))]
+        source: Box<DbError>,
+    },
     #[snafu(visibility(pub(crate)))]
     #[snafu(display("InternalServerError: {msg}"))]
     InternalServerError { msg: &'static str },

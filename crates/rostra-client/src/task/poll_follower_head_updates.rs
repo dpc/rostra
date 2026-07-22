@@ -5,14 +5,14 @@ use std::time::Duration;
 use futures::StreamExt as _;
 use futures::future::BoxFuture;
 use futures::stream::FuturesUnordered;
-use rostra_client_db::{Database, IdsFollowersRecord, WotData};
+use rostra_client_db::{Database, DbResult, IdsFollowersRecord, WotData};
 use rostra_core::event::{EventExt as _, VerifiedEvent};
 use rostra_core::id::{RostraId, ToShort as _};
 use rostra_p2p::Connection;
 use rostra_util_error::FmtCompact as _;
 use tokio::sync::{RwLock, watch};
 use tokio::time::Instant;
-use tracing::{debug, instrument, trace, warn};
+use tracing::{debug, error, instrument, trace, warn};
 
 use crate::client::{Client, INITIAL_BACKOFF_DURATION, MAX_BACKOFF_DURATION};
 use crate::connection_cache::ConnectionCache;
@@ -125,8 +125,17 @@ impl PollFollowerHeadUpdates {
 
         loop {
             tokio::select! {
-                Some(peer_id) = poll_futures.next() => {
+                Some((peer_id, result)) = poll_futures.next() => {
                     active_peers.remove(&peer_id);
+                    if let Err(err) = result {
+                        error!(
+                            target: LOG_TARGET,
+                            %peer_id,
+                            err = %err,
+                            "Failed to store a polled follower head; stopping poll task"
+                        );
+                        return;
+                    }
                     trace!(target: LOG_TARGET, %peer_id, "Poll task completed");
                     if desired_peers.contains(&peer_id) {
                         pending_peers.insert(peer_id);
@@ -180,7 +189,7 @@ impl PollFollowerHeadUpdates {
         &self,
         pending_peers: &mut BTreeSet<RostraId>,
         active_peers: &mut BTreeSet<RostraId>,
-        poll_futures: &mut FuturesUnordered<BoxFuture<'static, RostraId>>,
+        poll_futures: &mut FuturesUnordered<BoxFuture<'static, (RostraId, DbResult<()>)>>,
         backoff_state: &SharedBackoffState,
     ) {
         while active_peers.len() < MAX_ACTIVE_POLLS {
@@ -198,7 +207,7 @@ impl PollFollowerHeadUpdates {
             let wot_rx = self.self_wot_rx.clone();
             let backoff = backoff_state.clone();
             poll_futures.push(Box::pin(async move {
-                let _ = tokio::time::timeout(
+                let result = tokio::time::timeout(
                     POLL_SLOT_TIMEOUT,
                     Self::poll_peer_for_heads(
                         networking,
@@ -210,8 +219,9 @@ impl PollFollowerHeadUpdates {
                         backoff,
                     ),
                 )
-                .await;
-                peer_id
+                .await
+                .unwrap_or(Ok(()));
+                (peer_id, result)
             }));
         }
     }
@@ -224,7 +234,7 @@ impl PollFollowerHeadUpdates {
         peer_id: RostraId,
         wot_rx: watch::Receiver<Arc<WotData>>,
         backoff_state: SharedBackoffState,
-    ) {
+    ) -> DbResult<()> {
         loop {
             // Check if we're in backoff for this peer
             {
@@ -273,16 +283,22 @@ impl PollFollowerHeadUpdates {
                 }
             };
 
-            match Self::poll_once(&conn, &db, self_id, &wot_rx).await {
-                Ok(()) => {
-                    trace!(target: LOG_TARGET, %peer_id, "Successfully polled peer");
-                    // Reset backoff on success
+            match Self::poll_once(&conn, self_id, &wot_rx).await {
+                Ok(event) => {
+                    if let Some(insert_outcome) =
+                        Self::finish_successful_poll(&db, peer_id, event.as_ref(), &backoff_state)
+                            .await?
                     {
-                        let mut state = backoff_state.write().await;
-                        if let Some(peer_state) = state.get_mut(&peer_id) {
-                            peer_state.record_success();
-                        }
+                        let event = event.as_ref().expect("insert outcome requires an event");
+                        debug!(
+                            target: LOG_TARGET,
+                            author = %event.author().to_short(),
+                            event_id = %event.event_id.to_short(),
+                            ?insert_outcome,
+                            "Stored new head event (content deferred to NewHeadFetcher)"
+                        );
                     }
+                    trace!(target: LOG_TARGET, %peer_id, "Successfully polled peer");
                 }
                 Err(err) => {
                     debug!(
@@ -309,14 +325,47 @@ impl PollFollowerHeadUpdates {
                 }
             }
         }
+        Ok(())
+    }
+
+    async fn finish_successful_poll(
+        db: &Database,
+        peer_id: RostraId,
+        event: Option<&VerifiedEvent>,
+        backoff_state: &SharedBackoffState,
+    ) -> DbResult<Option<rostra_client_db::InsertEventOutcome>> {
+        let insert_outcome = if let Some(event) = event {
+            let (insert_outcome, _process_state) = match db.try_process_event(event).await {
+                Ok(outcome) => outcome,
+                Err(err) => {
+                    error!(
+                        target: LOG_TARGET,
+                        peer_id = %peer_id.to_short(),
+                        author = %event.author().to_short(),
+                        event_id = %event.event_id.to_short(),
+                        err = %err,
+                        "Failed to store a head event received from a follower"
+                    );
+                    return Err(err);
+                }
+            };
+            Some(insert_outcome)
+        } else {
+            None
+        };
+
+        let mut state = backoff_state.write().await;
+        if let Some(peer_state) = state.get_mut(&peer_id) {
+            peer_state.record_success();
+        }
+        Ok(insert_outcome)
     }
 
     async fn poll_once(
         conn: &Connection,
-        db: &Database,
         self_id: RostraId,
         wot_rx: &watch::Receiver<Arc<WotData>>,
-    ) -> Result<(), String> {
+    ) -> Result<Option<VerifiedEvent>, String> {
         // Call the blocking RPC
         let response = conn
             .wait_followers_new_heads()
@@ -354,26 +403,12 @@ impl PollFollowerHeadUpdates {
                 author = %authenticated_author.to_short(),
                 "Received event from author not in web of trust, ignoring"
             );
-            return Ok(());
+            return Ok(None);
         }
 
-        // Store the event (without content). Content will be fetched by
-        // NewHeadFetcher via download_events_from_child, which also
-        // traverses parent events. Not fetching content here ensures that
-        // wants_content() returns true for this event, preventing the
-        // probabilistic cutoff in download_events_from_child from skipping
-        // parent traversal.
-        let (insert_outcome, _process_state) = db.process_event(&verified_event).await;
-
-        debug!(
-            target: LOG_TARGET,
-            author = %authenticated_author.to_short(),
-            event_id = %verified_event.event_id.to_short(),
-            ?insert_outcome,
-            "Stored new head event (content deferred to NewHeadFetcher)"
-        );
-
-        Ok(())
+        // The caller stores the envelope after separating storage failure from
+        // transient peer errors. Content remains deferred to NewHeadFetcher.
+        Ok(Some(verified_event))
     }
 }
 

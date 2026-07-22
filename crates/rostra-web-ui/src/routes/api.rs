@@ -600,8 +600,14 @@ async fn publish_signed_event(
 
     client_ref
         .db()
-        .process_event_with_content(&verified_event_content)
-        .await;
+        .try_process_event_with_content(&verified_event_content)
+        .await
+        .map_err(|e| {
+            api_error(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                format!("Failed to store event: {e}"),
+            )
+        })?;
 
     // Get updated heads
     let mut heads: Vec<String> = client_ref

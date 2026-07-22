@@ -16,8 +16,8 @@ use iroh_base::EndpointAddr;
 use n0_future::task::AbortOnDropHandle;
 use rostra_client_db::{Database, DbResult, IdsFolloweesRecord, IdsFollowersRecord, WotData};
 use rostra_core::event::{
-    Event, EventContentRaw, IrohNodeId, PersonaTag, PersonasTagsSelector, SignedEvent, SocialPost,
-    VerifiedEvent, VerifiedEventContent, content_kind,
+    Event, EventContentRaw, EventExt as _, IrohNodeId, PersonaTag, PersonasTagsSelector,
+    SignedEvent, SocialPost, VerifiedEvent, VerifiedEventContent, content_kind,
 };
 use rostra_core::id::{RostraId, RostraIdSecretKey};
 use rostra_core::{ExternalEventId, ShortEventId, Timestamp};
@@ -34,7 +34,8 @@ use crate::LOG_TARGET;
 use crate::error::{
     ActivateResult, ActivateSnafu, ConnectResult, IdResolveError, IdResolveResult,
     IdSecretReadResult, InitIrohClientSnafu, InitPkarrClientSnafu, InitResult, IoSnafu,
-    ParsingSnafu, PostResult, SecretMismatchSnafu,
+    LocalAnnouncementStorageSnafu, ParsingSnafu, PostResult, SecretMismatchSnafu, StorageSnafu,
+    StoreEventError, StoreEventResult,
 };
 use crate::id::{CompactTicket, IdResolvedData};
 use crate::task::head_merger::HeadMerger;
@@ -327,6 +328,9 @@ pub struct Client {
 
     active: AtomicBool,
 
+    /// Serializes the fallible transition into active/signing mode.
+    activation_lock: tokio::sync::Mutex<()>,
+
     /// Networking layer (endpoint, pkarr, p2p_state, connection cache)
     pub(crate) networking: Arc<crate::net::ClientNetworking>,
 
@@ -401,6 +405,7 @@ impl Client {
             db,
             id,
             active: AtomicBool::new(false),
+            activation_lock: tokio::sync::Mutex::new(()),
             task_handles: Mutex::new(Vec::new()),
         });
 
@@ -438,10 +443,9 @@ impl Client {
     pub async fn unlock_active(&self, id_secret: RostraIdSecretKey) -> ActivateResult<()> {
         let unlock_start = Instant::now();
         ensure!(self.id == id_secret.id(), SecretMismatchSnafu);
-
-        if !self.active.swap(true, SeqCst) {
-            self.start_pkarr_id_publisher(id_secret);
-            self.start_head_merger(id_secret);
+        let _activation_guard = self.activation_lock.lock().await;
+        if self.active.load(SeqCst) {
+            return Ok(());
         }
 
         let db = &self.db;
@@ -455,19 +459,27 @@ impl Client {
             .find(|((_ts, endpoint), _)| endpoint == &our_endpoint)
         {
             debug!(target: LOG_TARGET, "Existing node announcement found");
+            self.finish_activation(id_secret, Ok(()))?;
         } else {
-            match self.publish_node_announcement(id_secret).await {
-                Err(err) => {
-                    warn!(target: LOG_TARGET, err = %err.fmt_compact(), "Could not publish node announcement");
-                }
-                _ => {
-                    info!(target: LOG_TARGET, "Published node announcement");
-                }
-            }
+            let announcement_result = self.publish_node_announcement(id_secret).await;
+            self.finish_activation(id_secret, announcement_result)?;
+            info!(target: LOG_TARGET, "Published node announcement");
             debug!(target: LOG_TARGET, elapsed_ms = %unlock_start.elapsed().as_millis(), "Node announcement published");
         }
 
         debug!(target: LOG_TARGET, elapsed_ms = %unlock_start.elapsed().as_millis(), "unlock_active complete");
+        Ok(())
+    }
+
+    fn finish_activation(
+        &self,
+        id_secret: RostraIdSecretKey,
+        announcement_result: PostResult<()>,
+    ) -> ActivateResult<()> {
+        announcement_result.context(LocalAnnouncementStorageSnafu)?;
+        self.active.store(true, SeqCst);
+        self.start_pkarr_id_publisher(id_secret);
+        self.start_head_merger(id_secret);
         Ok(())
     }
 
@@ -726,12 +738,23 @@ impl Client {
         false
     }
 
+    /// Store verified event content, retaining author and event context on
+    /// error.
     pub async fn store_event_with_content(
         &self,
-        _event_id: impl Into<ShortEventId>,
+        event_id: impl Into<ShortEventId>,
         content: &VerifiedEventContent,
-    ) {
-        self.db.process_event_with_content(content).await;
+    ) -> StoreEventResult<()> {
+        let event_id = event_id.into();
+        self.db
+            .try_process_event_with_content(content)
+            .await
+            .map(|_| ())
+            .map_err(|source| StoreEventError {
+                author_id: content.author(),
+                event_id,
+                source,
+            })
     }
 
     pub async fn store_event_too_large(
@@ -797,10 +820,10 @@ impl Client {
         let verified_event_content =
             rostra_core::event::VerifiedEventContent::verify(verified_event, content)
                 .expect("Can't fail to verify self-created content");
-        let _ = self
-            .db
-            .process_event_with_content(&verified_event_content)
-            .await;
+        self.db
+            .try_process_event_with_content(&verified_event_content)
+            .await
+            .context(StorageSnafu)?;
 
         Ok(verified_event)
     }
@@ -1018,5 +1041,57 @@ impl Client {
 
     pub fn self_wot_subscribe(&self) -> watch::Receiver<Arc<WotData>> {
         self.db.self_wot_subscribe()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::atomic::Ordering::SeqCst;
+
+    use iroh::endpoint::presets;
+    use rostra_client_db::DbError;
+    use rostra_core::id::RostraIdSecretKey;
+    use rostra_p2p_api::ROSTRA_P2P_V0_ALPN;
+
+    use super::Client;
+    use crate::error::PostError;
+
+    #[test_log::test(tokio::test(flavor = "multi_thread"))]
+    async fn failed_announcement_does_not_commit_activation_and_retry_can_start_tasks() {
+        let secret = RostraIdSecretKey::from_bytes([51; 32]);
+        let endpoint = iroh::Endpoint::builder(presets::Minimal)
+            .relay_mode(iroh::RelayMode::Disabled)
+            .alpns(vec![ROSTRA_P2P_V0_ALPN.to_vec()])
+            .bind()
+            .await
+            .expect("test endpoint");
+        let client = Client::builder(secret.id())
+            .iroh_endpoint(endpoint)
+            .start_request_handler(false)
+            .start_background_tasks(false)
+            .build()
+            .await
+            .expect("test client");
+
+        client
+            .finish_activation(
+                secret,
+                Err(PostError::Storage {
+                    source: DbError::Overflow,
+                }),
+            )
+            .expect_err("announcement storage failure");
+        assert!(!client.active.load(SeqCst));
+        assert!(client.task_handles.lock().expect("task handles").is_empty());
+
+        client
+            .finish_activation(secret, Ok(()))
+            .expect("activation retry");
+        assert!(client.active.load(SeqCst));
+        assert_eq!(
+            client.task_handles.lock().expect("task handles").len(),
+            2,
+            "the retry starts each signing task exactly once"
+        );
     }
 }

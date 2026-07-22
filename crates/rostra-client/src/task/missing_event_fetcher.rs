@@ -6,7 +6,7 @@ use rostra_core::id::{RostraId, ToShort as _};
 use rostra_p2p::Connection;
 use rostra_util_error::{FmtCompact as _, WhateverResult};
 use snafu::ResultExt as _;
-use tracing::{debug, instrument, trace, warn};
+use tracing::{debug, error, instrument, trace, warn};
 
 use crate::LOG_TARGET;
 use crate::client::Client;
@@ -105,8 +105,8 @@ impl MissingEventFetcher {
                     if db.has_event(*missing_event).await {
                         continue;
                     }
-                    match self.get_event(author_id, *missing_event, &conn, &db).await {
-                        Ok(_) => {}
+                    let event = match self.get_event(author_id, *missing_event, &conn).await {
+                        Ok(event) => event,
                         Err(err) => {
                             debug!(
                                 target:  LOG_TARGET,
@@ -116,7 +116,22 @@ impl MissingEventFetcher {
                                 err = %err.fmt_compact(),
                                 "Error getting event from a peer"
                             );
+                            continue;
                         }
+                    };
+                    let Some(event) = event else {
+                        continue;
+                    };
+                    if let Err(err) = db.try_process_event(&event).await {
+                        error!(
+                            target: LOG_TARGET,
+                            author_id = %author_id,
+                            event_id = %missing_event,
+                            follower_id = %follower_id,
+                            err = %err,
+                            "Failed to store a fetched missing event; stopping fetcher"
+                        );
+                        return;
                     }
                 }
             }
@@ -128,22 +143,19 @@ impl MissingEventFetcher {
         author_id: RostraId,
         event_id: ShortEventId,
         conn: &Connection,
-        storage: &rostra_client_db::Database,
-    ) -> WhateverResult<bool> {
+    ) -> WhateverResult<Option<VerifiedEvent>> {
         let event = conn
             .get_event(author_id, event_id)
             .await
             .whatever_context("Failed to query peer")?;
 
         let Some(event) = event else {
-            return Ok(false);
+            return Ok(None);
         };
         let event =
             VerifiedEvent::verify_response(author_id, event_id, *event.event(), event.sig())
                 .whatever_context("Invalid event received")?;
 
-        storage.process_event(&event).await;
-
-        Ok(true)
+        Ok(Some(event))
     }
 }

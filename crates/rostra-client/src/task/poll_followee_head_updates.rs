@@ -5,12 +5,13 @@ use std::time::Duration;
 use futures::StreamExt as _;
 use futures::future::BoxFuture;
 use futures::stream::FuturesUnordered;
-use rostra_client_db::{Database, IdsFolloweesRecord};
+use rostra_client_db::{Database, DbResult, IdsFolloweesRecord};
+use rostra_core::event::VerifiedEvent;
 use rostra_core::id::{RostraId, ToShort as _};
 use rostra_util_error::FmtCompact as _;
 use tokio::sync::{RwLock, watch};
 use tokio::time::Instant;
-use tracing::{debug, instrument, trace, warn};
+use tracing::{debug, error, instrument, trace, warn};
 
 use crate::client::{Client, INITIAL_BACKOFF_DURATION, MAX_BACKOFF_DURATION};
 use crate::connection_cache::ConnectionCache;
@@ -119,8 +120,17 @@ impl PollFolloweeHeadUpdates {
 
         loop {
             tokio::select! {
-                Some(peer_id) = poll_futures.next() => {
+                Some((peer_id, result)) = poll_futures.next() => {
                     active_peers.remove(&peer_id);
+                    if let Err(err) = result {
+                        error!(
+                            target: LOG_TARGET,
+                            followee_id = %peer_id.to_short(),
+                            err = %err,
+                            "Failed to store a polled followee head; stopping poll task"
+                        );
+                        return;
+                    }
                     trace!(target: LOG_TARGET, peer_id = %peer_id.to_short(), "Poll task completed");
                     if desired_peers.contains(&peer_id) {
                         pending_peers.insert(peer_id);
@@ -174,7 +184,7 @@ impl PollFolloweeHeadUpdates {
         &self,
         pending_peers: &mut BTreeSet<RostraId>,
         active_peers: &mut BTreeSet<RostraId>,
-        poll_futures: &mut FuturesUnordered<BoxFuture<'static, RostraId>>,
+        poll_futures: &mut FuturesUnordered<BoxFuture<'static, (RostraId, DbResult<()>)>>,
         backoff_state: &SharedBackoffState,
     ) {
         while active_peers.len() < MAX_ACTIVE_POLLS {
@@ -190,12 +200,13 @@ impl PollFolloweeHeadUpdates {
             let db = self.db.clone();
             let backoff = backoff_state.clone();
             poll_futures.push(Box::pin(async move {
-                let _ = tokio::time::timeout(
+                let result = tokio::time::timeout(
                     POLL_SLOT_TIMEOUT,
                     Self::poll_followee(networking, connections, db, peer_id, backoff),
                 )
-                .await;
-                peer_id
+                .await
+                .unwrap_or(Ok(()));
+                (peer_id, result)
             }));
         }
     }
@@ -206,7 +217,7 @@ impl PollFolloweeHeadUpdates {
         db: Arc<Database>,
         followee_id: RostraId,
         backoff_state: SharedBackoffState,
-    ) {
+    ) -> DbResult<()> {
         loop {
             // Check backoff
             {
@@ -252,7 +263,17 @@ impl PollFolloweeHeadUpdates {
             };
 
             match Self::poll_once(&conn, &db, followee_id).await {
-                Ok(()) => {
+                Ok(event) => {
+                    if let Some(event) = event {
+                        let (insert_outcome, _process_state) = db.try_process_event(&event).await?;
+                        debug!(
+                            target: LOG_TARGET,
+                            followee_id = %followee_id.to_short(),
+                            event_id = %event.event_id.to_short(),
+                            ?insert_outcome,
+                            "Stored followee head event (content deferred to NewHeadFetcher)"
+                        );
+                    }
                     trace!(target: LOG_TARGET, followee_id = %followee_id.to_short(), "Successfully polled followee");
                     let mut state = backoff_state.write().await;
                     if let Some(peer_state) = state.get_mut(&followee_id) {
@@ -280,13 +301,14 @@ impl PollFolloweeHeadUpdates {
                 }
             }
         }
+        Ok(())
     }
 
     async fn poll_once(
         conn: &rostra_p2p::Connection,
         db: &Database,
         followee_id: RostraId,
-    ) -> Result<(), String> {
+    ) -> Result<Option<VerifiedEvent>, String> {
         // Get our current known head for this followee
         let known_heads = db.get_heads(followee_id).await;
         let known_head =
@@ -315,7 +337,7 @@ impl PollFolloweeHeadUpdates {
                 "Peer returned same head (likely old handler bug), backing off"
             );
             tokio::time::sleep(Duration::from_secs(60)).await;
-            return Ok(());
+            return Ok(None);
         }
 
         debug!(
@@ -338,21 +360,9 @@ impl PollFolloweeHeadUpdates {
                 new_head = %new_head_id.to_short(),
                 "Followee reported head but event not found"
             );
-            return Ok(());
+            return Ok(None);
         };
 
-        // Store event without content (NewHeadFetcher will handle
-        // content fetch and DAG traversal)
-        let (insert_outcome, _process_state) = db.process_event(&verified_event).await;
-
-        debug!(
-            target: LOG_TARGET,
-            followee_id = %followee_id.to_short(),
-            event_id = %verified_event.event_id.to_short(),
-            ?insert_outcome,
-            "Stored followee head event (content deferred to NewHeadFetcher)"
-        );
-
-        Ok(())
+        Ok(Some(verified_event))
     }
 }

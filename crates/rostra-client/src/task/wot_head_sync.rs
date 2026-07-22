@@ -41,11 +41,11 @@
 use std::sync::Arc;
 use std::time::Duration;
 
-use rostra_client_db::{Database, WotData};
+use rostra_client_db::{Database, DbResult, WotData};
 use rostra_core::id::{RostraId, ToShort as _};
 use rostra_util_error::FmtCompact as _;
 use tokio::sync::watch;
-use tracing::{debug, instrument, trace};
+use tracing::{debug, error, instrument, trace};
 
 use crate::client::{Client, ClientHandle};
 use crate::connection_cache::ConnectionCache;
@@ -79,7 +79,14 @@ impl WotHeadSync {
     #[instrument(name = "wot-head-sync", skip(self), fields(self_id = %self.self_id.fmt_short()), ret)]
     pub async fn run(self) {
         loop {
-            self.sync_cycle().await;
+            if let Err(err) = self.sync_cycle().await {
+                error!(
+                    target: LOG_TARGET,
+                    err = %err,
+                    "Database ingestion failed; stopping WoT head sync"
+                );
+                return;
+            }
 
             if self.client.app_ref_opt().is_none() {
                 debug!(target: LOG_TARGET, "Client gone, quitting");
@@ -96,7 +103,7 @@ impl WotHeadSync {
         }
     }
 
-    async fn sync_cycle(&self) {
+    async fn sync_cycle(&self) -> DbResult<()> {
         let wot_ids: Vec<RostraId> = {
             let wot = self.wot_rx.borrow();
             std::iter::once(self.self_id)
@@ -115,18 +122,12 @@ impl WotHeadSync {
                 break;
             }
 
-            if let Err(err) = self.sync_id(*id).await {
-                debug!(
-                    target: LOG_TARGET,
-                    id = %id.to_short(),
-                    err = %err.fmt_compact(),
-                    "Error syncing ID"
-                );
-            }
+            self.sync_id(*id).await?;
         }
+        Ok(())
     }
 
-    async fn sync_id(&self, id: RostraId) -> rostra_util_error::WhateverResult<()> {
+    async fn sync_id(&self, id: RostraId) -> DbResult<()> {
         let followers = self.db.get_followers(id).await;
         let peers: Vec<RostraId> = followers.into_iter().chain([id, self.self_id]).collect();
 
@@ -182,7 +183,7 @@ impl WotHeadSync {
                 "Found unknown head, fetching events"
             );
 
-            match crate::util::rpc::download_events_from_child(
+            let download_result = crate::util::rpc::download_events_from_child(
                 id,
                 remote_head,
                 &self.networking,
@@ -190,9 +191,23 @@ impl WotHeadSync {
                 &peers,
                 &self.db,
             )
-            .await
-            {
-                Ok(true) => {
+            .await;
+            let downloaded = match download_result {
+                Ok(downloaded) => downloaded,
+                Err(err) => {
+                    error!(
+                        target: LOG_TARGET,
+                        id = %id.to_short(),
+                        peer_id = %peer_id.to_short(),
+                        head = %remote_head.to_short(),
+                        err = %err,
+                        "Database ingestion failed while syncing a WoT head"
+                    );
+                    return Err(err);
+                }
+            };
+            match downloaded {
+                true => {
                     debug!(
                         target: LOG_TARGET,
                         id = %id.to_short(),
@@ -200,21 +215,12 @@ impl WotHeadSync {
                         "Successfully fetched events for unknown head"
                     );
                 }
-                Ok(false) => {
+                false => {
                     debug!(
                         target: LOG_TARGET,
                         id = %id.to_short(),
                         head = %remote_head.to_short(),
                         "No new events found from peers"
-                    );
-                }
-                Err(err) => {
-                    debug!(
-                        target: LOG_TARGET,
-                        id = %id.to_short(),
-                        head = %remote_head.to_short(),
-                        err = %err.fmt_compact(),
-                        "Error fetching events for unknown head"
                     );
                 }
             }

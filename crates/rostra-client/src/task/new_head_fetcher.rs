@@ -2,12 +2,11 @@ use std::collections::{BTreeSet, HashSet};
 use std::sync::{Arc, Mutex};
 
 use n0_future::task::AbortOnDropHandle;
-use rostra_client_db::{Database, WotData};
+use rostra_client_db::{Database, DbResult, WotData};
 use rostra_core::ShortEventId;
 use rostra_core::id::{RostraId, ToShort as _};
-use rostra_util_error::FmtCompact as _;
 use tokio::sync::{broadcast, watch};
-use tracing::{debug, instrument, trace, warn};
+use tracing::{debug, error, instrument, trace, warn};
 
 use crate::LOG_TARGET;
 use crate::client::Client;
@@ -204,8 +203,26 @@ impl NewHeadFetcher {
             let heads = db.get_heads(author).await;
 
             for head in heads {
-                Self::fetch_events_for_head(author, head, &networking, &connections, self_id, &db)
-                    .await;
+                if let Err(err) = Self::fetch_events_for_head(
+                    author,
+                    head,
+                    &networking,
+                    &connections,
+                    self_id,
+                    &db,
+                )
+                .await
+                {
+                    error!(
+                        target: LOG_TARGET,
+                        worker_id,
+                        author = %author.to_short(),
+                        %head,
+                        err = %err,
+                        "Database ingestion failed; stopping new-head worker"
+                    );
+                    return;
+                }
             }
 
             queue.complete_work(&author);
@@ -219,7 +236,7 @@ impl NewHeadFetcher {
         connections: &ConnectionCache,
         self_id: RostraId,
         db: &Database,
-    ) {
+    ) -> DbResult<()> {
         let followers = db.get_followers(author).await;
 
         let peers: Vec<RostraId> = followers.into_iter().chain([author, self_id]).collect();
@@ -232,9 +249,9 @@ impl NewHeadFetcher {
             &peers,
             db,
         )
-        .await
+        .await?
         {
-            Ok(true) => {
+            true => {
                 debug!(
                     target: LOG_TARGET,
                     author = %author.to_short(),
@@ -242,7 +259,7 @@ impl NewHeadFetcher {
                     "Successfully fetched events for new head"
                 );
             }
-            Ok(false) => {
+            false => {
                 debug!(
                     target: LOG_TARGET,
                     author = %author.to_short(),
@@ -250,15 +267,7 @@ impl NewHeadFetcher {
                     "No new events found from any peer"
                 );
             }
-            Err(err) => {
-                debug!(
-                    target: LOG_TARGET,
-                    author = %author.to_short(),
-                    %head,
-                    err = %err.fmt_compact(),
-                    "Error fetching events for new head"
-                );
-            }
         }
+        Ok(())
     }
 }

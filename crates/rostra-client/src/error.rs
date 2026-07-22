@@ -2,8 +2,9 @@ use std::io;
 
 use pkarr::dns::SimpleDnsError;
 use rostra_client_db::DbError;
+use rostra_core::ShortEventId;
 use rostra_core::event::ContentValidationError;
-use rostra_core::id::RostraIdSecretKeyError;
+use rostra_core::id::{RostraId, RostraIdSecretKeyError};
 use rostra_util_error::BoxedError;
 use snafu::Snafu;
 
@@ -31,6 +32,8 @@ pub type InitResult<T> = std::result::Result<T, InitError>;
 pub enum ActivateError {
     #[snafu(display("Secret key does not match RostraId"))]
     SecretMismatch,
+    #[snafu(display("Failed to store the local node announcement: {source}"))]
+    LocalAnnouncementStorage { source: PostError },
 }
 
 pub type ActivateResult<T> = std::result::Result<T, ActivateError>;
@@ -112,9 +115,26 @@ pub enum PostError {
     Encode { source: BoxedError },
     #[snafu(transparent)]
     Validation { source: ContentValidationError },
+    #[snafu(display("Failed to store the published event: {source}"))]
+    Storage { source: DbError },
 }
 
 pub type PostResult<T> = std::result::Result<T, PostError>;
+
+/// Failure to ingest verified event content at a client request boundary.
+#[derive(Debug, Snafu)]
+#[snafu(display("Failed to store event {event_id} by {author_id}: {source}"))]
+pub struct StoreEventError {
+    /// Authenticated author of the event being stored.
+    pub author_id: RostraId,
+    /// Short identifier of the event being stored.
+    pub event_id: ShortEventId,
+    /// Database ingestion failure.
+    pub source: DbError,
+}
+
+/// Result of storing verified event content through the client boundary.
+pub type StoreEventResult<T> = std::result::Result<T, StoreEventError>;
 
 #[derive(Debug, Snafu)]
 #[snafu(visibility(pub(crate)))]

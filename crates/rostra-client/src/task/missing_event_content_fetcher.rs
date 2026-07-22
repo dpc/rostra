@@ -3,8 +3,7 @@ use std::time::Duration;
 
 use rostra_core::Timestamp;
 use rostra_core::id::{RostraId, ToShort as _};
-use rostra_util_error::FmtCompact as _;
-use tracing::{debug, instrument, trace, warn};
+use tracing::{debug, error, instrument, trace, warn};
 
 use crate::LOG_TARGET;
 use crate::client::Client;
@@ -142,14 +141,14 @@ impl MissingEventContentFetcher {
                     false
                 }
                 Err(err) => {
-                    debug!(
+                    error!(
                         target: LOG_TARGET,
                         author_id = %author_id.to_short(),
                         event_id = %event_id.to_short(),
-                        err = %err.fmt_compact(),
-                        "Error fetching missing content"
+                        err = %err,
+                        "Database ingestion failed; stopping missing-content fetcher"
                     );
-                    false
+                    return;
                 }
             };
 

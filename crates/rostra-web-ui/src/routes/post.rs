@@ -12,13 +12,14 @@ use rostra_core::event::{PersonaTag, SocialPost};
 use rostra_core::id::{RostraId, ToShort as _};
 use rostra_core::{ExternalEventId, ShortEventId, Timestamp};
 use serde::Deserialize;
+use snafu::ResultExt as _;
 use tower_cookies::Cookies;
 use tracing::debug;
 use url::Url;
 
 use super::unlock::session::{RoMode, UserSession};
 use super::{Maud, fragment};
-use crate::error::{ReadOnlyModeSnafu, RequestResult};
+use crate::error::{EventContentStorageSnafu, ReadOnlyModeSnafu, RequestResult};
 use crate::html_utils::re_typeset;
 use crate::layout::{OpenGraphMeta, truncate_at_word_boundary};
 use crate::util::extractors::AjaxRequest;
@@ -734,7 +735,7 @@ pub async fn fetch_missing_post(
 
     let content_id = post_content_html_id(post_thread_id, event_id);
 
-    if let Err(err) = get_event_content_from_followers(
+    if !get_event_content_from_followers(
         client.networking(),
         client.rostra_id(),
         author_id,
@@ -744,12 +745,14 @@ pub async fn fetch_missing_post(
         client.db(),
     )
     .await
-    {
+    .context(EventContentStorageSnafu {
+        author_id,
+        event_id,
+    })? {
         debug!(
             author = %author_id.to_short(),
             %event_id,
-            %err,
-            "Failed to fetch missing post content"
+            "Missing post content was unavailable from peers"
         );
     } else {
         // Post was fetched successfully, render the updated content

@@ -9,6 +9,19 @@ wakeup. The runtime shape and task ownership are described by
 integrity and graph invariants are specified by
 [SPEC-event-graph](../rostra-core/specs/SPEC-event-graph.md).
 
+Production ingestion uses the database's fallible APIs. Transaction, invariant,
+or storage failure rolls back the affected transaction and returns from a
+request or publication boundary, or logs the affected identity/event and stops
+the background task or worker performing that ingestion. Such failures never
+enter peer backoff or missing-content retry state; ordinary network absence
+keeps its existing bounded retry or backoff behavior. Stopped tasks are not
+globally restarted, so reopening or otherwise recovering the client is an
+operational decision. The database's panic-on-error compatibility wrappers are
+preserved for existing callers and tests but are not production ingestion APIs.
+`failed_announcement_does_not_commit_activation_and_retry_can_start_tasks` and
+`storage_failure_stops_before_resetting_peer_backoff` protect the activation and
+peer-failure classification boundaries.
+
 An encrypted iroh connection authenticates the remote transport endpoint, not
 the Rostra author of an event and not that author's admission to the local Web
 of Trust. Event signatures authenticate Rostra authors. Unsigned routing fields,

@@ -21,9 +21,10 @@ use rostra_p2p::util::ToShort as _;
 use rostra_util_error::{BoxedError, FmtCompact as _};
 use snafu::{Location, OptionExt as _, ResultExt as _, Snafu};
 use tokio::sync::{Semaphore, watch};
-use tracing::{debug, info, instrument, trace};
+use tracing::{debug, error, info, instrument, trace};
 
 use crate::client::Client;
+use crate::error::StoreEventError;
 use crate::task::head_selection::sample_head;
 use crate::{ClientHandle, ClientRefError, ClientRefSnafu};
 
@@ -58,6 +59,10 @@ pub enum IncomingConnectionError {
     #[snafu(transparent)]
     Db {
         source: DbError,
+    },
+    #[snafu(transparent)]
+    StoreEvent {
+        source: StoreEventError,
     },
     // TODO: more details
     InvalidRequest {
@@ -295,9 +300,19 @@ impl RequestHandler {
                 .boxed()
                 .context(InvalidRequestSnafu)?;
 
-            client
+            if let Err(err) = client
                 .store_event_with_content(event.event_id, &verified_content)
-                .await;
+                .await
+            {
+                error!(
+                    target: LOG_TARGET,
+                    author_id = %verified_content.author(),
+                    event_id = %verified_content.event_id(),
+                    err = %err,
+                    "Failed to store event received through FEED_EVENT"
+                );
+                return Err(err.into());
+            }
         }
 
         Connection::write_success_return_code(&mut send)

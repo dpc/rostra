@@ -1,11 +1,12 @@
 use std::time::Duration;
 
 use rand::Rng as _;
+use rostra_client_db::DbResult;
 use rostra_core::event::{EventContentRaw, EventKind, VerifiedEvent};
 use rostra_core::id::{RostraId, RostraIdSecretKey};
 use rostra_core::{Event, ShortEventId};
 use tokio::sync::watch;
-use tracing::{debug, instrument, trace};
+use tracing::{debug, error, instrument, trace};
 
 use crate::client::Client;
 use crate::task::head_selection::sorted_heads;
@@ -45,9 +46,17 @@ impl HeadMerger {
         let mut head_rx = self.self_head_rx.clone();
         loop {
             match self.merge_one_fork().await {
-                MergeOutcome::ClientDropped => break,
-                MergeOutcome::Merged => continue,
-                MergeOutcome::NoFork => {}
+                Err(err) => {
+                    error!(
+                        target: LOG_TARGET,
+                        err = %err,
+                        "Failed to store a head-merge event; stopping head merger"
+                    );
+                    break;
+                }
+                Ok(MergeOutcome::ClientDropped) => break,
+                Ok(MergeOutcome::Merged) => continue,
+                Ok(MergeOutcome::NoFork) => {}
             }
 
             if head_rx.changed().await.is_err() {
@@ -57,12 +66,12 @@ impl HeadMerger {
         }
     }
 
-    async fn merge_one_fork(&self) -> MergeOutcome {
+    async fn merge_one_fork(&self) -> DbResult<MergeOutcome> {
         let Ok(client) = self.client.client_ref() else {
-            return MergeOutcome::ClientDropped;
+            return Ok(MergeOutcome::ClientDropped);
         };
         if client.db().get_heads(self.id).await.len() < 2 {
-            return MergeOutcome::NoFork;
+            return Ok(MergeOutcome::NoFork);
         }
         drop(client);
 
@@ -76,12 +85,12 @@ impl HeadMerger {
         tokio::time::sleep(delay).await;
 
         let Ok(client) = self.client.client_ref() else {
-            return MergeOutcome::ClientDropped;
+            return Ok(MergeOutcome::ClientDropped);
         };
         let db = client.db();
         let heads = sorted_heads(&db.get_heads(self.id).await);
         let [head1, head2, ..] = heads.as_slice() else {
-            return MergeOutcome::NoFork;
+            return Ok(MergeOutcome::NoFork);
         };
 
         let empty_content = EventContentRaw::new(vec![]);
@@ -106,8 +115,21 @@ impl HeadMerger {
             head = %verified_event.event_id,
             "Merging divergent heads"
         );
-        let _ = db.process_event_with_content(&verified_event_content).await;
-        MergeOutcome::Merged
+        if let Err(err) = db
+            .try_process_event_with_content(&verified_event_content)
+            .await
+        {
+            error!(
+                target: LOG_TARGET,
+                first_head = %head1,
+                second_head = %head2,
+                merge_event_id = %verified_event.event_id,
+                err = %err,
+                "Failed to store a head-merge event"
+            );
+            return Err(err);
+        }
+        Ok(MergeOutcome::Merged)
     }
 }
 
