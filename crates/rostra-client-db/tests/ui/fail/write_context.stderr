@@ -1,0 +1,11 @@
+error[E0603]: struct `WriteTransactionCtx` is private
+ --> tests/ui/fail/write_context.rs:2:37
+  |
+2 |     let _: Option<rostra_client_db::WriteTransactionCtx> = None;
+  |                                     ^^^^^^^^^^^^^^^^^^^ private struct
+  |
+note: the struct `WriteTransactionCtx` is defined here
+ --> src/lib.rs
+  |
+  | pub(crate) struct WriteTransactionCtx {
+  | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^

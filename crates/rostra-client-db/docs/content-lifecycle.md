@@ -178,6 +178,16 @@ the maximum `(event.timestamp, ShortEventId)`. The vote aggregate changes only
 when the same candidate wins the individual-vote comparison. Equal-second
 events therefore converge independently of payload delivery order.
 
+Replacing an individual-vote winner first validates its complete stored source
+relationship: source key/ID, author, kind, singleton and auxiliary-parent flags,
+timestamp, verified retained bytes, decoded vote, and target must agree. A
+Deleted or Pruned source remains resolvable while those bytes remain because
+non-post projections survive those terminal transitions. A Missing, Invalid,
+absent, or mismatched source is corruption. Transaction processing fails and
+rolls back the whole transaction, including the candidate envelope, without
+changing the winner or aggregate; the current infallible public ingestion
+boundary then panics on that storage-corruption error.
+
 Active follows also retain the latest unfollow as an exclusive epoch boundary
 and retain processed follow-event orders. `first_ts` is the timestamp of the
 earliest follow strictly after that boundary, so late follow delivery can move
@@ -518,6 +528,15 @@ Both cases indicate bugs in the calling code and will panic in debug builds.
   conflicts converge in both orders
 - `test_equal_timestamp_vote_conflicts_converge` - Vote winner and aggregate use
   one equal-second comparison
+- `test_unresolved_vote_winners_abort_and_roll_back` - Missing, mismatched, or
+  cryptographically invalid stored vote sources abort replacement without
+  changing the winner, aggregate, or candidate envelope across reopen
+- `deleted_vote_winner_with_retained_content_can_be_replaced` - Normal
+  vote-delete-revote flow replaces a terminal winner while its verified content
+  remains retained
+- `latest_singleton_query_is_isolated_ordered_and_strict` - Public singleton
+  enumeration is identity/kind isolated, deterministically newest-first, and
+  rejects malformed stored keys
 - `test_failed_fetch_completions_are_compare_and_set` - Overlapping failed
   completions cannot leave stale rows after processing or deletion
 - `test_failed_fetch_rejects_non_forward_schedule` - Equal or backward

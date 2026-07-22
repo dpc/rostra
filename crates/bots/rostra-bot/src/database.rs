@@ -22,7 +22,7 @@ impl BotDatabase {
     /// Initialize bot specific tables
     pub async fn init_tables(&self) -> DbResult<()> {
         self.client_db
-            .write_with(|tx| {
+            .extension_write(|tx| {
                 let _unpublished_table = tx.open_table(&articles_unpublished::TABLE)?;
                 let _published_table = tx.open_table(&articles_published::TABLE)?;
                 let _published_urls_table = tx.open_table(&articles_published_urls::TABLE)?;
@@ -43,7 +43,7 @@ impl BotDatabase {
     /// 3. Title Jaccard similarity + temporal proximity
     pub async fn add_unpublished_article(&self, article: &Article) -> DbResult<bool> {
         self.client_db
-            .write_with(|tx| {
+            .extension_write(|tx| {
                 let mut unpublished_table = tx.open_table(&articles_unpublished::TABLE)?;
                 let published_table = tx.open_table(&articles_published::TABLE)?;
                 let published_urls_table = tx.open_table(&articles_published_urls::TABLE)?;
@@ -178,7 +178,7 @@ impl BotDatabase {
     /// Get all unpublished articles
     pub async fn get_unpublished_articles(&self) -> DbResult<Vec<Article>> {
         self.client_db
-            .read_with(|tx| {
+            .extension_read(|tx| {
                 let unpublished_table = tx.open_table(&articles_unpublished::TABLE)?;
                 let hn_unpublished_table = tx.open_table(&hn_articles_unpublished::TABLE)?;
                 let mut articles = Vec::new();
@@ -211,7 +211,7 @@ impl BotDatabase {
     ) -> DbResult<()> {
         let article = article.clone();
         self.client_db
-            .write_with(move |tx| {
+            .extension_write(move |tx| {
                 let mut unpublished_table = tx.open_table(&articles_unpublished::TABLE)?;
                 let mut published_table = tx.open_table(&articles_published::TABLE)?;
                 let mut published_urls_table = tx.open_table(&articles_published_urls::TABLE)?;
@@ -267,7 +267,7 @@ impl BotDatabase {
     pub async fn remove_unpublished_article(&self, article_id: &str) -> DbResult<()> {
         let article_id = article_id.to_string();
         self.client_db
-            .write_with(move |tx| {
+            .extension_write(move |tx| {
                 let mut unpublished_table = tx.open_table(&articles_unpublished::TABLE)?;
                 unpublished_table.remove(&article_id)?;
                 Ok(())
@@ -278,7 +278,7 @@ impl BotDatabase {
     /// Get count of unpublished articles
     pub async fn get_unpublished_count(&self) -> DbResult<usize> {
         self.client_db
-            .read_with(|tx| {
+            .extension_read(|tx| {
                 let unpublished_table = tx.open_table(&articles_unpublished::TABLE)?;
                 let hn_unpublished_table = tx.open_table(&hn_articles_unpublished::TABLE)?;
                 let mut count = 0;

@@ -140,7 +140,7 @@ impl Database {
     ///
     /// The `now` parameter should be `Timestamp::now()` for normal operation,
     /// but can be set to a specific value for testing or migration.
-    pub fn process_event_content_inserted_tx(
+    pub(crate) fn process_event_content_inserted_tx(
         &self,
         event_content: &VerifiedEventContent,
         now: Timestamp,
@@ -524,7 +524,7 @@ impl Database {
         Ok(())
     }
 
-    pub fn process_event_content_reverted_tx(
+    pub(crate) fn process_event_content_reverted_tx(
         &self,
         event_content: &VerifiedEventContent,
         tx: &WriteTransactionCtx,

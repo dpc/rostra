@@ -79,9 +79,10 @@ maud = "*"
 n0-future = "0.3.2"
 tempfile = "3.14.0"
 test-log = { version = "0.2.16", features = ["trace"] }
+trybuild = "1"
 rand = "0.9"
 redb = "2.3.0"
-redb-bincode = "0.3.0"
+redb-bincode = { git = "https://github.com/rustshop/redb-bincode", rev = "c5bb9c211d29424e7d1c3b9be3e1497b9aadfe86" }
 rostra-core = { path = "crates/rostra-core" }
 rostra-client = { path = "crates/rostra-client" }
 rostra-client-db = { path = "crates/rostra-client-db" }
@@ -162,6 +163,3 @@ debug = false
 debug = false
 [profile.release.build-override]
 debug = false
-
-[patch.crates-io]
-redb-bincode = { git = "https://github.com/rustshop/redb-bincode", rev = "b33cedb787d452dc3735a153aca55086fea7c306" }

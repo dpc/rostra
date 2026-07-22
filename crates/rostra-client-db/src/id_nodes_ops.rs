@@ -7,7 +7,10 @@ use rostra_core::id::RostraId;
 use crate::{Database, DbResult, IrohNodeRecord, ids_nodes};
 
 impl Database {
-    pub fn trim_iroh_nodes_to_limit_tx(id: RostraId, table: &mut ids_nodes::Table) -> DbResult<()> {
+    pub(crate) fn trim_iroh_nodes_to_limit_tx(
+        id: RostraId,
+        table: &mut ids_nodes::Table,
+    ) -> DbResult<()> {
         let existing: BTreeSet<(Timestamp, IrohNodeId)> = table
             .range(&(id, IrohNodeId::ZERO)..=&(id, IrohNodeId::MAX))?
             .map(|res| res.map(|(k, v)| (v.value().announcement_ts, k.value().1)))
@@ -20,7 +23,7 @@ impl Database {
         Ok(())
     }
 
-    pub fn get_id_endpoints_tx(
+    pub(crate) fn get_id_endpoints_tx(
         id: RostraId,
         table: &mut ids_nodes::Table,
     ) -> DbResult<BTreeMap<(Timestamp, IrohNodeId), IrohNodeRecord>> {

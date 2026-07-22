@@ -164,7 +164,8 @@ impl Database {
     /// If total migration is needed, this function:
     /// 1. Copies events, content_store, ids_self, db_init_time, and canonical
     ///    social-post replacement rows to temp tables
-    /// 2. Deletes all tables except temp and db_version
+    /// 2. Deletes built-in tables except temp and db_version, preserving
+    ///    caller-owned extension tables
     /// 3. Initializes fresh tables with current schema
     /// 4. Restores stable metadata and canonical replacement rows from temp
     ///
@@ -238,8 +239,9 @@ impl Database {
     /// Prepare for total migration by stashing source-of-truth tables.
     ///
     /// This copies events, content_store, stable metadata, and canonical
-    /// social-post replacement rows to temp tables, deletes all other tables,
-    /// and initializes fresh schema. Stable metadata and replacement rows are
+    /// social-post replacement rows to temp tables, deletes other built-in
+    /// tables, and initializes fresh schema. Caller-owned extension tables are
+    /// preserved byte-for-byte. Stable metadata and replacement rows are
     /// restored immediately so the Database can be created normally.
     fn prepare_total_migration(dbtx: &WriteTransactionCtx, source_ver: u64) -> DbResult<()> {
         // Define temp table definitions
@@ -305,7 +307,7 @@ impl Database {
             ver_table.insert(&(), &source_ver)?;
         }
 
-        // Step 2: Delete all tables except temp and db_version
+        // Step 2: Delete built-in tables except temp and db_version.
         info!(target: LOG_TARGET, "Deleting old tables...");
         let table_names: Vec<String> = dbtx
             .as_raw()
@@ -314,7 +316,10 @@ impl Database {
             .collect();
 
         for name in &table_names {
-            if name.starts_with(MIGRATION_TEMP_PREFIX) || name == "db_version" {
+            if name.starts_with(MIGRATION_TEMP_PREFIX)
+                || name == "db_version"
+                || !crate::extension::is_reserved_extension_table(name)
+            {
                 continue;
             }
             let raw_def = redb::TableDefinition::<&[u8], &[u8]>::new(name);

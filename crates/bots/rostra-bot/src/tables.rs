@@ -1,6 +1,5 @@
 use bincode::{Decode, Encode};
-// Re-export the def_table macro from rostra-client-db
-pub use rostra_client_db::def_table;
+use rostra_client_db::define_extension_table;
 use rostra_core::Timestamp;
 use serde::{Deserialize, Serialize};
 
@@ -63,33 +62,33 @@ pub struct TitleEntry {
 }
 
 // Tables for generic articles
-def_table! {
+define_extension_table! {
     /// Articles waiting to be published
-    articles_unpublished: String => Article
+    articles_unpublished, "articles_unpublished": String => Article
 }
 
-def_table! {
+define_extension_table! {
     /// Articles that have been published
-    articles_published: String => Timestamp
+    articles_published, "articles_published": String => Timestamp
 }
 
-def_table! {
+define_extension_table! {
     /// Normalized URL → original article ID (for O(1) URL dedup lookup)
-    articles_published_urls: String => String
+    articles_published_urls, "articles_published_urls": String => String
 }
 
-def_table! {
+define_extension_table! {
     /// Article ID → TitleEntry (scanned for Jaccard + temporal proximity check)
-    articles_published_titles: String => TitleEntry
+    articles_published_titles, "articles_published_titles": String => TitleEntry
 }
 
 // Legacy HN tables for backward compatibility
-def_table! {
+define_extension_table! {
     /// HackerNews articles waiting to be published
-    hn_articles_unpublished: u32 => HnArticle
+    hn_articles_unpublished, "hn_articles_unpublished": u32 => HnArticle
 }
 
-def_table! {
+define_extension_table! {
     /// HackerNews articles that have been published
-    hn_articles_published: u32 => Timestamp
+    hn_articles_published, "hn_articles_published": u32 => Timestamp
 }

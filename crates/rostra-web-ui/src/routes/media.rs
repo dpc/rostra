@@ -4,7 +4,6 @@ use axum::http::{HeaderMap, HeaderValue, StatusCode, header};
 use axum::response::{IntoResponse, Response};
 use axum_dpc_static_assets::handle_etag;
 use maud::{PreEscaped, html};
-use rostra_client_db::events_singletons_new;
 use rostra_core::ShortEventId;
 use rostra_core::event::content_kind;
 use rostra_core::id::{RostraId, ToShort as _};
@@ -158,41 +157,10 @@ pub async fn list(
     let client_handle = state.client(session.id()).await?;
     let client_ref = client_handle.client_ref()?;
 
-    // Get all SocialMedia events for this user from events_singleton2 table
-    // This should work for different images as they have different hashes
-    let media_event_ids: Vec<ShortEventId> = client_ref
+    let media_event_ids = client_ref
         .db()
-        .read_with(|tx| {
-            let singletons_table = tx.open_table(&events_singletons_new::TABLE)?;
-
-            let mut events = Vec::new();
-            let kind = rostra_core::event::EventKind::SOCIAL_MEDIA;
-
-            // Use a targeted range query to get only SOCIAL_MEDIA events for this user
-            let range_start = (author, kind, rostra_core::event::EventAuxKey::ZERO);
-            let range_end = (author, kind, rostra_core::event::EventAuxKey::MAX);
-
-            for record in singletons_table.range(range_start..=range_end)? {
-                let record = record?;
-                let key = record.0.value();
-                let value = record.1.value();
-
-                // Verify this is exactly what we want (should always be true with the range)
-                debug_assert_eq!(key.0, author);
-                debug_assert_eq!(key.1, kind);
-
-                events.push((value.ts, value.inner.event_id));
-            }
-
-            // Sort by timestamp, newest first
-            events.sort_by_key(|val: &(rostra_core::Timestamp, ShortEventId)| {
-                std::cmp::Reverse(val.0)
-            });
-
-            Ok(events.into_iter().map(|(_, id)| id).collect())
-        })
-        .await
-        .unwrap_or_default();
+        .get_latest_singleton_events(author, rostra_core::event::EventKind::SOCIAL_MEDIA)
+        .await;
 
     // Fetch media info for each event
     let mut media_items = Vec::new();

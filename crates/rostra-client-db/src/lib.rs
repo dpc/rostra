@@ -1,5 +1,6 @@
 mod event_order;
 mod events_content_missing_ops;
+mod extension;
 mod id_nodes_ops;
 mod migration_ops;
 mod models;
@@ -37,7 +38,18 @@ use tokio::sync::{Notify, broadcast, watch};
 use tokio::task::JoinError;
 use tracing::{debug, error, info, instrument};
 
-pub use self::tables::*;
+pub use self::extension::{
+    EXTENSION_RESERVED_TABLE_PREFIXES, ExtensionReadTransaction, ExtensionTableDefinition,
+    ExtensionWriteTransaction,
+};
+pub(crate) use self::tables::*;
+pub use self::tables::{
+    ContentStoreRecordOwned, EventContentResult, EventContentState, EventReceivedRecord,
+    EventReceivedSource, EventRecord, EventsHeadsTableRecord, IdSocialProfileRecord,
+    IdsDataUsageRecord, IrohNodeRecord, IrohNodeStats, Latest, SocialNewsRankRecord,
+    SocialPostRecord, SocialPostsReactionsRecord, SocialPostsRepliesRecord, SocialVoteScore,
+    SocialVoteSumRecord,
+};
 
 /// Web of Trust data - contains direct followees and extended followees.
 ///
@@ -80,7 +92,7 @@ impl WotData {
 
 const LOG_TARGET: &str = "rostra::db";
 
-pub struct WriteTransactionCtx {
+pub(crate) struct WriteTransactionCtx {
     dbtx: WriteTransaction,
     on_commit: std::sync::Mutex<Vec<Box<dyn FnOnce() + 'static>>>,
 }
@@ -93,7 +105,7 @@ impl From<WriteTransaction> for WriteTransactionCtx {
         }
     }
 }
-impl ops::Deref for WriteTransactionCtx {
+impl std::ops::Deref for WriteTransactionCtx {
     type Target = WriteTransaction;
 
     fn deref(&self) -> &Self::Target {
@@ -101,7 +113,7 @@ impl ops::Deref for WriteTransactionCtx {
     }
 }
 
-impl ops::DerefMut for WriteTransactionCtx {
+impl std::ops::DerefMut for WriteTransactionCtx {
     fn deref_mut(&mut self) -> &mut Self::Target {
         &mut self.dbtx
     }
@@ -227,11 +239,51 @@ pub enum DbError {
         #[snafu(implicit)]
         location: Location,
     },
+    #[snafu(display("Extension access to built-in table `{name}` is forbidden"))]
+    ReservedExtensionTable { name: String },
+    #[snafu(display("Stored vote singleton references unresolved event {event_id}"))]
+    UnresolvedVoteSingleton {
+        event_id: ShortEventId,
+        #[snafu(implicit)]
+        location: Location,
+    },
     #[snafu(display("Stored event graph contains a migration dependency cycle"))]
     MigrationDependencyCycle,
 }
 pub type DbResult<T> = std::result::Result<T, DbError>;
 
+/// The authoritative event store and projection boundary for one local
+/// identity.
+///
+/// Built-in reducers and projection tables are not part of the external API:
+///
+/// ```compile_fail
+/// let _ = rostra_client_db::Database::process_event_content_inserted_tx;
+/// ```
+///
+/// ```compile_fail
+/// let _ = rostra_client_db::events_singletons_new::TABLE;
+/// ```
+///
+/// ```compile_fail
+/// let _ = rostra_client_db::Database::write_with::<()>;
+/// ```
+///
+/// ```compile_fail
+/// let _ = rostra_client_db::Database::write_with_inner::<()>;
+/// ```
+///
+/// ```compile_fail
+/// let _ = rostra_client_db::Database::read_with::<()>;
+/// ```
+///
+/// ```compile_fail
+/// let _: Option<rostra_client_db::WriteTransactionCtx> = None;
+/// ```
+///
+/// ```compile_fail
+/// rostra_client_db::def_table!(forbidden: u64 => u64);
+/// ```
 #[derive(Debug)]
 pub struct Database {
     inner: redb_bincode::Database,
@@ -715,6 +767,11 @@ impl Database {
     ///
     /// This operation is idempotent whether or not the envelope or content was
     /// processed previously.
+    ///
+    /// # Panics
+    ///
+    /// Panics after rolling back if storage fails or a stored projection source
+    /// violates an invariant, including an unresolved existing vote winner.
     pub async fn process_event_with_content(
         &self,
         content: &VerifiedEventContent,
@@ -736,6 +793,11 @@ impl Database {
     /// transaction. If the envelope is already present, normal
     /// lifecycle-state checks make the operation idempotent and prevent
     /// repeated accounting or projections.
+    ///
+    /// # Panics
+    ///
+    /// Panics under the same storage-corruption conditions as
+    /// [`Database::process_event_with_content`].
     pub async fn process_event_content(&self, event_content: &VerifiedEventContent) {
         self.process_event_with_content(event_content).await;
     }
@@ -987,7 +1049,7 @@ impl Database {
     /// boundary.
     ///
     /// The synchronous transaction closure must not start another write.
-    pub async fn write_with_inner<T>(
+    pub(crate) async fn write_with_inner<T>(
         inner: &redb_bincode::Database,
         f: impl FnOnce(&'_ WriteTransactionCtx) -> DbResult<T>,
     ) -> DbResult<T> {
@@ -998,7 +1060,7 @@ impl Database {
     /// actions.
     ///
     /// The synchronous transaction closure must not re-enter database writes.
-    pub async fn write_with<T>(
+    pub(crate) async fn write_with<T>(
         &self,
         f: impl FnOnce(&'_ WriteTransactionCtx) -> DbResult<T>,
     ) -> DbResult<T> {
@@ -1011,7 +1073,33 @@ impl Database {
         })
     }
 
-    pub async fn read_with_inner<T>(
+    /// Runs a serialized transaction over caller-owned extension tables.
+    ///
+    /// The closure cannot access built-in graph, lifecycle, or projection
+    /// tables. It must not re-enter database writes. This trusted persistence
+    /// boundary does not include extension data in core replay or convergence;
+    /// callers own their schema, invariants, and compatibility. Total database
+    /// migrations preserve extension tables byte-for-byte.
+    ///
+    /// Returning `Ok` commits all extension-table mutations atomically.
+    /// Returning `Err`, panicking, or failing a reserved-name/table
+    /// operation leaves the transaction uncommitted. Post-commit built-in
+    /// projection hooks are not available at this boundary.
+    ///
+    /// # Errors
+    ///
+    /// Returns the closure's error and propagates transaction, table, and
+    /// commit errors. Opening a reserved table returns
+    /// [`DbError::ReservedExtensionTable`].
+    pub async fn extension_write<T>(
+        &self,
+        f: impl FnOnce(&ExtensionWriteTransaction<'_>) -> DbResult<T>,
+    ) -> DbResult<T> {
+        self.write_with(|tx| f(&ExtensionWriteTransaction::new(tx)))
+            .await
+    }
+
+    pub(crate) async fn read_with_inner<T>(
         inner: &redb_bincode::Database,
         f: impl FnOnce(&'_ ReadTransaction) -> DbResult<T>,
     ) -> DbResult<T> {
@@ -1022,14 +1110,34 @@ impl Database {
         })
     }
 
-    pub async fn read_with<T>(
+    pub(crate) async fn read_with<T>(
         &self,
         f: impl FnOnce(&'_ ReadTransaction) -> DbResult<T>,
     ) -> DbResult<T> {
         Self::read_with_inner(&self.inner, f).await
     }
 
-    pub fn verify_self_tx(self_id: RostraId, ids_self_t: &mut ids_self::Table) -> DbResult<()> {
+    /// Runs a read transaction over trusted, caller-owned extension tables.
+    ///
+    /// Callers own extension schemas, invariants, and compatibility; core event
+    /// replay does not validate or rebuild their contents.
+    ///
+    /// # Errors
+    ///
+    /// Returns the closure's error and propagates transaction and table errors.
+    /// Opening a reserved table returns [`DbError::ReservedExtensionTable`].
+    pub async fn extension_read<T>(
+        &self,
+        f: impl FnOnce(&ExtensionReadTransaction<'_>) -> DbResult<T>,
+    ) -> DbResult<T> {
+        self.read_with(|tx| f(&ExtensionReadTransaction::new(tx)))
+            .await
+    }
+
+    pub(crate) fn verify_self_tx(
+        self_id: RostraId,
+        ids_self_t: &mut ids_self::Table,
+    ) -> DbResult<()> {
         match Self::read_self_id_tx(ids_self_t)? {
             Some(existing_self_id_record) => {
                 if existing_self_id_record.rostra_id != self_id {
@@ -1095,6 +1203,32 @@ impl Database {
             Ok(singletons_table
                 .get(&(rostra_id, kind, aux_key))?
                 .map(|record| record.value().inner.event_id))
+        })
+        .await
+        .expect("Database panic")
+    }
+
+    /// Returns an identity's singleton winners for one event kind in descending
+    /// `(timestamp, ShortEventId)` order.
+    pub async fn get_latest_singleton_events(
+        &self,
+        rostra_id: RostraId,
+        kind: EventKind,
+    ) -> Vec<ShortEventId> {
+        self.read_with(|tx| {
+            let singletons = tx.open_table(&events_singletons_new::TABLE)?;
+            let start = (rostra_id, kind, EventAuxKey::ZERO);
+            let end = (rostra_id, kind, EventAuxKey::MAX);
+            let mut events = singletons
+                .range(start..=end)?
+                .map(|entry| {
+                    let (_, value) = entry?;
+                    let value = value.value();
+                    Ok((value.ts, value.inner.event_id))
+                })
+                .collect::<DbResult<Vec<_>>>()?;
+            events.sort_unstable_by_key(|event| std::cmp::Reverse(*event));
+            Ok(events.into_iter().map(|(_, event_id)| event_id).collect())
         })
         .await
         .expect("Database panic")

@@ -1,0 +1,13 @@
+error[E0624]: method `read_with` is private
+ --> tests/ui/fail/read_with.rs:2:41
+  |
+2 |       let _ = rostra_client_db::Database::read_with::<()>;
+  |                                           ^^^^^^^^^ private method
+  |
+ ::: src/lib.rs
+  |
+  | /     pub(crate) async fn read_with<T>(
+  | |         &self,
+  | |         f: impl FnOnce(&'_ ReadTransaction) -> DbResult<T>,
+  | |     ) -> DbResult<T> {
+  | |____________________- private method defined here

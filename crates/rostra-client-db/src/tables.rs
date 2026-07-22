@@ -128,13 +128,15 @@ pub(crate) mod event;
 pub(crate) mod id_self;
 pub(crate) mod ids;
 
-#[macro_export]
+// Every built-in table added here must use `events`, or one of the reserved
+// prefixes in `extension::EXTENSION_RESERVED_TABLE_PREFIXES`. The extension
+// boundary and total migration both rely on that namespace rule.
 macro_rules! def_table {
     ($(#[$outer:meta])*
         $name:ident : $k:ty => $v:ty) => {
         #[allow(unused)]
         $(#[$outer])*
-        pub mod $name {
+        pub(crate) mod $name {
             use super::*;
             pub type Key = $k;
             pub type Value = $v;
@@ -146,6 +148,9 @@ macro_rules! def_table {
         }
     };
 }
+#[cfg(test)]
+pub(crate) use def_table;
+
 // ============================================================================
 // SYSTEM TABLES
 // ============================================================================

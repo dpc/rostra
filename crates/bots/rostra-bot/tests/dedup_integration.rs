@@ -5,7 +5,10 @@ use rostra_bot::database::BotDatabase;
 use rostra_bot::dedup::DEDUP_TIME_WINDOW_SECS;
 use rostra_bot::publisher::Publisher;
 use rostra_bot::scraper::{Scraper, ScraperResult};
-use rostra_bot::tables::Article;
+use rostra_bot::tables::{
+    Article, articles_published, articles_published_titles, articles_published_urls,
+    articles_unpublished, hn_articles_published, hn_articles_unpublished,
+};
 use rostra_client::Client;
 use rostra_core::Timestamp;
 use rostra_core::id::RostraIdSecretKey;
@@ -13,6 +16,25 @@ use tokio::sync::Mutex;
 
 /// A fixed "now" timestamp for deterministic tests.
 const NOW: u64 = 1_700_000_000;
+
+#[test]
+fn extension_table_names_preserve_legacy_bot_data() {
+    assert_eq!(articles_unpublished::TABLE.name(), "articles_unpublished");
+    assert_eq!(articles_published::TABLE.name(), "articles_published");
+    assert_eq!(
+        articles_published_urls::TABLE.name(),
+        "articles_published_urls"
+    );
+    assert_eq!(
+        articles_published_titles::TABLE.name(),
+        "articles_published_titles"
+    );
+    assert_eq!(
+        hn_articles_unpublished::TABLE.name(),
+        "hn_articles_unpublished"
+    );
+    assert_eq!(hn_articles_published::TABLE.name(), "hn_articles_published");
+}
 
 /// A mock scraper that returns a configurable list of articles.
 struct MockScraper {

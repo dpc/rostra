@@ -12,6 +12,9 @@ may not open until `t4vh`. Late follow or unfollow changes also do not rewrite
 receipt indexes that were already materialized. The final rebuild supplies the
 follow-history backfill; as specified below, rebuilt receipt indexes use authored
 timestamps because historical local receipt times are unavailable.
+Typed writes use the configured big-endian bincode encoder. Typed reads require
+the decoder to consume the complete stored slice; a trailing byte is reported as
+corruption rather than interpreted as an alias of the encoded logical key.
 
 `rostra-client-db` is the authoritative state and projection layer for one
 local Rostra identity during a database instance's lifetime. It stores
@@ -30,8 +33,8 @@ Each `Database` is bound to a `self_id`; reopening storage for a different
 identity is rejected. The database also owns the iroh node secret associated
 with that client database, which is persistent for a disk-backed instance and
 transient for an in-memory instance. Higher layers submit verified events and
-content, query graph and social state, and subscribe to state changes. They do
-not mutate redb tables directly.
+content, query graph and social state, and subscribe to state changes. They
+cannot open built-in redb tables or invoke transaction-level reducers directly.
 
 The database separates:
 
@@ -51,12 +54,29 @@ Table definitions and migrations are implementation details of this crate.
 Public database methods and subscription channels form its boundary with the
 client and presentation layers.
 
+Trusted in-process components that share the database file, such as bots, may
+persist caller-owned tables through `Database::extension_read` and
+`Database::extension_write`. The extension transaction exposes typed table
+operations but not the underlying transaction, built-in table definitions, or
+post-commit projection hooks. It rejects every built-in table name. Extension
+owners must choose stable component-qualified names outside the reserved
+built-in prefixes and own their table schema, data invariants, and
+compatibility. Core replay and convergence guarantees exclude caller-owned
+extension tables. Total migrations preserve those tables byte-for-byte without
+validating or rebuilding them. The bot's existing unqualified table names remain
+supported for storage compatibility; new tables use component-qualified names.
+
 ## Transaction and notification boundary
 
 Event insertion and any immediately available content processing update the
 graph, lifecycle bookkeeping, and derived indexes within redb transactions.
 Derived side effects must not become visible without the corresponding source
 event state.
+
+Typed writes use redb-bincode's configured big-endian bincode encoding. Decoding
+must consume the complete stored byte slice; a trailing byte is corruption, not
+another representation of the same key or value. Range iteration validates keys
+before yielding entries, even when the caller does not otherwise inspect a key.
 
 Notifications are registered on `WriteTransactionCtx` and run only after a
 successful commit. Watch channels retain the latest committed identity-scoped
@@ -93,7 +113,12 @@ wrapping and reusing values.
   apply ordinary content projections or change lifecycle bookkeeping.
 - Follow state, profiles, generic singletons, and individual votes select the
   maximum `(event.timestamp, ShortEventId)`. Vote aggregates use the same
-  winner as the individual-vote projection.
+  winner as the individual-vote projection. An existing vote winner must
+  resolve to its source event and a vote for the same target. A terminal
+  Deleted or Pruned source remains resolvable while its verified content bytes
+  are retained because those states retain non-post projections;
+  otherwise the database is corrupt and the replacing transaction aborts
+  without changing the aggregate.
 - An active follow's `first_ts` is the timestamp of the earliest follow in the
   current uninterrupted follow epoch, not the first-ever follow. The latest
   unfollow is the exclusive epoch boundary under the same total event order.
@@ -119,6 +144,8 @@ wrapping and reusing values.
   their original local receipt times are not retained.
 - Total migration preserves canonical forward social-post replacement rows and
   rebuilds their reverse lookup index.
+- Total migration preserves caller-owned extension tables byte-for-byte without
+  replaying or validating their contents.
 
 The detailed payload state machine is specified by
 [SPEC-event-content-lifecycle](SPEC-event-content-lifecycle.md). The

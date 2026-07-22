@@ -107,7 +107,7 @@ impl Database {
         ))
     }
 
-    pub fn read_followees_tx(
+    pub(crate) fn read_followees_tx(
         id: RostraId,
         ids_followees_table: &impl ids_followees::ReadableTable,
     ) -> DbResult<HashMap<RostraId, IdsFolloweesRecord>> {
@@ -116,7 +116,7 @@ impl Database {
             .map(|res| res.map(|(k, v)| (k.value().1, v.value())))
             .collect::<Result<HashMap<_, _>, _>>()?)
     }
-    pub fn read_followees_tx_iter(
+    pub(crate) fn read_followees_tx_iter(
         id: RostraId,
         ids_followees_table: &impl ids_followees::ReadableTable,
     ) -> DbResult<impl Iterator<Item = Result<(RostraId, IdsFolloweesRecord), StorageError>>> {
@@ -125,7 +125,7 @@ impl Database {
             .map_ok(|(k, v)| (k.value().1, v.value())))
     }
 
-    pub fn read_followers_tx(
+    pub(crate) fn read_followers_tx(
         id: RostraId,
         ids_followers_table: &impl ids_followers::ReadableTable,
     ) -> DbResult<HashMap<RostraId, IdsFollowersRecord>> {
@@ -141,7 +141,7 @@ impl Database {
     /// - Direct followees (passed in)
     /// - Extended followees: followees of direct followees, excluding those
     ///   already in direct followees
-    pub fn compute_wot_tx(
+    pub(crate) fn compute_wot_tx(
         self_id: RostraId,
         direct_followees: &HashMap<RostraId, IdsFolloweesRecord>,
         ids_followees_table: &impl ids_followees::ReadableTable,
@@ -199,7 +199,7 @@ impl Database {
     /// inserted or already present, along with metadata about the
     /// insertion.
     #[allow(clippy::too_many_arguments)]
-    pub fn insert_event_tx(
+    pub(crate) fn insert_event_tx(
         event: VerifiedEvent,
         ids_full_t: &mut ids_full::Table,
         events_table: &mut events::Table,
@@ -437,7 +437,7 @@ impl Database {
     ///
     /// After processing content, callers should remove the `Missing` marker
     /// from `events_content_state` to indicate processing is complete.
-    pub fn can_insert_event_content_tx(
+    pub(crate) fn can_insert_event_content_tx(
         VerifiedEventContent { event, .. }: &VerifiedEventContent,
         events_content_state_table: &impl events_content_state::ReadableTable,
     ) -> DbResult<bool> {
@@ -471,7 +471,7 @@ impl Database {
     ///
     /// In the new model, RC was incremented when the event was inserted,
     /// so we decrement it here (unless already deleted/pruned).
-    pub fn prune_event_content_tx(
+    pub(crate) fn prune_event_content_tx(
         event_id: impl Into<ShortEventId>,
         content_hash: ContentHash,
         events_content_state_table: &mut events_content_state::Table,
@@ -528,7 +528,7 @@ impl Database {
         Ok(true)
     }
 
-    pub fn get_missing_events_for_id_tx(
+    pub(crate) fn get_missing_events_for_id_tx(
         author: RostraId,
         events_missing_table: &impl events_missing::ReadableTable,
     ) -> DbResult<Vec<ShortEventId>> {
@@ -538,7 +538,7 @@ impl Database {
             .collect::<Result<Vec<_>, _>>()?)
     }
 
-    pub fn get_heads_events_tx(
+    pub(crate) fn get_heads_events_tx(
         author: RostraId,
         events_heads_table: &impl events_heads::ReadableTable,
     ) -> DbResult<Vec<ShortEventId>> {
@@ -548,7 +548,7 @@ impl Database {
             .collect::<Result<Vec<_>, _>>()?)
     }
 
-    pub fn count_missing_events_for_id_tx(
+    pub(crate) fn count_missing_events_for_id_tx(
         author: RostraId,
         events_missing_table: &impl events_missing::ReadableTable,
     ) -> DbResult<usize> {
@@ -557,7 +557,7 @@ impl Database {
             .count())
     }
 
-    pub fn count_heads_events_tx(
+    pub(crate) fn count_heads_events_tx(
         author: RostraId,
         events_heads_table: &impl events_heads::ReadableTable,
     ) -> DbResult<usize> {
@@ -566,20 +566,20 @@ impl Database {
             .count())
     }
 
-    pub fn get_event_tx(
+    pub(crate) fn get_event_tx(
         event: impl Into<ShortEventId>,
         events_table: &impl events::ReadableTable,
     ) -> DbResult<Option<EventRecord>> {
         Ok(events_table.get(&event.into())?.map(|r| r.value()))
     }
 
-    pub fn get_social_post_tx(
+    pub(crate) fn get_social_post_tx(
         event: impl Into<ShortEventId>,
         social_posts_table: &impl social_posts::ReadableTable,
     ) -> DbResult<Option<SocialPostRecord>> {
         Ok(social_posts_table.get(&event.into())?.map(|r| r.value()))
     }
-    pub fn has_event_tx(
+    pub(crate) fn has_event_tx(
         event: impl Into<ShortEventId>,
         events_table: &impl events::ReadableTable,
     ) -> DbResult<bool> {
@@ -590,7 +590,7 @@ impl Database {
     ///
     /// To get the actual content, use `get_event_content_full_tx` which also
     /// looks up the content from the content_store.
-    pub fn get_event_content_state_tx(
+    pub(crate) fn get_event_content_state_tx(
         event: impl Into<ShortEventId>,
         events_content_state_table: &impl events_content_state::ReadableTable,
     ) -> DbResult<Option<EventContentState>> {
@@ -609,7 +609,7 @@ impl Database {
     /// - `Some(Deleted { deleted_by })` if content was deleted
     /// - `Some(Pruned)` if content was pruned
     /// - `Some(Missing)` if content is not in store
-    pub fn get_event_content_full_tx(
+    pub(crate) fn get_event_content_full_tx(
         event_id: impl Into<ShortEventId>,
         content_hash: ContentHash,
         events_content_state_table: &impl events_content_state::ReadableTable,
@@ -656,7 +656,7 @@ impl Database {
     /// In the new model, content is available if:
     /// - Event is NOT in deleted/pruned state, AND
     /// - Content hash is in content_store
-    pub fn has_event_content_tx(
+    pub(crate) fn has_event_content_tx(
         event_id: impl Into<ShortEventId>,
         content_hash: ContentHash,
         events_content_state_table: &impl events_content_state::ReadableTable,
@@ -684,7 +684,8 @@ impl Database {
     /// function doesn't touch RC. It just checks if content is available.
     ///
     /// Returns `true` if content is in store and event is not deleted/pruned.
-    pub fn is_content_available_for_event_tx(
+    #[cfg(test)]
+    pub(crate) fn is_content_available_for_event_tx(
         event_id: impl Into<ShortEventId>,
         content_hash: ContentHash,
         events_content_state_table: &impl events_content_state::ReadableTable,
@@ -982,7 +983,7 @@ impl Database {
         Self::get_random_table_key(events_self_table)
     }
 
-    pub fn read_iroh_secret_tx(
+    pub(crate) fn read_iroh_secret_tx(
         ids_self_t: &impl ids_self::ReadableTable,
     ) -> DbResult<iroh::SecretKey> {
         let self_id = Self::read_self_id_tx(ids_self_t)?
@@ -993,7 +994,7 @@ impl Database {
     /// Increment reference count for content by its hash.
     ///
     /// Called when a new event referencing this content is inserted.
-    pub fn increment_content_rc_tx(
+    pub(crate) fn increment_content_rc_tx(
         content_hash: ContentHash,
         content_rc_table: &mut content_rc::Table,
     ) -> DbResult<u64> {
@@ -1012,7 +1013,7 @@ impl Database {
     /// Called when an event's content is deleted or pruned.
     /// Note: This does NOT remove the content from content_store - that should
     /// be done separately via garbage collection when RC reaches 0.
-    pub fn decrement_content_rc_tx(
+    pub(crate) fn decrement_content_rc_tx(
         content_hash: ContentHash,
         content_rc_table: &mut content_rc::Table,
     ) -> DbResult<u64> {
@@ -1050,7 +1051,8 @@ impl Database {
     }
 
     /// Get the reference count for content by its hash.
-    pub fn get_content_rc_tx(
+    #[cfg(test)]
+    pub(crate) fn get_content_rc_tx(
         content_hash: ContentHash,
         content_rc_table: &impl content_rc::ReadableTable,
     ) -> DbResult<u64> {
@@ -1058,54 +1060,6 @@ impl Database {
             .get(&content_hash)?
             .map(|g| g.value())
             .unwrap_or(0)) // Default to 0 if missing
-    }
-
-    /// Remove an event and handle reference counting for its content.
-    ///
-    /// This removes the event from the events table and decrements the
-    /// reference count for its content hash.
-    pub fn remove_event_tx(
-        event_id: ShortEventId,
-        events_table: &mut events::Table,
-        events_content_state_table: &mut events_content_state::Table,
-        content_rc_table: &mut content_rc::Table,
-        events_content_missing_table: &mut events_content_missing::Table,
-    ) -> DbResult<bool> {
-        let event = events_table.remove(&event_id)?.map(|g| g.value());
-
-        if let Some(event_record) = event {
-            let content_hash = event_record.content_hash();
-
-            // Check if the event's content was already deleted/pruned
-            // In the new model, RC was incremented at insertion time,
-            // so we decrement here unless it was already decremented (deleted/pruned)
-            let old_state = events_content_state_table
-                .get(&event_id)?
-                .map(|g| g.value());
-
-            let was_already_unwanted = matches!(
-                old_state,
-                Some(EventContentState::Deleted { .. } | EventContentState::Pruned)
-            );
-
-            // Remove per-event state
-            events_content_state_table.remove(&event_id)?;
-            if let Some(EventContentState::Missing {
-                next_fetch_attempt, ..
-            }) = old_state
-            {
-                events_content_missing_table.remove(&(next_fetch_attempt, event_id))?;
-            }
-
-            // Decrement RC if content wasn't already unwanted
-            if !was_already_unwanted {
-                Database::decrement_content_rc_tx(content_hash, content_rc_table)?;
-            }
-
-            Ok(true)
-        } else {
-            Ok(false)
-        }
     }
 
     // ========================================================================
@@ -1129,7 +1083,7 @@ impl Database {
     /// Track a newly inserted event (metadata only).
     ///
     /// Called once per event in `insert_event_tx`.
-    pub fn track_new_event_tx(
+    pub(crate) fn track_new_event_tx(
         author: RostraId,
         ids_data_usage_table: &mut ids_data_usage::Table,
     ) -> DbResult<()> {
@@ -1149,7 +1103,7 @@ impl Database {
     /// Called in `insert_event_tx` when an event with `content_len > 0` is
     /// inserted and not deleted. The payload is counted in total and missing
     /// until content is received and processed.
-    pub fn track_new_payload_tx(
+    pub(crate) fn track_new_payload_tx(
         author: RostraId,
         content_len: u32,
         ids_data_usage_table: &mut ids_data_usage::Table,
@@ -1170,7 +1124,7 @@ impl Database {
     ///
     /// The payload contributes directly to total and deleted usage without
     /// entering Missing or participating in reference counting.
-    pub fn track_new_deleted_payload_tx(
+    pub(crate) fn track_new_deleted_payload_tx(
         author: RostraId,
         content_len: u32,
         ids_data_usage_table: &mut ids_data_usage::Table,
@@ -1191,7 +1145,7 @@ impl Database {
     ///
     /// Called in `process_event_content_tx` when content transitions from
     /// `Missing` to processed.
-    pub fn track_payload_processed_tx(
+    pub(crate) fn track_payload_processed_tx(
         author: RostraId,
         content_len: u32,
         ids_data_usage_table: &mut ids_data_usage::Table,
@@ -1211,7 +1165,7 @@ impl Database {
     /// Track a payload that failed validation (missing → invalid).
     ///
     /// Called in `process_event_content_tx` when content fails deserialization.
-    pub fn track_payload_invalid_tx(
+    pub(crate) fn track_payload_invalid_tx(
         author: RostraId,
         content_len: u32,
         ids_data_usage_table: &mut ids_data_usage::Table,
@@ -1235,7 +1189,7 @@ impl Database {
     /// - `Some(Invalid)` → moves from invalid to deleted
     /// - `Some(Pruned)` → moves from pruned to deleted
     /// - `None` (processed) → moves from current to deleted
-    pub fn track_payload_deletion_tx(
+    pub(crate) fn track_payload_deletion_tx(
         author: RostraId,
         content_len: u32,
         old_state: Option<&EventContentState>,
@@ -1277,7 +1231,7 @@ impl Database {
     /// `old_state` determines which bucket the payload moves from:
     /// - `Some(Missing)` → moves from missing to pruned
     /// - `None` (processed) → moves from current to pruned
-    pub fn track_payload_pruning_tx(
+    pub(crate) fn track_payload_pruning_tx(
         author: RostraId,
         content_len: u32,
         old_state: Option<&EventContentState>,
@@ -1306,7 +1260,7 @@ impl Database {
     }
 
     /// Get the data usage for an identity.
-    pub fn get_data_usage_tx(
+    pub(crate) fn get_data_usage_tx(
         author: RostraId,
         ids_data_usage_table: &impl ids_data_usage::ReadableTable,
     ) -> DbResult<IdsDataUsageRecord> {

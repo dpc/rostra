@@ -1,19 +1,21 @@
 use std::collections::BTreeSet;
 
-use rostra_core::event::{EventAuxKey, EventExt as _, EventKind, content_kind};
-use rostra_core::id::RostraId;
+use rostra_core::event::{
+    EventAuxKey, EventExt as _, EventKind, VerifiedEvent, VerifiedEventContent, content_kind,
+};
+use rostra_core::id::{RostraId, ToShort as _};
 use rostra_core::{ExternalEventId, ShortEventId, Timestamp};
 use serde::{Deserialize, Serialize};
 use tracing::{debug, warn};
 
-use crate::event::ContentStoreRecord;
+use crate::event::{ContentStoreRecord, EventContentState};
 use crate::event_order::EventOrder;
 use crate::social::SocialPostRecord;
 use crate::{
     Database, DbResult, LOG_TARGET, SocialNewsRankRecord, SocialVoteScore, SocialVoteSumRecord,
-    content_store, events, events_content_state, events_singletons_new,
-    social_news_rank_by_post_id, social_news_rank_by_score, social_news_rank_by_time, social_posts,
-    social_vote_sums,
+    UnresolvedVoteSingletonSnafu, content_store, events, events_content_state,
+    events_singletons_new, social_news_rank_by_post_id, social_news_rank_by_score,
+    social_news_rank_by_time, social_posts, social_vote_sums,
 };
 
 pub(crate) const NEWS_MAX_AGE_SECS: u64 = 4 * 365 * 24 * 60 * 60;
@@ -81,6 +83,9 @@ impl Database {
 
     pub(crate) fn get_social_vote_from_event_tx(
         event_id: ShortEventId,
+        voter: RostraId,
+        post_id: ExternalEventId,
+        singleton_ts: Timestamp,
         events_table: &impl events::ReadableTable,
         events_content_state_table: &impl events_content_state::ReadableTable,
         content_store_table: &impl content_store::ReadableTable,
@@ -88,13 +93,25 @@ impl Database {
         let Some(event) = Database::get_event_tx(event_id, events_table)? else {
             return Ok(None);
         };
+        let Ok(verified_event) = VerifiedEvent::verify_received_as_is(event.signed) else {
+            return Ok(None);
+        };
 
-        if event.kind() != EventKind::SOCIAL_VOTE {
+        if verified_event.event_id.to_short() != event_id
+            || event.author() != voter
+            || event.kind() != EventKind::SOCIAL_VOTE
+            || !event.is_singleton()
+            || event.aux_key() != Self::social_vote_aux_key(post_id)
+            || event.timestamp() != singleton_ts
+        {
             return Ok(None);
         }
 
-        if Database::get_event_content_state_tx(event_id, events_content_state_table)?.is_some() {
-            return Ok(None);
+        match Database::get_event_content_state_tx(event_id, events_content_state_table)? {
+            None | Some(EventContentState::Deleted { .. }) | Some(EventContentState::Pruned) => {}
+            Some(EventContentState::Missing { .. } | EventContentState::Invalid) => {
+                return Ok(None);
+            }
         }
 
         let Some(store_record) = content_store_table
@@ -104,6 +121,14 @@ impl Database {
             return Ok(None);
         };
         let ContentStoreRecord(content) = store_record;
+        let Ok(verified_content) =
+            VerifiedEventContent::verify(verified_event, content.into_owned())
+        else {
+            return Ok(None);
+        };
+        let Some(content) = verified_content.content else {
+            return Ok(None);
+        };
 
         Ok(content
             .deserialize_cbor::<content_kind::SocialVote>()
@@ -141,19 +166,24 @@ impl Database {
         let events_content_state_table = tx.open_table(&events_content_state::TABLE)?;
         let content_store_table = tx.open_table(&content_store::TABLE)?;
         let previous_vote_value = if let Some(existing) = existing_singleton {
-            Self::get_social_vote_from_event_tx(
-                existing.inner.event_id,
+            let previous_event_id = existing.inner.event_id;
+            let previous_vote = Self::get_social_vote_from_event_tx(
+                previous_event_id,
+                author,
+                reply_to,
+                existing.ts,
                 &events_table,
                 &events_content_state_table,
                 &content_store_table,
             )?
-            .and_then(|vote| {
-                vote.reply_to
-                    .filter(|previous_reply_to| *previous_reply_to == reply_to)
-                    .map(|_| vote.upvote)
-            })
-            .map(Self::social_vote_value)
-            .unwrap_or(0)
+            .filter(|vote| vote.reply_to == Some(reply_to));
+            let Some(previous_vote) = previous_vote else {
+                return UnresolvedVoteSingletonSnafu {
+                    event_id: previous_event_id,
+                }
+                .fail();
+            };
+            Self::social_vote_value(previous_vote.upvote)
         } else {
             0
         };
@@ -310,22 +340,25 @@ impl Database {
         post_id: ExternalEventId,
     ) -> Option<Option<bool>> {
         self.read_with(|tx| {
-            let event_id = tx
+            let singleton = tx
                 .open_table(&events_singletons_new::TABLE)?
                 .get(&(
                     voter,
                     EventKind::SOCIAL_VOTE,
                     Self::social_vote_aux_key(post_id),
                 ))?
-                .map(|g| g.value().inner.event_id);
-            let Some(event_id) = event_id else {
+                .map(|g| g.value());
+            let Some(singleton) = singleton else {
                 return Ok(None);
             };
             let events_table = tx.open_table(&events::TABLE)?;
             let events_content_state_table = tx.open_table(&events_content_state::TABLE)?;
             let content_store_table = tx.open_table(&content_store::TABLE)?;
             Ok(Self::get_social_vote_from_event_tx(
-                event_id,
+                singleton.inner.event_id,
+                voter,
+                post_id,
+                singleton.ts,
                 &events_table,
                 &events_content_state_table,
                 &content_store_table,

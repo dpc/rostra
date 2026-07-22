@@ -1,0 +1,13 @@
+error[E0603]: module `events_singletons_new` is private
+ --> tests/ui/fail/built_in_table.rs:2:31
+  |
+2 |     let _ = rostra_client_db::events_singletons_new::TABLE;
+  |                               ^^^^^^^^^^^^^^^^^^^^^  ----- constant `TABLE` is not publicly re-exported
+  |                               |
+  |                               private module
+  |
+note: the module `events_singletons_new` is defined here
+ --> src/lib.rs
+  |
+  | pub(crate) use self::tables::*;
+  |                ^^^^^^^^^^^^

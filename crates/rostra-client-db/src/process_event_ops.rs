@@ -18,7 +18,7 @@ impl Database {
     ///
     /// The `now` parameter should be `Timestamp::now()` for normal operation,
     /// but can be set to a specific value for testing or migration.
-    pub fn process_event_tx(
+    pub(crate) fn process_event_tx(
         &self,
         event: &VerifiedEvent,
         now: Timestamp,

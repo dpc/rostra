@@ -64,6 +64,14 @@ Projections that retain one latest source event use the maximum
 unfollow, profile, generic singleton, and individual-vote reducers all use this
 order. A vote changes its aggregate only when it wins that same comparison, so
 the aggregate and retained vote cannot select different equal-second events.
+Before replacing an existing vote winner, its singleton row must resolve to the
+stored event with the same ID, author, kind, singleton/auxiliary-parent shape,
+timestamp, verified retained content, and vote target. The source must have
+reached Processed; a later Deleted or Pruned state remains resolvable while
+those verified bytes are retained because non-post projections survive those
+transitions. Missing, Invalid, absent/mismatched content, or any relationship
+mismatch is database corruption and aborts the complete ingestion transaction,
+leaving the aggregate, winner, and newly submitted envelope unchanged.
 
 Invalid content is not stored and transitions to Invalid. Deletion, pruning,
 or invalidation removes the event's reference to the content hash exactly

@@ -1,0 +1,13 @@
+error[E0624]: method `write_with` is private
+ --> tests/ui/fail/write_with.rs:2:41
+  |
+2 |       let _ = rostra_client_db::Database::write_with::<()>;
+  |                                           ^^^^^^^^^^ private method
+  |
+ ::: src/lib.rs
+  |
+  | /     pub(crate) async fn write_with<T>(
+  | |         &self,
+  | |         f: impl FnOnce(&'_ WriteTransactionCtx) -> DbResult<T>,
+  | |     ) -> DbResult<T> {
+  | |____________________- private method defined here

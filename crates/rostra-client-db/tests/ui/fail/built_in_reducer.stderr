@@ -1,0 +1,15 @@
+error[E0624]: method `process_event_content_inserted_tx` is private
+ --> tests/ui/fail/built_in_reducer.rs:2:41
+  |
+2 |       let _ = rostra_client_db::Database::process_event_content_inserted_tx;
+  |                                           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ private method
+  |
+ ::: src/process_event_content_ops.rs
+  |
+  | /     pub(crate) fn process_event_content_inserted_tx(
+  | |         &self,
+  | |         event_content: &VerifiedEventContent,
+  | |         now: Timestamp,
+  | |         tx: &WriteTransactionCtx,
+  | |     ) -> ProcessEventResult<()> {
+  | |_______________________________- private method defined here

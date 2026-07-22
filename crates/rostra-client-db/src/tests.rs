@@ -3757,6 +3757,9 @@ async fn test_total_migration() -> BoxedErrorResult<()> {
         reception_order_next, social_posts_by_received_at, social_posts_by_time,
     };
 
+    const EXTENSION_TABLE: redb_bincode::TableDefinition<'_, u64, String> =
+        redb_bincode::TableDefinition::new("tests::total_migration::extension");
+
     let user_a_secret = RostraIdSecretKey::from_bytes([1; 32]);
     let user_a = user_a_secret.id();
 
@@ -3891,6 +3894,12 @@ async fn test_total_migration() -> BoxedErrorResult<()> {
             db.process_event_content_tx(&verified_post, now, tx)?;
             db.process_event_tx(&deleting_follow_event, now, tx)?;
             db.process_event_tx(&missing_event, now, tx)?;
+            Ok(())
+        })
+        .await?;
+        db.write_with(|tx| {
+            tx.open_table(&EXTENSION_TABLE)?
+                .insert(&1, &"preserved".to_owned())?;
             Ok(())
         })
         .await?;
@@ -4040,6 +4049,14 @@ async fn test_total_migration() -> BoxedErrorResult<()> {
         let current_ver = db_ver_table.first()?.map(|g| g.1.value());
         info!("DB version after migration: {:?}", current_ver);
         assert_eq!(current_ver, Some(24), "DB version should be updated");
+        assert_eq!(
+            tx.open_table(&EXTENSION_TABLE)?
+                .get(&1)?
+                .map(|value| value.value())
+                .as_deref(),
+            Some("preserved"),
+            "total migration must preserve caller-owned extension tables"
+        );
 
         // Check followees table in detail
         let followees = tx.open_table(&ids_followees::TABLE)?;
