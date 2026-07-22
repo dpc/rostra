@@ -100,14 +100,12 @@ impl Database {
                         let _ = sender.send((author, event_id));
                     });
                 }
-
-                if event.event.author == self.self_id {
-                    let mut events_self_table = tx.open_table(&crate::events_self::TABLE)?;
-                    Database::insert_self_event_id_tx(event.event_id, &mut events_self_table)?;
-                }
             }
 
             if event.event.author == self.self_id {
+                let mut events_self_table = tx.open_table(&crate::events_self::TABLE)?;
+                Database::insert_self_event_id_tx(event.event_id, &mut events_self_table)?;
+
                 if !was_missing {
                     info!(target: LOG_TARGET, event_id = %event.event_id, "New self head");
                 }

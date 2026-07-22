@@ -18,7 +18,7 @@ separately to enable:
 
 Content may be empty (`content_len == 0`). Empty content is handled as normal
 content — it gets an RC entry and is stored in `content_store` immediately at
-event insertion time.
+event insertion time unless the event starts in Deleted.
 
 ## Key Tables
 
@@ -54,8 +54,9 @@ Event Inserted ──► Missing ──► (no entry) ──► Deleted/Pruned  
                          validation)         delete records intent)
 ```
 
-Note: Events with `content_len == 0` skip the `Missing` state entirely and go
-straight to "no entry" (processed) during event insertion.
+Note: Events with `content_len == 0` skip the `Missing` state entirely. They go
+straight to "no entry" (processed) during event insertion unless they start in
+Deleted.
 
 ### State Meanings
 
@@ -86,7 +87,7 @@ collection when no events need the content.
 
 - RC is managed at **event insertion time**, not when content arrives
 - Content is stored in `content_store` when first processed (or immediately
-  for `content_len == 0` events)
+  for `content_len == 0` events that do not start in Deleted)
 - When RC reaches 0, content *can* be garbage collected (not automatic)
 
 ## Detailed Flows
@@ -114,7 +115,7 @@ during envelope processing and never enters Missing.
    - Remove Missing marker from `events_content_state`
 ```
 
-### Flow 1b: Empty Content Event (content_len == 0)
+### Flow 1b: Non-deleted Empty Content Event (content_len == 0)
 
 ```
 1. insert_event_tx:
@@ -168,6 +169,8 @@ and cannot be mutated.
    - Check `events_missing`: found with deleted_by
    - Mark T's content as Deleted in `events_content_state`
    - Do NOT increment RC (content already marked for deletion)
+   - Account T's payload directly in total and deleted usage without first
+     entering Missing
    - Do NOT mark content as Missing
 ```
 
@@ -396,6 +399,9 @@ Both cases indicate bugs in the calling code and will panic in debug builds.
 - `test_multiple_events_share_content` - Deduplication + pruning
 - `test_multiple_events_waiting_for_content` - Multiple events, same hash
 - `test_delete_event_arrives_before_target` - Delete before target
+- `test_predeleted_envelope_bookkeeping_converges` - Delete-before-target and
+  target-before-delete produce equal self-envelope indexing, payload usage, RC,
+  queue, and Deleted state across reopen and total replay
 - `test_content_processing_idempotency` - Duplicate content delivery
 
 ### Edge Case Tests
@@ -449,7 +455,7 @@ The content lifecycle model handles:
 - Out-of-order delivery (event before content, content delete before target)
 - Duplicate delivery (idempotent via Missing state)
 - Content deduplication (RC tracks multiple events per hash)
-- Empty content (content_len == 0, processed immediately at insertion)
+- Empty content (processed immediately at insertion unless already Deleted)
 - Invalid content (failed validation, RC decremented, bytes discarded)
 - Content deletion and pruning (with double-decrement prevention)
 - Fetch scheduling (exponential backoff for missing content, event-driven wake-up)

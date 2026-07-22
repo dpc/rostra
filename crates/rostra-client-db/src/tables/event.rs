@@ -104,15 +104,15 @@ pub type ContentStoreRecordOwned = ContentStoreRecord<'static>;
 ///                       └─► Invalid ──► Deleted
 /// ```
 ///
-/// Note: Events with `content_len == 0` skip the `Missing` state entirely
-/// and go straight to "no entry" (processed).
+/// Note: Events with `content_len == 0` skip the `Missing` state entirely. They
+/// go straight to "no entry" (processed) unless they start in `Deleted`.
 ///
 /// ## Interpretation
 ///
 /// - **No entry in table**: Content has been processed for this event. This is
 ///   the normal state after successful content processing. Side effects (reply
 ///   counts, follow updates, etc.) have been applied. Also the state for events
-///   with no content (`content_len == 0`).
+///   with no content (`content_len == 0`) unless they start in `Deleted`.
 ///
 /// - **`Missing`**: Event was inserted but content hasn't been received or
 ///   processed yet. The event's content side effects have NOT been applied.
@@ -137,8 +137,8 @@ pub enum EventContentState {
     /// Content has not been received/processed yet for this event.
     ///
     /// This state is set when an event with `content_len > 0` is inserted
-    /// (in `insert_event_tx`). Events with `content_len == 0` skip this
-    /// state entirely.
+    /// (in `insert_event_tx`). Events with `content_len == 0` skip this state,
+    /// going directly to processed or `Deleted`.
     ///
     /// When `process_event_content_tx` runs and sees this state:
     /// 1. It processes the content (applies side effects)

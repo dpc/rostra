@@ -181,11 +181,13 @@ impl Database {
     /// 2. **DAG structure**: Resolves author-scoped parents, updates heads, and
     ///    handles missing parent references
     /// 3. **Content tracking**:
-    ///    - Increments RC in `content_rc` for the event's content_hash
-    ///    - Marks the event as `Missing` in `events_content_state`
-    ///    - If content is not in `content_store`, adds to
+    ///    - Non-deleted content increments RC in `content_rc`
+    ///    - Nonempty content is marked `Missing` in `events_content_state`
+    ///    - If missing content is not in `content_store`, adds it to
     ///      `events_content_missing`
-    /// 4. **Deletion handling**: If event is a delete, marks target as deleted
+    ///    - Content that starts Deleted skips RC and Missing and is accounted
+    ///      directly as total and deleted usage
+    /// 4. **Deletion handling**: If event is a delete, marks its target Deleted
     ///
     /// **Important**: This function does NOT process content side effects (like
     /// incrementing reply counts). That happens in `process_event_content_tx`.
@@ -367,7 +369,11 @@ impl Database {
 
         // Handle content RC and state for this event.
         let content_hash = event.content_hash();
-        if !is_deleted {
+        if is_deleted {
+            if let Some(ref mut usage_table) = ids_data_usage_table {
+                Database::track_new_deleted_payload_tx(author, event.content_len(), usage_table)?;
+            }
+        } else {
             // Increment RC for the content hash (including empty content)
             Database::increment_content_rc_tx(content_hash, content_rc_table)?;
 
@@ -1075,6 +1081,27 @@ impl Database {
         usage.total_payload_num += 1;
         usage.missing_payload_size += len;
         usage.missing_payload_num += 1;
+
+        ids_data_usage_table.insert(&author, &usage)?;
+        Ok(())
+    }
+
+    /// Track a newly inserted payload whose event starts in Deleted.
+    ///
+    /// The payload contributes directly to total and deleted usage without
+    /// entering Missing or participating in reference counting.
+    pub fn track_new_deleted_payload_tx(
+        author: RostraId,
+        content_len: u32,
+        ids_data_usage_table: &mut ids_data_usage::Table,
+    ) -> DbResult<()> {
+        let len = u64::from(content_len);
+        let mut usage = Self::get_usage_mut(author, ids_data_usage_table)?;
+
+        usage.total_content_size += len;
+        usage.total_payload_num += 1;
+        usage.deleted_payload_size += len;
+        usage.deleted_payload_num += 1;
 
         ids_data_usage_table.insert(&author, &usage)?;
         Ok(())

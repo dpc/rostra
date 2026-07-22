@@ -53,8 +53,11 @@
 //!    [`Missing`](EventContentState::Missing) in [`events_content_state`], and
 //!    if content bytes are not in [`content_store`], event is added to
 //!    [`events_content_missing`]
-//! 4. If `content_len == 0`: empty content stored in [`content_store`], event
-//!    goes straight to "processed" (no entry in [`events_content_state`])
+//! 4. If `content_len == 0` and the event does not start Deleted: empty content
+//!    is stored in [`content_store`] and the event goes straight to "processed"
+//!    (no entry in [`events_content_state`])
+//! 5. An event that starts Deleted skips RC and Missing while its payload is
+//!    accounted directly in total and deleted usage
 //!
 //! **Content Processing** (via `process_event_content_tx`):
 //! 1. Check if event is `Missing` (if not, skip - already processed)
@@ -82,7 +85,8 @@
 //!
 //! ### Interpreting `events_content_state`
 //!
-//! - **No entry**: Content has been processed (or `content_len == 0`)
+//! - **No entry**: Content has been processed (including non-deleted events
+//!   with `content_len == 0`)
 //! - **`Missing`**: Event inserted but content not yet received/processed
 //! - **`Invalid`**: Content failed validation (e.g. CBOR deserialization)
 //! - **`Deleted`**: Content deleted by author
@@ -347,10 +351,11 @@ def_table! {
 }
 
 def_table! {
-    /// Index of the local user's own events.
+    /// Index of every accepted event envelope authored by the local user.
     ///
-    /// Used for efficient random access to own events (e.g., for verification
-    /// or export).
+    /// Content deletion or pruning does not remove an envelope from this index.
+    /// Used for efficient random access to own events (e.g., for verification or
+    /// export).
     events_self: ShortEventId => ()
 }
 
@@ -393,8 +398,9 @@ def_table! {
     ///
     /// This table tracks the content processing state for each event:
     ///
-    /// - **No entry**: Content has been processed (side effects applied), or
-    ///   the event has `content_len == 0`. This is the normal state.
+    /// - **No entry**: Content has been processed (side effects applied),
+    ///   including a `content_len == 0` event that did not start Deleted. This
+    ///   is the normal state.
     /// - **`Missing`**: Event was inserted but content hasn't been received or
     ///   processed yet. Content side effects (reply counts, follow updates,
     ///   etc.) have not been applied.

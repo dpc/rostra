@@ -457,8 +457,9 @@ impl Database {
                 "Migration: processed event"
             );
 
-            // Events with content_len==0 have no content to process — insert_event_tx
-            // already handled storing empty content and RC tracking.
+            // Events with content_len==0 have no content to process —
+            // insert_event_tx already applied their processed or predeleted
+            // lifecycle bookkeeping.
             if event_record.content_len() == 0 {
                 processed_count += 1;
                 continue;

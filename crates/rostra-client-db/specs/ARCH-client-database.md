@@ -30,6 +30,10 @@ The database separates:
   and news scores;
 - reception-order indexes used for local timelines and notifications.
 
+The `events_self` index contains every accepted envelope authored by the local
+identity. It indexes graph membership rather than content availability:
+deletion, pruning, or invalid content does not remove the envelope.
+
 Table definitions and migrations are implementation details of this crate.
 Public database methods and subscription channels form its boundary with the
 client and presentation layers.
@@ -75,6 +79,10 @@ wrapping and reusing values.
   winner as the individual-vote projection.
 - Locally imposed payload limits may prune content without removing the event
   envelope or breaking graph traversal.
+- Per-identity usage accounting is authoritative for retained envelopes and
+  their payload lifecycle. Every accepted payload contributes once to total
+  usage and exactly one of current, missing, deleted, pruned, or invalid usage,
+  including payloads whose envelopes arrive already Deleted.
 - Total migration rebuilds reception-order indexes and their sequence from
   retained event envelopes and available retained content. It preserves semantic
   membership, not historical reception sequence values.

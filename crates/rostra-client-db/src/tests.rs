@@ -2074,7 +2074,7 @@ async fn test_data_usage_new_event_metadata() -> BoxedErrorResult<()> {
 }
 
 /// Test: Empty-content events (content_len == 0) are treated as processed
-/// immediately — no Missing state, no RC, no payload tracking.
+/// immediately, with RC and payload accounting but no Missing state.
 #[test_log::test(tokio::test(flavor = "multi_thread"))]
 async fn test_empty_content_event_skips_missing_state() -> BoxedErrorResult<()> {
     use rostra_core::Timestamp;
@@ -5163,90 +5163,306 @@ async fn test_invalid_then_prune() -> BoxedErrorResult<()> {
     Ok(())
 }
 
-/// Test: Delete event arrives before target, then target arrives.
-///
-/// Verifies Flow 3 from the lifecycle docs:
-/// - Delete event marks target as deleted_by in events_missing
-/// - When target finally arrives, it's immediately marked Deleted
-/// - RC is NOT incremented for the target (is_deleted = true)
-/// - No payload is tracked as unprocessed
+/// Durable bookkeeping converges when deletion and its target arrive in either
+/// order.
 #[test_log::test(tokio::test(flavor = "multi_thread"))]
-async fn test_delete_before_target_rc_not_incremented() -> BoxedErrorResult<()> {
-    use rostra_core::id::ToShort as _;
+async fn test_predeleted_envelope_bookkeeping_converges() -> BoxedErrorResult<()> {
+    use rostra_core::{ContentHash, ShortEventId};
 
-    use crate::ids_data_usage;
+    use crate::{IdsDataUsageRecord, db_version, events_self, ids_data_usage};
 
-    let id_secret = RostraIdSecretKey::generate();
-    let author = id_secret.id();
-    let (_dir, db) = temp_db(author).await?;
+    #[derive(Debug, PartialEq, Eq)]
+    struct PayloadUsage {
+        current_content_size: u64,
+        total_content_size: u64,
+        current_payload_num: u64,
+        total_payload_num: u64,
+        missing_payload_size: u64,
+        missing_payload_num: u64,
+        deleted_payload_size: u64,
+        deleted_payload_num: u64,
+        pruned_payload_size: u64,
+        pruned_payload_num: u64,
+        invalid_payload_size: u64,
+        invalid_payload_num: u64,
+    }
 
-    // Create the target event (but don't insert it yet)
-    let (target_event, _target_content) =
-        build_test_event_with_valid_content(id_secret, None, "Will be deleted");
-    let target_id = target_event.event_id;
-    let target_content_hash = target_event.content_hash();
+    fn payload_usage(
+        IdsDataUsageRecord {
+            current_metadata_size: _,
+            total_metadata_size: _,
+            current_metadata_num: _,
+            total_metadata_num: _,
+            current_content_size,
+            total_content_size,
+            current_payload_num,
+            total_payload_num,
+            missing_payload_size,
+            missing_payload_num,
+            deleted_payload_size,
+            deleted_payload_num,
+            pruned_payload_size,
+            pruned_payload_num,
+            invalid_payload_size,
+            invalid_payload_num,
+        }: IdsDataUsageRecord,
+    ) -> PayloadUsage {
+        PayloadUsage {
+            current_content_size,
+            total_content_size,
+            current_payload_num,
+            total_payload_num,
+            missing_payload_size,
+            missing_payload_num,
+            deleted_payload_size,
+            deleted_payload_num,
+            pruned_payload_size,
+            pruned_payload_num,
+            invalid_payload_size,
+            invalid_payload_num,
+        }
+    }
 
-    // Create the delete event targeting the not-yet-inserted target
-    let delete_event = build_delete_event(id_secret, target_id, target_id);
+    #[derive(Debug, PartialEq, Eq)]
+    struct Snapshot {
+        self_events: Vec<ShortEventId>,
+        payload_usage: PayloadUsage,
+        target_rc: Option<u64>,
+        queue: Vec<(Timestamp, ShortEventId)>,
+        target_state: Option<EventContentState>,
+    }
 
-    let now = rostra_core::Timestamp::now();
+    async fn snapshot(
+        db: &Database,
+        author: RostraId,
+        target_id: ShortEventId,
+        target_hash: ContentHash,
+    ) -> BoxedErrorResult<Snapshot> {
+        Ok(db
+            .read_with(|tx| {
+                let self_events = tx
+                    .open_table(&events_self::TABLE)?
+                    .range(..)?
+                    .map(|entry| entry.map(|(key, _)| key.value()))
+                    .collect::<Result<Vec<_>, _>>()?;
+                let usage =
+                    Database::get_data_usage_tx(author, &tx.open_table(&ids_data_usage::TABLE)?)?;
+                assert_eq!(
+                    usage.total_content_size,
+                    usage.current_content_size
+                        + usage.missing_payload_size
+                        + usage.deleted_payload_size
+                        + usage.pruned_payload_size
+                        + usage.invalid_payload_size,
+                    "payload-size buckets must sum to total"
+                );
+                assert_eq!(
+                    usage.total_payload_num,
+                    usage.current_payload_num
+                        + usage.missing_payload_num
+                        + usage.deleted_payload_num
+                        + usage.pruned_payload_num
+                        + usage.invalid_payload_num,
+                    "payload-count buckets must sum to total"
+                );
+                let target_rc = tx
+                    .open_table(&content_rc::TABLE)?
+                    .get(&target_hash)?
+                    .map(|entry| entry.value());
+                let queue = tx
+                    .open_table(&events_content_missing::TABLE)?
+                    .range(..)?
+                    .map(|entry| entry.map(|(key, _)| key.value()))
+                    .collect::<Result<Vec<_>, _>>()?;
+                let target_state = tx
+                    .open_table(&events_content_state::TABLE)?
+                    .get(&target_id)?
+                    .map(|entry| entry.value());
 
-    // Step 1: Insert delete event first (target doesn't exist yet)
-    db.write_with(|tx| {
-        db.process_event_tx(&delete_event, now, tx)?;
+                Ok(Snapshot {
+                    self_events,
+                    payload_usage: payload_usage(usage),
+                    target_rc,
+                    queue,
+                    target_state,
+                })
+            })
+            .await?)
+    }
+
+    fn force_total_replay(path: &std::path::Path) -> BoxedErrorResult<()> {
+        let raw_db = redb_bincode::Database::from(redb::Database::open(path)?);
+        let write_txn = raw_db.begin_write()?;
+        {
+            let mut table = write_txn.open_table(&db_version::TABLE)?;
+            table.insert(&(), &23)?;
+        }
+        write_txn.commit()?;
         Ok(())
-    })
-    .await?;
+    }
 
-    // Step 2: Now insert the target event
-    db.write_with(|tx| {
-        db.process_event_tx(&target_event, now, tx)?;
-        Ok(())
-    })
-    .await?;
+    let self_secret = RostraIdSecretKey::from_bytes([31; 32]);
+    let self_id = self_secret.id();
+    let other_secret = RostraIdSecretKey::from_bytes([32; 32]);
 
-    // Verify: target is Deleted, RC was never incremented
-    db.read_with(|tx| {
-        let events_content_state_table = tx.open_table(&events_content_state::TABLE)?;
-        let content_rc_table = tx.open_table(&content_rc::TABLE)?;
-        let ids_data_usage_table = tx.open_table(&ids_data_usage::TABLE)?;
+    for (case, author_secret) in [("self", self_secret), ("non-self", other_secret)] {
+        let author = author_secret.id();
+        let (target, _content) =
+            build_test_event_with_valid_content(author_secret, None, "deleted target payload");
+        let target_id = target.event_id.to_short();
+        let target_hash = target.content_hash();
+        let content_len = u64::from(target.content_len());
+        let deletion = build_delete_event(author_secret, target.event_id, target.event_id);
+        let deletion_id = deletion.event_id.to_short();
+        let mut final_snapshots = vec![];
 
-        // State should be Deleted
-        let state = Database::get_event_content_state_tx(
-            target_id.to_short(),
-            &events_content_state_table,
-        )?;
-        assert!(
-            matches!(state, Some(EventContentState::Deleted { .. })),
-            "Target should be Deleted, got {state:?}"
-        );
+        for delete_first in [false, true] {
+            let dir = tempdir()?;
+            let path = dir.path().join("db.redb");
+            let db = Database::open(&path, self_id).await.boxed()?;
+            let ordered_events = if delete_first {
+                [deletion, target]
+            } else {
+                [target, deletion]
+            };
 
-        // RC should be 0 (never incremented for deleted-before-arrival events)
-        let rc = Database::get_content_rc_tx(target_content_hash, &content_rc_table)?;
+            for (index, event) in ordered_events.into_iter().enumerate() {
+                db.write_with(|tx| {
+                    db.process_event_tx(&event, Timestamp::from(1), tx)?;
+                    Ok(())
+                })
+                .await?;
+                if index == 0 {
+                    let observed = snapshot(&db, author, target_id, target_hash).await?;
+                    let first_self_events = if case == "self" {
+                        vec![event.event_id.to_short()]
+                    } else {
+                        vec![]
+                    };
+                    let expected = if delete_first {
+                        Snapshot {
+                            self_events: first_self_events,
+                            payload_usage: PayloadUsage {
+                                current_content_size: 0,
+                                total_content_size: 0,
+                                current_payload_num: 1,
+                                total_payload_num: 1,
+                                missing_payload_size: 0,
+                                missing_payload_num: 0,
+                                deleted_payload_size: 0,
+                                deleted_payload_num: 0,
+                                pruned_payload_size: 0,
+                                pruned_payload_num: 0,
+                                invalid_payload_size: 0,
+                                invalid_payload_num: 0,
+                            },
+                            target_rc: None,
+                            queue: vec![],
+                            target_state: None,
+                        }
+                    } else {
+                        Snapshot {
+                            self_events: first_self_events,
+                            payload_usage: PayloadUsage {
+                                current_content_size: 0,
+                                total_content_size: content_len,
+                                current_payload_num: 0,
+                                total_payload_num: 1,
+                                missing_payload_size: content_len,
+                                missing_payload_num: 1,
+                                deleted_payload_size: 0,
+                                deleted_payload_num: 0,
+                                pruned_payload_size: 0,
+                                pruned_payload_num: 0,
+                                invalid_payload_size: 0,
+                                invalid_payload_num: 0,
+                            },
+                            target_rc: Some(1),
+                            queue: vec![(Timestamp::ZERO, target_id)],
+                            target_state: Some(EventContentState::Missing {
+                                last_fetch_attempt: None,
+                                fetch_attempt_count: 0,
+                                next_fetch_attempt: Timestamp::ZERO,
+                            }),
+                        }
+                    };
+                    assert_eq!(
+                        observed, expected,
+                        "{case}, delete_first={delete_first}: first transaction"
+                    );
+                }
+            }
+
+            let expected_self_events = if case == "self" {
+                let mut ids = vec![target_id, deletion_id];
+                ids.sort_unstable();
+                ids
+            } else {
+                vec![]
+            };
+            let final_snapshot = snapshot(&db, author, target_id, target_hash).await?;
+            assert_eq!(
+                final_snapshot.self_events, expected_self_events,
+                "{case}, delete_first={delete_first}: self-envelope index"
+            );
+            assert_eq!(
+                final_snapshot.payload_usage,
+                PayloadUsage {
+                    current_content_size: 0,
+                    total_content_size: content_len,
+                    current_payload_num: 1,
+                    total_payload_num: 2,
+                    missing_payload_size: 0,
+                    missing_payload_num: 0,
+                    deleted_payload_size: content_len,
+                    deleted_payload_num: 1,
+                    pruned_payload_size: 0,
+                    pruned_payload_num: 0,
+                    invalid_payload_size: 0,
+                    invalid_payload_num: 0,
+                },
+                "{case}, delete_first={delete_first}: all payload usage fields"
+            );
+            assert_eq!(
+                final_snapshot.target_rc, None,
+                "{case}, delete_first={delete_first}: target must not retain RC"
+            );
+            assert!(
+                final_snapshot.queue.is_empty(),
+                "{case}, delete_first={delete_first}: fetch queue must be empty"
+            );
+            assert_eq!(
+                final_snapshot.target_state,
+                Some(EventContentState::Deleted {
+                    deleted_by: deletion_id,
+                }),
+                "{case}, delete_first={delete_first}: target state"
+            );
+
+            drop(db);
+            let reopened = Database::open(&path, self_id).await.boxed()?;
+            assert_eq!(
+                snapshot(&reopened, author, target_id, target_hash).await?,
+                final_snapshot,
+                "{case}, delete_first={delete_first}: ordinary reopen"
+            );
+
+            drop(reopened);
+            force_total_replay(&path)?;
+            let replayed = Database::open(&path, self_id).await.boxed()?;
+            assert_eq!(
+                snapshot(&replayed, author, target_id, target_hash).await?,
+                final_snapshot,
+                "{case}, delete_first={delete_first}: total replay"
+            );
+            final_snapshots.push(final_snapshot);
+        }
+
         assert_eq!(
-            rc, 0,
-            "RC should be 0 — never incremented for pre-deleted target"
+            final_snapshots[0], final_snapshots[1],
+            "{case}: target-first and delete-first must converge"
         );
-
-        // Data usage: target's payload should NOT be tracked (deleted before arrival).
-        // The delete event has content_len=0 but IS now tracked as a payload.
-        let usage = Database::get_data_usage_tx(author, &ids_data_usage_table)?;
-        assert_eq!(
-            usage.missing_payload_num, 0,
-            "No payloads should be missing (target is deleted)"
-        );
-        assert_eq!(
-            usage.current_payload_num, 1,
-            "Delete event (content_len=0) should be tracked"
-        );
-        assert_eq!(
-            usage.total_payload_num, 1,
-            "Only delete event tracked (target deleted before arrival)"
-        );
-
-        Ok(())
-    })
-    .await?;
+    }
 
     Ok(())
 }

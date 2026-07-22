@@ -25,11 +25,12 @@ Every inserted event has one effective content state:
 - **Deleted** records an author's graph-level deletion instruction.
 - **Pruned** records a local decision not to retain or process the payload.
 
-An event with empty content is processed at insertion and does not enter
-Missing. The local maximum payload length is inclusive: payloads at or below
-the maximum are eligible for processing, while payloads above it are pruned. A
-deletion instruction can arrive before the target event; when the target later
-arrives it starts in Deleted without becoming Missing.
+Unless it starts in Deleted, an event with empty content is processed at
+insertion and does not enter Missing. The local maximum payload length is
+inclusive: payloads at or below the maximum are eligible for processing, while
+payloads above it are pruned. A deletion instruction can arrive before the
+target event; when the target later arrives it starts in Deleted without
+becoming Missing or contributing a content reference.
 
 ## Processing and idempotency
 
@@ -71,6 +72,12 @@ is direct rather than transitive; in a chain where D2 deletes D1's content and
 D1 deletes T's content, T is deleted by D1 and D1 is deleted by D2.
 Attribution-only winner changes do not repeat reference-count, fetch-queue,
 usage-accounting, or projection-reversion effects.
+
+Per-identity payload usage counts every accepted event payload exactly once.
+Total payload size and count equal the sums of the current, missing, deleted,
+pruned, and invalid buckets. A payload whose envelope starts in Deleted enters
+the total and deleted buckets directly; it never enters Missing, changes
+content reference counts, or fabricates lifecycle transition side effects.
 
 ## Deduplication and retrieval
 
