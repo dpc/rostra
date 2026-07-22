@@ -588,15 +588,25 @@ impl Database {
         drop(events_temp_table);
         drop(legacy_content_temp_table);
 
-        let replacement_sources = dbtx
-            .open_table(&crate::social_posts_replaced_by::TABLE)?
+        let mut replaced_by = dbtx.open_table(&crate::social_posts_replaced_by::TABLE)?;
+        let replacement_sources = replaced_by
             .range(..)?
             .map(|entry| entry.map(|(key, _)| key.value()))
             .collect::<Result<Vec<_>, _>>()?;
+        let events = dbtx.open_table(&events::TABLE)?;
         let mut replaces = dbtx.open_table(&crate::social_posts_replaces::TABLE)?;
         for (author, old_event_id, new_event_id) in replacement_sources {
+            if events
+                .get(&new_event_id)?
+                .is_some_and(|event| Self::MAX_CONTENT_LEN <= event.value().content_len())
+            {
+                replaced_by.remove(&(author, old_event_id, new_event_id))?;
+                continue;
+            }
             replaces.insert(&(author, new_event_id, old_event_id), &())?;
         }
+        drop(events);
+        drop(replaced_by);
         drop(replaces);
 
         // Verify migration results by counting entries in key tables

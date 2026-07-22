@@ -163,7 +163,7 @@ impl Database {
         tx: &WriteTransactionCtx,
     ) -> ProcessEventResult<bool> {
         if event_content.kind() != EventKind::SOCIAL_POST
-            || Self::MAX_CONTENT_LEN < event_content.content_len()
+            || Self::MAX_CONTENT_LEN <= event_content.content_len()
         {
             return Ok(false);
         }

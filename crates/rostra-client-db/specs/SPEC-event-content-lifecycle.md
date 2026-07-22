@@ -10,6 +10,13 @@ final total rebuild tracked by `t4vh` reconstructs both directions from retained
 sources. See [ARCH-client-database](ARCH-client-database.md#status) for the
 combined database-transition status.
 
+New ingestion and total replay treat the configured maximum payload length as
+an exclusive upper bound. Existing version-24 rows admitted at the exact limit
+are not proactively rewritten without a database-version bump. Their current
+lifecycle state remains until duplicate processing or total replay; previously
+derived replacement lineage remains until the final total rebuild tracked by
+`t4vh`.
+
 ## Record justification
 
 The lifecycle spans event and content tables, reference counting, fetch
@@ -43,10 +50,10 @@ Every inserted event has one effective content state:
 - **Pruned** records a local decision not to retain or process the payload.
 
 Unless it starts in Deleted, an event with empty content is processed at
-insertion and does not enter Missing. The local maximum payload length is
-inclusive: non-Deleted payloads at or below the maximum are eligible for
-processing, while those above it are pruned. An already-Deleted payload remains
-Deleted and is ineligible regardless of size. A deletion instruction can
+insertion and does not enter Missing. The local maximum payload length is an
+exclusive upper bound: non-Deleted payloads below the maximum are eligible for
+processing, while those at or above it are pruned. An already-Deleted payload
+remains Deleted and is ineligible regardless of size. A deletion instruction can
 arrive before the target event; when the target later arrives it starts in
 Deleted without becoming Missing or contributing a content reference.
 
@@ -103,7 +110,7 @@ or reception-order projections. This rule is semantic rather than an arithmetic
 guard: genuine counter or receipt-mapping mismatches still fail instead of
 saturating or silently mutating unrelated state.
 
-An at-or-below-limit `SOCIAL_POST` that has the delete-auxiliary-parent flag,
+A below-limit `SOCIAL_POST` that has the delete-auxiliary-parent flag,
 has an auxiliary parent, decodes successfully, and has `djot_content` whose
 trimmed body is nonempty is an edit. It records exactly two immutable,
 author-scoped replacement rows: a forward row that is both canonical source

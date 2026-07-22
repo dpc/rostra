@@ -186,7 +186,7 @@ impl Database {
         }
 
         let process_event_content_state =
-            if Self::MAX_CONTENT_LEN < u32::from(event.event.content_len) {
+            if Self::MAX_CONTENT_LEN <= u32::from(event.event.content_len) {
                 if Database::prune_event_content_tx(
                     event.event_id,
                     event.content_hash(),

@@ -6333,7 +6333,7 @@ async fn test_wot_contains() -> BoxedErrorResult<()> {
 }
 
 #[test_log::test(tokio::test(flavor = "multi_thread"))]
-async fn test_content_length_limit_is_inclusive() -> BoxedErrorResult<()> {
+async fn test_content_length_limit_is_exclusive() -> BoxedErrorResult<()> {
     use crate::ids_data_usage;
 
     for separate_delivery in [false, true] {
@@ -6366,10 +6366,10 @@ async fn test_content_length_limit_is_inclusive() -> BoxedErrorResult<()> {
                 db.process_event_with_content(&event_content).await.1
             };
 
-            let above_maximum = Database::MAX_CONTENT_LEN < content_len;
+            let exceeds_limit = Database::MAX_CONTENT_LEN <= content_len;
             assert_eq!(
                 envelope_state,
-                if above_maximum {
+                if exceeds_limit {
                     crate::ProcessEventState::Pruned
                 } else {
                     crate::ProcessEventState::New
@@ -6384,7 +6384,7 @@ async fn test_content_length_limit_is_inclusive() -> BoxedErrorResult<()> {
                     .map(|entry| entry.value());
                 assert_eq!(
                     state,
-                    above_maximum.then_some(EventContentState::Pruned),
+                    exceeds_limit.then_some(EventContentState::Pruned),
                     "unexpected content state for length {content_len}, separate={separate_delivery}"
                 );
 
@@ -6398,7 +6398,7 @@ async fn test_content_length_limit_is_inclusive() -> BoxedErrorResult<()> {
                     content_hash,
                     &tx.open_table(&content_rc::TABLE)?,
                 )?;
-                assert_eq!(rc, u64::from(!above_maximum), "unexpected reference count");
+                assert_eq!(rc, u64::from(!exceeds_limit), "unexpected reference count");
 
                 let usage = Database::get_data_usage_tx(
                     author,
@@ -6408,25 +6408,35 @@ async fn test_content_length_limit_is_inclusive() -> BoxedErrorResult<()> {
                 assert_eq!(usage.total_payload_num, 1);
                 assert_eq!(
                     usage.current_content_size,
-                    if above_maximum {
+                    if exceeds_limit {
                         0
                     } else {
                         u64::from(content_len)
                     }
                 );
-                assert_eq!(usage.current_payload_num, u64::from(!above_maximum));
+                assert_eq!(usage.current_payload_num, u64::from(!exceeds_limit));
                 assert_eq!(
                     usage.pruned_payload_size,
-                    if above_maximum {
+                    if exceeds_limit {
                         u64::from(content_len)
                     } else {
                         0
                     }
                 );
-                assert_eq!(usage.pruned_payload_num, u64::from(above_maximum));
+                assert_eq!(usage.pruned_payload_num, u64::from(exceeds_limit));
+                assert_eq!(usage.missing_payload_size, 0);
                 assert_eq!(usage.missing_payload_num, 0);
+                assert_eq!(usage.invalid_payload_size, 0);
                 assert_eq!(usage.invalid_payload_num, 0);
+                assert_eq!(usage.deleted_payload_size, 0);
                 assert_eq!(usage.deleted_payload_num, 0);
+                assert_eq!(
+                    tx.open_table(&content_store::TABLE)?
+                        .get(&content_hash)?
+                        .is_some(),
+                    !exceeds_limit,
+                    "content retention must match eligibility"
+                );
                 Ok(())
             })
             .await?;

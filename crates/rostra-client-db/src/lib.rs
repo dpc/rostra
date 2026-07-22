@@ -893,7 +893,7 @@ impl Database {
     /// effects, stores the content, removes fetch scheduling, and transitions
     /// to Processed. RC was already incremented at event insertion.
     ///
-    /// A verified, at-or-below-limit Deleted social-post edit is the sole
+    /// A verified, below-limit Deleted social-post edit is the sole
     /// terminal-state exception. It may add only immutable forward and reverse
     /// replacement rows; it does not store the supplied bytes or change
     /// lifecycle bookkeeping or other projections.
@@ -925,7 +925,7 @@ impl Database {
 
         // Check if content should be processed (not deleted/pruned, is Missing)
         let (can_insert, is_deleted) = if u32::from(event_content.event.event.content_len)
-            <= Self::MAX_CONTENT_LEN
+            < Self::MAX_CONTENT_LEN
         {
             let events_content_state_table = tx.open_table(&events_content_state::TABLE)?;
             let state = events_content_state_table

@@ -29,6 +29,12 @@ Content may be empty (`content_len == 0`). Empty content is handled as normal
 content — it gets an RC entry and is stored in `content_store` immediately at
 event insertion time unless the event starts in Deleted.
 
+New ingestion and total replay enforce the exclusive maximum described below.
+Existing version-24 rows admitted at the exact limit are not proactively
+rewritten without a database-version bump. Their current lifecycle state remains
+until duplicate processing or total replay; previously derived replacement
+lineage remains until the final total rebuild tracked by `t4vh`.
+
 ## Key Tables
 
 | Table | Key | Purpose |
@@ -105,9 +111,9 @@ collection when no events need the content.
 
 ### Flow 1: Normal Event Arrival (content_len > 0)
 
-The configured maximum content length is inclusive. Content whose length is at
-or below the maximum follows this flow; content above the maximum is pruned
-during envelope processing and never enters Missing.
+The configured maximum content length is an exclusive upper bound. Content
+whose length is below the maximum follows this flow; content at or above it is
+pruned during envelope processing and never enters Missing.
 
 ```
 1. insert_event_tx:
@@ -252,7 +258,7 @@ content is deleted. The direct attributions remain `T.deleted_by = D1` and
 3. Content for T arrives:
    - can_insert_event_content_tx: T's content = Deleted → return false
    - Ordinary content processing is skipped
-   - An at-or-below-limit SOCIAL_POST with the delete-aux flag, an auxiliary
+   - A below-limit SOCIAL_POST with the delete-aux flag, an auxiliary
      parent, valid CBOR, and nonempty `djot_content.trim()` may record only its
      immutable forward and reverse replacement rows
 ```

@@ -44,6 +44,21 @@ impl ReplacementChain {
         Self::new("x".repeat(Database::MAX_CONTENT_LEN as usize))
     }
 
+    fn exact_limit_edit() -> Self {
+        let target_len = Database::MAX_CONTENT_LEN as usize;
+        let mut body_len = target_len;
+        loop {
+            let chain = Self::new("x".repeat(body_len));
+            let content_len = chain.events[1].content_len() as usize;
+            if content_len == target_len {
+                return chain;
+            }
+            body_len -= content_len
+                .checked_sub(target_len)
+                .expect("serialized social post unexpectedly below target length");
+        }
+    }
+
     fn new(intermediate_body: String) -> Self {
         let author_secret = RostraIdSecretKey::from_bytes([41; 32]);
         let self_id = RostraIdSecretKey::from_bytes([42; 32]).id();
@@ -665,6 +680,57 @@ async fn retained_deleted_edit_lineage_survives_reopen_gc_and_total_replay() -> 
         semantic_snapshot(&db, &chain).await?
     };
     assert_eq!(reopened, expected);
+
+    force_total_replay(&db_path)?;
+    let replayed = {
+        let db = Database::open(&db_path, chain.self_id).await.boxed()?;
+        semantic_snapshot(&db, &chain).await?
+    };
+    assert_eq!(replayed, expected);
+
+    Ok(())
+}
+
+#[test_log::test(tokio::test(flavor = "multi_thread"))]
+async fn total_replay_removes_legacy_exact_limit_deleted_edit_lineage() -> BoxedErrorResult<()> {
+    let chain = ReplacementChain::exact_limit_edit();
+    let [original_id, intermediate_id, _] = chain.ids();
+    let db_dir = tempfile::tempdir()?;
+    let db_path = db_dir.path().join("db.redb");
+
+    let expected = {
+        let db = Database::open(&db_path, chain.self_id).await.boxed()?;
+        deliver(
+            &db,
+            &chain,
+            &[
+                Delivery::Envelope(2),
+                Delivery::Payload(2),
+                Delivery::Envelope(1),
+                Delivery::Payload(1),
+                Delivery::Envelope(0),
+            ],
+        )
+        .await;
+        let expected = semantic_snapshot(&db, &chain).await?;
+        assert_expected_bookkeeping(&expected, &chain);
+        assert!(
+            !expected
+                .tables
+                .replaced_by
+                .contains(&(original_id, intermediate_id))
+        );
+
+        db.write_with(|tx| {
+            tx.open_table(&social_posts_replaced_by::TABLE)?
+                .insert(&(chain.self_id, original_id, intermediate_id), &())?;
+            tx.open_table(&social_posts_replaces::TABLE)?
+                .insert(&(chain.self_id, intermediate_id, original_id), &())?;
+            Ok(())
+        })
+        .await?;
+        expected
+    };
 
     force_total_replay(&db_path)?;
     let replayed = {
