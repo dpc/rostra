@@ -3907,7 +3907,7 @@ dependencies = [
 [[package]]
 name = "redb-bincode"
 version = "0.4.0"
-source = "git+https://github.com/rustshop/redb-bincode?rev=c5bb9c211d29424e7d1c3b9be3e1497b9aadfe86#c5bb9c211d29424e7d1c3b9be3e1497b9aadfe86"
+source = "git+https://github.com/rustshop/redb-bincode?rev=3f7414710f1d86610277c759c640fc2213730d22#3f7414710f1d86610277c759c640fc2213730d22"
 dependencies = [
  "bincode",
  "redb",
