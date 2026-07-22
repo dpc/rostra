@@ -1131,7 +1131,7 @@ async fn test_follow_unfollow_timestamp_ordering() -> BoxedErrorResult<()> {
     use rostra_core::Timestamp;
     use rostra_core::event::content_kind;
 
-    use crate::{ids_followees, ids_followers, ids_unfollowed};
+    use crate::{ids_follow_events, ids_followees, ids_followers, ids_unfollowed};
 
     let id_secret = RostraIdSecretKey::generate();
     let author = id_secret.id();
@@ -1141,6 +1141,7 @@ async fn test_follow_unfollow_timestamp_ordering() -> BoxedErrorResult<()> {
     db.write_with(|tx| {
         let mut followees_table = tx.open_table(&ids_followees::TABLE)?;
         let mut followers_table = tx.open_table(&ids_followers::TABLE)?;
+        let mut follow_events_table = tx.open_table(&ids_follow_events::TABLE)?;
         let mut unfollowed_table = tx.open_table(&ids_unfollowed::TABLE)?;
 
         let ts_100 = Timestamp::from(100);
@@ -1160,6 +1161,7 @@ async fn test_follow_unfollow_timestamp_ordering() -> BoxedErrorResult<()> {
             follow_content.clone(),
             &mut followees_table,
             &mut followers_table,
+            &mut follow_events_table,
             &mut unfollowed_table,
         )?;
         assert!(result, "Initial follow should succeed");
@@ -1168,16 +1170,21 @@ async fn test_follow_unfollow_timestamp_ordering() -> BoxedErrorResult<()> {
         let record = followees_table.get(&(author, followee))?.unwrap().value();
         assert_eq!(record.latest_ts, ts_100);
 
-        // Try to follow with older timestamp - should be rejected
+        // A late older follow in the same epoch updates its start timestamp
+        // without replacing the active selector.
         let result = Database::insert_follow_tx(
             author,
             EventOrder::new(Timestamp::from(50), rostra_core::ShortEventId::ZERO),
             follow_content.clone(),
             &mut followees_table,
             &mut followers_table,
+            &mut follow_events_table,
             &mut unfollowed_table,
         )?;
-        assert!(!result, "Follow with older timestamp should be rejected");
+        assert!(result, "Older same-epoch follow should update first_ts");
+        let record = followees_table.get(&(author, followee))?.unwrap().value();
+        assert_eq!(record.latest_ts, ts_100);
+        assert_eq!(record.first_ts, Timestamp::from(50));
 
         // The same timestamp and event ID is idempotently rejected.
         let result = Database::insert_follow_tx(
@@ -1186,6 +1193,7 @@ async fn test_follow_unfollow_timestamp_ordering() -> BoxedErrorResult<()> {
             follow_content.clone(),
             &mut followees_table,
             &mut followers_table,
+            &mut follow_events_table,
             &mut unfollowed_table,
         )?;
         assert!(!result, "Duplicate follow should be rejected");
@@ -1197,6 +1205,7 @@ async fn test_follow_unfollow_timestamp_ordering() -> BoxedErrorResult<()> {
             follow_content,
             &mut followees_table,
             &mut followers_table,
+            &mut follow_events_table,
             &mut unfollowed_table,
         )?;
         assert!(result, "Follow with newer timestamp should succeed");
@@ -1205,20 +1214,21 @@ async fn test_follow_unfollow_timestamp_ordering() -> BoxedErrorResult<()> {
         let record = followees_table.get(&(author, followee))?.unwrap().value();
         assert_eq!(record.latest_ts, ts_200);
 
-        // Now test unfollow timestamp ordering
-        // Unfollow with older timestamp than current follow - should be rejected
+        // A late unfollow below the active winner still advances the epoch
+        // boundary and excludes earlier follows from first_ts.
         let result = Database::insert_unfollow_tx(
             author,
             EventOrder::new(ts_150, rostra_core::ShortEventId::ZERO),
             followee,
             &mut followees_table,
             &mut followers_table,
+            &mut follow_events_table,
             &mut unfollowed_table,
         )?;
-        assert!(
-            !result,
-            "Unfollow with timestamp older than follow should be rejected"
-        );
+        assert!(result, "Older unfollow should update the epoch boundary");
+        let record = followees_table.get(&(author, followee))?.unwrap().value();
+        assert_eq!(record.latest_ts, ts_200);
+        assert_eq!(record.first_ts, ts_200);
 
         // Unfollow with newer timestamp - should succeed
         let ts_300 = Timestamp::from(300);
@@ -1228,6 +1238,7 @@ async fn test_follow_unfollow_timestamp_ordering() -> BoxedErrorResult<()> {
             followee,
             &mut followees_table,
             &mut followers_table,
+            &mut follow_events_table,
             &mut unfollowed_table,
         )?;
         assert!(result, "Unfollow with newer timestamp should succeed");
@@ -1246,6 +1257,7 @@ async fn test_follow_unfollow_timestamp_ordering() -> BoxedErrorResult<()> {
             follow_content2.clone(),
             &mut followees_table,
             &mut followers_table,
+            &mut follow_events_table,
             &mut unfollowed_table,
         )?;
         assert!(
@@ -1261,6 +1273,7 @@ async fn test_follow_unfollow_timestamp_ordering() -> BoxedErrorResult<()> {
             follow_content2,
             &mut followees_table,
             &mut followers_table,
+            &mut follow_events_table,
             &mut unfollowed_table,
         )?;
         assert!(
@@ -1276,6 +1289,7 @@ async fn test_follow_unfollow_timestamp_ordering() -> BoxedErrorResult<()> {
             followee,
             &mut followees_table,
             &mut followers_table,
+            &mut follow_events_table,
             &mut unfollowed_table,
         )?;
         assert!(
@@ -1428,7 +1442,7 @@ async fn test_get_random_self_event_fallback_paths() -> BoxedErrorResult<()> {
 async fn test_duplicate_unfollow_rejected() -> BoxedErrorResult<()> {
     use rostra_core::Timestamp;
 
-    use crate::{ids_followees, ids_followers, ids_unfollowed};
+    use crate::{ids_follow_events, ids_followees, ids_followers, ids_unfollowed};
 
     let id_secret = RostraIdSecretKey::generate();
     let author = id_secret.id();
@@ -1438,6 +1452,7 @@ async fn test_duplicate_unfollow_rejected() -> BoxedErrorResult<()> {
     db.write_with(|tx| {
         let mut followees_table = tx.open_table(&ids_followees::TABLE)?;
         let mut followers_table = tx.open_table(&ids_followers::TABLE)?;
+        let mut follow_events_table = tx.open_table(&ids_follow_events::TABLE)?;
         let mut unfollowed_table = tx.open_table(&ids_unfollowed::TABLE)?;
 
         let ts_100 = Timestamp::from(100);
@@ -1450,6 +1465,7 @@ async fn test_duplicate_unfollow_rejected() -> BoxedErrorResult<()> {
             followee,
             &mut followees_table,
             &mut followers_table,
+            &mut follow_events_table,
             &mut unfollowed_table,
         )?;
         assert!(result, "Initial unfollow should succeed");
@@ -1465,6 +1481,7 @@ async fn test_duplicate_unfollow_rejected() -> BoxedErrorResult<()> {
             followee,
             &mut followees_table,
             &mut followers_table,
+            &mut follow_events_table,
             &mut unfollowed_table,
         )?;
         assert!(!result, "Duplicate unfollow should be rejected");
@@ -1476,6 +1493,7 @@ async fn test_duplicate_unfollow_rejected() -> BoxedErrorResult<()> {
             followee,
             &mut followees_table,
             &mut followers_table,
+            &mut follow_events_table,
             &mut unfollowed_table,
         )?;
         assert!(!result, "Unfollow with older timestamp should be rejected");
@@ -1487,6 +1505,7 @@ async fn test_duplicate_unfollow_rejected() -> BoxedErrorResult<()> {
             followee,
             &mut followees_table,
             &mut followers_table,
+            &mut follow_events_table,
             &mut unfollowed_table,
         )?;
         assert!(result, "Unfollow with newer timestamp should succeed");
@@ -2894,10 +2913,10 @@ async fn test_follow_unfollow_refollow_flow() -> BoxedErrorResult<()> {
             "User B should have User A as follower after re-follow"
         );
 
-        // Unfollowed record should be removed (follow with newer timestamp removes it)
+        // The latest unfollow remains as the current epoch boundary.
         assert!(
-            unfollowed_table.get(&(user_a, user_b))?.is_none(),
-            "Unfollow record should be removed after re-follow"
+            unfollowed_table.get(&(user_a, user_b))?.is_some(),
+            "Unfollow boundary should remain after re-follow"
         );
 
         Ok(())
@@ -3519,6 +3538,7 @@ mod proptest_follow {
         // state
         let last_op = ops.last().unwrap();
         let expected_following = matches!(last_op, FollowOp::Follow { .. });
+        let expected_unfollow_boundary = ops.iter().any(|op| matches!(op, FollowOp::Unfollow));
 
         // Verify final state
         db.write_with(|tx| {
@@ -3540,8 +3560,8 @@ mod proptest_follow {
                     "Expected user_b to have user_a as follower (ops: {ops:?})"
                 );
                 assert!(
-                    !is_unfollowed,
-                    "Expected no unfollow record when following (ops: {ops:?})"
+                    is_unfollowed == expected_unfollow_boundary,
+                    "Expected retained latest unfollow boundary when present (ops: {ops:?})"
                 );
             } else {
                 assert!(

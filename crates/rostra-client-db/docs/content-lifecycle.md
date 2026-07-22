@@ -151,6 +151,20 @@ the maximum `(event.timestamp, ShortEventId)`. The vote aggregate changes only
 when the same candidate wins the individual-vote comparison. Equal-second
 events therefore converge independently of payload delivery order.
 
+Active follows also retain the latest unfollow as an exclusive epoch boundary
+and retain processed follow-event orders. `first_ts` is the timestamp of the
+earliest follow strictly after that boundary, so late follow delivery can move
+the current epoch's start earlier without allowing a pre-unfollow follow into a
+later epoch. Follow/unfollow events in the same second use `ShortEventId` to
+decide epoch membership. Notification cutoff remains timestamp-only: a social
+post or shoutbox timestamp below both database initialization and `first_ts`
+uses its authored time in the receipt index; one equal to `first_ts` uses local
+receipt time.
+
+Deployment staging and the deterministic authored-time fallback for receipt
+indexes rebuilt by total migration are recorded in the
+[ARCH-client-database status](../specs/ARCH-client-database.md#status).
+
 ### Flow 3: Content Deletion Before Target Event Arrives
 
 Parent IDs resolve only within the deleting event's author graph, as specified
@@ -454,6 +468,18 @@ Both cases indicate bugs in the calling code and will panic in debug builds.
 - `test_data_usage_invalid_payload_deletion` - Deleting invalid: Invalid→Deleted, no RC change
 - `test_equal_timestamp_follow_conflicts_converge` - Follow/unfollow and selector
   conflicts converge in both orders
+- `follow_epochs_converge_across_zero_one_and_two_unfollows` - Shuffled follow
+  histories converge on active selector, current-epoch `first_ts`, and
+  historical notification cutoffs
+- `equal_second_event_order_defines_epoch_membership` - Same-second follow and
+  unfollow events use the event-ID tie-break while the timestamp cutoff treats
+  content at `first_ts` as current
+- `post_and_shout_notifications_use_current_epoch_cutoff` - Both receipt indexes
+  apply the current follow epoch's strict timestamp cutoff
+- `metadata_only_epoch_changes_publish_followee_state` - Late nonwinning
+  follow/unfollow changes publish the retained `first_ts` projection
+- `follow_epoch_survives_reopen_and_total_replay` - Retained state and canonical
+  replay derive the same follow epoch
 - `test_equal_timestamp_latest_values_converge` - Profile and generic singleton
   conflicts converge in both orders
 - `test_equal_timestamp_vote_conflicts_converge` - Vote winner and aggregate use

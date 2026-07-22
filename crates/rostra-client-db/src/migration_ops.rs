@@ -122,6 +122,7 @@ impl Database {
         tx.open_table(&crate::ids_full::TABLE)?;
         tx.open_table(&crate::ids_followers::TABLE)?;
         tx.open_table(&crate::ids_followees::TABLE)?;
+        tx.open_table(&crate::ids_follow_events::TABLE)?;
         tx.open_table(&crate::ids_unfollowed::TABLE)?;
         tx.open_table(&crate::ids_personas::TABLE)?;
         tx.open_table(&crate::ids_data_usage::TABLE)?;

@@ -12,20 +12,21 @@ use rostra_core::{ShortEventId, Timestamp};
 /// Stored with key `(follower_id, followee_id)`, this tracks who someone
 /// follows and which of their personas they want to see.
 ///
-/// Entries in the table represent active follows. When an unfollow event
-/// is processed, the entry is removed from the table entirely (and recorded
-/// in `ids_unfollowed` instead).
+/// Entries in the table represent active follows. When the latest event is an
+/// unfollow, the entry is removed while the unfollow boundary and follow-event
+/// history remain available in their respective tables.
 #[derive(Debug, Encode, Decode, Clone)]
 pub struct IdsFolloweesRecord {
     /// Timestamp of the winning follow event.
     pub latest_ts: Timestamp,
     /// Event ID of the winning follow event.
     pub latest_event_id: ShortEventId,
-    /// Timestamp of the first follow event that established this relationship.
+    /// Timestamp that starts the current uninterrupted follow epoch.
     ///
-    /// Used for notification timestamp heuristics: posts from before this
-    /// time are likely historical syncs and should not appear as "just
-    /// received".
+    /// This is the earliest follow after the latest unfollow under the total
+    /// event order. Posts that strictly predate both this timestamp and
+    /// database initialization are historical syncs and should not appear
+    /// as newly received notifications.
     pub first_ts: Timestamp,
     /// Legacy persona selector — kept for backward compat with old follow
     /// events.
@@ -82,6 +83,12 @@ impl IdsFolloweesRecord {
         }
         PersonasTagsSelector::default()
     }
+
+    /// Replace the current follow epoch's start timestamp.
+    pub(crate) fn with_first_ts(mut self, first_ts: Timestamp) -> Self {
+        self.first_ts = first_ts;
+        self
+    }
 }
 
 /// Record for the `ids_followers` table.
@@ -94,8 +101,7 @@ pub struct IdsFollowersRecord {}
 
 /// Record for the `ids_unfollowed` table.
 ///
-/// Tracks the winning unfollow order so follow/unfollow candidates at or below
-/// its `(event.timestamp, ShortEventId)` do not replace it.
+/// Tracks the latest unfollow as a durable follow-epoch boundary.
 #[derive(Debug, Encode, Decode, Clone)]
 pub struct IdsUnfollowedRecord {
     /// Timestamp of the winning unfollow event.

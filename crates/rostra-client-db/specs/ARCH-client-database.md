@@ -1,5 +1,18 @@
 # ARCH-client-database: Per-identity state and projections
 
+## Status
+
+Fresh databases and databases rebuilt from retained events derive the follow
+epoch described below. Until the final total-rebuild change tracked as `t4vh`,
+a version-24 database already using the compatible stacked-development schema
+opens without backfilling follow history or retained unfollow boundaries; its
+active-winner fallback cannot fully recover the epoch from legacy rows.
+Pre-series production version-24 follow rows use an incompatible encoding and
+may not open until `t4vh`. Late follow or unfollow changes also do not rewrite
+receipt indexes that were already materialized. The final rebuild supplies the
+follow-history backfill; as specified below, rebuilt receipt indexes use authored
+timestamps because historical local receipt times are unavailable.
+
 `rostra-client-db` is the authoritative state and projection layer for one
 local Rostra identity during a database instance's lifetime. It stores
 verified graph data, tracks incomplete replication, and materializes
@@ -81,6 +94,18 @@ wrapping and reusing values.
 - Follow state, profiles, generic singletons, and individual votes select the
   maximum `(event.timestamp, ShortEventId)`. Vote aggregates use the same
   winner as the individual-vote projection.
+- An active follow's `first_ts` is the timestamp of the earliest follow in the
+  current uninterrupted follow epoch, not the first-ever follow. The latest
+  unfollow is the exclusive epoch boundary under the same total event order.
+  Follow history and that boundary remain available while the relationship is
+  active, so a late follow after the boundary can lower `first_ts`, while a
+  follow at or before the boundary cannot leak into the current epoch.
+- Social-post and shoutbox notification indexes use the event timestamp for an
+  active followee's historical content only when the content strictly predates
+  both database creation and the current follow epoch's `first_ts`; otherwise
+  they use local receipt time. A content timestamp equal to `first_ts` is
+  treated as current because the timestamp-only cutoff cannot order
+  equal-second content relative to the follow event.
 - Locally imposed payload limits may prune content without removing the event
   envelope or breaking graph traversal.
 - Per-identity usage accounting is authoritative for retained envelopes and
@@ -88,8 +113,10 @@ wrapping and reusing values.
   usage and exactly one of current, missing, deleted, pruned, or invalid usage,
   including payloads whose envelopes arrive already Deleted.
 - Total migration rebuilds reception-order indexes and their sequence from
-  retained event envelopes and available retained content. It preserves semantic
-  membership, not historical reception sequence values.
+  retained event envelopes and available retained content. It preserves
+  semantic membership, not historical reception timestamps or sequence values:
+  rebuilt entries use authored timestamps as the deterministic fallback because
+  their original local receipt times are not retained.
 - Total migration preserves canonical forward social-post replacement rows and
   rebuilds their reverse lookup index.
 

@@ -158,9 +158,8 @@ def_table! {
 def_table! {
     /// Tracks when the database was first created.
     ///
-    /// Used as a heuristic for notification timestamps: posts with author
-    /// timestamps older than the DB init time are likely historical syncs
-    /// and should not appear as "just received" in notifications.
+    /// Used with the current follow epoch as a notification cutoff: posts older
+    /// than both are historical syncs and should not appear as newly received.
     db_init_time: () => Timestamp
 }
 
@@ -206,9 +205,20 @@ def_table! {
     /// Key: (follower, followee)
     /// Value: winning event order and persona selector
     ///
-    /// Entries represent active follows only. Unfollows remove the entry
-    /// entirely (and are recorded in `ids_unfollowed` instead).
+    /// Entries represent active follows only. Unfollows remove the entry while
+    /// retaining the epoch boundary and follow-event history.
     ids_followees: (RostraId, RostraId) => IdsFolloweesRecord
+}
+
+def_table! {
+    /// Total-order history of follow events after the latest unfollow.
+    ///
+    /// Key: (follower, followee, event timestamp, event ID)
+    /// Used with the latest unfollow boundary to derive the current follow
+    /// epoch's first timestamp independently of delivery order. Entries at or
+    /// before that boundary are discarded because they cannot enter a later
+    /// epoch.
+    ids_follow_events: (RostraId, RostraId, Timestamp, ShortEventId) => ()
 }
 
 def_table! {
@@ -220,11 +230,11 @@ def_table! {
 }
 
 def_table! {
-    /// Tracks winning unfollow event orders.
+    /// Tracks latest unfollow event orders as follow-epoch boundaries.
     ///
     /// Key: (unfollower, unfollowee)
-    /// Used to reject follow/unfollow candidates at or below the stored
-    /// `(event.timestamp, ShortEventId)`.
+    /// Retained even while the relationship is active so earlier follow events
+    /// cannot leak into a later epoch.
     ids_unfollowed: (RostraId, RostraId) => IdsUnfollowedRecord
 }
 
@@ -518,14 +528,14 @@ def_table! {
 }
 
 def_table! {
-    /// Time-ordered index of social posts by reception time.
+    /// Time-ordered index of social posts by effective notification time.
     ///
-    /// Key: (received_timestamp, reception_order)
+    /// Key: (effective_timestamp, reception_order)
     /// Value: post_event_id
     ///
-    /// Used for notification queries - posts ordered by when we received them,
-    /// not when they were authored. This is important for notifications where
-    /// the order of reception matters more than the order of creation.
+    /// New content normally uses local receipt time. Historical synced content
+    /// and total-replay reconstruction use authored time when no meaningful
+    /// historical receipt time is available.
     ///
     /// The `reception_order` is allocated durably in the insertion transaction.
     /// Insertions fail rather than replacing an occupied key.
@@ -585,12 +595,14 @@ def_table! {
 // ============================================================================
 
 def_table! {
-    /// Time-ordered index of shoutbox posts by reception time.
+    /// Time-ordered index of shoutbox posts by effective notification time.
     ///
-    /// Key: (received_timestamp, reception_order)
+    /// Key: (effective_timestamp, reception_order)
     /// Value: post_event_id
     ///
-    /// Similar to `social_posts_by_received_at` but for shoutbox posts.
+    /// New content normally uses local receipt time. Historical synced content
+    /// and total-replay reconstruction use authored time when no meaningful
+    /// historical receipt time is available.
     /// The `reception_order` is allocated durably in the insertion transaction.
     /// Insertions fail rather than replacing an occupied key.
     shoutbox_posts_by_received_at: (Timestamp, u64) => ShortEventId

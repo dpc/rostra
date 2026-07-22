@@ -23,8 +23,8 @@ use super::id_self::IdSelfAccountRecord;
 use super::{
     Database, DbError, DbResult, EventsHeadsTableRecord, InsertEventOutcome, content_rc,
     content_store, events, events_by_time, events_content_state, events_heads, events_missing,
-    events_self, get_first_in_range, get_last_in_range, ids, ids_followees, ids_followers,
-    ids_self, tables,
+    events_self, get_first_in_range, get_last_in_range, ids, ids_follow_events, ids_followees,
+    ids_followers, ids_self, tables,
 };
 use crate::{
     IdSocialProfileRecord, IdsDataUsageRecord, LOG_TARGET, Latest, LatestEventValue,
@@ -720,32 +720,53 @@ impl Database {
         content: content_kind::Follow,
         followees_table: &mut Table<(RostraId, RostraId), IdsFolloweesRecord>,
         followers_table: &mut Table<(RostraId, RostraId), IdsFollowersRecord>,
+        follow_events_table: &mut Table<(RostraId, RostraId, Timestamp, ShortEventId), ()>,
         unfollowed_table: &mut Table<(RostraId, RostraId), IdsUnfollowedRecord>,
     ) -> DbResult<bool> {
         let followee = content.followee;
         let db_key = (author, followee);
+        let epoch_boundary = unfollowed_table
+            .get(&db_key)?
+            .map(|record| record.value())
+            .map(|record| EventOrder::new(record.ts, record.event_id));
+        if epoch_boundary.is_some_and(|boundary| event_order <= boundary) {
+            return Ok(false);
+        }
+        follow_events_table.insert(
+            &(
+                author,
+                followee,
+                event_order.timestamp(),
+                event_order.event_id(),
+            ),
+            &(),
+        )?;
+
         let existing = followees_table.get(&db_key)?.map(|v| v.value());
         if let Some(ref followees) = existing {
             if event_order <= EventOrder::new(followees.latest_ts, followees.latest_event_id) {
-                return Ok(false);
-            }
-        }
-        if let Some(unfollowed) = unfollowed_table.get(&db_key)?.map(|v| v.value()) {
-            if event_order <= EventOrder::new(unfollowed.ts, unfollowed.event_id) {
-                return Ok(false);
+                let first_ts = Self::first_follow_ts_after_tx(
+                    author,
+                    followee,
+                    epoch_boundary,
+                    follow_events_table,
+                )?
+                .unwrap_or(followees.latest_ts);
+                if first_ts == followees.first_ts {
+                    return Ok(false);
+                }
+                followees_table.insert(&db_key, &followees.clone().with_first_ts(first_ts))?;
+                return Ok(true);
             }
         }
 
         let timestamp = event_order.timestamp();
-        let first_ts = existing
-            .map(|r| std::cmp::min(r.first_ts, timestamp))
-            .unwrap_or(timestamp);
+        let first_ts =
+            Self::first_follow_ts_after_tx(author, followee, epoch_boundary, follow_events_table)?
+                .unwrap_or(timestamp);
 
         let tags_selector = content.persona_tags_selector.clone();
         let selector = content.selector();
-        if selector.is_some() || tags_selector.is_some() {
-            unfollowed_table.remove(&db_key)?;
-        }
         followees_table.insert(
             &db_key,
             &IdsFolloweesRecord::new(
@@ -770,22 +791,16 @@ impl Database {
         followee: RostraId,
         followees_table: &mut Table<(RostraId, RostraId), IdsFolloweesRecord>,
         followers_table: &mut Table<(RostraId, RostraId), IdsFollowersRecord>,
+        follow_events_table: &mut Table<(RostraId, RostraId, Timestamp, ShortEventId), ()>,
         unfollowed_table: &mut Table<(RostraId, RostraId), IdsUnfollowedRecord>,
     ) -> DbResult<bool> {
         let db_key = (author, followee);
-        if let Some(followees) = followees_table.get(&db_key)?.map(|v| v.value()) {
-            if event_order <= EventOrder::new(followees.latest_ts, followees.latest_event_id) {
-                return Ok(false);
-            }
-        }
         if let Some(unfollowed) = unfollowed_table.get(&db_key)?.map(|v| v.value()) {
             if event_order <= EventOrder::new(unfollowed.ts, unfollowed.event_id) {
                 return Ok(false);
             }
         }
 
-        followees_table.remove(&db_key)?;
-        followers_table.remove(&(followee, author))?;
         unfollowed_table.insert(
             &db_key,
             &IdsUnfollowedRecord {
@@ -793,9 +808,72 @@ impl Database {
                 event_id: event_order.event_id(),
             },
         )?;
+        Self::prune_follow_events_through_tx(author, followee, event_order, follow_events_table)?;
+
+        let existing = followees_table.get(&db_key)?.map(|v| v.value());
+        if let Some(followees) = existing {
+            if event_order < EventOrder::new(followees.latest_ts, followees.latest_event_id) {
+                let first_ts = Self::first_follow_ts_after_tx(
+                    author,
+                    followee,
+                    Some(event_order),
+                    follow_events_table,
+                )?
+                .unwrap_or(followees.latest_ts);
+                followees_table.insert(&db_key, &followees.with_first_ts(first_ts))?;
+                debug!(target: LOG_TARGET, follower = %author.to_short(), followee=%followee.to_short(), "Follow epoch boundary update");
+                return Ok(true);
+            }
+        }
+
+        followees_table.remove(&db_key)?;
+        followers_table.remove(&(followee, author))?;
         debug!(target: LOG_TARGET, follower = %author.to_short(), followee=%followee.to_short(), "Unfollow update");
 
         Ok(true)
+    }
+
+    /// Find the earliest follow timestamp strictly after an unfollow boundary.
+    fn first_follow_ts_after_tx(
+        author: RostraId,
+        followee: RostraId,
+        boundary: Option<EventOrder>,
+        follow_events_table: &impl ids_follow_events::ReadableTable,
+    ) -> DbResult<Option<Timestamp>> {
+        let lower = boundary
+            .map(|order| (author, followee, order.timestamp(), order.event_id()))
+            .unwrap_or((author, followee, Timestamp::ZERO, ShortEventId::ZERO));
+        let upper = (author, followee, Timestamp::MAX, ShortEventId::MAX);
+
+        for entry in follow_events_table.range(lower..=upper)? {
+            let (key, _) = entry?;
+            let (_, _, timestamp, event_id) = key.value();
+            let order = EventOrder::new(timestamp, event_id);
+            if boundary.is_none_or(|boundary| boundary < order) {
+                return Ok(Some(timestamp));
+            }
+        }
+        Ok(None)
+    }
+
+    /// Discard follow history that cannot belong to this or any later epoch.
+    fn prune_follow_events_through_tx(
+        author: RostraId,
+        followee: RostraId,
+        boundary: EventOrder,
+        follow_events_table: &mut Table<(RostraId, RostraId, Timestamp, ShortEventId), ()>,
+    ) -> DbResult<()> {
+        let keys = follow_events_table
+            .range(
+                (author, followee, Timestamp::ZERO, ShortEventId::ZERO)
+                    ..=(author, followee, boundary.timestamp(), boundary.event_id()),
+            )?
+            .map(|entry| entry.map(|(key, _)| key.value()))
+            .collect::<Result<Vec<_>, _>>()?;
+        for key in keys {
+            follow_events_table.remove(&key)?;
+        }
+        Ok(())
     }
 
     pub(crate) fn insert_latest_value_tx<K, V>(

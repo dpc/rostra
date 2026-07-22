@@ -94,12 +94,11 @@ impl Database {
 
     /// Compute the effective received-at timestamp for notification ordering.
     ///
-    /// For posts whose author timestamp predates both the database creation
-    /// time and the time we first followed the author, use the event's own
-    /// timestamp instead of `now`. This pushes old synced posts to the
-    /// bottom of the notification timeline instead of showing them all as
-    /// "just received".
-    fn effective_received_at(
+    /// For posts whose author timestamp predates both database creation and the
+    /// current follow epoch, use the event's own timestamp instead of `now`.
+    /// This pushes old synced posts to the bottom of the notification timeline
+    /// instead of showing them all as "just received".
+    pub(crate) fn effective_received_at(
         &self,
         author: RostraId,
         event_ts: Timestamp,
@@ -116,7 +115,7 @@ impl Database {
             return now;
         }
 
-        // Look up when we first followed this author
+        // Look up the start of the current follow epoch.
         let record = ids_followees_table
             .get(&(self.self_id, author))
             .ok()
@@ -128,7 +127,7 @@ impl Database {
             return now;
         };
 
-        // Post predates when we first followed — it's historical
+        // Post predates the current follow epoch — it's historical.
         if event_ts < record.first_ts {
             return event_ts;
         }
@@ -161,6 +160,9 @@ impl Database {
                 let mut ids_followers_t = tx
                     .open_table(&crate::ids_followers::TABLE)
                     .map_err(DbError::from)?;
+                let mut ids_follow_events_t = tx
+                    .open_table(&crate::ids_follow_events::TABLE)
+                    .map_err(DbError::from)?;
                 let mut id_unfollowed_t = tx
                     .open_table(&crate::ids_unfollowed::TABLE)
                     .map_err(DbError::from)?;
@@ -181,6 +183,7 @@ impl Database {
                             content.followee,
                             &mut ids_followees_t,
                             &mut ids_followers_t,
+                            &mut ids_follow_events_t,
                             &mut id_unfollowed_t,
                         )?
                     } else {
@@ -190,6 +193,7 @@ impl Database {
                             content,
                             &mut ids_followees_t,
                             &mut ids_followers_t,
+                            &mut ids_follow_events_t,
                             &mut id_unfollowed_t,
                         )?
                     },

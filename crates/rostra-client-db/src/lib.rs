@@ -240,9 +240,8 @@ pub struct Database {
 
     /// Timestamp when this database was first created.
     ///
-    /// Used as a heuristic for notification timestamps: posts with author
-    /// timestamps older than this are likely historical syncs and should
-    /// not appear as "just received" in notifications.
+    /// Used with the current follow epoch as a notification cutoff: posts older
+    /// than both are historical syncs and should not appear as newly received.
     db_init_time: Timestamp,
 
     /// Serializes writes through their post-commit current-state publication.
@@ -1307,6 +1306,8 @@ impl ProcessEventState {
 }
 #[cfg(test)]
 mod deleted_replacement_tests;
+#[cfg(test)]
+mod follow_epoch_tests;
 #[cfg(test)]
 mod reception_order_tests;
 #[cfg(test)]

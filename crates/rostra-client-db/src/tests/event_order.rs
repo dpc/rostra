@@ -122,6 +122,12 @@ async fn test_equal_timestamp_follow_conflicts_converge() -> BoxedErrorResult<()
         ];
         let expected_index = winning_event_index(&events);
         let expected_event_id = events[expected_index].event_id().to_short();
+        let expected_unfollow_event_id = events
+            .iter()
+            .zip([left_selector.is_none(), right_selector.is_none()])
+            .filter(|(_, is_unfollow)| *is_unfollow)
+            .map(|(event, _)| event.event_id().to_short())
+            .max();
         let expected_selector = [left_selector, right_selector][expected_index]
             .as_ref()
             .map(|selector| match selector {
@@ -160,7 +166,12 @@ async fn test_equal_timestamp_follow_conflicts_converge() -> BoxedErrorResult<()
                         expected_selector.clone()
                     );
                     assert!(followers.get(&(followee, author))?.is_some());
-                    assert!(unfollowed.get(&(author, followee))?.is_none());
+                    assert_eq!(
+                        unfollowed
+                            .get(&(author, followee))?
+                            .map(|record| record.value().event_id),
+                        expected_unfollow_event_id,
+                    );
                 } else {
                     assert!(follow_record.is_none());
                     assert!(followers.get(&(followee, author))?.is_none());
