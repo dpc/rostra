@@ -6727,6 +6727,110 @@ async fn test_wot_contains() -> BoxedErrorResult<()> {
 }
 
 #[test_log::test(tokio::test(flavor = "multi_thread"))]
+async fn test_content_length_limit_is_inclusive() -> BoxedErrorResult<()> {
+    use crate::ids_data_usage;
+
+    for separate_delivery in [false, true] {
+        for content_len in [
+            Database::MAX_CONTENT_LEN - 1,
+            Database::MAX_CONTENT_LEN,
+            Database::MAX_CONTENT_LEN + 1,
+        ] {
+            let secret = RostraIdSecretKey::generate();
+            let author = secret.id();
+            let (_dir, db) = temp_db(author).await?;
+            let content = EventContentRaw::new(vec![0x5a; content_len as usize]);
+            let event = Event::builder_raw_content()
+                .author(author)
+                .kind(EventKind::RAW)
+                .content(&content)
+                .build();
+            let signed = event.signed_by(secret);
+            let event =
+                VerifiedEvent::verify_signed(author, signed).expect("event signature must verify");
+            let event_id = event.event_id.to_short();
+            let content_hash = event.content_hash();
+            let event_content = VerifiedEventContent::assume_verified(event, content);
+
+            let envelope_state = if separate_delivery {
+                let (_, state) = db.process_event(&event).await;
+                db.process_event_content(&event_content).await;
+                state
+            } else {
+                db.process_event_with_content(&event_content).await.1
+            };
+
+            let above_maximum = Database::MAX_CONTENT_LEN < content_len;
+            assert_eq!(
+                envelope_state,
+                if above_maximum {
+                    crate::ProcessEventState::Pruned
+                } else {
+                    crate::ProcessEventState::New
+                },
+                "unexpected envelope result for length {content_len}, separate={separate_delivery}"
+            );
+
+            db.read_with(|tx| {
+                let state = tx
+                    .open_table(&events_content_state::TABLE)?
+                    .get(&event_id)?
+                    .map(|entry| entry.value());
+                assert_eq!(
+                    state,
+                    above_maximum.then_some(EventContentState::Pruned),
+                    "unexpected content state for length {content_len}, separate={separate_delivery}"
+                );
+
+                let queue_len = tx
+                    .open_table(&events_content_missing::TABLE)?
+                    .range(..)?
+                    .count();
+                assert_eq!(queue_len, 0, "fetch queue must be empty");
+
+                let rc = Database::get_content_rc_tx(
+                    content_hash,
+                    &tx.open_table(&content_rc::TABLE)?,
+                )?;
+                assert_eq!(rc, u64::from(!above_maximum), "unexpected reference count");
+
+                let usage = Database::get_data_usage_tx(
+                    author,
+                    &tx.open_table(&ids_data_usage::TABLE)?,
+                )?;
+                assert_eq!(usage.total_content_size, u64::from(content_len));
+                assert_eq!(usage.total_payload_num, 1);
+                assert_eq!(
+                    usage.current_content_size,
+                    if above_maximum {
+                        0
+                    } else {
+                        u64::from(content_len)
+                    }
+                );
+                assert_eq!(usage.current_payload_num, u64::from(!above_maximum));
+                assert_eq!(
+                    usage.pruned_payload_size,
+                    if above_maximum {
+                        u64::from(content_len)
+                    } else {
+                        0
+                    }
+                );
+                assert_eq!(usage.pruned_payload_num, u64::from(above_maximum));
+                assert_eq!(usage.missing_payload_num, 0);
+                assert_eq!(usage.invalid_payload_num, 0);
+                assert_eq!(usage.deleted_payload_num, 0);
+                Ok(())
+            })
+            .await?;
+        }
+    }
+
+    Ok(())
+}
+
+#[test_log::test(tokio::test(flavor = "multi_thread"))]
 async fn test_process_social_vote_with_content() -> BoxedErrorResult<()> {
     use rostra_core::ExternalEventId;
     use rostra_core::event::{VerifiedEventContent, content_kind};

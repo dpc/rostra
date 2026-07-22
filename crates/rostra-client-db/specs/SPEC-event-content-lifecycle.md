@@ -26,9 +26,10 @@ Every inserted event has one effective content state:
 - **Pruned** records a local decision not to retain or process the payload.
 
 An event with empty content is processed at insertion and does not enter
-Missing. Payloads above the local maximum are pruned. A deletion instruction
-can arrive before the target event; when the target later arrives it starts in
-Deleted without becoming Missing.
+Missing. The local maximum payload length is inclusive: payloads at or below
+the maximum are eligible for processing, while payloads above it are pruned. A
+deletion instruction can arrive before the target event; when the target later
+arrives it starts in Deleted without becoming Missing.
 
 ## Processing and idempotency
 
@@ -43,6 +44,8 @@ processing validates the payload, applies kind-specific projections, stores
 the bytes by content hash, removes fetch scheduling, and transitions to
 Processed. Repeated delivery of an envelope or payload must not duplicate
 reference counts, reply counts, follow changes, or other projections.
+Eligibility is established before fetch scheduling is removed, so rejected or
+terminal-state payload delivery cannot orphan a Missing event.
 
 Projections that retain one latest source event use the maximum
 `(event.timestamp, ShortEventId)` defined by

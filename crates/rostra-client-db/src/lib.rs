@@ -769,33 +769,33 @@ impl Database {
             }
         }
 
-        // Remove from missing list (need next_fetch_attempt for composite key)
-        {
-            let event_short_id = event_content.event_id().to_short();
-            let events_content_state_table = tx.open_table(&events_content_state::TABLE)?;
-            let mut events_content_missing_table =
-                tx.open_table(&tables::events_content_missing::TABLE)?;
-            let state = events_content_state_table
-                .get(&event_short_id)?
-                .map(|g| g.value());
-            if let Some(EventContentState::Missing {
-                next_fetch_attempt, ..
-            }) = state
-            {
-                events_content_missing_table.remove(&(next_fetch_attempt, event_short_id))?;
-            }
-        }
-
         // Check if content should be processed (not deleted/pruned, is Missing)
-        let can_insert = if u32::from(event_content.event.event.content_len) < Self::MAX_CONTENT_LEN
-        {
-            let events_content_state_table = tx.open_table(&events_content_state::TABLE)?;
-            Database::can_insert_event_content_tx(event_content, &events_content_state_table)?
-        } else {
-            false
-        };
+        let can_insert =
+            if u32::from(event_content.event.event.content_len) <= Self::MAX_CONTENT_LEN {
+                let events_content_state_table = tx.open_table(&events_content_state::TABLE)?;
+                Database::can_insert_event_content_tx(event_content, &events_content_state_table)?
+            } else {
+                false
+            };
 
         if can_insert {
+            // Remove eligible content from the missing list.
+            {
+                let event_short_id = event_content.event_id().to_short();
+                let events_content_state_table = tx.open_table(&events_content_state::TABLE)?;
+                let mut events_content_missing_table =
+                    tx.open_table(&tables::events_content_missing::TABLE)?;
+                let state = events_content_state_table
+                    .get(&event_short_id)?
+                    .map(|g| g.value());
+                if let Some(EventContentState::Missing {
+                    next_fetch_attempt, ..
+                }) = state
+                {
+                    events_content_missing_table.remove(&(next_fetch_attempt, event_short_id))?;
+                }
+            }
+
             if let Some(content) = event_content.content.as_ref() {
                 let content_hash = event_content.content_hash();
                 let event_short_id = event_content.event_id().to_short();

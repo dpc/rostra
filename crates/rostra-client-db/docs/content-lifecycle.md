@@ -93,6 +93,10 @@ collection when no events need the content.
 
 ### Flow 1: Normal Event Arrival (content_len > 0)
 
+The configured maximum content length is inclusive. Content whose length is at
+or below the maximum follows this flow; content above the maximum is pruned
+during envelope processing and never enters Missing.
+
 ```
 1. insert_event_tx:
    - Add event to `events`
@@ -102,7 +106,8 @@ collection when no events need the content.
    - Otherwise add (Timestamp::ZERO, event_id) to `events_content_missing`
 
 2. process_event_content_tx:
-   - Check can_insert_event_content_tx: Missing? → proceed
+   - Check length eligibility and can_insert_event_content_tx: Missing? → proceed
+   - Leave fetch scheduling unchanged if the payload is ineligible
    - Apply side effects (reply counts, follow updates, etc.)
    - Store content in `content_store` (if not already there)
    - Remove from `events_content_missing` (using next_fetch_attempt from state)
