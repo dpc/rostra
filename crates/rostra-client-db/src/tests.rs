@@ -258,6 +258,113 @@ async fn test_store_deleted_event() -> BoxedErrorResult<()> {
     Ok(())
 }
 
+#[test_log::test(tokio::test(flavor = "multi_thread"))]
+async fn test_cross_author_parent_never_resolves_or_deletes() -> BoxedErrorResult<()> {
+    let child_secret = RostraIdSecretKey::generate();
+    let child_author = child_secret.id();
+    let target_secret = RostraIdSecretKey::generate();
+    let target_author = target_secret.id();
+
+    let target_content = EventContentRaw::new(vec![1, 2, 3]);
+    let target = Event::builder_raw_content()
+        .author(target_author)
+        .kind(EventKind::SOCIAL_POST)
+        .content(&target_content)
+        .build()
+        .signed_by(target_secret);
+    let target =
+        VerifiedEvent::verify_signed(target_author, target).expect("target event is valid");
+    let target_id = target.event_id.to_short();
+    let target_content_hash = target.content_hash();
+
+    let child_content = EventContentRaw::new(vec![]);
+    let ordinary_child = Event::builder_raw_content()
+        .author(child_author)
+        .kind(EventKind::SOCIAL_POST)
+        .parent_prev(target_id)
+        .content(&child_content)
+        .build()
+        .signed_by(child_secret);
+    let ordinary_child = VerifiedEvent::verify_signed(child_author, ordinary_child)
+        .expect("ordinary child is valid");
+    let deleting_child = Event::builder_raw_content()
+        .author(child_author)
+        .kind(EventKind::SOCIAL_POST)
+        .delete(target_id)
+        .content(&child_content)
+        .build()
+        .signed_by(child_secret);
+    let deleting_child = VerifiedEvent::verify_signed(child_author, deleting_child)
+        .expect("deleting child is valid");
+
+    for (name, child, target_first) in [
+        ("target then ordinary child", ordinary_child, true),
+        ("ordinary child then target", ordinary_child, false),
+        ("target then deleting child", deleting_child, true),
+        ("deleting child then target", deleting_child, false),
+    ] {
+        let (_dir, db) = temp_db(child_author).await?;
+
+        if target_first {
+            db.process_event(&target).await;
+            db.process_event(&child).await;
+        } else {
+            db.process_event(&child).await;
+            db.process_event(&target).await;
+        }
+
+        db.read_with(|tx| {
+            let events_table = tx.open_table(&events::TABLE)?;
+            let events_missing_table = tx.open_table(&events_missing::TABLE)?;
+            let events_content_state_table = tx.open_table(&events_content_state::TABLE)?;
+            let content_rc_table = tx.open_table(&content_rc::TABLE)?;
+
+            let stored_target = Database::get_event_tx(target_id, &events_table)?
+                .unwrap_or_else(|| panic!("{name}: target must remain stored"));
+            assert_eq!(
+                stored_target.author(),
+                target_author,
+                "{name}: target author changed"
+            );
+
+            let target_state =
+                Database::get_event_content_state_tx(target_id, &events_content_state_table)?;
+            assert!(
+                matches!(target_state, Some(EventContentState::Missing { .. })),
+                "{name}: cross-author child changed target state to {target_state:?}"
+            );
+            assert_eq!(
+                Database::get_content_rc_tx(target_content_hash, &content_rc_table)?,
+                1,
+                "{name}: cross-author child changed target content reference count"
+            );
+
+            let missing_parent = events_missing_table
+                .get(&(child_author, target_id))?
+                .map(|record| record.value())
+                .unwrap_or_else(|| panic!("{name}: parent must remain missing for child author"));
+            assert_eq!(
+                missing_parent.deleted_by,
+                child
+                    .is_delete_parent_aux_content_set()
+                    .then_some(child.event_id.to_short()),
+                "{name}: missing-parent deletion intent changed"
+            );
+            assert!(
+                events_missing_table
+                    .get(&(target_author, target_id))?
+                    .is_none(),
+                "{name}: target must not be missing from its own graph"
+            );
+
+            Ok(())
+        })
+        .await?;
+    }
+
+    Ok(())
+}
+
 /// Test content reference counting by ContentHash.
 ///
 /// The new content deduplication system tracks RC by content hash, not event
@@ -2556,8 +2663,7 @@ mod proptest_rc {
     /// Rules:
     /// - 3 authors, each with their own chain of events
     /// - Each author's events form a linked list via parent_prev
-    /// - parent_aux can reference any earlier event (including from other
-    ///   authors)
+    /// - parent_aux can reference any earlier event by the same author
     /// - delete_idx can be set to delete an earlier event's content (mutually
     ///   exclusive with parent_aux)
     fn generate_event_dag(
@@ -2565,7 +2671,7 @@ mod proptest_rc {
         rng_seed: u64,
     ) -> (Vec<TestEventSpec>, Vec<(usize, bool)>) {
         let mut rng = StdRng::seed_from_u64(rng_seed);
-        let mut events = Vec::new();
+        let mut events: Vec<TestEventSpec> = Vec::new();
         let mut last_event_by_author: [Option<usize>; 3] = [None, None, None];
 
         for i in 0..num_events {
@@ -2576,14 +2682,21 @@ mod proptest_rc {
             let parent_prev_idx = last_event_by_author[author_idx];
 
             // Decide between parent_aux and delete (mutually exclusive)
-            let (parent_aux_idx, delete_idx) = if i > 0 {
+            let same_author_event_indices = events
+                .iter()
+                .enumerate()
+                .filter_map(|(idx, event)| (event.author_idx == author_idx).then_some(idx))
+                .collect::<Vec<_>>();
+            let (parent_aux_idx, delete_idx) = if !same_author_event_indices.is_empty() {
                 let choice = rng.random_range(0..10);
+                let earlier_idx =
+                    same_author_event_indices[rng.random_range(0..same_author_event_indices.len())];
                 if choice < 2 {
                     // 20% chance: delete an earlier event
-                    (None, Some(rng.random_range(0..i)))
+                    (None, Some(earlier_idx))
                 } else if choice < 5 {
                     // 30% chance: have a parent_aux
-                    (Some(rng.random_range(0..i)), None)
+                    (Some(earlier_idx), None)
                 } else {
                     // 50% chance: neither
                     (None, None)

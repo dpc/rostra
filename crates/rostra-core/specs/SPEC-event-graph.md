@@ -20,11 +20,15 @@ boundary first.
 
 ## Graph structure
 
-Each event can name a previous parent and an auxiliary parent. Missing parents
-are valid, including for the first event, light clients, and data received out
-of order. The two parents may be equal. Together, events from one author form
-a graph that can merge concurrently produced branches and can be traversed
-from newer events toward older history.
+Each event can name a previous parent and an auxiliary parent. Both parent IDs
+are relative to the envelope author and can resolve only to events signed by
+that same author. An event by another author with the same raw parent ID is not
+the named parent. Missing parents are valid, including for the first event,
+light clients, and data received out of order. Storage therefore keeps such a
+cross-author raw-ID match unresolved for the envelope author, just as when no
+matching row exists. The two parents may be equal. Together, events from one
+author form a graph that can merge concurrently produced branches and can be
+traversed from newer events toward older history.
 
 The previous parent normally identifies the latest event known to the author.
 The auxiliary parent may merge another branch, carry kind-specific meaning,
@@ -39,11 +43,13 @@ hash, and length in the header permits selection and size policy before
 payload retrieval. Identical payloads may be shared by multiple events because
 content is addressed by hash.
 
-The delete-parent-content flag declares that the content of the auxiliary
-parent is deleted; the graph header remains available. The singleton flag
-declares that only the latest event for the same kind and auxiliary key
-matters. Consumers must preserve these graph-level semantics even when the
-affected payload is absent locally.
+The delete-parent-content flag declares that the content of the same-author
+auxiliary parent is deleted; the graph header remains available. It must never
+delete or otherwise mutate an event signed by another author whose raw event
+ID matches the auxiliary parent field. The singleton flag declares that only
+the latest event for the same kind and auxiliary key matters. Consumers must
+preserve these graph-level semantics even when the affected payload is absent
+locally.
 
 Unknown flag bits are not produced by the current implementation, but readers
 accept and ignore bits they do not understand so later protocol versions can

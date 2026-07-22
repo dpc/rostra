@@ -141,11 +141,16 @@ collection when no events need the content.
 
 ### Flow 3: Content Deletion Before Target Event Arrives
 
+Parent IDs resolve only within the deleting event's author graph, as specified
+by [SPEC-event-graph](../../rostra-core/specs/SPEC-event-graph.md). A present
+event by another author with the same short ID follows this missing-target flow
+and cannot be mutated.
+
 ```
-1. Delete event D arrives, target T not in `events`:
+1. Delete event D arrives, same-author target T not in `events`:
    - T added to `events_missing` with deleted_by = D
 
-2. Target event T finally arrives:
+2. Same-author target event T finally arrives:
    - Check `events_missing`: found with deleted_by
    - Mark T's content as Deleted in `events_content_state`
    - Do NOT increment RC (content already marked for deletion)
@@ -155,11 +160,11 @@ collection when no events need the content.
 ### Flow 4: Content Deletion After Target (While Content Missing)
 
 ```
-1. Event T arrives:
+1. Event T arrives in its author's graph:
    - RC = 1
    - T's content = Missing
 
-2. Delete event D arrives targeting T's content:
+2. Same-author delete event D arrives targeting T's content:
    - old_state = Missing
    - Set T's content = Deleted
    - Decrement RC (now 0)
@@ -349,6 +354,8 @@ Both cases indicate bugs in the calling code and will panic in debug builds.
 - `test_two_deletes_same_target` - Second content delete doesn't double-decrement RC
 - `test_prune_then_delete` - Content Prune→Delete transition, no double-decrement
 - `test_delete_then_prune` - Prune after content delete returns false
+- `test_cross_author_parent_never_resolves_or_deletes` - Cross-author raw-ID
+  matches stay author-scoped missing in either arrival order
 - `test_process_content_for_nonexistent_event` - Silent skip (release only)
 - `test_data_usage_payload_invalid` - Invalid content: Missing→Invalid, RC decremented
 - `test_data_usage_invalid_payload_deletion` - Deleting invalid: Invalid→Deleted, no RC change

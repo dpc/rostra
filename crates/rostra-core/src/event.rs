@@ -115,8 +115,8 @@ pub struct Event {
     /// Bit flags
     ///
     /// Bit `0` - delete previous event - All well-behaved nodes
-    /// should consider the **content** of the event from `parent_aux` deleted,
-    /// and delete itfrom their storage, recording the id of
+    /// should consider the **content** of the author's event from `parent_aux`
+    /// deleted, and delete it from their storage, recording the id of
     /// this event (one that deleted it) instead. The p2p and other
     /// protocols should accommodate such missing events as a core
     /// feature of the protocol and no longer store or return content data.
@@ -161,6 +161,9 @@ pub struct Event {
     /// It is supposed to be the *latest* `EventID` known to the client
     /// to allow traversing events (almost) in order.
     ///
+    /// The ID is relative to this event's `author` and can only identify
+    /// another event by that author.
+    ///
     /// `EventID::ZERO` means "None" which means that there is
     /// no parent (first event ever), or the node that produced the event
     /// was not capable of knowing it. In such a case it is a job
@@ -172,6 +175,9 @@ pub struct Event {
     /// With some `flags` and `kind`s it can point at a past [`Event`]
     /// with special meaning or function, as
     /// opposed to the `parent_event` which is always about exact ordering.
+    ///
+    /// The ID is relative to this event's `author` and can only identify
+    /// another event by that author.
     ///
     /// In all cases used to potentially merge divergent chains
     /// into one DAG. Also, by pointing at some much older `EventId`

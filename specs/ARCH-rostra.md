@@ -70,6 +70,10 @@ Followers and extended followees define the normal synchronization scope.
   clients can synchronize and serve stored data without it.
 - Network input is untrusted until validated by the core verification types
   and database processing path.
+- Parent identifiers are author-relative. The database processing boundary
+  must never resolve a parent through, or apply a parent-directed mutation to,
+  an event authenticated to another author, as specified by
+  [SPEC-event-graph](../crates/rostra-core/specs/SPEC-event-graph.md).
 - The web UI may hold unlocked credentials in memory for a session, but
   protocol signing remains a client responsibility and social state remains a
   database responsibility.

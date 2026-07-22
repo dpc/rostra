@@ -144,7 +144,8 @@ impl Database {
     /// This function handles event insertion and related bookkeeping:
     ///
     /// 1. **Identity tracking**: Records the author's full RostraId
-    /// 2. **DAG structure**: Updates heads, handles missing parent references
+    /// 2. **DAG structure**: Resolves author-scoped parents, updates heads, and
+    ///    handles missing parent references
     /// 3. **Content tracking**:
     ///    - Increments RC in `content_rc` for the event's content_hash
     ///    - Marks the event as `Missing` in `events_content_state`
@@ -227,7 +228,10 @@ impl Database {
                 continue;
             };
 
-            let parent_event = events_table.get(&parent_id)?.map(|r| r.value());
+            let parent_event = events_table
+                .get(&parent_id)?
+                .map(|r| r.value())
+                .filter(|parent| parent.author() == author);
             if let Some(parent_event_record) = parent_event {
                 if event.is_delete_parent_aux_content_set() && parent_is_aux {
                     deleted_parent = Some(parent_id);
