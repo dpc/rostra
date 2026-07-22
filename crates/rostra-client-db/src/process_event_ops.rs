@@ -107,17 +107,19 @@ impl Database {
                 if event.event.author == self.self_id {
                     let mut events_self_table = tx.open_table(&crate::events_self::TABLE)?;
                     Database::insert_self_event_id_tx(event.event_id, &mut events_self_table)?;
-
-                    if !was_missing {
-                        info!(target: LOG_TARGET, event_id = %event.event_id, "New self head");
-
-                        let sender = self.self_head_updated.clone();
-                        let event_id = event.event_id.into();
-                        tx.on_commit(move || {
-                            let _ = sender.send(Some(event_id));
-                        });
-                    }
                 }
+            }
+
+            if event.event.author == self.self_id {
+                if !was_missing {
+                    info!(target: LOG_TARGET, event_id = %event.event_id, "New self head");
+                }
+
+                let sender = self.self_head_updated.clone();
+                let self_head = Database::read_head_tx(self.self_id, &events_heads_tbl)?;
+                tx.on_commit(move || {
+                    sender.send_replace(self_head);
+                });
             }
 
             if !missing_parents.is_empty() {

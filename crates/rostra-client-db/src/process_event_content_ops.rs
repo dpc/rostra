@@ -150,10 +150,14 @@ impl Database {
                         let self_followees = Arc::new(self_followees);
                         let self_wot = Arc::new(self_wot);
                         tx.on_commit(move || {
-                            let _ = followees_sender.send(self_followees);
-                            let _ = wot_sender.send(self_wot);
+                            followees_sender.send_replace(self_followees);
+                            wot_sender.send_replace(self_wot);
                         });
-                    } else if self.self_followees_updated.borrow().contains_key(&author) {
+                    } else if ids_followees_t
+                        .get(&(self.self_id, author))
+                        .map_err(DbError::from)?
+                        .is_some()
+                    {
                         // One of self's followees changed their followees - update WoT
                         let wot_sender = self.self_wot_updated.clone();
                         let self_followees =
@@ -165,7 +169,7 @@ impl Database {
                         )?;
                         let self_wot = Arc::new(self_wot);
                         tx.on_commit(move || {
-                            let _ = wot_sender.send(self_wot);
+                            wot_sender.send_replace(self_wot);
                         });
                     }
 
@@ -175,7 +179,7 @@ impl Database {
                             Arc::new(Database::read_followers_tx(self.self_id, &ids_followers_t)?);
 
                         tx.on_commit(move || {
-                            let _ = followers_sender.send(self_followers);
+                            followers_sender.send_replace(self_followers);
                         });
                     }
                 }

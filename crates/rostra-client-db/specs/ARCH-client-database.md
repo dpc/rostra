@@ -42,10 +42,14 @@ Derived side effects must not become visible without the corresponding source
 event state.
 
 Notifications are registered on `WriteTransactionCtx` and run only after a
-successful commit. Watch channels publish current identity-scoped state such
-as heads and follow relationships; broadcast or deduplicating channels signal
-new content and work queues. Consumers must treat these channels as wakeups or
-incremental observations and use database state as the authority.
+successful commit. Watch channels retain the latest committed identity-scoped
+projection, including the self head, followees, followers, and Web of Trust.
+Commit and watch publication are ordered together, so an older transaction
+cannot overwrite a newer projection; subscribing after a period with no
+receivers still yields the latest committed value. Broadcast or deduplicating
+channels remain lossy or incremental signals for new content and work queues.
+The database remains authoritative; these watch payloads are retained
+current-state projections.
 
 ## Invariants
 

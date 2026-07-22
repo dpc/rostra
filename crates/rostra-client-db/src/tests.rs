@@ -1,8 +1,12 @@
 mod event_order;
 
-use rostra_core::EventId;
-use rostra_core::event::{Event, EventContentRaw, EventExt as _, EventKind, VerifiedEvent};
+use rostra_core::event::content_kind::{self, EventContentKind as _};
+use rostra_core::event::{
+    Event, EventContentRaw, EventExt as _, EventKind, PersonaSelector, VerifiedEvent,
+    VerifiedEventContent,
+};
 use rostra_core::id::{RostraId, RostraIdSecretKey, ToShort as _};
+use rostra_core::{EventId, Timestamp};
 use rostra_util_error::BoxedErrorResult;
 use snafu::ResultExt as _;
 use tempfile::{TempDir, tempdir};
@@ -48,6 +52,57 @@ fn build_test_event(
     let signed_event = event.signed_by(id_secret);
 
     VerifiedEvent::verify_signed(author, signed_event).expect("Valid event")
+}
+
+fn build_follow_event_content(
+    secret: RostraIdSecretKey,
+    followee: RostraId,
+    timestamp: time::OffsetDateTime,
+    parent: Option<EventId>,
+) -> VerifiedEventContent {
+    let content = content_kind::Follow {
+        followee,
+        persona: None,
+        selector: Some(PersonaSelector::Except { ids: vec![] }),
+        persona_tags_selector: None,
+    }
+    .serialize_cbor()
+    .expect("Follow content must serialize");
+    let event = Event::builder_raw_content()
+        .author(secret.id())
+        .kind(EventKind::FOLLOW)
+        .content(&content)
+        .timestamp(timestamp)
+        .maybe_parent_prev(parent.map(Into::into))
+        .build();
+    let signed_event = event.signed_by(secret);
+    let verified_event =
+        VerifiedEvent::verify_signed(secret.id(), signed_event).expect("Valid event");
+
+    VerifiedEventContent::assume_verified(verified_event, content)
+}
+
+fn build_post_event_content(
+    secret: RostraIdSecretKey,
+    timestamp: time::OffsetDateTime,
+    parent: Option<EventId>,
+    text: &str,
+) -> VerifiedEventContent {
+    let content = content_kind::SocialPost::new(text.to_owned(), None, Default::default())
+        .serialize_cbor()
+        .expect("Social post content must serialize");
+    let event = Event::builder_raw_content()
+        .author(secret.id())
+        .kind(EventKind::SOCIAL_POST)
+        .content(&content)
+        .timestamp(timestamp)
+        .maybe_parent_prev(parent.map(Into::into))
+        .build();
+    let signed_event = event.signed_by(secret);
+    let verified_event =
+        VerifiedEvent::verify_signed(secret.id(), signed_event).expect("Valid event");
+
+    VerifiedEventContent::assume_verified(verified_event, content)
 }
 
 #[test_log::test(tokio::test(flavor = "multi_thread"))]
@@ -4048,6 +4103,16 @@ async fn test_total_migration() -> BoxedErrorResult<()> {
         "user_a's follower should be user_b after migration"
     );
 
+    let migrated_followees = db.self_followees_subscribe();
+    let migrated_followers = db.self_followers_subscribe();
+    let migrated_wot = db.self_wot_subscribe();
+    let migrated_head = db.self_head_subscribe();
+    assert!(migrated_followees.borrow().contains_key(&user_b));
+    assert!(migrated_followers.borrow().contains_key(&user_b));
+    assert!(migrated_wot.borrow().followees.contains_key(&user_b));
+    let authoritative_head = db.get_self_current_head().await;
+    assert_eq!(*migrated_head.borrow(), authoritative_head);
+
     let (posts_after, _) = db.paginate_social_posts_rev(None, 10, |_| true).await;
     info!(
         "paginate_social_posts_rev after migration: {} posts",
@@ -5516,6 +5581,292 @@ async fn test_wants_content_for_missing_content() -> BoxedErrorResult<()> {
 // ============================================================================
 // Broadcast Channel Tests
 // ============================================================================
+
+#[test_log::test(tokio::test(flavor = "multi_thread"))]
+async fn test_current_state_watches_retain_state_and_match_restart() -> BoxedErrorResult<()> {
+    let self_secret = RostraIdSecretKey::generate();
+    let self_id = self_secret.id();
+    let direct_followee_secret = RostraIdSecretKey::generate();
+    let direct_followee = direct_followee_secret.id();
+    let extended_followee = RostraIdSecretKey::generate().id();
+    let follower_secret = RostraIdSecretKey::generate();
+    let follower = follower_secret.id();
+    let dir = tempdir()?;
+    let db_path = dir.path().join("db.redb");
+    let db = Database::open(&db_path, self_id).await.boxed()?;
+    let base_time = time::OffsetDateTime::UNIX_EPOCH;
+
+    let self_follow = build_follow_event_content(self_secret, direct_followee, base_time, None);
+    let self_post_a = build_post_event_content(
+        self_secret,
+        base_time + time::Duration::seconds(1),
+        Some(self_follow.event_id()),
+        "retained head A",
+    );
+    let self_post_b = build_post_event_content(
+        self_secret,
+        base_time + time::Duration::seconds(2),
+        Some(self_follow.event_id()),
+        "retained head B",
+    );
+    let follower_event = build_follow_event_content(follower_secret, self_id, base_time, None);
+    let extended_event =
+        build_follow_event_content(direct_followee_secret, extended_followee, base_time, None);
+    let expected_head = std::cmp::min(
+        self_post_a.event_id().to_short(),
+        self_post_b.event_id().to_short(),
+    );
+
+    db.write_with(|tx| {
+        for event_content in [
+            &self_follow,
+            &extended_event,
+            &follower_event,
+            &self_post_a,
+            &self_post_b,
+        ] {
+            db.process_event_tx(&event_content.event, Timestamp::ZERO, tx)?;
+            db.process_event_content_tx(event_content, Timestamp::ZERO, tx)?;
+        }
+        Ok(())
+    })
+    .await?;
+
+    let followees_rx = db.self_followees_subscribe();
+    let followers_rx = db.self_followers_subscribe();
+    let wot_rx = db.self_wot_subscribe();
+    let head_rx = db.self_head_subscribe();
+
+    assert!(followees_rx.borrow().contains_key(&direct_followee));
+    assert!(followers_rx.borrow().contains_key(&follower));
+    assert!(wot_rx.borrow().followees.contains_key(&direct_followee));
+    assert!(wot_rx.borrow().extended.contains(&extended_followee));
+    assert_eq!(*head_rx.borrow(), Some(expected_head));
+
+    let continuous_head = *head_rx.borrow();
+
+    drop((followees_rx, followers_rx, wot_rx, head_rx));
+    drop(db);
+
+    let reopened = Database::open(&db_path, self_id).await.boxed()?;
+    let reopened_followees = reopened.self_followees_subscribe();
+    let reopened_followers = reopened.self_followers_subscribe();
+    let reopened_wot = reopened.self_wot_subscribe();
+    let reopened_head = reopened.self_head_subscribe();
+
+    assert_eq!(reopened_followees.borrow().len(), 1);
+    assert!(reopened_followees.borrow().contains_key(&direct_followee));
+    assert_eq!(reopened_followers.borrow().len(), 1);
+    assert!(reopened_followers.borrow().contains_key(&follower));
+    assert_eq!(reopened_wot.borrow().followees.len(), 1);
+    assert!(
+        reopened_wot
+            .borrow()
+            .followees
+            .contains_key(&direct_followee)
+    );
+    assert_eq!(reopened_wot.borrow().extended.len(), 1);
+    assert!(reopened_wot.borrow().extended.contains(&extended_followee));
+    assert_eq!(*reopened_head.borrow(), continuous_head);
+
+    Ok(())
+}
+
+#[test_log::test(tokio::test(flavor = "multi_thread"))]
+async fn test_current_state_watches_cannot_regress_between_commits() -> BoxedErrorResult<()> {
+    use std::sync::{Arc, mpsc};
+    use std::time::Duration;
+
+    let self_secret = RostraIdSecretKey::generate();
+    let self_id = self_secret.id();
+    let direct_a_secret = RostraIdSecretKey::generate();
+    let direct_a = direct_a_secret.id();
+    let direct_b = RostraIdSecretKey::generate().id();
+    let extended = RostraIdSecretKey::generate().id();
+    let follower_a_secret = RostraIdSecretKey::generate();
+    let follower_a = follower_a_secret.id();
+    let follower_b_secret = RostraIdSecretKey::generate();
+    let follower_b = follower_b_secret.id();
+    let (_dir, db) = temp_db(self_id).await?;
+    let db = Arc::new(db);
+    let followees_rx = db.self_followees_subscribe();
+    let followers_rx = db.self_followers_subscribe();
+    let wot_rx = db.self_wot_subscribe();
+    let head_rx = db.self_head_subscribe();
+    let base_time = time::OffsetDateTime::UNIX_EPOCH;
+
+    let older_self_follow = build_follow_event_content(self_secret, direct_a, base_time, None);
+    let older_self_post = build_post_event_content(
+        self_secret,
+        base_time + time::Duration::seconds(1),
+        Some(older_self_follow.event_id()),
+        "older head",
+    );
+    let older_follower = build_follow_event_content(follower_a_secret, self_id, base_time, None);
+
+    let newer_self_follow = build_follow_event_content(
+        self_secret,
+        direct_b,
+        base_time + time::Duration::seconds(2),
+        Some(older_self_post.event_id()),
+    );
+    let newer_self_post = build_post_event_content(
+        self_secret,
+        base_time + time::Duration::seconds(3),
+        Some(newer_self_follow.event_id()),
+        "newer head",
+    );
+    let newer_follower = build_follow_event_content(
+        follower_b_secret,
+        self_id,
+        base_time + time::Duration::seconds(1),
+        None,
+    );
+    let newer_extended = build_follow_event_content(
+        direct_a_secret,
+        extended,
+        base_time + time::Duration::seconds(1),
+        None,
+    );
+    let expected_head = newer_self_post.event_id().to_short();
+
+    let (older_hook_entered_tx, older_hook_entered_rx) = mpsc::channel();
+    let (release_older_hook_tx, release_older_hook_rx) = mpsc::channel();
+    let older_db = db.clone();
+    let older_task = tokio::spawn(async move {
+        older_db
+            .write_with(|tx| {
+                tx.on_commit(move || {
+                    let _ = older_hook_entered_tx.send(());
+                    release_older_hook_rx
+                        .recv()
+                        .expect("Test must release older hook");
+                });
+                for event_content in [&older_self_follow, &older_follower, &older_self_post] {
+                    older_db.process_event_tx(&event_content.event, Timestamp::ZERO, tx)?;
+                    older_db.process_event_content_tx(event_content, Timestamp::ZERO, tx)?;
+                }
+                Ok(())
+            })
+            .await
+    });
+
+    let older_hook_entered = tokio::task::spawn_blocking(move || {
+        older_hook_entered_rx.recv_timeout(Duration::from_secs(5))
+    })
+    .await;
+
+    let (newer_started_tx, newer_started_rx) = tokio::sync::oneshot::channel();
+    let newer_db = db.clone();
+    let newer_task = tokio::spawn(async move {
+        let _ = newer_started_tx.send(());
+        newer_db
+            .write_with(|tx| {
+                for event_content in [
+                    &newer_self_follow,
+                    &newer_follower,
+                    &newer_extended,
+                    &newer_self_post,
+                ] {
+                    newer_db.process_event_tx(&event_content.event, Timestamp::ZERO, tx)?;
+                    newer_db.process_event_content_tx(event_content, Timestamp::ZERO, tx)?;
+                }
+                Ok(())
+            })
+            .await
+    });
+
+    let newer_started = tokio::time::timeout(Duration::from_secs(5), newer_started_rx).await;
+    tokio::time::sleep(Duration::from_millis(100)).await;
+    let newer_waited = !newer_task.is_finished();
+
+    let release_result = release_older_hook_tx.send(());
+    let older_result = older_task.await;
+    let newer_result = newer_task.await;
+
+    older_hook_entered
+        .expect("Hook waiter must not panic")
+        .expect("Older transaction must reach its first commit hook");
+    newer_started
+        .expect("Newer transaction start must not time out")
+        .expect("Newer transaction must start");
+    assert!(
+        newer_waited,
+        "Newer commit must wait for older current-state publication"
+    );
+    release_result.expect("Older hook must still be waiting");
+    older_result
+        .expect("Older task must not panic")
+        .expect("Older transaction must commit");
+    newer_result
+        .expect("Newer task must not panic")
+        .expect("Newer transaction must commit");
+
+    assert!(followees_rx.borrow().contains_key(&direct_a));
+    assert!(followees_rx.borrow().contains_key(&direct_b));
+    assert!(followers_rx.borrow().contains_key(&follower_a));
+    assert!(followers_rx.borrow().contains_key(&follower_b));
+    assert!(wot_rx.borrow().followees.contains_key(&direct_a));
+    assert!(wot_rx.borrow().followees.contains_key(&direct_b));
+    assert!(wot_rx.borrow().extended.contains(&extended));
+    assert_eq!(*head_rx.borrow(), Some(expected_head));
+
+    Ok(())
+}
+
+#[test_log::test(tokio::test(flavor = "multi_thread"))]
+async fn test_current_state_publication_survives_earlier_hook_panic() -> BoxedErrorResult<()> {
+    use std::sync::Arc;
+
+    let self_secret = RostraIdSecretKey::generate();
+    let self_id = self_secret.id();
+    let followee = RostraIdSecretKey::generate().id();
+    let (_dir, db) = temp_db(self_id).await?;
+    let db = Arc::new(db);
+    let follow = build_follow_event_content(
+        self_secret,
+        followee,
+        time::OffsetDateTime::UNIX_EPOCH,
+        None,
+    );
+    let post = build_post_event_content(
+        self_secret,
+        time::OffsetDateTime::UNIX_EPOCH + time::Duration::seconds(1),
+        Some(follow.event_id()),
+        "write after hook panic",
+    );
+
+    let panic_db = db.clone();
+    let panic_task = tokio::spawn(async move {
+        panic_db
+            .write_with(|tx| {
+                tx.on_commit(|| panic!("controlled commit-hook panic"));
+                panic_db.process_event_tx(&follow.event, Timestamp::ZERO, tx)?;
+                panic_db.process_event_content_tx(&follow, Timestamp::ZERO, tx)?;
+                Ok(())
+            })
+            .await
+    });
+    assert!(
+        panic_task
+            .await
+            .expect_err("Commit hook must propagate its panic")
+            .is_panic()
+    );
+
+    let followees_rx = db.self_followees_subscribe();
+    let wot_rx = db.self_wot_subscribe();
+    assert!(followees_rx.borrow().contains_key(&followee));
+    assert!(wot_rx.borrow().followees.contains_key(&followee));
+
+    db.process_event_with_content(&post).await;
+    assert_eq!(
+        *db.self_head_subscribe().borrow(),
+        Some(post.event_id().to_short())
+    );
+
+    Ok(())
+}
 
 /// Test that new_heads_tx broadcasts when a new head event is inserted
 #[test_log::test(tokio::test(flavor = "multi_thread"))]

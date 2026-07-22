@@ -14,6 +14,7 @@ mod tx_ops;
 
 use std::borrow::Cow;
 use std::collections::{BTreeMap, HashMap, HashSet};
+use std::panic::{AssertUnwindSafe, catch_unwind, resume_unwind};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::{io, ops, result};
@@ -106,7 +107,12 @@ impl ops::DerefMut for WriteTransactionCtx {
 }
 
 impl WriteTransactionCtx {
-    pub fn on_commit(&self, f: impl FnOnce() + 'static) {
+    /// Registers an action to run in registration order after a successful
+    /// commit.
+    ///
+    /// A hook panic does not suppress later hooks. After every hook has been
+    /// attempted, the first panic resumes.
+    pub(crate) fn on_commit(&self, f: impl FnOnce() + 'static) {
         self.on_commit
             .lock()
             .expect("Locking failed")
@@ -118,8 +124,14 @@ impl WriteTransactionCtx {
 
         dbtx.commit()?;
 
+        let mut first_panic = None;
         for hook in on_commit.lock().expect("Locking failed").drain(..) {
-            hook();
+            if let Err(payload) = catch_unwind(AssertUnwindSafe(hook)) {
+                first_panic.get_or_insert(payload);
+            }
+        }
+        if let Some(payload) = first_panic {
+            resume_unwind(payload);
         }
         Ok(())
     }
@@ -226,6 +238,13 @@ pub struct Database {
     /// Used in `events_received_at` and `social_posts_by_received_at` tables
     /// to ensure events received at the same timestamp are ordered correctly.
     reception_order_counter: std::sync::atomic::AtomicU64,
+
+    /// Serializes writes through their post-commit current-state publication.
+    ///
+    /// Acquiring it before transaction creation keeps redb writer order and
+    /// publication order identical. Commit hooks run while it is held and must
+    /// not synchronously re-enter `write_with`.
+    write_and_publish_lock: std::sync::Mutex<()>,
 
     self_followees_updated: watch::Sender<Arc<HashMap<RostraId, IdsFolloweesRecord>>>,
     self_followers_updated: watch::Sender<Arc<HashMap<RostraId, IdsFollowersRecord>>>,
@@ -358,6 +377,7 @@ impl Database {
             iroh_secret,
             db_init_time,
             reception_order_counter: std::sync::atomic::AtomicU64::new(0),
+            write_and_publish_lock: std::sync::Mutex::new(()),
             self_followees_updated,
             self_followers_updated,
             self_wot_updated,
@@ -426,22 +446,38 @@ impl Database {
         .expect("Database panic")
     }
 
+    /// Subscribes to the retained current self-followee projection.
+    ///
+    /// Drop values borrowed from the receiver before awaiting or calling the
+    /// database; publication waits for outstanding watch borrows.
     pub fn self_followees_subscribe(
         &self,
     ) -> watch::Receiver<Arc<HashMap<RostraId, IdsFolloweesRecord>>> {
         self.self_followees_updated.subscribe()
     }
 
+    /// Subscribes to the retained current self-follower projection.
+    ///
+    /// Drop values borrowed from the receiver before awaiting or calling the
+    /// database; publication waits for outstanding watch borrows.
     pub fn self_followers_subscribe(
         &self,
     ) -> watch::Receiver<Arc<HashMap<RostraId, IdsFollowersRecord>>> {
         self.self_followers_updated.subscribe()
     }
 
+    /// Subscribes to the retained current Web-of-Trust projection.
+    ///
+    /// Drop values borrowed from the receiver before awaiting or calling the
+    /// database; publication waits for outstanding watch borrows.
     pub fn self_wot_subscribe(&self) -> watch::Receiver<Arc<WotData>> {
         self.self_wot_updated.subscribe()
     }
 
+    /// Subscribes to the retained current canonical self-head projection.
+    ///
+    /// Drop values borrowed from the receiver before awaiting or calling the
+    /// database; publication waits for outstanding watch borrows.
     pub fn self_head_subscribe(&self) -> watch::Receiver<Option<ShortEventId>> {
         self.self_head_updated.subscribe()
     }
@@ -912,25 +948,44 @@ impl Database {
 }
 
 impl Database {
+    fn write_with_inner_blocking<T>(
+        inner: &redb_bincode::Database,
+        f: impl FnOnce(&'_ WriteTransactionCtx) -> DbResult<T>,
+    ) -> DbResult<T> {
+        let mut dbtx = WriteTransactionCtx::from(inner.begin_write().context(TransactionSnafu)?);
+        let res = f(&mut dbtx)?;
+
+        dbtx.commit().context(CommitSnafu)?;
+
+        Ok(res)
+    }
+
+    /// Runs a low-level write transaction without a `Database` publication
+    /// boundary.
+    ///
+    /// The synchronous transaction closure must not start another write.
     pub async fn write_with_inner<T>(
         inner: &redb_bincode::Database,
         f: impl FnOnce(&'_ WriteTransactionCtx) -> DbResult<T>,
     ) -> DbResult<T> {
-        tokio::task::block_in_place(|| {
-            let mut dbtx =
-                WriteTransactionCtx::from(inner.begin_write().context(TransactionSnafu)?);
-            let res = f(&mut dbtx)?;
-
-            dbtx.commit().context(CommitSnafu)?;
-
-            Ok(res)
-        })
+        tokio::task::block_in_place(|| Self::write_with_inner_blocking(inner, f))
     }
+
+    /// Runs a serialized write transaction and its internal post-commit
+    /// actions.
+    ///
+    /// The synchronous transaction closure must not re-enter database writes.
     pub async fn write_with<T>(
         &self,
         f: impl FnOnce(&'_ WriteTransactionCtx) -> DbResult<T>,
     ) -> DbResult<T> {
-        Self::write_with_inner(&self.inner, f).await
+        tokio::task::block_in_place(|| {
+            let _write_and_publish_guard = self
+                .write_and_publish_lock
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            Self::write_with_inner_blocking(&self.inner, f)
+        })
     }
 
     pub async fn read_with_inner<T>(
