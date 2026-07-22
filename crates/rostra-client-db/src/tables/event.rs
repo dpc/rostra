@@ -120,7 +120,9 @@ pub type ContentStoreRecordOwned = ContentStoreRecord<'static>;
 /// - **`Invalid`**: Content was received but failed validation (e.g. CBOR
 ///   deserialization). RC has been decremented. Content bytes are discarded.
 ///
-/// - **`Deleted` / `Pruned`**: Content is unwanted. RC has been decremented.
+/// - **`Deleted` / `Pruned`**: Content is unwanted. RC has been decremented. An
+///   eligible Deleted social-post edit may still contribute immutable
+///   replacement metadata without ordinary content processing.
 ///
 /// ## Idempotency Guarantee
 ///
@@ -128,7 +130,8 @@ pub type ContentStoreRecordOwned = ContentStoreRecord<'static>;
 /// - `process_event_content_tx` checks for `Missing` before processing
 /// - If `Missing` → process content, then remove the marker
 /// - If no entry → skip (already processed)
-/// - If `Deleted`/`Pruned`/`Invalid` → skip (content unwanted or bad)
+/// - If `Deleted`/`Pruned`/`Invalid` → skip ordinary processing; the narrow
+///   Deleted social-post lineage exception remains idempotent table insertion
 ///
 /// This prevents duplicate side effects (e.g., incrementing reply_count twice)
 /// when the same content is received multiple times for the same event.

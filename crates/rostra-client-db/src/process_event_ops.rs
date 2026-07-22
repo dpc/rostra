@@ -2,8 +2,9 @@ use rostra_core::Timestamp;
 use rostra_core::event::{EventExt as _, VerifiedEvent, VerifiedEventContent};
 use rostra_core::id::ToShort as _;
 use rostra_util_error::FmtCompact as _;
-use tracing::{info, warn};
+use tracing::{debug, info, warn};
 
+use crate::event::ContentStoreRecord;
 use crate::process_event_content_ops::ProcessEventError;
 use crate::{
     Database, DbResult, EventReceivedRecord, EventReceivedSource, InsertEventOutcome, LOG_TARGET,
@@ -80,6 +81,40 @@ impl Database {
                     parent_aux = %event.event.parent_aux,
                     "Event content was already deleted; header effects applied"
                 );
+                if let Some(ContentStoreRecord(content)) = content_store_tbl
+                    .get(&event.content_hash())?
+                    .map(|record| record.value())
+                {
+                    match VerifiedEventContent::verify(*event, content.into_owned()) {
+                        Ok(event_content) => {
+                            match Self::process_deleted_social_post_replacement_tx(
+                                &event_content,
+                                tx,
+                            ) {
+                                Ok(_) => {}
+                                Err(ProcessEventError::Db { source }) => return Err(source),
+                                Err(ProcessEventError::Invalid { source, location }) => {
+                                    debug!(
+                                        target: LOG_TARGET,
+                                        err = %source.as_ref().fmt_compact(),
+                                        %location,
+                                        event_id = %event.event_id,
+                                        author = %event.author(),
+                                        "Ignoring malformed retained Deleted social-post content"
+                                    );
+                                }
+                            }
+                        }
+                        Err(err) => {
+                            warn!(
+                                target: LOG_TARGET,
+                                ?err,
+                                event_id = %event.event_id,
+                                "Ignoring retained content that does not verify against its event"
+                            );
+                        }
+                    }
+                }
             } else {
                 info!(target: LOG_TARGET,
                     kind = %event.kind(),

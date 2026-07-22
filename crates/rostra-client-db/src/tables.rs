@@ -59,13 +59,17 @@
 //! 5. An event that starts Deleted skips RC and Missing while its payload is
 //!    accounted directly in total and deleted usage
 //!
-//! **Content Processing** (via `process_event_content_tx`):
-//! 1. Check if event is `Missing` (if not, skip - already processed)
+//! **Ordinary Content Processing** (via `process_event_content_tx`):
+//! 1. Check if event is `Missing` (if not, skip ordinary processing)
 //! 2. Process content side effects (e.g., increment reply counts, update
 //!    follows)
 //! 3. Store content bytes in [`content_store`] if not already there
 //! 4. Remove event from [`events_content_missing`] (if present)
 //! 5. Remove `Missing` marker from [`events_content_state`]
+//!
+//! Verified Deleted social-post edits have one narrow exception: they may add
+//! only immutable forward and reverse replacement rows. They do not
+//! store supplied bytes or change lifecycle bookkeeping or other projections.
 //!
 //! **Content Deletion** (author requests content deletion):
 //! 1. Event's content state changes to [`Deleted`](EventContentState::Deleted)
@@ -408,12 +412,10 @@ def_table! {
     /// - **`Pruned`**: Content was pruned locally (e.g., too large to store).
     /// - **`Invalid`**: Content failed validation (e.g. CBOR deserialization).
     ///
-    /// **Idempotency**: The `Missing` state ensures content processing is
-    /// idempotent. When `process_event_content_tx` is called, it checks for
-    /// `Missing` state - if present, it processes the content and removes
-    /// the marker. If absent (or Deleted/Pruned/Invalid), it skips
-    /// processing. This prevents duplicate side effects when the same
-    /// content arrives multiple times.
+    /// **Idempotency**: The `Missing` state ensures ordinary content processing
+    /// is idempotent. If absent, ordinary processing is skipped. Eligible
+    /// Deleted social-post edits may still insert idempotent immutable
+    /// replacement metadata without changing this state.
     events_content_state: ShortEventId => EventContentState
 }
 
@@ -531,7 +533,11 @@ def_table! {
 }
 
 def_table! {
-    /// Mapping from an old social post event id to the event that replaced it.
+    /// Immutable mapping from an old social post to the event that replaced it.
+    ///
+    /// This is canonical replacement source metadata as well as the forward
+    /// lookup index. Total migration preserves it and rebuilds the reverse
+    /// index from it.
     social_posts_replaced_by: (RostraId, ShortEventId, ShortEventId) => ()
 }
 

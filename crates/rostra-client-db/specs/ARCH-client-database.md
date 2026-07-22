@@ -74,6 +74,10 @@ wrapping and reusing values.
   content. Deletion of a processed social post reverts its post-specific
   projections; other content kinds currently retain their derived
   projections.
+- Social-post replacement lineage remains available across a Deleted
+  intermediate. Verified Deleted content may establish only immutable edit
+  metadata, whose canonical forward rows survive total migration; it cannot
+  apply ordinary content projections or change lifecycle bookkeeping.
 - Follow state, profiles, generic singletons, and individual votes select the
   maximum `(event.timestamp, ShortEventId)`. Vote aggregates use the same
   winner as the individual-vote projection.
@@ -86,6 +90,8 @@ wrapping and reusing values.
 - Total migration rebuilds reception-order indexes and their sequence from
   retained event envelopes and available retained content. It preserves semantic
   membership, not historical reception sequence values.
+- Total migration preserves canonical forward social-post replacement rows and
+  rebuilds their reverse lookup index.
 
 The detailed payload state machine is specified by
 [SPEC-event-content-lifecycle](SPEC-event-content-lifecycle.md). The

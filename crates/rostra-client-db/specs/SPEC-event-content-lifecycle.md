@@ -27,10 +27,11 @@ Every inserted event has one effective content state:
 
 Unless it starts in Deleted, an event with empty content is processed at
 insertion and does not enter Missing. The local maximum payload length is
-inclusive: payloads at or below the maximum are eligible for processing, while
-payloads above it are pruned. A deletion instruction can arrive before the
-target event; when the target later arrives it starts in Deleted without
-becoming Missing or contributing a content reference.
+inclusive: non-Deleted payloads at or below the maximum are eligible for
+processing, while those above it are pruned. An already-Deleted payload remains
+Deleted and is ineligible regardless of size. A deletion instruction can
+arrive before the target event; when the target later arrives it starts in
+Deleted without becoming Missing or contributing a content reference.
 
 ## Processing and idempotency
 
@@ -43,7 +44,9 @@ without another network fetch.
 Only Missing content is eligible for first-time processing. Successful
 processing validates the payload, applies kind-specific projections, stores
 the bytes by content hash, removes fetch scheduling, and transitions to
-Processed. Repeated delivery of an envelope or payload must not duplicate
+Processed. The sole terminal-state exception is immutable replacement-lineage
+extraction from a verified, well-formed Deleted `SOCIAL_POST` payload, as
+defined below. Repeated delivery of an envelope or payload must not duplicate
 reference counts, reply counts, follow changes, or other projections.
 Eligibility is established before fetch scheduling is removed, so rejected or
 terminal-state payload delivery cannot orphan a Missing event.
@@ -62,6 +65,32 @@ author's stronger deletion intent without decrementing again. When deletion
 invalidates an already processed social post, the database reverts its
 post-specific projections. Derived projections for other content kinds are
 currently retained.
+
+An at-or-below-limit `SOCIAL_POST` that has the delete-auxiliary-parent flag,
+has an auxiliary parent, decodes successfully, and has `djot_content` whose
+trimmed body is nonempty is an edit. It records exactly two immutable,
+author-scoped replacement rows: a forward row that is both canonical source
+metadata and a lookup index, and a reverse lookup row. Total migration
+preserves the forward row and rebuilds the reverse row from it. Missing, empty,
+or whitespace-only `djot_content` is a deletion, even
+when other social-post fields are populated, and records no replacement
+metadata. Replacement lookup follows edges transitively: in `E <- A <- B`,
+resolving E yields newest B even when A's content became Deleted before A's
+envelope or payload arrived.
+
+Supplying hash-verified bytes for a Deleted event, or finding such bytes
+already in the local deduplicated store when its envelope arrives, may only
+establish that replacement metadata when the exact edit predicate above holds.
+The database preserves the forward row across total migration and reconstructs
+the reverse index from it; it does not retain newly supplied Deleted
+bytes for replay. Deleted state continues to block content retrieval. The
+database never schedules or requests bytes for a Deleted event.
+
+This exception does not change content state, reference counts, fetch
+scheduling, usage accounting, singleton or vote state, visibility indexes,
+reply or reaction projections, news ranking, mentions, or notifications.
+Over-limit, blank-body, malformed, non-social, and non-edit Deleted payloads
+derive no metadata, and supplied bytes from these paths are not stored.
 
 Deletion intent is monotone: once a valid direct deleting child has been
 observed, ordinary child references and later lifecycle changes cannot erase

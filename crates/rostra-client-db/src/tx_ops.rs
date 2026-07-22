@@ -431,7 +431,9 @@ impl Database {
     /// - **No entry** → `false`: Content was already processed. Returning false
     ///   prevents duplicate side effects (e.g., incrementing reply_count
     ///   twice).
-    /// - **`Deleted`/`Pruned`** → `false`: Content is unwanted.
+    /// - **`Deleted`/`Pruned`** → `false`: Ordinary processing is unwanted. The
+    ///   caller may separately derive immutable replacement metadata from an
+    ///   eligible Deleted social-post edit.
     ///
     /// After processing content, callers should remove the `Missing` marker
     /// from `events_content_state` to indicate processing is complete.

@@ -198,8 +198,24 @@ content is deleted. The direct attributions remain `T.deleted_by = D1` and
 
 3. Content for T arrives:
    - can_insert_event_content_tx: T's content = Deleted → return false
-   - Content processing skipped
+   - Ordinary content processing is skipped
+   - An at-or-below-limit SOCIAL_POST with the delete-aux flag, an auxiliary
+     parent, valid CBOR, and nonempty `djot_content.trim()` may record only its
+     immutable forward and reverse replacement rows
 ```
+
+The same limited replacement extraction applies when the deletion arrived
+before the target envelope. In an edit chain `E <- A <- B`, delivery of B can
+stage A as Deleted; later verified A content still records `E -> A`, so lookup
+of E follows `E -> A -> B`. Blank deletion posts do not record an edit edge.
+Missing, empty, or whitespace-only `djot_content` is blank regardless of other
+social-post fields. The database also checks already-retained hash-keyed bytes
+when a predeleted envelope arrives, but it never schedules or requests Deleted
+content. Total replay preserves the immutable forward row and reconstructs the
+reverse index without depending on zero-RC payload bytes; already-retained
+bytes remain independently GC-eligible. Deleted content never becomes visible
+or retrievable and does not update RC, queues, usage, time/reception indexes,
+reply/reaction counts, news, mentions, votes, singletons, or notifications.
 
 ### Flow 5: Content Deduplication (Multiple Events, Same Hash)
 
@@ -402,6 +418,17 @@ Both cases indicate bugs in the calling code and will panic in debug builds.
 - `test_predeleted_envelope_bookkeeping_converges` - Delete-before-target and
   target-before-delete produce equal self-envelope indexing, payload usage, RC,
   queue, and Deleted state across reopen and total replay
+- `deleted_intermediate_lineage_converges_for_all_valid_deliveries` - All 90
+  envelope-before-own-payload schedules produce identical transitive edit
+  lineage, lifecycle bookkeeping, and semantic visibility
+- `supplied_predeleted_edit_changes_only_lineage` and
+  `supplied_predeleted_blank_delete_changes_nothing` - Supplied Deleted content
+  adds only eligible nonblank edit metadata; blank deletion content is inert
+- `retained_deleted_edit_lineage_survives_reopen_gc_and_total_replay` -
+  hash-deduplicated retained content derives lineage without payload delivery,
+  and immutable forward metadata survives reopen, byte removal, and total replay
+- `over_limit_deleted_edit_derives_no_lineage_from_retained_or_supplied_bytes`
+  - Both Deleted-content activation paths reject over-limit replacement content
 - `test_content_processing_idempotency` - Duplicate content delivery
 
 ### Edge Case Tests

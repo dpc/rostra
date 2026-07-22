@@ -738,11 +738,14 @@ impl Database {
 
     /// Process event content.
     ///
-    /// In the new model:
-    /// - RC is managed at event insertion time (already incremented)
-    /// - We store content in content_store if not already there
-    /// - We process side effects
-    /// - We remove from events_content_missing
+    /// Ordinary processing requires Missing state, applies kind-specific side
+    /// effects, stores the content, removes fetch scheduling, and transitions
+    /// to Processed. RC was already incremented at event insertion.
+    ///
+    /// A verified, at-or-below-limit Deleted social-post edit is the sole
+    /// terminal-state exception. It may add only immutable forward and reverse
+    /// replacement rows; it does not store the supplied bytes or change
+    /// lifecycle bookkeeping or other projections.
     ///
     /// The `now` parameter should be `Timestamp::now()` for normal operation,
     /// but can be set to a specific value for testing or migration.
@@ -770,13 +773,20 @@ impl Database {
         }
 
         // Check if content should be processed (not deleted/pruned, is Missing)
-        let can_insert =
-            if u32::from(event_content.event.event.content_len) <= Self::MAX_CONTENT_LEN {
-                let events_content_state_table = tx.open_table(&events_content_state::TABLE)?;
-                Database::can_insert_event_content_tx(event_content, &events_content_state_table)?
-            } else {
-                false
-            };
+        let (can_insert, is_deleted) = if u32::from(event_content.event.event.content_len)
+            <= Self::MAX_CONTENT_LEN
+        {
+            let events_content_state_table = tx.open_table(&events_content_state::TABLE)?;
+            let state = events_content_state_table
+                .get(&event_content.event_id().to_short())?
+                .map(|state| state.value());
+            (
+                Database::can_insert_event_content_tx(event_content, &events_content_state_table)?,
+                matches!(state, Some(EventContentState::Deleted { .. })),
+            )
+        } else {
+            (false, false)
+        };
 
         if can_insert {
             // Remove eligible content from the missing list.
@@ -890,6 +900,19 @@ impl Database {
                         )?;
                     }
                 }
+            }
+        } else if is_deleted && event_content.content.is_some() {
+            match Self::process_deleted_social_post_replacement_tx(event_content, tx) {
+                Ok(_) => {}
+                Err(ProcessEventError::Invalid { source, location }) => {
+                    debug!(
+                        target: LOG_TARGET,
+                        err = %source.as_ref().fmt_compact(),
+                        %location,
+                        "Ignoring malformed Deleted social-post content"
+                    );
+                }
+                Err(ProcessEventError::Db { source }) => return Err(source),
             }
         }
         Ok(())
@@ -1282,6 +1305,8 @@ impl ProcessEventState {
         }
     }
 }
+#[cfg(test)]
+mod deleted_replacement_tests;
 #[cfg(test)]
 mod reception_order_tests;
 #[cfg(test)]

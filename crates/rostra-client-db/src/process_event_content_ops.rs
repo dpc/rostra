@@ -32,6 +32,66 @@ pub enum ProcessEventError {
 pub type ProcessEventResult<T> = std::result::Result<T, ProcessEventError>;
 
 impl Database {
+    fn social_post_replaced_event_id(
+        event_content: &VerifiedEventContent,
+        content: &content_kind::SocialPost,
+    ) -> Option<rostra_core::ShortEventId> {
+        event_content
+            .event
+            .is_delete_parent_aux_content_set()
+            .then(|| event_content.event.parent_aux())
+            .flatten()
+            .filter(|_| {
+                content
+                    .djot_content
+                    .as_deref()
+                    .is_some_and(|text| !text.trim().is_empty())
+            })
+    }
+
+    fn insert_social_post_replacement_tx(
+        event_content: &VerifiedEventContent,
+        old_event_id: rostra_core::ShortEventId,
+        tx: &WriteTransactionCtx,
+    ) -> ProcessEventResult<()> {
+        let author = event_content.author();
+        let event_id = event_content.event_id().to_short();
+
+        tx.open_table(&social_posts_replaced_by::TABLE)
+            .map_err(DbError::from)?
+            .insert(&(author, old_event_id, event_id), &())
+            .map_err(DbError::from)?;
+        tx.open_table(&social_posts_replaces::TABLE)
+            .map_err(DbError::from)?
+            .insert(&(author, event_id, old_event_id), &())
+            .map_err(DbError::from)?;
+
+        Ok(())
+    }
+
+    /// Derives only immutable edit lineage from an already-Deleted social post.
+    pub(crate) fn process_deleted_social_post_replacement_tx(
+        event_content: &VerifiedEventContent,
+        tx: &WriteTransactionCtx,
+    ) -> ProcessEventResult<bool> {
+        if event_content.kind() != EventKind::SOCIAL_POST
+            || Self::MAX_CONTENT_LEN < event_content.content_len()
+        {
+            return Ok(false);
+        }
+        let content = event_content
+            .deserialize_cbor::<content_kind::SocialPost>()
+            .boxed()
+            .context(InvalidSnafu)?;
+        let Some(old_event_id) = Self::social_post_replaced_event_id(event_content, &content)
+        else {
+            return Ok(false);
+        };
+
+        Self::insert_social_post_replacement_tx(event_content, old_event_id, tx)?;
+        Ok(true)
+    }
+
     /// Compute the effective received-at timestamp for notification ordering.
     ///
     /// For posts whose author timestamp predates both the database creation
@@ -245,17 +305,8 @@ impl Database {
                         }).boxed().context(InvalidSnafu)?;
 
                     let event_id = event_content.event_id().to_short();
-                    let replaced_event_id = event_content
-                        .event
-                        .is_delete_parent_aux_content_set()
-                        .then(|| event_content.event.parent_aux())
-                        .flatten()
-                        .filter(|_| {
-                            content
-                                .djot_content
-                                .as_deref()
-                                .is_some_and(|text| !text.trim().is_empty())
-                        });
+                    let replaced_event_id =
+                        Self::social_post_replaced_event_id(event_content, &content);
                     if event_content.event.is_delete_parent_aux_content_set()
                         && replaced_event_id.is_none()
                     {
@@ -294,20 +345,7 @@ impl Database {
                     .map_err(ProcessEventError::from)?;
 
                     if let Some(old_event_id) = replaced_event_id {
-                        let mut replaced_by_tbl = tx
-                            .open_table(&social_posts_replaced_by::TABLE)
-                            .map_err(DbError::from)?;
-                        replaced_by_tbl
-                            .insert(&(author, old_event_id, event_id), &())
-                            .map_err(DbError::from)?;
-                        drop(replaced_by_tbl);
-
-                        let mut replaces_tbl = tx
-                            .open_table(&social_posts_replaces::TABLE)
-                            .map_err(DbError::from)?;
-                        replaces_tbl
-                            .insert(&(author, event_id, old_event_id), &())
-                            .map_err(DbError::from)?;
+                        Self::insert_social_post_replacement_tx(event_content, old_event_id, tx)?;
                     }
 
                     tx.on_commit({
@@ -494,7 +532,6 @@ impl Database {
                     .deserialize_cbor::<content_kind::SocialPost>()
                     .boxed()
                     .context(InvalidSnafu)?;
-
                 let mut social_post_by_time_tbl = tx
                     .open_table(&social_posts_by_time::TABLE)
                     .map_err(DbError::from)?;

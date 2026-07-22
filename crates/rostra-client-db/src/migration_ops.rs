@@ -14,9 +14,9 @@ use rostra_core::event::{
     EventContentRaw, EventContentUnsized, EventExt as _, SignedEvent, VerifiedEvent,
     VerifiedEventContent,
 };
-use rostra_core::id::ToShort as _;
+use rostra_core::id::{RostraId, ToShort as _};
 use rostra_core::{ShortEventId, Timestamp};
-use tracing::{debug, info};
+use tracing::{debug, info, warn};
 
 use crate::id_self::IdSelfAccountRecord;
 use crate::{
@@ -161,11 +161,11 @@ impl Database {
     /// Handle database version check and migrations.
     ///
     /// If total migration is needed, this function:
-    /// 1. Copies events, content_store, ids_self, and db_init_time to temp
-    ///    tables
+    /// 1. Copies events, content_store, ids_self, db_init_time, and canonical
+    ///    social-post replacement rows to temp tables
     /// 2. Deletes all tables except temp and db_version
     /// 3. Initializes fresh tables with current schema
-    /// 4. Restores ids_self and db_init_time from temp
+    /// 4. Restores stable metadata and canonical replacement rows from temp
     ///
     /// The actual reprocessing of events happens later via
     /// `reprocess_migration_stash`. Use `has_pending_migration_stash` to check
@@ -236,10 +236,10 @@ impl Database {
 
     /// Prepare for total migration by stashing source-of-truth tables.
     ///
-    /// This copies events, content_store, ids_self, and db_init_time to temp
-    /// tables, deletes all other tables, and initializes fresh schema. Stable
-    /// identity and initialization metadata are restored immediately so the
-    /// Database can be created normally.
+    /// This copies events, content_store, stable metadata, and canonical
+    /// social-post replacement rows to temp tables, deletes all other tables,
+    /// and initializes fresh schema. Stable metadata and replacement rows are
+    /// restored immediately so the Database can be created normally.
     fn prepare_total_migration(dbtx: &WriteTransactionCtx, source_ver: u64) -> DbResult<()> {
         // Define temp table definitions
         let events_temp: redb_bincode::TableDefinition<
@@ -259,6 +259,11 @@ impl Database {
             redb_bincode::TableDefinition::new("_total_migration_db_init_time");
         let source_ver_temp: redb_bincode::TableDefinition<'_, (), u64> =
             redb_bincode::TableDefinition::new(MIGRATION_SOURCE_VER_TEMP_TABLE);
+        let replaced_by_temp: redb_bincode::TableDefinition<
+            '_,
+            (RostraId, ShortEventId, ShortEventId),
+            (),
+        > = redb_bincode::TableDefinition::new("_total_migration_social_posts_replaced_by");
 
         // Legacy table definition for old event-id-based content store
         let legacy_events_content: redb_bincode::TableDefinition<
@@ -278,6 +283,11 @@ impl Database {
         Self::copy_table_raw(dbtx, &content_store::TABLE, &content_store_temp)?;
         Self::copy_table_raw(dbtx, &ids_self::TABLE, &ids_self_temp)?;
         Self::copy_table_raw(dbtx, &crate::db_init_time::TABLE, &db_init_time_temp)?;
+        Self::copy_table_raw(
+            dbtx,
+            &crate::social_posts_replaced_by::TABLE,
+            &replaced_by_temp,
+        )?;
 
         // Try to copy legacy events_content table if it exists
         if Self::copy_table_raw_if_exists(
@@ -331,6 +341,11 @@ impl Database {
                 db_init_time_table.insert(&(), &timestamp)?;
             }
         }
+        Self::copy_table_raw(
+            dbtx,
+            &replaced_by_temp,
+            &crate::social_posts_replaced_by::TABLE,
+        )?;
 
         info!(target: LOG_TARGET, "Total migration prepared, events stashed for reprocessing");
         Ok(())
@@ -353,6 +368,11 @@ impl Database {
             redb_bincode::TableDefinition::new("_total_migration_ids_self");
         let db_init_time_temp: redb_bincode::TableDefinition<'_, (), Timestamp> =
             redb_bincode::TableDefinition::new("_total_migration_db_init_time");
+        let replaced_by_temp: redb_bincode::TableDefinition<
+            '_,
+            (RostraId, ShortEventId, ShortEventId),
+            (),
+        > = redb_bincode::TableDefinition::new("_total_migration_social_posts_replaced_by");
 
         // Read source DB version to determine content store format
         let source_ver_temp: redb_bincode::TableDefinition<'_, (), u64> =
@@ -492,13 +512,22 @@ impl Database {
 
             match content_from_store {
                 Some(content_raw) => {
-                    // Create VerifiedEventContent and process it
-                    let verified_content =
-                        VerifiedEventContent::assume_verified(verified_event, content_raw);
-
-                    // Process content using the same function as normal operation.
-                    // Use event timestamp as "now" for migration.
-                    self.process_event_content_tx(&verified_content, timestamp, dbtx)?;
+                    match VerifiedEventContent::verify(verified_event, content_raw) {
+                        Ok(verified_content) => {
+                            // Process content using the same function as normal operation.
+                            // Use event timestamp as "now" for migration.
+                            self.process_event_content_tx(&verified_content, timestamp, dbtx)?;
+                        }
+                        Err(err) => {
+                            warn!(
+                                target: LOG_TARGET,
+                                kind = %event_kind,
+                                author = %author.to_short(),
+                                ?err,
+                                "Migration: current content-store hash mismatch, skipping"
+                            );
+                        }
+                    }
                 }
                 None => {
                     // Try legacy table
@@ -552,6 +581,17 @@ impl Database {
         drop(events_temp_table);
         drop(legacy_content_temp_table);
 
+        let replacement_sources = dbtx
+            .open_table(&crate::social_posts_replaced_by::TABLE)?
+            .range(..)?
+            .map(|entry| entry.map(|(key, _)| key.value()))
+            .collect::<Result<Vec<_>, _>>()?;
+        let mut replaces = dbtx.open_table(&crate::social_posts_replaces::TABLE)?;
+        for (author, old_event_id, new_event_id) in replacement_sources {
+            replaces.insert(&(author, new_event_id, old_event_id), &())?;
+        }
+        drop(replaces);
+
         // Verify migration results by counting entries in key tables
         let events_count = dbtx
             .as_raw()
@@ -592,6 +632,7 @@ impl Database {
             .delete_table(new_content_store_temp.as_raw())?;
         dbtx.as_raw().delete_table(ids_self_temp.as_raw())?;
         dbtx.as_raw().delete_table(db_init_time_temp.as_raw())?;
+        dbtx.as_raw().delete_table(replaced_by_temp.as_raw())?;
         dbtx.as_raw().delete_table(source_ver_temp.as_raw())?;
         // Try to delete legacy temp table (may not exist)
         let _ = dbtx
