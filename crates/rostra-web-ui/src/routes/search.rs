@@ -1,6 +1,7 @@
 use axum::Json;
 use axum::extract::{Query, State};
 use axum::response::IntoResponse;
+use rostra_core::id::RostraId;
 use serde::{Deserialize, Serialize};
 
 use super::unlock::session::UserSession;
@@ -57,6 +58,17 @@ pub struct ProfileSearchResult {
     display_name: String,
 }
 
+fn order_and_limit_results(
+    mut scored: Vec<(i32, RostraId, ProfileSearchResult)>,
+) -> Vec<ProfileSearchResult> {
+    scored.sort_by(|a, b| b.0.cmp(&a.0).then_with(|| a.1.cmp(&b.1)));
+    scored
+        .into_iter()
+        .take(10)
+        .map(|(_, _, result)| result)
+        .collect()
+}
+
 pub async fn search_profiles(
     state: State<SharedState>,
     session: UserSession,
@@ -79,7 +91,7 @@ pub async fn search_profiles(
         .collect();
 
     // Fuzzy match against display name or rostra_id
-    let mut scored: Vec<(i32, ProfileSearchResult)> = Vec::new();
+    let mut scored = Vec::new();
     for id in all_ids {
         let id_str = id.to_string();
 
@@ -97,6 +109,7 @@ pub async fn search_profiles(
         if 0 < score {
             scored.push((
                 score,
+                id,
                 ProfileSearchResult {
                     rostra_id: id_str,
                     display_name,
@@ -105,8 +118,8 @@ pub async fn search_profiles(
         }
     }
 
-    scored.sort_by(|a, b| b.0.cmp(&a.0));
-    let results: Vec<_> = scored.into_iter().take(10).map(|(_, r)| r).collect();
-
-    Ok(Json(results))
+    Ok(Json(order_and_limit_results(scored)))
 }
+
+#[cfg(test)]
+mod tests;
