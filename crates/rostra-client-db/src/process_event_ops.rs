@@ -81,7 +81,7 @@ impl Database {
                     author = %event.event.author,
                     parent_prev = %event.event.parent_prev,
                     parent_aux = %event.event.parent_aux,
-                    "Ignoring already deleted event"
+                    "Event content was already deleted; header effects applied"
                 );
             } else {
                 info!(target: LOG_TARGET,

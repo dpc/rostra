@@ -40,8 +40,8 @@ pub struct EventsMissingRecord {
     /// When the missing event is finally received, its content should be
     /// marked as deleted immediately rather than processed normally.
     ///
-    /// Note: We only store one `deleted_by` ID. If multiple deletion events
-    /// target the same missing event, we arbitrarily keep one.
+    /// Multiple direct deleters are merged by maximum signed timestamp and
+    /// event ID. An ordinary child cannot erase existing deletion attribution.
     pub deleted_by: Option<ShortEventId>,
 }
 
@@ -162,7 +162,7 @@ pub enum EventContentState {
     /// - RC is decremented in `content_rc`
     /// - Content may be garbage collected if RC reaches 0
     Deleted {
-        /// The event that requested this content be deleted
+        /// Canonical direct deleter: maximum signed timestamp and event ID.
         deleted_by: ShortEventId,
     },
 
@@ -176,7 +176,8 @@ pub enum EventContentState {
     ///
     /// The content bytes could not be deserialized for the event's kind.
     /// RC has been decremented and content bytes are not stored.
-    /// Like `Deleted`/`Pruned`, this is a terminal state.
+    /// A later author deletion can supersede this with `Deleted` without
+    /// another RC decrement.
     Invalid,
 }
 

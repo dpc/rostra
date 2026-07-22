@@ -161,6 +161,14 @@ async fn test_store_deleted_event() -> BoxedErrorResult<()> {
     let event_c_id = event_c.event_id;
     let event_d = build_test_event_2(id_secret, event_c.event_id, event_b_id);
     let event_d_id = event_d.event_id;
+    let event_a_deleted_by = [
+        (event_b.timestamp(), event_b_id.to_short()),
+        (event_c.timestamp(), event_c_id.to_short()),
+    ]
+    .into_iter()
+    .max()
+    .expect("two direct deleters")
+    .1;
 
     db.write_with(|tx| {
         let mut ids_full_tbl = tx.open_table(&ids_full::TABLE).boxed()?;
@@ -186,8 +194,8 @@ async fn test_store_deleted_event() -> BoxedErrorResult<()> {
         //   deleted-when-missing
         // - When event_b arrives:
         //   - event_b gets Deleted { deleted_by: d } (from missing marker)
-        //   - event_b also deletes event_a → event_a gets Deleted { deleted_by: b }
-        //     (overwrites c)
+        //   - event_b also deletes event_a; canonical timestamp/ID precedence selects
+        //     between b and c
         for (event, expected_states) in [
             (event_a, [Some(None), None, None, None]),
             (
@@ -201,8 +209,7 @@ async fn test_store_deleted_event() -> BoxedErrorResult<()> {
             (
                 event_b,
                 [
-                    // event_a: deleted by event_b (last deleter wins)
-                    Some(Some(event_b_id.into())),
+                    Some(Some(event_a_deleted_by)),
                     // event_b: arrived with pending delete from event_d
                     Some(Some(event_d_id.into())),
                     Some(None),
@@ -1609,6 +1616,322 @@ fn build_delete_event(
         .build();
     let signed = event.signed_by(id_secret);
     VerifiedEvent::verify_signed(author, signed).expect("Valid event")
+}
+
+/// Build a deletion event with explicit content and signed timestamp.
+fn build_delete_event_at(
+    id_secret: RostraIdSecretKey,
+    parent: EventId,
+    delete: EventId,
+    content: &EventContentRaw,
+    timestamp: i64,
+) -> VerifiedEvent {
+    let author = id_secret.id();
+    let event = Event::builder_raw_content()
+        .author(author)
+        .kind(EventKind::SOCIAL_POST)
+        .parent_prev(parent.into())
+        .delete(delete.into())
+        .content(content)
+        .timestamp(
+            time::OffsetDateTime::from_unix_timestamp(timestamp).expect("valid test timestamp"),
+        )
+        .build();
+    let signed = event.signed_by(id_secret);
+    VerifiedEvent::verify_signed(author, signed).expect("Valid event")
+}
+
+/// Return the canonical direct deleter recorded for an event.
+async fn get_deleted_by(
+    db: &Database,
+    event_id: impl Into<rostra_core::ShortEventId>,
+) -> BoxedErrorResult<rostra_core::ShortEventId> {
+    let event_id = event_id.into();
+    Ok(db
+        .read_with(|tx| {
+            let states = tx.open_table(&events_content_state::TABLE)?;
+            Ok(
+                match Database::get_event_content_state_tx(event_id, &states)? {
+                    Some(EventContentState::Deleted { deleted_by }) => Some(deleted_by),
+                    _ => None,
+                },
+            )
+        })
+        .await?
+        .expect("event content must be deleted"))
+}
+
+/// Return an event content hash's current reference count.
+async fn get_test_content_rc(
+    db: &Database,
+    content_hash: rostra_core::ContentHash,
+) -> BoxedErrorResult<u64> {
+    Ok(db
+        .read_with(|tx| {
+            let content_rc_table = tx.open_table(&content_rc::TABLE)?;
+            Database::get_content_rc_tx(content_hash, &content_rc_table)
+        })
+        .await?)
+}
+
+/// Return the stored reply count for a social post.
+async fn get_test_reply_count(
+    db: &Database,
+    event_id: impl Into<rostra_core::ShortEventId>,
+) -> BoxedErrorResult<u64> {
+    let event_id = event_id.into();
+    Ok(db
+        .read_with(|tx| {
+            let social_posts = tx.open_table(&crate::social_posts::TABLE)?;
+            Ok(social_posts
+                .get(&event_id)?
+                .map(|record| record.value().reply_count)
+                .unwrap_or_default())
+        })
+        .await?)
+}
+
+const THREE_EVENT_PERMUTATIONS: [[usize; 3]; 6] = [
+    [0, 1, 2],
+    [0, 2, 1],
+    [1, 0, 2],
+    [1, 2, 0],
+    [2, 0, 1],
+    [2, 1, 0],
+];
+
+/// Ordinary children cannot erase a staged deletion in any delivery order.
+#[test_log::test(tokio::test(flavor = "multi_thread"))]
+async fn test_deletion_is_monotone_across_delivery_permutations() -> BoxedErrorResult<()> {
+    let id_secret = RostraIdSecretKey::generate();
+    let author = id_secret.id();
+    let (target, target_content) =
+        build_test_event_with_valid_content(id_secret, None, "monotone target");
+    let target_id = target.event_id;
+    let target_hash = target.content_hash();
+    let deleting = build_delete_event(id_secret, target_id, target_id);
+    let deleting_id = deleting.event_id.to_short();
+    let ordinary = build_test_event(id_secret, target_id);
+    let events = [deleting, ordinary, target];
+
+    for permutation in THREE_EVENT_PERMUTATIONS {
+        let (_dir, db) = temp_db(author).await?;
+        for index in permutation {
+            db.process_event(&events[index]).await;
+        }
+
+        let verified_content = rostra_core::event::VerifiedEventContent::assume_verified(
+            target,
+            target_content.clone(),
+        );
+        db.process_event_content(&verified_content).await;
+
+        assert_eq!(get_deleted_by(&db, target_id).await?, deleting_id);
+        assert_eq!(get_test_content_rc(&db, target_hash).await?, 0);
+        assert!(!db.is_event_content_missing(target_id.to_short()).await);
+        assert!(db.get_event_content(target_id).await.is_none());
+    }
+
+    Ok(())
+}
+
+/// Distinct-time direct deleters converge on the latest signed candidate.
+#[test_log::test(tokio::test(flavor = "multi_thread"))]
+async fn test_direct_deleters_converge_across_delivery_permutations() -> BoxedErrorResult<()> {
+    let id_secret = RostraIdSecretKey::generate();
+    let author = id_secret.id();
+    let (target, target_content) =
+        build_test_event_with_valid_content(id_secret, None, "canonical target");
+    let target_id = target.event_id;
+    let target_hash = target.content_hash();
+    let empty = EventContentRaw::new(vec![]);
+    let delete_1 = build_delete_event_at(id_secret, target_id, target_id, &empty, 1_000);
+    let delete_2 = build_delete_event_at(id_secret, delete_1.event_id, target_id, &empty, 1_001);
+    let expected = delete_2.event_id.to_short();
+    let events = [delete_1, delete_2, target];
+
+    for permutation in THREE_EVENT_PERMUTATIONS {
+        let (_dir, db) = temp_db(author).await?;
+        for index in permutation {
+            db.process_event(&events[index]).await;
+        }
+
+        let verified_content = rostra_core::event::VerifiedEventContent::assume_verified(
+            target,
+            target_content.clone(),
+        );
+        db.process_event_content(&verified_content).await;
+
+        assert_eq!(get_deleted_by(&db, target_id).await?, expected);
+        assert_eq!(get_test_content_rc(&db, target_hash).await?, 0);
+        assert!(!db.is_event_content_missing(target_id.to_short()).await);
+        assert!(db.get_event_content(target_id).await.is_none());
+    }
+
+    Ok(())
+}
+
+/// Equal-time direct deleters use event ID as the canonical tie-break.
+#[test_log::test(tokio::test(flavor = "multi_thread"))]
+async fn test_equal_timestamp_deleters_use_event_id_tiebreak() -> BoxedErrorResult<()> {
+    let id_secret = RostraIdSecretKey::generate();
+    let author = id_secret.id();
+    let (target, _) = build_test_event_with_valid_content(id_secret, None, "equal-time target");
+    let target_id = target.event_id;
+    let empty = EventContentRaw::new(vec![]);
+    let delete_1 = build_delete_event_at(id_secret, target_id, target_id, &empty, 2_000);
+    let delete_2 = build_delete_event_at(id_secret, delete_1.event_id, target_id, &empty, 2_000);
+    let expected = delete_1
+        .event_id
+        .to_short()
+        .max(delete_2.event_id.to_short());
+    let events = [delete_1, delete_2, target];
+
+    for permutation in THREE_EVENT_PERMUTATIONS {
+        let (_dir, db) = temp_db(author).await?;
+        for index in permutation {
+            db.process_event(&events[index]).await;
+        }
+
+        assert_eq!(get_deleted_by(&db, target_id).await?, expected);
+    }
+
+    Ok(())
+}
+
+/// Attribution-only updates do not repeat processed-post projection reversion.
+#[test_log::test(tokio::test(flavor = "multi_thread"))]
+async fn test_deleter_attribution_update_does_not_repeat_reversion() -> BoxedErrorResult<()> {
+    use rostra_core::ExternalEventId;
+    use rostra_core::event::VerifiedEventContent;
+    use rostra_core::event::content_kind::{EventContentKind as _, SocialPost};
+
+    let id_secret = RostraIdSecretKey::generate();
+    let author = id_secret.id();
+    let (_dir, db) = temp_db(author).await?;
+
+    let parent_content =
+        SocialPost::new("parent".to_owned(), None, Default::default()).serialize_cbor()?;
+    let parent = Event::builder_raw_content()
+        .author(author)
+        .kind(EventKind::SOCIAL_POST)
+        .content(&parent_content)
+        .build()
+        .signed_by(id_secret);
+    let parent = VerifiedEvent::verify_signed(author, parent).expect("valid parent event");
+
+    let reply_content = SocialPost::new(
+        "reply".to_owned(),
+        Some(ExternalEventId::new(author, parent.event_id)),
+        Default::default(),
+    )
+    .serialize_cbor()?;
+    let reply = Event::builder_raw_content()
+        .author(author)
+        .kind(EventKind::SOCIAL_POST)
+        .parent_prev(parent.event_id.into())
+        .content(&reply_content)
+        .build()
+        .signed_by(id_secret);
+    let reply = VerifiedEvent::verify_signed(author, reply).expect("valid reply event");
+
+    db.process_event_with_content(&VerifiedEventContent::assume_verified(
+        parent,
+        parent_content,
+    ))
+    .await;
+    db.process_event_with_content(&VerifiedEventContent::assume_verified(reply, reply_content))
+        .await;
+    assert_eq!(get_test_reply_count(&db, parent.event_id).await?, 1);
+
+    let empty = EventContentRaw::new(vec![]);
+    let delete_1 = build_delete_event_at(id_secret, reply.event_id, reply.event_id, &empty, 5_000);
+    let delete_2 =
+        build_delete_event_at(id_secret, delete_1.event_id, reply.event_id, &empty, 5_001);
+    let losing_delete =
+        build_delete_event_at(id_secret, delete_2.event_id, reply.event_id, &empty, 4_999);
+
+    db.process_event(&delete_1).await;
+    assert_eq!(
+        get_deleted_by(&db, reply.event_id).await?,
+        delete_1.event_id.to_short()
+    );
+    assert_eq!(get_test_reply_count(&db, parent.event_id).await?, 0);
+
+    db.process_event(&delete_2).await;
+    assert_eq!(
+        get_deleted_by(&db, reply.event_id).await?,
+        delete_2.event_id.to_short()
+    );
+    assert_eq!(get_test_reply_count(&db, parent.event_id).await?, 0);
+
+    db.process_event(&losing_delete).await;
+    assert_eq!(
+        get_deleted_by(&db, reply.event_id).await?,
+        delete_2.event_id.to_short()
+    );
+    assert_eq!(get_test_reply_count(&db, parent.event_id).await?, 0);
+
+    Ok(())
+}
+
+/// Deleting a deleting event's content does not cancel its header effect.
+#[test_log::test(tokio::test(flavor = "multi_thread"))]
+async fn test_deletion_chain_preserves_header_effects() -> BoxedErrorResult<()> {
+    let id_secret = RostraIdSecretKey::generate();
+    let author = id_secret.id();
+    let (target, _) = build_test_event_with_valid_content(id_secret, None, "chain target");
+    let target_id = target.event_id;
+    let (_, delete_1_content) =
+        build_test_event_with_valid_content(id_secret, None, "deleting event content");
+    let delete_1 = build_delete_event_at(id_secret, target_id, target_id, &delete_1_content, 3_000);
+    let delete_1_id = delete_1.event_id;
+    let delete_2 = build_delete_event_at(
+        id_secret,
+        delete_1_id,
+        delete_1_id,
+        &EventContentRaw::new(vec![]),
+        3_001,
+    );
+    let delete_2_id = delete_2.event_id;
+    let events = [target, delete_1, delete_2];
+
+    for permutation in THREE_EVENT_PERMUTATIONS {
+        let (_dir, db) = temp_db(author).await?;
+        for index in permutation {
+            db.process_event(&events[index]).await;
+        }
+
+        assert_eq!(
+            get_deleted_by(&db, target_id).await?,
+            delete_1_id.to_short()
+        );
+        assert_eq!(
+            get_deleted_by(&db, delete_1_id).await?,
+            delete_2_id.to_short()
+        );
+        assert!(db.get_event(target_id).await.is_some());
+        assert!(db.get_event(delete_1_id).await.is_some());
+        assert!(db.get_event(delete_2_id).await.is_some());
+        assert!(!db.is_event_content_missing(target_id.to_short()).await);
+        assert!(!db.is_event_content_missing(delete_1_id.to_short()).await);
+    }
+
+    let ordinary = build_test_event(id_secret, delete_1_id);
+    let (_dir, db) = temp_db(author).await?;
+    for event in [delete_2, ordinary, delete_1, target] {
+        db.process_event(&event).await;
+    }
+    assert_eq!(
+        get_deleted_by(&db, target_id).await?,
+        delete_1_id.to_short()
+    );
+    assert_eq!(
+        get_deleted_by(&db, delete_1_id).await?,
+        delete_2_id.to_short()
+    );
+
+    Ok(())
 }
 
 /// Test: Inserting events increments metadata size and num (current and total).
@@ -4234,6 +4557,14 @@ async fn test_two_deletes_same_target() -> BoxedErrorResult<()> {
         let signed = event.signed_by(user_secret);
         VerifiedEvent::verify_signed(user, signed).expect("Valid event")
     };
+    let expected_deleted_by = [
+        (delete1_event.timestamp(), delete1_event.event_id.to_short()),
+        (delete2_event.timestamp(), delete2_event.event_id.to_short()),
+    ]
+    .into_iter()
+    .max()
+    .expect("two deletion candidates")
+    .1;
 
     let now = rostra_core::Timestamp::now();
 
@@ -4259,6 +4590,7 @@ async fn test_two_deletes_same_target() -> BoxedErrorResult<()> {
         Ok(())
     })
     .await?;
+    let usage_after_first_delete = db.get_data_usage(user).await;
 
     // Insert second delete: RC should still be 0 (no double decrement)
     db.write_with(|tx| {
@@ -4277,14 +4609,27 @@ async fn test_two_deletes_same_target() -> BoxedErrorResult<()> {
 
         // State should still be Deleted
         let state = Database::get_event_content_state_tx(post_id, &events_content_state_table)?;
-        assert!(
-            matches!(state, Some(EventContentState::Deleted { .. })),
-            "Post should still be Deleted"
+        assert_eq!(
+            state,
+            Some(EventContentState::Deleted {
+                deleted_by: expected_deleted_by
+            }),
+            "Post should retain canonical direct attribution"
         );
 
         Ok(())
     })
     .await?;
+    let usage_after_second_delete = db.get_data_usage(user).await;
+    assert_eq!(
+        usage_after_second_delete.deleted_payload_num, usage_after_first_delete.deleted_payload_num,
+        "attribution-only updates must not repeat payload deletion accounting"
+    );
+    assert_eq!(
+        usage_after_second_delete.deleted_payload_size,
+        usage_after_first_delete.deleted_payload_size,
+        "attribution-only updates must not repeat payload deletion accounting"
+    );
 
     info!("=== Two deletes same target test passed ===");
 

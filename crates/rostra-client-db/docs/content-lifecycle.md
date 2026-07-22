@@ -149,6 +149,9 @@ and cannot be mutated.
 ```
 1. Delete event D arrives, same-author target T not in `events`:
    - T added to `events_missing` with deleted_by = D
+   - An ordinary child referencing T preserves deleted_by = D
+   - Another direct deleter is merged canonically; the maximum
+     `(signed timestamp, ShortEventId)` becomes deleted_by
 
 2. Same-author target event T finally arrives:
    - Check `events_missing`: found with deleted_by
@@ -156,6 +159,16 @@ and cannot be mutated.
    - Do NOT increment RC (content already marked for deletion)
    - Do NOT mark content as Missing
 ```
+
+Deletion intent is monotone in both `events_missing` and
+`events_content_state`. Multiple direct deleting children select the same
+canonical `deleted_by` regardless of delivery order. Changing only the winner
+does not repeat RC, queue, usage, or projection-reversion work.
+
+Deletion affects content, not the signed header. In the direct chain
+`T <-delete- D1 <-delete- D2`, D1's header keeps deleting T even after D1's own
+content is deleted. The direct attributions remain `T.deleted_by = D1` and
+`D1.deleted_by = D2`; D2 is not transitively assigned to T.
 
 ### Flow 4: Content Deletion After Target (While Content Missing)
 
@@ -352,6 +365,16 @@ Both cases indicate bugs in the calling code and will panic in debug builds.
 
 - `test_delete_while_unprocessed` - Content delete arrives while content is Missing
 - `test_two_deletes_same_target` - Second content delete doesn't double-decrement RC
+- `test_deletion_is_monotone_across_delivery_permutations` - Ordinary children
+  cannot erase staged deletion
+- `test_direct_deleters_converge_across_delivery_permutations` - Direct
+  attribution uses canonical timestamp/ID precedence
+- `test_equal_timestamp_deleters_use_event_id_tiebreak` - Equal-time direct
+  attribution is total
+- `test_deleter_attribution_update_does_not_repeat_reversion` - Canonical
+  attribution updates do not revert processed projections twice
+- `test_deletion_chain_preserves_header_effects` - Deletion chains retain direct
+  non-transitive attribution, including staged ordinary-child interference
 - `test_prune_then_delete` - Content Prune→Delete transition, no double-decrement
 - `test_delete_then_prune` - Prune after content delete returns false
 - `test_cross_author_parent_never_resolves_or_deletes` - Cross-author raw-ID

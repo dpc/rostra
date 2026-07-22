@@ -1,5 +1,11 @@
 # SPEC-event-graph: Signed event graph
 
+## Record justification
+
+Graph semantics span core event encoding and verification, client database
+storage and lifecycle transitions, replication, and application content
+processing. No single implementation area can document the complete contract.
+
 Rostra data is represented by compact signed event headers and separately
 addressed content. This model is the shared contract used by storage,
 replication, and application content processing. It refines the system shape
@@ -50,6 +56,12 @@ ID matches the auxiliary parent field. The singleton flag declares that only
 the latest event for the same kind and auxiliary key matters. Consumers must
 preserve these graph-level semantics even when the affected payload is absent
 locally.
+
+Deletion affects only the target payload. It does not disable the target header
+or any parent or deletion instruction encoded by that header. Deleting a
+deletion event's payload therefore neither cancels that event's deletion of its
+direct auxiliary parent nor transitively changes the earlier target's deleting
+event.
 
 Unknown flag bits are not produced by the current implementation, but readers
 accept and ignore bits they do not understand so later protocol versions can

@@ -1,5 +1,12 @@
 # SPEC-event-content-lifecycle: Event content processing
 
+## Record justification
+
+The lifecycle spans event and content tables, reference counting, fetch
+scheduling, ingestion transactions, projection processing and reversion, and
+client retrieval. Local documentation beside any one component cannot describe
+the complete state machine and its cross-table invariants.
+
 Event envelopes and payload bytes have independent arrival and retention
 lifecycles. The database preserves the event graph while fetching, processing,
 deduplicating, pruning, or deleting payloads. This behavior implements
@@ -44,6 +51,16 @@ author's stronger deletion intent without decrementing again. When deletion
 invalidates an already processed social post, the database reverts its
 post-specific projections. Derived projections for other content kinds are
 currently retained.
+
+Deletion intent is monotone: once a valid direct deleting child has been
+observed, ordinary child references and later lifecycle changes cannot erase
+it. If several direct same-author children delete the same target, `deleted_by`
+is the child with the maximum `(signed timestamp, ShortEventId)`. A deleting
+child remains a candidate even when its own content is deleted. This attribution
+is direct rather than transitive; in a chain where D2 deletes D1's content and
+D1 deletes T's content, T is deleted by D1 and D1 is deleted by D2.
+Attribution-only winner changes do not repeat reference-count, fetch-queue,
+usage-accounting, or projection-reversion effects.
 
 ## Deduplication and retrieval
 

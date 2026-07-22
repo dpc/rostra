@@ -120,6 +120,8 @@ pub struct Event {
     /// this event (one that deleted it) instead. The p2p and other
     /// protocols should accommodate such missing events as a core
     /// feature of the protocol and no longer store or return content data.
+    /// Deleting the content of an event does not disable that event's header or
+    /// its own graph-level effects.
     ///
     /// Big `1` - singleton - only the last value of this event for a given
     /// `(kind, key)` really matters, and previous ones can be considered

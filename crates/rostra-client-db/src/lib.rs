@@ -197,6 +197,12 @@ pub enum DbError {
     },
     #[snafu(display("Integer overflow"))]
     Overflow,
+    #[snafu(display("Deletion attribution references missing event {event_id}"))]
+    MissingDeletionAttribution {
+        event_id: ShortEventId,
+        #[snafu(implicit)]
+        location: Location,
+    },
 }
 pub type DbResult<T> = std::result::Result<T, DbError>;
 

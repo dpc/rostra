@@ -67,7 +67,9 @@
 //! **Content Deletion** (author requests content deletion):
 //! 1. Event's content state changes to [`Deleted`](EventContentState::Deleted)
 //!    in [`events_content_state`]
-//! 2. RC is decremented in [`content_rc`]
+//! 2. RC is decremented in [`content_rc`] only if the prior state still
+//!    contributed a reference; later deletion attribution updates do not
+//!    decrement it again
 //!
 //! **Content Pruning** (local decision, e.g., content too large):
 //! 1. Event's content state changes to [`Pruned`](EventContentState::Pruned) in

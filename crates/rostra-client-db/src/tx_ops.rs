@@ -73,6 +73,34 @@ impl RandomTableKey for ExternalEventId {
 }
 
 impl Database {
+    /// Merge a direct content-deletion candidate into stored attribution.
+    ///
+    /// Deletion presence is monotone. Multiple direct deleters select the
+    /// greatest `(signed timestamp, event ID)` so delivery order cannot affect
+    /// attribution.
+    fn merge_deleted_by_tx(
+        current: Option<ShortEventId>,
+        candidate: Option<(Timestamp, ShortEventId)>,
+        events_table: &impl events::ReadableTable,
+    ) -> DbResult<Option<ShortEventId>> {
+        let Some(candidate) = candidate else {
+            return Ok(current);
+        };
+        let Some(current_id) = current else {
+            return Ok(Some(candidate.1));
+        };
+
+        let current_timestamp = events_table
+            .get(&current_id)?
+            .map(|event| event.value().timestamp())
+            .ok_or(DbError::MissingDeletionAttribution {
+                event_id: current_id,
+                location: snafu::Location::new(file!(), line!(), column!()),
+            })?;
+
+        Ok(Some((current_timestamp, current_id).max(candidate).1))
+    }
+
     pub fn read_followees_tx(
         id: RostraId,
         ids_followees_table: &impl ids_followees::ReadableTable,
@@ -238,13 +266,19 @@ impl Database {
 
                     let parent_content_hash = parent_event_record.content_hash();
                     let old_state = events_content_state_table
-                        .insert(
-                            &parent_id,
-                            &EventContentState::Deleted {
-                                deleted_by: event_id,
-                            },
-                        )?
-                        .map(|g| g.value());
+                        .get(&parent_id)?
+                        .map(|state| state.value());
+                    let deleted_by = Self::merge_deleted_by_tx(
+                        match old_state {
+                            Some(EventContentState::Deleted { deleted_by }) => Some(deleted_by),
+                            _ => None,
+                        },
+                        Some((event.timestamp(), event_id)),
+                        events_table,
+                    )?
+                    .expect("a direct deletion candidate always produces attribution");
+                    events_content_state_table
+                        .insert(&parent_id, &EventContentState::Deleted { deleted_by })?;
 
                     if let Some(EventContentState::Missing {
                         next_fetch_attempt, ..
@@ -295,14 +329,17 @@ impl Database {
                 }
             } else {
                 // We do not have this parent yet, so we mark it as missing
-                events_missing_table.insert(
-                    &(author, parent_id),
-                    &EventsMissingRecord {
-                        // Potentially mark that the missing event was already deleted.
-                        deleted_by: (event.is_delete_parent_aux_content_set() && parent_is_aux)
-                            .then_some(event_id),
-                    },
+                let old_deleted_by = events_missing_table
+                    .get(&(author, parent_id))?
+                    .and_then(|record| record.value().deleted_by);
+                let deleted_by = Self::merge_deleted_by_tx(
+                    old_deleted_by,
+                    (event.is_delete_parent_aux_content_set() && parent_is_aux)
+                        .then_some((event.timestamp(), event_id)),
+                    events_table,
                 )?;
+                events_missing_table
+                    .insert(&(author, parent_id), &EventsMissingRecord { deleted_by })?;
                 missing_parents.push(parent_id);
             }
             // If the event was considered a "head", it shouldn't as it has a child.
