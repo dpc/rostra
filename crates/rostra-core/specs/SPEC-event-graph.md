@@ -25,6 +25,10 @@ An event names its author with a `RostraId`. Its signature must verify against
 that identity, and its event ID is derived from the signed event header.
 Callers receiving an event in response to a request must also verify that the
 computed identity and event ID match what was requested.
+Any separate author claim in a protocol response remains untrusted until it
+matches the author authenticated by the event signature. Synchronization scope
+or Web-of-Trust admission must use that bound, authenticated identity rather
+than independently trusting response metadata.
 
 An event header commits to a content hash and content length. Payload bytes are
 valid for that event only when both values match. Code that accepts

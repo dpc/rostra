@@ -30,6 +30,10 @@ Rostra v0 ALPN.
 connect to, caches connections, tracks per-identity and per-node backoff, and
 passes verified data to
 [ARCH-client-database](../../rostra-client-db/specs/ARCH-client-database.md).
+Unsigned routing and admission metadata in a response remains peer-controlled.
+When `WAIT_FOLLOWERS_NEW_HEADS` supplies both a claimed author and a signed
+event, the client requires the claim to equal the event's cryptographically
+verified author before applying Web-of-Trust admission or storing the event.
 
 Relay-only iroh transport is the default privacy mode. Explicit public mode
 enables direct IP transports. Published endpoint data is sanitized to avoid

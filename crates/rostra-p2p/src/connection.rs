@@ -235,6 +235,10 @@ define_rpc!(
     WaitFollowersNewHeadsResponse,
     /// Response containing the author and exact event that caused the
     /// incremental new-head notification.
+    ///
+    /// `author` is untrusted wire metadata. Consumers must require it to match
+    /// the author authenticated by `event`'s signature before using it for
+    /// synchronization-scope or Web-of-Trust admission.
     pub struct WaitFollowersNewHeadsResponse {
         pub author: RostraId,
         pub event: SignedEvent,
@@ -602,7 +606,8 @@ impl Connection {
     ///
     /// This is a blocking incremental call. The response contains the exact
     /// event that caused the server notification rather than another selected
-    /// member of that author's current head set.
+    /// member of that author's current head set. The response's claimed author
+    /// remains untrusted until it is bound to the event's verified signature.
     pub async fn wait_followers_new_heads(&self) -> RpcResult<WaitFollowersNewHeadsResponse> {
         self.make_rpc(&WaitFollowersNewHeadsRequest).await
     }

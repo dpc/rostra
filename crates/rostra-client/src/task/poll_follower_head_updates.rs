@@ -6,7 +6,7 @@ use futures::StreamExt as _;
 use futures::future::BoxFuture;
 use futures::stream::FuturesUnordered;
 use rostra_client_db::{Database, IdsFollowersRecord, WotData};
-use rostra_core::event::VerifiedEvent;
+use rostra_core::event::{EventExt as _, VerifiedEvent};
 use rostra_core::id::{RostraId, ToShort as _};
 use rostra_p2p::Connection;
 use rostra_util_error::FmtCompact as _;
@@ -80,7 +80,9 @@ type SharedBackoffState = Arc<RwLock<HashMap<RostraId, PeerBackoffState>>>;
 ///
 /// This task maintains connections to self and direct followers, polling each
 /// for head updates using a blocking RPC call. When a new head is discovered,
-/// the event is verified and added to the database.
+/// the event is verified, bound to the response's claimed author, and added to
+/// the database only when that authenticated author is in the local Web of
+/// Trust.
 pub struct PollFollowerHeadUpdates {
     client: crate::client::ClientHandle,
     networking: Arc<ClientNetworking>,
@@ -327,25 +329,29 @@ impl PollFollowerHeadUpdates {
         let event_id = event.compute_short_id();
         trace!(
             target: LOG_TARGET,
-            author = %author.to_short(),
+            claimed_author = %author.to_short(),
             event_id = %event_id.to_short(),
             "Received new head event from peer"
         );
 
-        // Verify the event is authentic
-        let verified_event = VerifiedEvent::verify_received_as_is(event)
+        // Bind the routing/admission claim to the signed envelope. The response
+        // author is peer-controlled and must not independently grant WoT
+        // admission to an event signed by another identity.
+        let verified_event = VerifiedEvent::verify_signed(author, event)
             .map_err(|e| format!("Event verification failed: {}", e.fmt_compact()))?;
+        let authenticated_author = verified_event.author();
 
-        // Check if the author is in our web of trust
+        // Check the cryptographically authenticated author against our Web of
+        // Trust only after the response binding has succeeded.
         let in_wot = {
             let wot = wot_rx.borrow();
-            wot.contains(author, self_id)
+            wot.contains(authenticated_author, self_id)
         };
 
         if !in_wot {
             warn!(
                 target: LOG_TARGET,
-                author = %author.to_short(),
+                author = %authenticated_author.to_short(),
                 "Received event from author not in web of trust, ignoring"
             );
             return Ok(());
@@ -361,7 +367,7 @@ impl PollFollowerHeadUpdates {
 
         debug!(
             target: LOG_TARGET,
-            author = %author.to_short(),
+            author = %authenticated_author.to_short(),
             event_id = %verified_event.event_id.to_short(),
             ?insert_outcome,
             "Stored new head event (content deferred to NewHeadFetcher)"
@@ -370,3 +376,6 @@ impl PollFollowerHeadUpdates {
         Ok(())
     }
 }
+
+#[cfg(test)]
+mod tests;
