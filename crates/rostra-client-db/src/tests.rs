@@ -3755,6 +3755,7 @@ async fn test_total_migration() -> BoxedErrorResult<()> {
     use crate::{
         db_init_time, db_version, events_received_at, ids_followees, ids_followers,
         reception_order_next, social_posts_by_received_at, social_posts_by_time,
+        social_posts_received_at_keys,
     };
 
     const EXTENSION_TABLE: redb_bincode::TableDefinition<'_, u64, String> =
@@ -4111,14 +4112,25 @@ async fn test_total_migration() -> BoxedErrorResult<()> {
         let social_receipts = tx
             .open_table(&social_posts_by_received_at::TABLE)?
             .range(..)?
-            .map(|entry| entry.map(|(_, event_id)| event_id.value()))
+            .map(|entry| entry.map(|(key, event_id)| (key.value(), event_id.value())))
+            .collect::<Result<Vec<_>, _>>()?;
+        let social_receipt_keys = tx
+            .open_table(&social_posts_received_at_keys::TABLE)?
+            .range(..)?
+            .map(|entry| entry.map(|(event_id, key)| (event_id.value(), key.value())))
             .collect::<Result<Vec<_>, _>>()?;
         let next_reception_order = tx
             .open_table(&reception_order_next::TABLE)?
             .get(&())?
             .map(|value| value.value());
         assert_eq!(event_receipts.len(), 5);
-        assert_eq!(social_receipts, vec![expected_post_event_id]);
+        assert_eq!(social_receipts.len(), 1);
+        assert_eq!(social_receipts[0].1, expected_post_event_id);
+        assert_eq!(
+            social_receipt_keys,
+            vec![(expected_post_event_id, social_receipts[0].0)],
+            "total replay must rebuild the exact social-receipt reverse mapping"
+        );
         assert_eq!(
             next_reception_order,
             Some((event_receipts.len() + social_receipts.len()) as u64),

@@ -540,7 +540,24 @@ def_table! {
     ///
     /// The `reception_order` is allocated durably in the insertion transaction.
     /// Insertions fail rather than replacing an occupied key.
+    /// Every row inserted by the current implementation or total replay has an
+    /// exact reverse entry in [`social_posts_received_at_keys`]. Reverting a
+    /// processed post removes both entries atomically without reclaiming its
+    /// reception-order sequence. Unmapped version-24 rows remain transitional as
+    /// documented in `specs/ARCH-client-database.md`.
     social_posts_by_received_at: (Timestamp, u64) => ShortEventId
+}
+
+def_table! {
+    /// Reverse mapping from a social post to its effective reception-order key.
+    ///
+    /// Key: post_event_id
+    /// Value: (effective_timestamp, reception_order)
+    ///
+    /// This derived mapping makes post reversion remove the exact forward receipt
+    /// row without scanning. It is inserted and removed in the same transaction
+    /// as the forward row and is rebuilt with that row by total replay.
+    social_posts_received_at_keys: ShortEventId => (Timestamp, u64)
 }
 
 def_table! {

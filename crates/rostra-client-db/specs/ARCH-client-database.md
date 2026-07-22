@@ -24,6 +24,12 @@ repaired by this staged change: reply or reaction counts that the former
 asymmetric blank-post reversion already decremented can remain incorrect until
 the final total rebuild tracked by `t4vh`.
 
+New and total-replay-built social receipt rows have the reverse mapping required
+for exact reversion. Existing version-24 `social_posts_by_received_at` rows are
+not scanned or backfilled by this staged change. If one of those legacy posts is
+deleted before `t4vh`, its unaddressable stale receipt row can remain until the
+final total rebuild discards and reconstructs both receipt directions.
+
 `rostra-client-db` is the authoritative state and projection layer for one
 local Rostra identity during a database instance's lifetime. It stores
 verified graph data, tracks incomplete replication, and materializes
@@ -113,6 +119,13 @@ than replace an existing member. Different replicas need not assign the same
 sequence to an event. Sequence exhaustion fails the transaction instead of
 wrapping and reusing values.
 
+Each current-schema social-post receipt also stores an event-to-reception-key
+reverse row in the insertion transaction. Reverting that processed post removes
+the forward and reverse rows atomically. Removal does not rewind the shared
+allocator or make its sequence value reusable. A present reverse row that does
+not resolve to the same event in the forward index is corruption and aborts the
+deletion transaction.
+
 ## Invariants
 
 - Only cryptographically verified event envelopes enter normal processing.
@@ -124,13 +137,14 @@ wrapping and reusing values.
   completed after out-of-order delivery.
 - Content-derived projections are applied at most once for each event
   content. Deletion of a processed social post reverts its post-specific
-  projections; other content kinds currently retain their derived
-  projections.
+  projections, including both directions of its notification receipt index;
+  other content kinds currently retain their derived projections.
 - Social-post projection reversion has the same applicability as insertion.
   A blank or whitespace-only post whose header deletes its auxiliary parent's
   content neither adds nor removes ordinary authored-time, reply, reaction,
-  news, or self-mention projections. Nonblank edits apply and revert those
-  projections normally; counter mismatches fail closed rather than saturating.
+  news, self-mention, or reception-order projections. Nonblank edits apply and
+  revert those projections normally; counter or receipt-mapping mismatches fail
+  closed rather than saturating or mutating unrelated rows.
 - Social-post replacement lineage remains available across a Deleted
   intermediate. Verified Deleted content may establish only immutable edit
   metadata, whose canonical forward rows survive total migration; it cannot
@@ -165,7 +179,8 @@ wrapping and reusing values.
   retained event envelopes and available retained content. It preserves
   semantic membership, not historical reception timestamps or sequence values:
   rebuilt entries use authored timestamps as the deterministic fallback because
-  their original local receipt times are not retained.
+  their original local receipt times are not retained. Social-post replay also
+  rebuilds the exact event-to-reception-key reverse mapping.
 - Total migration preserves canonical forward social-post replacement rows and
   rebuilds their reverse lookup index.
 - Total migration preserves caller-owned extension tables byte-for-byte without

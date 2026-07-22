@@ -12,11 +12,12 @@ use crate::event::EventSingletonRecord;
 use crate::event_order::EventOrder;
 use crate::{
     Database, DbError, IdSocialProfileRecord, IrohNodeRecord, LOG_TARGET, OverflowSnafu,
+    SocialPostReceiptAlreadyIndexedSnafu, SocialPostReceiptMismatchSnafu,
     SocialPostsReactionsRecord, SocialPostsRepliesRecord, WriteTransactionCtx,
     events_singletons_new, ids_followees, shoutbox_posts_by_received_at, social_posts,
     social_posts_by_received_at, social_posts_by_time, social_posts_reactions,
-    social_posts_replaced_by, social_posts_replaces, social_posts_replies,
-    social_posts_self_mention,
+    social_posts_received_at_keys, social_posts_replaced_by, social_posts_replaces,
+    social_posts_replies, social_posts_self_mention,
 };
 
 #[derive(Debug, Snafu)]
@@ -86,6 +87,73 @@ impl Database {
             .insert(&(author, event_id, old_event_id), &())
             .map_err(DbError::from)?;
 
+        Ok(())
+    }
+
+    fn insert_social_post_receipt_tx(
+        tx: &WriteTransactionCtx,
+        event_id: rostra_core::ShortEventId,
+        received_at: Timestamp,
+    ) -> ProcessEventResult<()> {
+        let mut receipt_keys = tx
+            .open_table(&social_posts_received_at_keys::TABLE)
+            .map_err(DbError::from)?;
+        if receipt_keys
+            .get(&event_id)
+            .map_err(DbError::from)?
+            .is_some()
+        {
+            return SocialPostReceiptAlreadyIndexedSnafu { event_id }
+                .fail()
+                .map_err(ProcessEventError::from);
+        }
+
+        let mut receipts = tx
+            .open_table(&social_posts_by_received_at::TABLE)
+            .map_err(DbError::from)?;
+        let reception_order =
+            Self::insert_reception_ordered_tx(tx, received_at, &event_id, &mut receipts)
+                .map_err(ProcessEventError::from)?;
+        receipt_keys
+            .insert(&event_id, &(received_at, reception_order))
+            .map_err(DbError::from)?;
+        Ok(())
+    }
+
+    fn remove_social_post_receipt_tx(
+        tx: &WriteTransactionCtx,
+        event_id: rostra_core::ShortEventId,
+    ) -> ProcessEventResult<()> {
+        let mut receipt_keys = tx
+            .open_table(&social_posts_received_at_keys::TABLE)
+            .map_err(DbError::from)?;
+        let Some(receipt_key) = receipt_keys
+            .get(&event_id)
+            .map_err(DbError::from)?
+            .map(|entry| entry.value())
+        else {
+            // Version-24 rows created before this reverse mapping are left for the
+            // final total replay rather than requiring an unbounded forward scan.
+            return Ok(());
+        };
+
+        let mut receipts = tx
+            .open_table(&social_posts_by_received_at::TABLE)
+            .map_err(DbError::from)?;
+        let actual_event_id = receipts
+            .get(&receipt_key)
+            .map_err(DbError::from)?
+            .map(|entry| entry.value());
+        if actual_event_id != Some(event_id) {
+            return SocialPostReceiptMismatchSnafu {
+                event_id,
+                actual_event_id,
+            }
+            .fail()
+            .map_err(ProcessEventError::from);
+        }
+        receipts.remove(&receipt_key).map_err(DbError::from)?;
+        receipt_keys.remove(&event_id).map_err(DbError::from)?;
         Ok(())
     }
 
@@ -357,16 +425,7 @@ impl Database {
                         &ids_followees_tbl,
                     );
                     drop(ids_followees_tbl);
-                    let mut social_post_by_received_at_tbl = tx
-                        .open_table(&social_posts_by_received_at::TABLE)
-                        .map_err(DbError::from)?;
-                    Self::insert_reception_ordered_tx(
-                        tx,
-                        received_at,
-                        &event_id,
-                        &mut social_post_by_received_at_tbl,
-                    )
-                    .map_err(ProcessEventError::from)?;
+                    Self::insert_social_post_receipt_tx(tx, event_id, received_at)?;
 
                     if let Some(old_event_id) = replaced_event_id {
                         Self::insert_social_post_replacement_tx(event_content, old_event_id, tx)?;
@@ -570,6 +629,7 @@ impl Database {
                         event_content.event_id().to_short(),
                     ))
                     .map_err(DbError::from)?;
+                Self::remove_social_post_receipt_tx(tx, event_content.event_id().to_short())?;
 
                 if content.news {
                     Self::remove_social_news_rank_tx(

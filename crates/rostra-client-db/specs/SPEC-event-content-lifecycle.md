@@ -1,5 +1,15 @@
 # SPEC-event-content-lifecycle: Event content processing
 
+## Status
+
+Rows inserted by the current implementation and rows reconstructed by total
+replay have the reversible social-receipt mapping described below. Existing
+version-24 forward receipt rows are not backfilled by this staged change. If one
+of those posts is deleted first, its unmapped forward row can remain until the
+final total rebuild tracked by `t4vh` reconstructs both directions from retained
+sources. See [ARCH-client-database](ARCH-client-database.md#status) for the
+combined database-transition status.
+
 ## Record justification
 
 The lifecycle spans event and content tables, reference counting, fetch
@@ -78,17 +88,20 @@ or invalidation removes the event's reference to the content hash exactly
 once. A later transition from Invalid or Pruned to Deleted records the
 author's stronger deletion intent without decrementing again. When deletion
 invalidates an already processed social post, the database reverts its
-post-specific projections. Derived projections for other content kinds are
-currently retained.
+post-specific projections. The effective-reception forward row and its exact
+event-to-key reverse row are removed atomically; the durable database-local
+reception allocator is not rewound or reused. A mapped key that names another
+event, or has no forward row, is corruption and aborts the deletion transaction.
+Derived projections for other content kinds are currently retained.
 
 Ordinary social-post projection insertion and reversion use one applicability
 rule. A social post whose header deletes its auxiliary parent's content applies
 ordinary projections only when it is an edit: it has an auxiliary parent and a
 nonempty trimmed body. A blank or whitespace-only deleting post therefore adds
 and removes no authored-time, reply, reaction, news, or self-mention
-projections. This rule is semantic rather than an arithmetic guard: genuine
-counter mismatches still fail instead of saturating or silently decrementing
-unrelated state.
+or reception-order projections. This rule is semantic rather than an arithmetic
+guard: genuine counter or receipt-mapping mismatches still fail instead of
+saturating or silently mutating unrelated state.
 
 An at-or-below-limit `SOCIAL_POST` that has the delete-auxiliary-parent flag,
 has an auxiliary parent, decodes successfully, and has `djot_content` whose

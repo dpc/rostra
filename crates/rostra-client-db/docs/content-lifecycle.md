@@ -38,6 +38,8 @@ event insertion time unless the event starts in Deleted.
 | `content_rc` | `ContentHash` | Reference count per content hash |
 | `events_content_state` | `ShortEventId` | Per-event processing state |
 | `events_content_missing` | `(Timestamp, ShortEventId)` | Events waiting for content, sorted by next fetch time |
+| `social_posts_by_received_at` | `(Timestamp, u64)` | Social posts ordered by effective local receipt time |
+| `social_posts_received_at_keys` | `ShortEventId` | Exact reverse key for removing a social receipt without scanning |
 
 ## State Machine
 
@@ -281,10 +283,17 @@ reversion use the same projection-applicability classification:
   are populated.
 
 The symmetric rule covers the authored-time, reply, reaction, news, and
-self-mention projections. Reversion does not compensate with saturating
-arithmetic: an eligible projection with inconsistent counters remains an
-invariant failure. Immutable replacement lineage follows its separate,
-Deleted-state exception above.
+self-mention projections, plus the effective-reception forward row and its
+event-to-key reverse mapping. The receipt directions are inserted and removed
+atomically. Reversion leaves the shared durable reception allocator advanced;
+deleted sequence values are never reused. A reverse key whose forward row is
+absent or names another event is an invariant failure and rolls back deletion.
+Reversion likewise does not compensate with saturating arithmetic: an eligible
+projection with inconsistent counters remains an invariant failure. Immutable
+replacement lineage follows its separate, Deleted-state exception above.
+Unmapped version-24 receipt rows created before this change remain staged as
+described by the
+[ARCH-client-database status](../specs/ARCH-client-database.md#status).
 
 ### Flow 5: Content Deduplication (Multiple Events, Same Hash)
 
@@ -517,7 +526,20 @@ Both cases indicate bugs in the calling code and will panic in debug builds.
   without an auxiliary parent remains inert even with nonblank projection fields
 - `inconsistent_eligible_reaction_reversion_fails_and_rolls_back` - An eligible
   projection with a corrupt zero aggregate fails checked reversion and rolls
-  back deletion lifecycle and index changes
+  back deletion lifecycle and index changes, including both receipt directions
+- `social_receipt_reversion_updates_cursors_without_reusing_order` - Reverting
+  the latest ordinary post removes both receipt directions, moves raw latest and
+  pagination cursors to the retained post, and preserves allocator durability
+  and collision safety across duplicate deletion and reopen
+- `inconsistent_social_receipt_mapping_aborts_complete_deletion` - A reverse key
+  whose forward row is absent or resolves to another event fails closed and
+  rolls back the complete deletion transaction
+- `duplicate_social_receipt_mapping_aborts_complete_insertion` - A preexisting
+  reverse mapping fails closed and rolls back the event, projections, and
+  allocator while preserving the existing mapping
+- `unmapped_v24_receipt_is_staged_until_total_replay` - Reopen initializes the
+  reverse table without a version bump; an unmapped legacy row coexists with
+  exact new mappings until deterministic total replay removes stale membership
 
 ### Edge Case Tests
 

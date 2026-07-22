@@ -145,6 +145,7 @@ impl Database {
         tx.open_table(&crate::social_posts::TABLE)?;
         tx.open_table(&crate::social_posts_by_time::TABLE)?;
         tx.open_table(&crate::social_posts_by_received_at::TABLE)?;
+        tx.open_table(&crate::social_posts_received_at_keys::TABLE)?;
         tx.open_table(&crate::social_posts_replies::TABLE)?;
         tx.open_table(&crate::social_posts_reactions::TABLE)?;
         tx.open_table(&crate::social_posts_replaced_by::TABLE)?;

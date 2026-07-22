@@ -10,7 +10,8 @@ use snafu::ResultExt as _;
 use crate::event::EventContentState;
 use crate::{
     Database, DbError, db_version, events_content_state, social_news_rank_by_post_id, social_posts,
-    social_posts_by_time, social_posts_reactions, social_posts_replaced_by, social_posts_replaces,
+    social_posts_by_received_at, social_posts_by_time, social_posts_reactions,
+    social_posts_received_at_keys, social_posts_replaced_by, social_posts_replaces,
     social_posts_replies, social_posts_self_mention,
 };
 
@@ -37,6 +38,7 @@ struct ProjectionSnapshot {
     target_in_time: bool,
     target_in_news: bool,
     target_in_mentions: bool,
+    receipt_event_ids: Vec<ShortEventId>,
     target_replaces_parent: bool,
     parent_replaced_by_target: bool,
     parent_deleted_by: ShortEventId,
@@ -176,6 +178,30 @@ async fn snapshot(
                 .open_table(&social_posts_self_mention::TABLE)?
                 .get(&target_id)?
                 .is_some();
+            let receipt_entries = tx
+                .open_table(&social_posts_by_received_at::TABLE)?
+                .range(..)?
+                .map(|entry| entry.map(|(key, event_id)| (key.value(), event_id.value())))
+                .collect::<Result<Vec<_>, _>>()?;
+            let receipt_keys = tx.open_table(&social_posts_received_at_keys::TABLE)?;
+            let mut reverse_event_ids = receipt_keys
+                .range(..)?
+                .map(|entry| entry.map(|(event_id, _)| event_id.value()))
+                .collect::<Result<Vec<_>, _>>()?;
+            let mut receipt_event_ids = receipt_entries
+                .iter()
+                .map(|(_, event_id)| *event_id)
+                .collect::<Vec<_>>();
+            receipt_event_ids.sort_unstable();
+            reverse_event_ids.sort_unstable();
+            assert_eq!(reverse_event_ids, receipt_event_ids);
+            for (key, event_id) in receipt_entries {
+                assert_eq!(
+                    receipt_keys.get(&event_id)?.map(|entry| entry.value()),
+                    Some(key),
+                    "forward and reverse receipt rows must agree"
+                );
+            }
             let target_replaces_parent = tx
                 .open_table(&social_posts_replaces::TABLE)?
                 .get(&(author, target_id, parent))?
@@ -202,6 +228,7 @@ async fn snapshot(
                 target_in_time,
                 target_in_news,
                 target_in_mentions,
+                receipt_event_ids,
                 target_replaces_parent,
                 parent_replaced_by_target,
                 parent_deleted_by,
@@ -252,6 +279,7 @@ async fn deleting_post_projection_reversion_is_symmetric() -> BoxedErrorResult<(
                     ),
                 );
                 let reply_target_id = reply_target.event_id().to_short();
+                let mut expected_receipt_event_ids = vec![reply_target_id];
                 let reply_to = ExternalEventId::new(author, reply_target.event_id());
                 let parent = social_post(
                     author_secret,
@@ -297,6 +325,8 @@ async fn deleting_post_projection_reversion_is_symmetric() -> BoxedErrorResult<(
                     db.try_process_event_with_content(&reaction).await?;
                     expected_replies.push(reply.event_id().to_short());
                     expected_reactions.push(reaction.event_id().to_short());
+                    expected_receipt_event_ids.push(reply.event_id().to_short());
+                    expected_receipt_event_ids.push(reaction.event_id().to_short());
                 }
 
                 let target = social_post(
@@ -335,28 +365,44 @@ async fn deleting_post_projection_reversion_is_symmetric() -> BoxedErrorResult<(
                                 .open_table(&social_posts_self_mention::TABLE)?
                                 .get(&target_id)?
                                 .is_some();
+                            let receipt_key = tx
+                                .open_table(&social_posts_received_at_keys::TABLE)?
+                                .get(&target_id)?
+                                .map(|entry| entry.value());
+                            let receipt = if let Some(key) = receipt_key {
+                                tx.open_table(&social_posts_by_received_at::TABLE)?
+                                    .get(&key)?
+                                    .map(|entry| entry.value())
+                            } else {
+                                None
+                            };
                             Ok((
                                 aggregate.reply_count,
                                 aggregate.reaction_count,
                                 time,
                                 news,
                                 mention,
+                                receipt,
+                                receipt_key.is_some(),
                             ))
                         })
                         .await?;
                     let base = u64::from(seed_unrelated);
                     match body {
                         DeletingPostBody::Absent => {
-                            assert_eq!(before, (base, base, false, false, false));
+                            assert_eq!(before, (base, base, false, false, false, None, false));
                         }
                         DeletingPostBody::Empty => {
-                            assert_eq!(before, (base, base, false, false, false));
+                            assert_eq!(before, (base, base, false, false, false, None, false));
                         }
                         DeletingPostBody::Whitespace => {
-                            assert_eq!(before, (base, base, false, false, false));
+                            assert_eq!(before, (base, base, false, false, false, None, false));
                         }
                         DeletingPostBody::Edit => {
-                            assert_eq!(before, (base + 1, base, true, true, true));
+                            assert_eq!(
+                                before,
+                                (base + 1, base, true, true, true, Some(target_id), true,)
+                            );
                         }
                     }
                     db.try_process_event(&deleting).await?;
@@ -373,6 +419,10 @@ async fn deleting_post_projection_reversion_is_symmetric() -> BoxedErrorResult<(
                     target_in_time: false,
                     target_in_news: false,
                     target_in_mentions: false,
+                    receipt_event_ids: {
+                        expected_receipt_event_ids.sort_unstable();
+                        expected_receipt_event_ids
+                    },
                     target_replaces_parent: body.is_edit(),
                     parent_replaced_by_target: body.is_edit(),
                     parent_deleted_by: target_id,
@@ -538,6 +588,17 @@ async fn ordinary_reaction_projection_still_reverts() -> BoxedErrorResult<()> {
             .expect("reaction aggregate must exist")
             .value();
         assert_eq!(aggregate.reaction_count, 1);
+        let receipt_key = tx
+            .open_table(&social_posts_received_at_keys::TABLE)?
+            .get(&reaction_id)?
+            .expect("reaction receipt key must exist")
+            .value();
+        assert_eq!(
+            tx.open_table(&social_posts_by_received_at::TABLE)?
+                .get(&receipt_key)?
+                .map(|entry| entry.value()),
+            Some(reaction_id)
+        );
         assert!(
             tx.open_table(&social_posts_reactions::TABLE)?
                 .get(&(
@@ -560,6 +621,18 @@ async fn ordinary_reaction_projection_still_reverts() -> BoxedErrorResult<()> {
             .expect("reaction aggregate must remain")
             .value();
         assert_eq!(aggregate.reaction_count, 0);
+        assert!(
+            tx.open_table(&social_posts_received_at_keys::TABLE)?
+                .get(&reaction_id)?
+                .is_none()
+        );
+        assert!(
+            tx.open_table(&social_posts_by_received_at::TABLE)?
+                .range(..)?
+                .all(|entry| entry
+                    .map(|(_, event_id)| event_id.value() != reaction_id)
+                    .unwrap_or(false))
+        );
         assert!(
             tx.open_table(&social_posts_reactions::TABLE)?
                 .get(&(
@@ -637,6 +710,18 @@ async fn inconsistent_eligible_reaction_reversion_fails_and_rolls_back() -> Boxe
             .expect("corrupt aggregate must remain unchanged")
             .value();
         assert_eq!(aggregate.reaction_count, 0);
+        let receipt_key = tx
+            .open_table(&social_posts_received_at_keys::TABLE)?
+            .get(&reaction_id)?
+            .expect("failed reversion must preserve reverse receipt")
+            .value();
+        assert_eq!(
+            tx.open_table(&social_posts_by_received_at::TABLE)?
+                .get(&receipt_key)?
+                .map(|entry| entry.value()),
+            Some(reaction_id),
+            "failed reversion must preserve forward receipt"
+        );
         assert!(
             tx.open_table(&social_posts_reactions::TABLE)?
                 .get(&reaction_key)?

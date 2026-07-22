@@ -234,6 +234,21 @@ pub enum DbError {
         #[snafu(implicit)]
         location: Location,
     },
+    #[snafu(display("Social post {event_id} already has a reception-order key"))]
+    SocialPostReceiptAlreadyIndexed {
+        event_id: ShortEventId,
+        #[snafu(implicit)]
+        location: Location,
+    },
+    #[snafu(display(
+        "Reception-order key for social post {event_id} references {actual_event_id:?}"
+    ))]
+    SocialPostReceiptMismatch {
+        event_id: ShortEventId,
+        actual_event_id: Option<ShortEventId>,
+        #[snafu(implicit)]
+        location: Location,
+    },
     #[snafu(display("Deletion attribution references missing event {event_id}"))]
     MissingDeletionAttribution {
         event_id: ShortEventId,
@@ -1515,5 +1530,7 @@ mod identity_collision_tests;
 mod reception_order_tests;
 #[cfg(test)]
 mod social_post_projection_tests;
+#[cfg(test)]
+mod social_post_receipt_tests;
 #[cfg(test)]
 mod tests;
