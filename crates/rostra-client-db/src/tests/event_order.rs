@@ -461,7 +461,13 @@ async fn social_vote_winner_and_sum_update_atomically() -> BoxedErrorResult<()> 
 /// contribution deterministically across both aggregates and total replay.
 #[test_log::test(tokio::test(flavor = "multi_thread"))]
 async fn colliding_full_vote_targets_converge_and_replay() -> BoxedErrorResult<()> {
+    use bincode::{Decode, Encode};
     use rostra_core::{ExternalEventId, ShortEventId};
+
+    #[derive(Encode, Decode)]
+    struct Version24EventSingletonRecord {
+        event_id: ShortEventId,
+    }
 
     let voter_secret = RostraIdSecretKey::generate();
     let voter = voter_secret.id();
@@ -506,8 +512,38 @@ async fn colliding_full_vote_targets_converge_and_replay() -> BoxedErrorResult<(
         let raw_db = redb_bincode::Database::from(redb::Database::open(&db_path)?);
         let write_txn = raw_db.begin_write()?;
         {
+            // qsc3 added an inline full-target/value projection. Install the
+            // actual pre-qsc3 v24 encoding so open succeeds only when migration
+            // discards the incompatible derived row before decoding it.
+            assert!(
+                write_txn
+                    .as_raw()
+                    .delete_table(crate::events_singletons_new::TABLE.as_raw())?
+            );
+            let legacy_singletons: redb_bincode::TableDefinition<
+                '_,
+                (
+                    rostra_core::id::RostraId,
+                    EventKind,
+                    rostra_core::event::EventAuxKey,
+                ),
+                crate::Latest<Version24EventSingletonRecord>,
+            > = redb_bincode::TableDefinition::new("events_singletons_new");
+            write_txn.open_table(&legacy_singletons)?.insert(
+                &(
+                    voter,
+                    EventKind::SOCIAL_VOTE,
+                    rostra_core::event::EventAuxKey::from_bytes(shared_post_id.to_bytes()),
+                ),
+                &crate::Latest {
+                    ts: events[3].timestamp(),
+                    inner: Version24EventSingletonRecord {
+                        event_id: events[3].event_id().to_short(),
+                    },
+                },
+            )?;
             let mut version = write_txn.open_table(&crate::db_version::TABLE)?;
-            version.insert(&(), &23)?;
+            version.insert(&(), &24)?;
         }
         write_txn.commit()?;
         drop(raw_db);
@@ -785,7 +821,7 @@ async fn vote_winner_survives_deleted_and_collected_source() -> BoxedErrorResult
     let write_txn = raw_db.begin_write()?;
     {
         let mut version = write_txn.open_table(&crate::db_version::TABLE)?;
-        version.insert(&(), &23)?;
+        version.insert(&(), &24)?;
     }
     write_txn.commit()?;
     drop(raw_db);

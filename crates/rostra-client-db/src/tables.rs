@@ -545,8 +545,8 @@ def_table! {
     /// Every row inserted by the current implementation or total replay has an
     /// exact reverse entry in [`social_posts_received_at_keys`]. Reverting a
     /// processed post removes both entries atomically without reclaiming its
-    /// reception-order sequence. Unmapped version-24 rows remain transitional as
-    /// documented in `specs/ARCH-client-database.md`.
+    /// reception-order sequence. A present inconsistent reverse row is
+    /// corruption and fails reversion without mutation.
     social_posts_by_received_at: (Timestamp, u64) => ShortEventId
 }
 

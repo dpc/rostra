@@ -30,10 +30,6 @@ content — it gets an RC entry and is stored in `content_store` immediately at
 event insertion time unless the event starts in Deleted.
 
 New ingestion and total replay enforce the exclusive maximum described below.
-Existing version-24 rows admitted at the exact limit are not proactively
-rewritten without a database-version bump. Their current lifecycle state remains
-until duplicate processing or total replay; previously derived replacement
-lineage remains until the final total rebuild tracked by `t4vh`.
 
 ## Key Tables
 
@@ -46,6 +42,50 @@ lineage remains until the final total rebuild tracked by `t4vh`.
 | `events_content_missing` | `(Timestamp, ShortEventId)` | Events waiting for content, sorted by next fetch time |
 | `social_posts_by_received_at` | `(Timestamp, u64)` | Social posts ordered by effective local receipt time |
 | `social_posts_received_at_keys` | `ShortEventId` | Exact reverse key for removing a social receipt without scanning |
+
+## Total Replay
+
+Opening a database older than schema version 25 performs one total rebuild
+before reading derived rows. The preparation transaction stashes signed
+envelopes, available immutable content, identity and initialization metadata,
+event acquisition sources, and canonical forward replacement lineage. It
+preserves caller-owned extension tables and discards every other built-in table.
+
+Replay streams the stash twice in stable event-ID order. The envelope pass first
+establishes the complete graph and final deletion, pruning, and missing state.
+The content pass then processes available eligible payloads under current
+reducers. This phase boundary prevents a deleted target from gaining a
+projection merely because its payload replayed first; no parent-before-child
+topology is required. Rebuilt receipts preserve source and membership, use
+authored timestamps under a uniform policy, and receive new database-local
+sequence values. Preparation intentionally discards available envelope receipt
+timestamps; content-specific effective receipt times cannot generally be
+reconstructed.
+
+Retained records are trusted as previously authenticated ingestion output.
+Replay retains typed decoding and payload commitment checks but does not repeat
+Ed25519 authentication or claim to audit the database. Failure rolls back the
+complete replay transaction and leaves the separately committed stash for the
+next open.
+
+Replay does not retain the event graph or per-event commit hooks. Application
+and codec code transiently hold the current record, a decoded below-limit
+payload, payload clones, and encoding scratch space; follow-history deletion uses
+fixed 256-key batches. Work scales with event/reference B-tree operations and
+total referenced payload bytes, not only unique content bytes. The final watch
+refresh allocates proportional to self followees, followers, and two-hop WoT.
+
+redb also retains dirty-page bookkeeping in process memory and copy-on-write
+rollback pages for the whole atomic transaction. Total RAM and peak disk can
+therefore scale with database size. There is no resource preflight or safe fixed
+free-space multiplier. Measure a production-shaped copy, provision monitored RAM
+and disk headroom, retain a restorable backup, and plan a long first open. Replay
+does not compact the file.
+
+The stacked version-24 schema changes and the version-25 rebuild must ship as one
+deployable release. Never deploy an intermediate version-24 ancestor against
+production storage. Once preparation commits version 25, rollback requires
+restoring the pre-upgrade backup rather than running an older binary.
 
 ## State Machine
 
@@ -204,13 +244,6 @@ Retained signed source remains authoritative for total replay and explicit
 audits. A detected source/cache mismatch requires quarantine or recomputation
 of the affected projection rather than changing only the cached winner value.
 
-The inline vote projection is an optional field in the shared singleton record,
-so every pre-series version-24 singleton row, not only vote rows, uses a
-decode-incompatible encoding. The database may open its raw tables, but
-singleton operations are not safely usable until the final total rebuild
-tracked by `t4vh`. See
-[ARCH-client-database status](../specs/ARCH-client-database.md#status).
-
 Active follows also retain the latest unfollow as an exclusive epoch boundary
 and retain processed follow-event orders. `first_ts` is the timestamp of the
 earliest follow strictly after that boundary, so late follow delivery can move
@@ -220,10 +253,6 @@ decide epoch membership. Notification cutoff remains timestamp-only: a social
 post or shoutbox timestamp below both database initialization and `first_ts`
 uses its authored time in the receipt index; one equal to `first_ts` uses local
 receipt time.
-
-Deployment staging and the deterministic authored-time fallback for receipt
-indexes rebuilt by total migration are recorded in the
-[ARCH-client-database status](../specs/ARCH-client-database.md#status).
 
 ### Flow 3: Content Deletion Before Target Event Arrives
 
@@ -307,14 +336,13 @@ The symmetric rule covers the authored-time, reply, reaction, news, and
 self-mention projections, plus the effective-reception forward row and its
 event-to-key reverse mapping. The receipt directions are inserted and removed
 atomically. Reversion leaves the shared durable reception allocator advanced;
-deleted sequence values are never reused. A reverse key whose forward row is
-absent or names another event is an invariant failure and rolls back deletion.
+deleted sequence values are never reused. An absent reverse key is a no-op when
+deletion ordering prevented ordinary projection insertion. A present reverse
+key whose forward row is absent or names another event is an invariant failure
+and rolls back deletion.
 Reversion likewise does not compensate with saturating arithmetic: an eligible
 projection with inconsistent counters remains an invariant failure. Immutable
 replacement lineage follows its separate, Deleted-state exception above.
-Unmapped version-24 receipt rows created before this change remain staged as
-described by the
-[ARCH-client-database status](../specs/ARCH-client-database.md#status).
 
 ### Flow 5: Content Deduplication (Multiple Events, Same Hash)
 
@@ -558,9 +586,9 @@ Both cases indicate bugs in the calling code and will panic in debug builds.
 - `duplicate_social_receipt_mapping_aborts_complete_insertion` - A preexisting
   reverse mapping fails closed and rolls back the event, projections, and
   allocator while preserving the existing mapping
-- `unmapped_v24_receipt_is_staged_until_total_replay` - Reopen initializes the
-  reverse table without a version bump; an unmapped legacy row coexists with
-  exact new mappings until deterministic total replay removes stale membership
+- `version_24_unmapped_receipt_is_rebuilt_before_open` - The version-25 total
+  rebuild replaces an unmapped legacy receipt with exact authored-time forward
+  and reverse membership before normal access
 
 ### Edge Case Tests
 
@@ -625,7 +653,27 @@ Both cases indicate bugs in the calling code and will panic in debug builds.
   inconsistent front rows, pagination filters stale tail rows, later valid work
   remains reachable, and repairs persist across reopen
 - `test_total_migration` - Total replay discards inconsistent queue rows and
-  derives one exact row for retained Missing content
+  reconstructs canonical Missing state while preserving stable metadata,
+  eligible referenced available content, extension rows, and event acquisition
+  sources
+- `total_migration_preserves_legacy_receipt_sources` - Authentic
+  decode-incompatible version-6/11 and version-12 receipt layouts migrate while
+  preserving local and populated network acquisition sources
+- `version_25_adopts_pending_version_24_legacy_content_stash` - Version 25
+  adopts a production-v24 legacy-content stash without replacing its source
+  discriminator; a failed replay retains bytes for a successful retry
+- `test_two_phase_replay_converges_across_event_orders` - Envelope-first replay
+  converges across forward and reverse envelope/content scans without graph
+  topology; receipt allocator values are intentionally excluded
+- `total_replay_collision_fails_deterministically_and_remains_retryable` -
+  Identity collisions abort replay without consuming the stash, and an
+  identical reopen retries deterministically
+- `total_replay_removes_legacy_exact_limit_deleted_edit_lineage` - Final replay
+  removes exact-limit replacement lineage under the exclusive payload boundary
+- `benchmark_large_total_migration_streaming` (ignored) - Manually rebuilds a
+  10,000-envelope chain and reports elapsed time and file growth; run with
+  `RUST_LOG=error cargo test -p rostra-client-db
+  benchmark_large_total_migration_streaming -- --ignored --nocapture`
 
 ### Property and Shuffled-Order Tests
 

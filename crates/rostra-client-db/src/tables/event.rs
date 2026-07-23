@@ -305,7 +305,7 @@ use rostra_core::id::RostraId;
 ///
 /// Tracks the source and method by which we received an event, useful for
 /// debugging sync issues, understanding network propagation, and analytics.
-#[derive(Debug, Encode, Decode, Clone, Serialize)]
+#[derive(Debug, Encode, Decode, Clone, PartialEq, Eq, Serialize)]
 pub enum EventReceivedSource {
     /// Event was backfilled during a database migration.
     ///

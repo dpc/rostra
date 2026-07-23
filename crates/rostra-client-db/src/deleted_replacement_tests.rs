@@ -621,7 +621,7 @@ fn force_total_replay(db_path: &std::path::Path) -> BoxedErrorResult<()> {
     write_txn
         .open_table(&db_version::TABLE)
         .boxed()?
-        .insert(&(), &23)
+        .insert(&(), &24)
         .boxed()?;
     write_txn.commit().boxed()?;
     Ok(())

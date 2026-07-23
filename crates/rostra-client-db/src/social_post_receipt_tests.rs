@@ -89,14 +89,6 @@ async fn receipt_rows(
         .await?)
 }
 
-fn force_total_replay(path: &std::path::Path) -> BoxedErrorResult<()> {
-    let db = redb_bincode::Database::from(redb::Database::open(path)?);
-    let tx = db.begin_write()?;
-    tx.open_table(&db_version::TABLE)?.insert(&(), &23)?;
-    tx.commit()?;
-    Ok(())
-}
-
 #[test_log::test(tokio::test(flavor = "multi_thread"))]
 async fn social_receipt_reversion_updates_cursors_without_reusing_order() -> BoxedErrorResult<()> {
     let secret = RostraIdSecretKey::from_bytes([87; 32]);
@@ -312,14 +304,12 @@ async fn duplicate_social_receipt_mapping_aborts_complete_insertion() -> BoxedEr
 }
 
 #[test_log::test(tokio::test(flavor = "multi_thread"))]
-async fn unmapped_v24_receipt_is_staged_until_total_replay() -> BoxedErrorResult<()> {
+async fn version_24_unmapped_receipt_is_rebuilt_before_open() -> BoxedErrorResult<()> {
     let secret = RostraIdSecretKey::from_bytes([89; 32]);
     let dir = tempfile::tempdir()?;
     let path = dir.path().join("db.redb");
     let legacy = social_post(secret, "legacy", 300);
-    let current = social_post(secret, "current", 301);
     let legacy_id = legacy.event_id().to_short();
-    let current_id = current.event_id().to_short();
 
     {
         let db = Database::open(&path, secret.id()).await.boxed()?;
@@ -332,77 +322,40 @@ async fn unmapped_v24_receipt_is_staged_until_total_replay() -> BoxedErrorResult
             tx.as_raw()
                 .delete_table(social_posts_received_at_keys::TABLE.as_raw())?
         );
+        tx.open_table(&db_version::TABLE)?.insert(&(), &24)?;
         tx.commit()?;
     }
 
-    {
-        let db = Database::open(&path, secret.id()).await.boxed()?;
-        assert_eq!(
-            db.read_with(|tx| {
+    let replayed = Database::open(&path, secret.id()).await.boxed()?;
+    assert_eq!(
+        receipt_rows(&replayed).await?,
+        (
+            vec![((Timestamp::from(300), 1), legacy_id)],
+            vec![(legacy_id, (Timestamp::from(300), 1))],
+            Some(2),
+        ),
+        "version-24 replay must rebuild authored-time receipt membership in both directions"
+    );
+    assert_eq!(
+        replayed
+            .read_with(|tx| {
                 Ok(tx
                     .open_table(&db_version::TABLE)?
                     .get(&())?
                     .map(|entry| entry.value()))
             })
             .await?,
-            Some(24),
-            "ordinary reopen must initialize the table without a version bump"
-        );
-        assert_eq!(
-            receipt_rows(&db).await?,
-            (
-                vec![((Timestamp::from(700), 1), legacy_id)],
-                vec![],
-                Some(2),
-            )
-        );
+        Some(25)
+    );
 
-        let delete_legacy = deletion(secret, &legacy, 302);
-        db.write_with(|tx| db.process_event_tx(&delete_legacy, Timestamp::from(800), tx))
-            .await?;
-        assert_eq!(
-            receipt_rows(&db).await?,
-            (
-                vec![((Timestamp::from(700), 1), legacy_id)],
-                vec![],
-                Some(3),
-            ),
-            "unmapped legacy receipt remains staged without reusing its sequence"
-        );
-
-        process_at(&db, &current, Timestamp::from(900)).await?;
-        assert_eq!(
-            receipt_rows(&db).await?,
-            (
-                vec![
-                    ((Timestamp::from(700), 1), legacy_id),
-                    ((Timestamp::from(900), 4), current_id),
-                ],
-                vec![(current_id, (Timestamp::from(900), 4))],
-                Some(5),
-            ),
-            "new exact mappings must coexist with an unmapped legacy row"
-        );
-        let delete_current = deletion(secret, &current, 303);
-        db.write_with(|tx| db.process_event_tx(&delete_current, Timestamp::from(950), tx))
-            .await?;
-        assert_eq!(
-            receipt_rows(&db).await?,
-            (
-                vec![((Timestamp::from(700), 1), legacy_id)],
-                vec![],
-                Some(6),
-            ),
-            "current receipt removal must not disturb the legacy row or allocator"
-        );
-    }
-
-    force_total_replay(&path)?;
-    let replayed = Database::open(&path, secret.id()).await.boxed()?;
+    let delete_legacy = deletion(secret, &legacy, 302);
+    replayed
+        .write_with(|tx| replayed.process_event_tx(&delete_legacy, Timestamp::from(800), tx))
+        .await?;
     assert_eq!(
         receipt_rows(&replayed).await?,
-        (vec![], vec![], Some(6)),
-        "total replay must remove stale membership and rebuild both directions"
+        (vec![], vec![], Some(3)),
+        "rebuilt exact mapping must support bounded reversion"
     );
 
     Ok(())

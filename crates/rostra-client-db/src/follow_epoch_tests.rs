@@ -270,6 +270,47 @@ async fn follow_epochs_converge_across_zero_one_and_two_unfollows() -> BoxedErro
 }
 
 #[test_log::test(tokio::test(flavor = "multi_thread"))]
+async fn concentrated_follow_history_prunes_in_bounded_batches() -> BoxedErrorResult<()> {
+    const HISTORY_LEN: usize = 600;
+
+    let secret = RostraIdSecretKey::from_bytes([0xb1; 32]);
+    let follower = secret.id();
+    let followee = RostraIdSecretKey::from_bytes([0xb2; 32]).id();
+    let db = Database::new_in_memory(follower).await?;
+    let follows = (0..HISTORY_LEN)
+        .map(|index| follow_event(secret, followee, index as u64 + 1, Some("bulk"), 1))
+        .collect::<Vec<_>>();
+    let unfollow = follow_event(secret, followee, 1_000, None, 2);
+
+    db.write_with(|tx| {
+        for event in follows.iter().chain(std::iter::once(&unfollow)) {
+            db.process_event_tx(&event.event, event.timestamp(), tx)?;
+            db.process_event_content_tx(event, event.timestamp(), tx)?;
+        }
+        Ok(())
+    })
+    .await?;
+
+    db.read_with(|tx| {
+        let history = tx.open_table(&ids_follow_events::TABLE)?;
+        assert!(
+            history
+                .range(
+                    (follower, followee, Timestamp::ZERO, ShortEventId::ZERO)
+                        ..=(follower, followee, Timestamp::MAX, ShortEventId::MAX)
+                )?
+                .next()
+                .is_none(),
+            "all {HISTORY_LEN} obsolete rows must be removed across multiple 256-key batches"
+        );
+        Ok(())
+    })
+    .await?;
+
+    Ok(())
+}
+
+#[test_log::test(tokio::test(flavor = "multi_thread"))]
 async fn equal_second_event_order_defines_epoch_membership() -> BoxedErrorResult<()> {
     let secret = RostraIdSecretKey::from_bytes([93; 32]);
     let follower = secret.id();
@@ -496,7 +537,7 @@ async fn follow_epoch_survives_reopen_and_total_replay() -> BoxedErrorResult<()>
         write_txn
             .open_table(&db_version::TABLE)
             .boxed()?
-            .insert(&(), &23)
+            .insert(&(), &24)
             .boxed()?;
         write_txn.commit().boxed()?;
     }

@@ -310,7 +310,7 @@ async fn identity_prefix_collision_preserves_first_mapping_and_is_atomic() -> Bo
 async fn prepare_total_replay(path: &std::path::Path) -> BoxedErrorResult<()> {
     let inner = redb_bincode::Database::from(redb::Database::open(path)?);
     Database::write_with_inner(&inner, |tx| {
-        tx.open_table(&db_version::TABLE)?.insert(&(), &23)?;
+        tx.open_table(&db_version::TABLE)?.insert(&(), &24)?;
         Ok(())
     })
     .await?;

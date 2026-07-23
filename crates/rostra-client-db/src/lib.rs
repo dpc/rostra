@@ -95,16 +95,18 @@ impl WotData {
 
 const LOG_TARGET: &str = "rostra::db";
 
+type CommitHook = Box<dyn FnOnce() + 'static>;
+
 pub(crate) struct WriteTransactionCtx {
     dbtx: WriteTransaction,
-    on_commit: std::sync::Mutex<Vec<Box<dyn FnOnce() + 'static>>>,
+    on_commit: std::sync::Mutex<Option<Vec<CommitHook>>>,
 }
 
 impl From<WriteTransaction> for WriteTransactionCtx {
     fn from(dbtx: WriteTransaction) -> Self {
         Self {
             dbtx,
-            on_commit: std::sync::Mutex::new(vec![]),
+            on_commit: std::sync::Mutex::new(Some(vec![])),
         }
     }
 }
@@ -129,10 +131,24 @@ impl WriteTransactionCtx {
     /// A hook panic does not suppress later hooks. After every hook has been
     /// attempted, the first panic resumes.
     pub(crate) fn on_commit(&self, f: impl FnOnce() + 'static) {
-        self.on_commit
-            .lock()
-            .expect("Locking failed")
-            .push(Box::new(f));
+        if let Some(hooks) = self.on_commit.lock().expect("Locking failed").as_mut() {
+            hooks.push(Box::new(f));
+        }
+    }
+
+    /// Discard existing and future commit hooks for a bulk internal rebuild.
+    ///
+    /// Total replay reconstructs durable state before the database is exposed
+    /// to subscribers. Retaining one publication closure per source event
+    /// would make an otherwise streaming rebuild consume memory
+    /// proportional to database size.
+    pub(crate) fn discard_commit_hooks(&self) {
+        *self.on_commit.lock().expect("Locking failed") = None;
+    }
+
+    /// Return whether this transaction publishes incremental commit hooks.
+    pub(crate) fn commit_hooks_enabled(&self) -> bool {
+        self.on_commit.lock().expect("Locking failed").is_some()
     }
 
     fn commit(self) -> result::Result<(), redb::CommitError> {
@@ -141,9 +157,11 @@ impl WriteTransactionCtx {
         dbtx.commit()?;
 
         let mut first_panic = None;
-        for hook in on_commit.lock().expect("Locking failed").drain(..) {
-            if let Err(payload) = catch_unwind(AssertUnwindSafe(hook)) {
-                first_panic.get_or_insert(payload);
+        if let Some(hooks) = on_commit.lock().expect("Locking failed").as_mut() {
+            for hook in hooks.drain(..) {
+                if let Err(payload) = catch_unwind(AssertUnwindSafe(hook)) {
+                    first_panic.get_or_insert(payload);
+                }
             }
         }
         if let Some(payload) = first_panic {
@@ -193,10 +211,22 @@ pub enum DbError {
         #[snafu(implicit)]
         location: Location,
     },
+    #[snafu(transparent)]
+    StoredDecode {
+        source: bincode::error::DecodeError,
+        #[snafu(implicit)]
+        location: Location,
+    },
     #[snafu(display("Database version {db_ver} is newer than supported version {code_ver}"))]
     DbVersionTooHigh {
         db_ver: u64,
         code_ver: u64,
+        #[snafu(implicit)]
+        location: Location,
+    },
+    #[snafu(display("Pending migration stash is missing required table `{table}`"))]
+    MissingMigrationStashTable {
+        table: String,
         #[snafu(implicit)]
         location: Location,
     },
@@ -273,8 +303,6 @@ pub enum DbError {
         #[snafu(implicit)]
         location: Location,
     },
-    #[snafu(display("Stored event graph contains a migration dependency cycle"))]
-    MigrationDependencyCycle,
     #[snafu(display(
         "Shortened identity prefix {prefix} maps to both {existing_id} and {incoming_id}"
     ))]
@@ -389,6 +417,12 @@ impl Database {
         Self::open_inner(inner, self_id).await
     }
 
+    /// Open an identity database, creating it when absent.
+    ///
+    /// Opening storage older than schema version 25 performs the total rebuild
+    /// before returning. This can hold a long atomic write transaction and
+    /// requires deployment-specific RAM and temporary disk headroom. See
+    /// `specs/ARCH-client-database.md#total-rebuild`.
     pub async fn open(path: impl Into<PathBuf>, self_id: RostraId) -> DbResult<Database> {
         let path = path.into();
         debug!(target: LOG_TARGET, id = %self_id, path = %path.display(), "Opening database");
@@ -413,9 +447,12 @@ impl Database {
 
         // Run migrations (may stash tables for total migration reprocessing)
         Self::write_with_inner(&inner, |tx| {
+            // Opening table definitions is raw and does not decode rows. Check
+            // the schema version before reading typed identity bytes so a newer
+            // database always fails with DbVersionTooHigh.
             Self::init_tables_tx(tx)?;
-            Self::verify_self_tx(self_id, &mut tx.open_table(&ids_self::TABLE)?)?;
             Self::handle_db_ver_migrations(tx)?;
+            Self::verify_self_tx(self_id, &mut tx.open_table(&ids_self::TABLE)?)?;
             Ok(())
         })
         .await?;
@@ -481,9 +518,35 @@ impl Database {
         // fails/panics.
         if needs_reprocessing {
             db.write_with(|tx| db.reprocess_migration_stash(tx)).await?;
+            db.refresh_current_state_after_replay().await?;
         }
 
         Ok(db)
+    }
+
+    /// Publish one coherent current-state snapshot after silent total replay.
+    async fn refresh_current_state_after_replay(&self) -> DbResult<()> {
+        let (self_head, self_followees, self_followers, self_wot) = self
+            .read_with(|tx| {
+                let followees = tx.open_table(&ids_followees::TABLE)?;
+                let self_followees = Self::read_followees_tx(self.self_id, &followees)?;
+                let self_wot = Self::compute_wot_tx(self.self_id, &self_followees, &followees)?;
+                Ok((
+                    Self::read_head_tx(self.self_id, &tx.open_table(&events_heads::TABLE)?)?,
+                    self_followees,
+                    Self::read_followers_tx(self.self_id, &tx.open_table(&ids_followers::TABLE)?)?,
+                    self_wot,
+                ))
+            })
+            .await?;
+
+        self.self_head_updated.send_replace(self_head);
+        self.self_followees_updated
+            .send_replace(Arc::new(self_followees));
+        self.self_followers_updated
+            .send_replace(Arc::new(self_followers));
+        self.self_wot_updated.send_replace(Arc::new(self_wot));
+        Ok(())
     }
 
     pub async fn compact(&mut self) -> Result<bool, redb::CompactionError> {
@@ -1003,22 +1066,26 @@ impl Database {
                 let is_valid = match self.process_event_content_inserted_tx(event_content, now, tx)
                 {
                     Ok(()) => {
-                        info!(target: LOG_TARGET,
-                            kind = %event_content.kind(),
-                            event_id = %event_short_id,
-                            author = %event_content.author().to_short(),
-                            len = %event_content.content_len(),
-                            "New event content inserted"
-                        );
+                        if tx.commit_hooks_enabled() {
+                            info!(target: LOG_TARGET,
+                                kind = %event_content.kind(),
+                                event_id = %event_short_id,
+                                author = %event_content.author().to_short(),
+                                len = %event_content.content_len(),
+                                "New event content inserted"
+                            );
+                        }
                         true
                     }
                     Err(ProcessEventError::Invalid { source, location }) => {
-                        info!(
-                            target: LOG_TARGET,
-                            err = %source.as_ref().fmt_compact(),
-                            %location,
-                            "Invalid event content"
-                        );
+                        if tx.commit_hooks_enabled() {
+                            info!(
+                                target: LOG_TARGET,
+                                err = %source.as_ref().fmt_compact(),
+                                %location,
+                                "Invalid event content"
+                            );
+                        }
                         false
                     }
                     Err(ProcessEventError::Db { source }) => {
@@ -1057,13 +1124,15 @@ impl Database {
                     }
 
                     // Notify about new content
-                    tx.on_commit({
-                        let new_content_tx = self.new_content_tx.clone();
-                        let event_content = event_content.clone();
-                        move || {
-                            let _ = new_content_tx.send(event_content);
-                        }
-                    });
+                    if tx.commit_hooks_enabled() {
+                        tx.on_commit({
+                            let new_content_tx = self.new_content_tx.clone();
+                            let event_content = event_content.clone();
+                            move || {
+                                let _ = new_content_tx.send(event_content);
+                            }
+                        });
+                    }
                 } else {
                     // Content failed validation — mark as Invalid, decrement RC,
                     // discard content bytes

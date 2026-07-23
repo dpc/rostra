@@ -24,6 +24,25 @@ impl Database {
         now: Timestamp,
         tx: &WriteTransactionCtx,
     ) -> DbResult<(InsertEventOutcome, ProcessEventState)> {
+        self.process_event_tx_with_source(
+            event,
+            now,
+            EventReceivedSource::Pushed {
+                from_id: None,
+                from_node: None,
+            },
+            tx,
+        )
+    }
+
+    /// Process a received event while retaining its known acquisition source.
+    pub(crate) fn process_event_tx_with_source(
+        &self,
+        event: &VerifiedEvent,
+        now: Timestamp,
+        source: EventReceivedSource,
+        tx: &WriteTransactionCtx,
+    ) -> DbResult<(InsertEventOutcome, ProcessEventState)> {
         let mut events_tbl = tx.open_table(&events::TABLE)?;
         let mut events_content_state_tbl = tx.open_table(&events_content_state::TABLE)?;
         let mut content_store_tbl = tx.open_table(&content_store::TABLE)?;
@@ -65,22 +84,21 @@ impl Database {
                 now,
                 &EventReceivedRecord {
                     event_id: event.event_id.to_short(),
-                    source: EventReceivedSource::Pushed {
-                        from_id: None,
-                        from_node: None,
-                    },
+                    source,
                 },
                 &mut events_received_at_tbl,
             )?;
 
             if is_deleted {
-                info!(target: LOG_TARGET,
-                    event_id = %event.event_id,
-                    author = %event.event.author,
-                    parent_prev = %event.event.parent_prev,
-                    parent_aux = %event.event.parent_aux,
-                    "Event content was already deleted; header effects applied"
-                );
+                if tx.commit_hooks_enabled() {
+                    info!(target: LOG_TARGET,
+                        event_id = %event.event_id,
+                        author = %event.event.author,
+                        parent_prev = %event.event.parent_prev,
+                        parent_aux = %event.event.parent_aux,
+                        "Event content was already deleted; header effects applied"
+                    );
+                }
                 if let Some(ContentStoreRecord(content)) = content_store_tbl
                     .get(&event.content_hash())?
                     .map(|record| record.value())
@@ -116,14 +134,16 @@ impl Database {
                     }
                 }
             } else {
-                info!(target: LOG_TARGET,
-                    kind = %event.kind(),
-                    event_id = %event.event_id.to_short(),
-                    author = %event.event.author.to_short(),
-                    parent_prev = %event.event.parent_prev,
-                    parent_aux = %event.event.parent_aux,
-                    "New event inserted"
-                );
+                if tx.commit_hooks_enabled() {
+                    info!(target: LOG_TARGET,
+                        kind = %event.kind(),
+                        event_id = %event.event_id.to_short(),
+                        author = %event.event.author.to_short(),
+                        parent_prev = %event.event.parent_prev,
+                        parent_aux = %event.event.parent_aux,
+                        "New event inserted"
+                    );
+                }
 
                 // Not missing, means it's a head event (no known children yet)
                 // Broadcast new head event to subscribers
@@ -141,15 +161,17 @@ impl Database {
                 let mut events_self_table = tx.open_table(&crate::events_self::TABLE)?;
                 Database::insert_self_event_id_tx(event.event_id, &mut events_self_table)?;
 
-                if !was_missing {
+                if !was_missing && tx.commit_hooks_enabled() {
                     info!(target: LOG_TARGET, event_id = %event.event_id, "New self head");
                 }
 
-                let sender = self.self_head_updated.clone();
-                let self_head = Database::read_head_tx(self.self_id, &events_heads_tbl)?;
-                tx.on_commit(move || {
-                    sender.send_replace(self_head);
-                });
+                if tx.commit_hooks_enabled() {
+                    let sender = self.self_head_updated.clone();
+                    let self_head = Database::read_head_tx(self.self_id, &events_heads_tbl)?;
+                    tx.on_commit(move || {
+                        sender.send_replace(self_head);
+                    });
+                }
             }
 
             if !missing_parents.is_empty() {

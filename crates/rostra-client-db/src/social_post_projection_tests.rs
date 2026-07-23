@@ -242,7 +242,7 @@ fn force_total_replay(path: &std::path::Path) -> BoxedErrorResult<()> {
     let db = redb_bincode::Database::from(redb::Database::open(path).boxed()?);
     let tx = db.begin_write().boxed()?;
     tx.open_table(&db_version::TABLE)?
-        .insert(&(), &23)
+        .insert(&(), &24)
         .boxed()?;
     tx.commit().boxed()?;
     Ok(())

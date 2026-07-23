@@ -132,8 +132,10 @@ impl Database {
             .map_err(DbError::from)?
             .map(|entry| entry.value())
         else {
-            // Version-24 rows created before this reverse mapping are left for the
-            // final total replay rather than requiring an unbounded forward scan.
+            // A schedule can establish deletion before this post's ordinary
+            // projection is materialized. In that case there is no receipt to
+            // remove. Version-25 total replay eliminates the old inconsistent
+            // forward-only representation before normal access.
             return Ok(());
         };
 
@@ -291,7 +293,7 @@ impl Database {
                     },
                 );
 
-                if updated {
+                if updated && tx.commit_hooks_enabled() {
                     if author == self.self_id {
                         // Self's followees changed - update both followees and WoT
                         let followees_sender = self.self_followees_updated.clone();
@@ -435,14 +437,16 @@ impl Database {
                         Self::insert_social_post_replacement_tx(event_content, old_event_id, tx)?;
                     }
 
-                    tx.on_commit({
-                        let event_content = event_content.clone();
-                        let content = content.clone();
-                        let new_posts_tx = self.new_posts_tx.clone();
-                        move || {
-                            let _ = new_posts_tx.send((event_content.to_owned(), content));
-                        }
-                    });
+                    if tx.commit_hooks_enabled() {
+                        tx.on_commit({
+                            let event_content = event_content.clone();
+                            let content = content.clone();
+                            let new_posts_tx = self.new_posts_tx.clone();
+                            move || {
+                                let _ = new_posts_tx.send((event_content.to_owned(), content));
+                            }
+                        });
+                    }
 
                     if content.news {
                         let post_id =
@@ -582,14 +586,16 @@ impl Database {
                     .map_err(ProcessEventError::from)?;
 
                     // Broadcast to subscribers
-                    tx.on_commit({
-                        let event_content = event_content.clone();
-                        let content = content.clone();
-                        let new_shoutbox_tx = self.new_shoutbox_tx.clone();
-                        move || {
-                            let _ = new_shoutbox_tx.send((event_content.to_owned(), content));
-                        }
-                    });
+                    if tx.commit_hooks_enabled() {
+                        tx.on_commit({
+                            let event_content = event_content.clone();
+                            let content = content.clone();
+                            let new_shoutbox_tx = self.new_shoutbox_tx.clone();
+                            move || {
+                                let _ = new_shoutbox_tx.send((event_content.to_owned(), content));
+                            }
+                        });
+                    }
                 }
                 _ => {}
             },

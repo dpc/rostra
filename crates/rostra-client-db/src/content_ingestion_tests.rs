@@ -183,7 +183,7 @@ fn deletion(secret: RostraIdSecretKey, parent: EventId, target: EventId) -> Veri
 fn force_total_replay(path: &std::path::Path) -> BoxedErrorResult<()> {
     let db = redb_bincode::Database::from(redb::Database::open(path).boxed()?);
     let tx = db.begin_write().boxed()?;
-    tx.open_table(&db_version::TABLE)?.insert(&(), &23)?;
+    tx.open_table(&db_version::TABLE)?.insert(&(), &24)?;
     tx.commit().boxed()?;
     Ok(())
 }

@@ -1,28 +1,5 @@
 # SPEC-event-content-lifecycle: Event content processing
 
-## Status
-
-Rows inserted by the current implementation and rows reconstructed by total
-replay have the reversible social-receipt mapping described below. Existing
-version-24 forward receipt rows are not backfilled by this staged change. If one
-of those posts is deleted first, its unmapped forward row can remain until the
-final total rebuild tracked by `t4vh` reconstructs both directions from retained
-sources. See [ARCH-client-database](ARCH-client-database.md#status) for the
-combined database-transition status.
-
-New ingestion and total replay treat the configured maximum payload length as
-an exclusive upper bound. Existing version-24 rows admitted at the exact limit
-are not proactively rewritten without a database-version bump. Their current
-lifecycle state remains until duplicate processing or total replay; previously
-derived replacement lineage remains until the final total rebuild tracked by
-`t4vh`.
-
-Current-schema social-vote singleton rows also retain their authoritative
-projection inline. That optional field changes the shared singleton-record
-encoding for every event kind: all pre-series production version-24 shared
-singleton rows are decode-incompatible and are not safely usable until the final
-total rebuild reconstructs current-schema winners and vote aggregates.
-
 ## Record justification
 
 The lifecycle spans event and content tables, reference counting, fetch
@@ -42,6 +19,12 @@ inserts that envelope when it is absent and then applies the ordinary content
 lifecycle in the same transaction. Supplying the envelope separately before or
 afterward is idempotent. Existing-envelope-only transaction helpers are internal
 implementation and migration interfaces, not caller preconditions.
+
+Total replay has one additional phase constraint: it streams all retained
+envelopes before streaming available payloads. Complete envelope state therefore
+decides deletion and pruning eligibility before any content projection is
+rebuilt. Event order within either pass does not affect semantic state, and
+replay does not retain or topologically sort the event graph in memory.
 
 ## States
 
@@ -114,6 +97,9 @@ Retained signed events and payloads remain the authority for total replay and
 explicit integrity audits. An audit that detects disagreement with an inline
 value must quarantine or recompute the affected projection; it must not patch
 only the winner cache and leave the aggregate unchanged.
+Normal total replay trusts the authentication already performed at ingestion
+and is not such an audit. It still decodes retained records and checks payload
+length and hash when constructing verified content.
 
 Invalid content is not stored and transitions to Invalid. Deletion, pruning,
 or invalidation removes the event's reference to the content hash exactly
@@ -122,8 +108,10 @@ author's stronger deletion intent without decrementing again. When deletion
 invalidates an already processed social post, the database reverts its
 post-specific projections. The effective-reception forward row and its exact
 event-to-key reverse row are removed atomically; the durable database-local
-reception allocator is not rewound or reused. A mapped key that names another
-event, or has no forward row, is corruption and aborts the deletion transaction.
+reception allocator is not rewound or reused. An absent reverse key is a no-op
+when deletion ordering prevented the ordinary projection from being
+materialized. A mapped key that names another event, or a mapped key with no
+forward row, is corruption and aborts the deletion transaction.
 Derived projections for other content kinds are currently retained.
 
 Ordinary social-post projection insertion and reversion use one applicability

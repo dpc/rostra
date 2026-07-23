@@ -1,13 +1,5 @@
 # SPEC-event-graph: Signed event graph
 
-## Status
-
-The shortened-identity collision guard applies to new event ingestion and total
-replay. Existing version-24 client databases are not proactively scanned, so a
-mapping written before the guard may remain until it is encountered. The final
-total rebuild tracked by `t4vh` will validate retained event authors under the
-guard.
-
 ## Record justification
 
 Graph semantics span core event encoding and verification, client database

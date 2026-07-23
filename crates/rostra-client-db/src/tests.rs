@@ -3082,10 +3082,9 @@ async fn test_social_posts_by_received_at_pagination() -> BoxedErrorResult<()> {
 /// 4. Social posts are in the correct index tables
 /// 5. Exact winner event IDs are recovered after derived rows are removed
 /// 6. Stable database initialization metadata is preserved
-/// 7. Present same-author parents replay before their children
-/// 8. Reception indexes and their durable sequence rebuild from retained
+/// 7. Reception indexes and their durable sequence rebuild from retained
 ///    sources
-/// 9. The missing-content queue rebuilds from source state instead of retaining
+/// 8. The missing-content queue rebuilds from source state instead of retaining
 ///    inconsistent legacy rows
 #[test_log::test(tokio::test(flavor = "multi_thread"))]
 async fn test_total_migration() -> BoxedErrorResult<()> {
@@ -3094,8 +3093,8 @@ async fn test_total_migration() -> BoxedErrorResult<()> {
     use rostra_core::event::{VerifiedEventContent, content_kind};
 
     use crate::{
-        db_init_time, db_version, events_received_at, ids_followees, ids_followers,
-        reception_order_next, social_posts_by_received_at, social_posts_by_time,
+        EventReceivedSource, db_init_time, db_version, events_received_at, ids_followees,
+        ids_followers, reception_order_next, social_posts_by_received_at, social_posts_by_time,
         social_posts_received_at_keys,
     };
 
@@ -3114,10 +3113,12 @@ async fn test_total_migration() -> BoxedErrorResult<()> {
     let expected_post_event_id;
     let expected_missing_event_id;
     let db_init_time_before;
+    let iroh_secret_before;
 
     // Phase 1: Create database with data
     {
         let db = Database::open(&db_path, user_a).await.boxed()?;
+        iroh_secret_before = db.iroh_secret();
         db_init_time_before = db
             .read_with(|tx| {
                 Ok(tx
@@ -3151,24 +3152,6 @@ async fn test_total_migration() -> BoxedErrorResult<()> {
             VerifiedEvent::verify_signed(user_a, signed).expect("Valid event")
         };
         expected_follow_event_id = follow_event.event_id.to_short();
-
-        // Use a deleting child whose ID sorts before the target. Raw-ID replay
-        // would stage deletion before the follow and produce a different derived
-        // result; dependency-ordered replay must process the target first.
-        let deleting_follow_event = {
-            let event = Event::builder_raw_content()
-                .author(user_a)
-                .kind(EventKind::NULL)
-                .delete(expected_follow_event_id)
-                .timestamp(time::OffsetDateTime::UNIX_EPOCH)
-                .build();
-            let signed = event.signed_by(user_a_secret);
-            VerifiedEvent::verify_signed(user_a, signed).expect("valid deleting event")
-        };
-        assert!(
-            deleting_follow_event.event_id.to_short() < expected_follow_event_id,
-            "fixed deleting child must sort before its target"
-        );
 
         // Create a follow event (user_b follows user_a) - to test "who follows me"
         let reverse_follow_content = content_kind::Follow {
@@ -3234,7 +3217,6 @@ async fn test_total_migration() -> BoxedErrorResult<()> {
             db.process_event_tx(&post_event, now, tx)?;
             let verified_post = VerifiedEventContent::assume_verified(post_event, post_content_raw);
             db.process_event_content_tx(&verified_post, now, tx)?;
-            db.process_event_tx(&deleting_follow_event, now, tx)?;
             db.process_event_tx(&missing_event, now, tx)?;
             Ok(())
         })
@@ -3242,6 +3224,22 @@ async fn test_total_migration() -> BoxedErrorResult<()> {
         db.write_with(|tx| {
             tx.open_table(&EXTENSION_TABLE)?
                 .insert(&1, &"preserved".to_owned())?;
+
+            let mut receipts = tx.open_table(&events_received_at::TABLE)?;
+            let post_receipt = receipts
+                .range(..)?
+                .find_map(|entry| match entry {
+                    Ok((key, receipt)) if receipt.value().event_id == expected_post_event_id => {
+                        Some(Ok((key.value(), receipt.value())))
+                    }
+                    Ok(_) => None,
+                    Err(error) => Some(Err(error)),
+                })
+                .transpose()?
+                .expect("post receipt");
+            let mut post_receipt_record = post_receipt.1;
+            post_receipt_record.source = EventReceivedSource::Local;
+            receipts.insert(&post_receipt.0, &post_receipt_record)?;
             Ok(())
         })
         .await?;
@@ -3375,7 +3373,7 @@ async fn test_total_migration() -> BoxedErrorResult<()> {
             // Exercise the established total-replay path without changing the
             // production schema counter; the final stacked-series migration
             // owns that single bump.
-            let old_version: u64 = 23;
+            let old_version: u64 = 24;
             table.insert(&(), &old_version).boxed()?;
         }
         write_txn.commit().boxed()?;
@@ -3390,7 +3388,7 @@ async fn test_total_migration() -> BoxedErrorResult<()> {
         let db_ver_table = tx.open_table(&db_version::TABLE)?;
         let current_ver = db_ver_table.first()?.map(|g| g.1.value());
         info!("DB version after migration: {:?}", current_ver);
-        assert_eq!(current_ver, Some(24), "DB version should be updated");
+        assert_eq!(current_ver, Some(25), "DB version should be updated");
         assert_eq!(
             tx.open_table(&EXTENSION_TABLE)?
                 .get(&1)?
@@ -3448,7 +3446,7 @@ async fn test_total_migration() -> BoxedErrorResult<()> {
         let event_receipts = tx
             .open_table(&events_received_at::TABLE)?
             .range(..)?
-            .map(|entry| entry.map(|(key, _)| key.value()))
+            .map(|entry| entry.map(|(key, receipt)| (key.value(), receipt.value())))
             .collect::<Result<Vec<_>, _>>()?;
         let social_receipts = tx
             .open_table(&social_posts_by_received_at::TABLE)?
@@ -3464,9 +3462,38 @@ async fn test_total_migration() -> BoxedErrorResult<()> {
             .open_table(&reception_order_next::TABLE)?
             .get(&())?
             .map(|value| value.value());
-        assert_eq!(event_receipts.len(), 5);
+        assert_eq!(event_receipts.len(), 4);
+        for ((received_at, _), receipt) in &event_receipts {
+            let authored_at = tx
+                .open_table(&events::TABLE)?
+                .get(&receipt.event_id)?
+                .expect("receipt event")
+                .value()
+                .timestamp();
+            assert_eq!(
+                *received_at, authored_at,
+                "rebuilt event receipts must use authored timestamps"
+            );
+        }
+        assert_eq!(
+            event_receipts
+                .iter()
+                .find(|(_, receipt)| receipt.event_id == expected_post_event_id)
+                .map(|(_, receipt)| &receipt.source),
+            Some(&EventReceivedSource::Local),
+            "migration must retain event acquisition provenance"
+        );
         assert_eq!(social_receipts.len(), 1);
         assert_eq!(social_receipts[0].1, expected_post_event_id);
+        assert_eq!(
+            social_receipts[0].0.0,
+            tx.open_table(&events::TABLE)?
+                .get(&expected_post_event_id)?
+                .expect("post event")
+                .value()
+                .timestamp(),
+            "rebuilt social receipts must use authored timestamps"
+        );
         assert_eq!(
             social_receipt_keys,
             vec![(expected_post_event_id, social_receipts[0].0)],
@@ -3501,6 +3528,11 @@ async fn test_total_migration() -> BoxedErrorResult<()> {
         Ok(())
     })
     .await?;
+    assert_eq!(
+        db.iroh_secret().to_bytes(),
+        iroh_secret_before.to_bytes(),
+        "migration must preserve the database iroh secret"
+    );
 
     // Phase 5: Verify via Database methods after migration
     info!("=== Verifying Database methods after migration ===");
@@ -3594,6 +3626,521 @@ async fn test_total_migration() -> BoxedErrorResult<()> {
     );
 
     info!("=== All migration verifications passed ===");
+
+    Ok(())
+}
+
+/// Versions 11 and 12 stored acquisition provenance in a value without an
+/// event ID. These fixtures use both decode-incompatible key layouts rather
+/// than only rewriting the version singleton on a current-schema database.
+#[test_log::test(tokio::test(flavor = "multi_thread"))]
+async fn total_migration_preserves_legacy_receipt_sources() -> BoxedErrorResult<()> {
+    use rostra_core::event::IrohNodeId;
+
+    use crate::migration_ops::LegacyEventReceivedRecord;
+    use crate::{EventReceivedSource, db_version, events_received_at};
+
+    for source_version in [6, 11, 12] {
+        let secret = RostraIdSecretKey::from_bytes([source_version as u8; 32]);
+        let peer_secret = RostraIdSecretKey::from_bytes([source_version as u8 + 40; 32]);
+        let self_id = secret.id();
+        let peer_id = peer_secret.id();
+        let dir = tempfile::tempdir()?;
+        let db_path = dir.path().join("db.redb");
+        let events = [
+            build_test_event(secret, None),
+            build_test_event(peer_secret, None),
+        ];
+        let sources = [
+            EventReceivedSource::Local,
+            EventReceivedSource::Pulled {
+                from_id: Some(peer_id),
+                from_node: Some(IrohNodeId::MAX),
+                task: Some("legacy sync".to_owned()),
+            },
+        ];
+
+        {
+            let db = Database::open(&db_path, self_id).await.boxed()?;
+            db.write_with(|tx| {
+                for (index, event) in events.iter().enumerate() {
+                    db.process_event_tx_with_source(
+                        event,
+                        Timestamp::from(500 + index as u64),
+                        sources[index].clone(),
+                        tx,
+                    )?;
+                }
+                Ok(())
+            })
+            .await?;
+        }
+
+        {
+            let db = redb_bincode::Database::from(redb::Database::open(&db_path)?);
+            let tx = db.begin_write()?;
+            assert!(
+                tx.as_raw()
+                    .delete_table(events_received_at::TABLE.as_raw())?
+            );
+            if source_version <= 11 {
+                let legacy_receipts: redb_bincode::TableDefinition<
+                    '_,
+                    (Timestamp, rostra_core::ShortEventId),
+                    LegacyEventReceivedRecord,
+                > = redb_bincode::TableDefinition::new("events_received_at");
+                let mut receipts = tx.open_table(&legacy_receipts)?;
+                for (index, event) in events.iter().enumerate() {
+                    receipts.insert(
+                        &(
+                            Timestamp::from(500 + index as u64),
+                            event.event_id.to_short(),
+                        ),
+                        &LegacyEventReceivedRecord {
+                            source: sources[index].clone(),
+                        },
+                    )?;
+                }
+            } else {
+                let legacy_receipts: redb_bincode::TableDefinition<
+                    '_,
+                    (Timestamp, u64, rostra_core::ShortEventId),
+                    LegacyEventReceivedRecord,
+                > = redb_bincode::TableDefinition::new("events_received_at");
+                let mut receipts = tx.open_table(&legacy_receipts)?;
+                for (index, event) in events.iter().enumerate() {
+                    receipts.insert(
+                        &(
+                            Timestamp::from(500 + index as u64),
+                            index as u64 + 7,
+                            event.event_id.to_short(),
+                        ),
+                        &LegacyEventReceivedRecord {
+                            source: sources[index].clone(),
+                        },
+                    )?;
+                }
+            }
+            tx.open_table(&db_version::TABLE)?
+                .insert(&(), &source_version)?;
+            tx.commit()?;
+        }
+
+        let db = Database::open(&db_path, self_id).await.boxed()?;
+        db.read_with(|tx| {
+            let receipts = tx.open_table(&events_received_at::TABLE)?;
+            let rebuilt = receipts
+                .range(..)?
+                .map(|entry| {
+                    entry.map(|(key, receipt)| {
+                        (
+                            key.value().0,
+                            receipt.value().event_id,
+                            receipt.value().source,
+                        )
+                    })
+                })
+                .collect::<Result<Vec<_>, _>>()?;
+            for (event, source) in events.iter().zip(&sources) {
+                assert!(rebuilt.contains(&(
+                    event.timestamp(),
+                    event.event_id.to_short(),
+                    source.clone()
+                )));
+            }
+            Ok(())
+        })
+        .await?;
+    }
+
+    Ok(())
+}
+
+/// A stash committed by the production-v24 migration remains authoritative
+/// across the v25 binary boundary. In particular, v25 must not replace the
+/// original content-format discriminator before retrying replay.
+#[test_log::test(tokio::test(flavor = "multi_thread"))]
+async fn version_25_adopts_pending_version_24_legacy_content_stash() -> BoxedErrorResult<()> {
+    use std::borrow::Cow;
+
+    use redb::TableHandle as _;
+
+    use crate::migration_ops::{LegacyContentStoreRecord, LegacyContentStoreRecordOwned};
+    use crate::{DbError, db_init_time, db_version};
+
+    const EVENTS_STASH: &str = "_total_migration_events";
+    const CONTENT_STASH: &str = "_total_migration_content_store";
+    const SOURCE_VERSION_STASH: &str = "_total_migration_source_ver";
+
+    let secret = RostraIdSecretKey::from_bytes([0x16; 32]);
+    let self_id = secret.id();
+    let dir = tempfile::tempdir()?;
+    let db_path = dir.path().join("db.redb");
+    let (event, content) = build_test_event_with_valid_content(secret, None, "held legacy content");
+    let event_id = event.event_id.to_short();
+    let content_hash = event.content_hash();
+
+    {
+        let db = Database::open(&db_path, self_id).await.boxed()?;
+        let verified = VerifiedEventContent::assume_verified(event, content.clone());
+        db.write_with(|tx| {
+            db.process_event_tx(&verified.event, Timestamp::from(700), tx)?;
+            db.process_event_content_tx(&verified, Timestamp::from(700), tx)
+        })
+        .await?;
+    }
+
+    let raw_db = redb_bincode::Database::from(redb::Database::open(&db_path)?);
+    Database::write_with_inner(&raw_db, |tx| {
+        tx.as_raw().delete_table(content_store::TABLE.as_raw())?;
+        let legacy_content: redb_bincode::TableDefinition<
+            '_,
+            rostra_core::ContentHash,
+            LegacyContentStoreRecordOwned,
+        > = redb_bincode::TableDefinition::new("content_store");
+        tx.open_table(&legacy_content)?.insert(
+            &content_hash,
+            &LegacyContentStoreRecord::Present(Cow::Owned(content.clone())),
+        )?;
+        tx.open_table(&db_version::TABLE)?.insert(&(), &16)?;
+        Ok(())
+    })
+    .await?;
+
+    // Reproduce the durable point after production v24 committed preparation
+    // but before replay/cleanup.
+    Database::write_with_inner(&raw_db, |tx| {
+        Database::prepare_total_migration(tx, 16)?;
+        Ok(())
+    })
+    .await?;
+    Database::write_with_inner(&raw_db, |tx| {
+        // Production v24 did not create these later stash tables. Its <21
+        // incremental step instead wrote a fallback initialization time into
+        // the newly installed current table.
+        tx.as_raw()
+            .delete_table(redb::TableDefinition::<&[u8], &[u8]>::new(
+                "_total_migration_db_init_time",
+            ))?;
+        tx.as_raw()
+            .delete_table(redb::TableDefinition::<&[u8], &[u8]>::new(
+                "_total_migration_event_sources",
+            ))?;
+        tx.as_raw()
+            .delete_table(redb::TableDefinition::<&[u8], &[u8]>::new(
+                "_total_migration_social_posts_replaced_by",
+            ))?;
+        tx.open_table(&db_init_time::TABLE)?
+            .insert(&(), &Timestamp::from(4242))?;
+        tx.open_table(&db_version::TABLE)?.insert(&(), &24)?;
+        Ok(())
+    })
+    .await?;
+
+    // Add one malformed stashed value so the first v25 replay fails after
+    // adopting the stash. This also verifies fallible decode leaves all source
+    // bytes and the original discriminator retryable.
+    let bad_event_id = rostra_core::ShortEventId::from_bytes([0xee; 16]);
+    let bad_key = bincode::encode_to_vec(bad_event_id, redb_bincode::BINCODE_CONFIG)?;
+    {
+        let tx = raw_db.begin_write()?;
+        let mut events = tx
+            .as_raw()
+            .open_table(redb::TableDefinition::<&[u8], &[u8]>::new(EVENTS_STASH))?;
+        events.insert(bad_key.as_slice(), &[0xff][..])?;
+        drop(events);
+        tx.commit()?;
+    }
+    drop(raw_db);
+
+    let first_open = Database::open(&db_path, self_id).await;
+    let Err(first_error) = first_open else {
+        panic!("malformed stash must fail replay");
+    };
+    assert!(
+        matches!(first_error, DbError::StoredDecode { .. }),
+        "unexpected replay error: {first_error:?}"
+    );
+
+    let raw_db = redb_bincode::Database::from(redb::Database::open(&db_path)?);
+    {
+        let tx = raw_db.begin_read()?;
+        let source_version: redb_bincode::TableDefinition<'_, (), u64> =
+            redb_bincode::TableDefinition::new(SOURCE_VERSION_STASH);
+        assert_eq!(
+            tx.open_table(&source_version)?
+                .get(&())?
+                .map(|value| value.value_try())
+                .transpose()?,
+            Some(16)
+        );
+        assert_eq!(
+            tx.open_table(&db_init_time::TABLE)?
+                .get(&())?
+                .map(|value| value.value_try())
+                .transpose()?,
+            Some(Timestamp::from(4242))
+        );
+        let legacy_content: redb_bincode::TableDefinition<
+            '_,
+            rostra_core::ContentHash,
+            LegacyContentStoreRecordOwned,
+        > = redb_bincode::TableDefinition::new(CONTENT_STASH);
+        let retained = tx
+            .open_table(&legacy_content)?
+            .get(&content_hash)?
+            .expect("held content remains")
+            .value_try()?;
+        let LegacyContentStoreRecord::Present(retained) = retained;
+        assert_eq!(retained.as_ref().as_slice(), content.as_ref());
+    }
+
+    {
+        let tx = raw_db.begin_write()?;
+        let mut events = tx
+            .as_raw()
+            .open_table(redb::TableDefinition::<&[u8], &[u8]>::new(EVENTS_STASH))?;
+        assert!(events.remove(bad_key.as_slice())?.is_some());
+        drop(events);
+        tx.commit()?;
+    }
+    drop(raw_db);
+
+    let db = Database::open(&db_path, self_id).await.boxed()?;
+    assert_eq!(db.db_init_time(), Timestamp::from(4242));
+    assert_eq!(
+        db.get_event_content(event_id)
+            .await
+            .map(|content| content.as_ref().to_vec()),
+        Some(content.as_ref().to_vec())
+    );
+    let (posts, _) = db.paginate_social_posts_rev(None, 10, |_| true).await;
+    assert_eq!(posts.len(), 1);
+    drop(db);
+    let raw_db = redb::Database::open(&db_path)?;
+    assert!(
+        raw_db
+            .begin_read()?
+            .list_tables()?
+            .all(|table| !table.name().starts_with("_total_migration_"))
+    );
+
+    Ok(())
+}
+
+#[test_log::test(tokio::test(flavor = "multi_thread"))]
+async fn too_new_version_precedes_identity_decode() -> BoxedErrorResult<()> {
+    use crate::{DbError, db_version, ids_self};
+
+    let secret = RostraIdSecretKey::from_bytes([0x26; 32]);
+    let self_id = secret.id();
+    let dir = tempfile::tempdir()?;
+    let db_path = dir.path().join("db.redb");
+    drop(Database::open(&db_path, self_id).await.boxed()?);
+
+    {
+        let db = redb_bincode::Database::from(redb::Database::open(&db_path)?);
+        let tx = db.begin_write()?;
+        tx.open_table(&db_version::TABLE)?.insert(&(), &26)?;
+        let mut ids_self_raw = tx.as_raw().open_table(ids_self::TABLE.as_raw())?;
+        ids_self_raw.insert(&[][..], &[0xff][..])?;
+        drop(ids_self_raw);
+        tx.commit()?;
+    }
+
+    assert!(matches!(
+        Database::open(&db_path, self_id).await,
+        Err(DbError::DbVersionTooHigh {
+            db_ver: 26,
+            code_ver: 25,
+            ..
+        })
+    ));
+    Ok(())
+}
+
+/// Two-phase replay converges without retaining the event graph in memory.
+#[test_log::test(tokio::test(flavor = "multi_thread"))]
+async fn test_two_phase_replay_converges_across_event_orders() -> BoxedErrorResult<()> {
+    use rostra_core::event::content_kind::PersonaSelector;
+
+    use crate::{
+        events_received_at, ids_followees, social_posts_by_received_at, social_posts_by_time,
+    };
+
+    let author_secret = RostraIdSecretKey::from_bytes([71; 32]);
+    let author = author_secret.id();
+    let followee = RostraIdSecretKey::from_bytes([72; 32]).id();
+
+    let follow_content = content_kind::Follow {
+        followee,
+        persona: None,
+        selector: Some(PersonaSelector::default()),
+        persona_tags_selector: None,
+    }
+    .serialize_cbor()?;
+    let follow = {
+        let event = Event::builder_raw_content()
+            .author(author)
+            .kind(EventKind::FOLLOW)
+            .content(&follow_content)
+            .timestamp(time::OffsetDateTime::from_unix_timestamp(100)?)
+            .build();
+        let event = VerifiedEvent::verify_signed(author, event.signed_by(author_secret))?;
+        VerifiedEventContent::assume_verified(event, follow_content)
+    };
+
+    let post_content =
+        content_kind::SocialPost::new_text("survives".to_owned(), None, Default::default())
+            .serialize_cbor()?;
+    let post = {
+        let event = Event::builder_raw_content()
+            .author(author)
+            .kind(EventKind::SOCIAL_POST)
+            .content(&post_content)
+            .timestamp(time::OffsetDateTime::from_unix_timestamp(101)?)
+            .build();
+        let event = VerifiedEvent::verify_signed(author, event.signed_by(author_secret))?;
+        VerifiedEventContent::assume_verified(event, post_content)
+    };
+
+    let deleting_follow = {
+        let event = Event::builder_raw_content()
+            .author(author)
+            .kind(EventKind::NULL)
+            .delete(follow.event_id().to_short())
+            .timestamp(time::OffsetDateTime::from_unix_timestamp(102)?)
+            .build();
+        let event = VerifiedEvent::verify_signed(author, event.signed_by(author_secret))?;
+        VerifiedEventContent::assume_verified(event, Option::<EventContentRaw>::None)
+    };
+    let events = [follow, post, deleting_follow];
+    let post_id = events[1].event_id().to_short();
+    let follow_id = events[0].event_id().to_short();
+    let mut baseline = None;
+
+    for envelope_order in [[0, 1, 2], [2, 1, 0]] {
+        for content_order in [[0, 1, 2], [2, 1, 0]] {
+            let (_dir, db) = temp_db(author).await?;
+            db.write_with(|tx| {
+                tx.discard_commit_hooks();
+                for index in envelope_order {
+                    db.process_event_tx(&events[index].event, events[index].timestamp(), tx)?;
+                }
+                for index in content_order {
+                    db.process_event_content_tx(&events[index], events[index].timestamp(), tx)?;
+                }
+                Ok(())
+            })
+            .await?;
+
+            let snapshot = db
+                .read_with(|tx| {
+                    let mut received_events = tx
+                        .open_table(&events_received_at::TABLE)?
+                        .range(..)?
+                        .map(|entry| entry.map(|(_, receipt)| receipt.value().event_id))
+                        .collect::<Result<Vec<_>, _>>()?;
+                    received_events.sort_unstable();
+                    let mut received_posts = tx
+                        .open_table(&social_posts_by_received_at::TABLE)?
+                        .range(..)?
+                        .map(|entry| entry.map(|(_, event_id)| event_id.value()))
+                        .collect::<Result<Vec<_>, _>>()?;
+                    received_posts.sort_unstable();
+                    Ok((
+                        tx.open_table(&events::TABLE)?.range(..)?.count(),
+                        tx.open_table(&ids_followees::TABLE)?
+                            .get(&(author, followee))?
+                            .is_some(),
+                        tx.open_table(&events_content_state::TABLE)?
+                            .get(&follow_id)?
+                            .map(|state| state.value()),
+                        tx.open_table(&social_posts_by_time::TABLE)?
+                            .get(&(events[1].timestamp(), post_id))?
+                            .is_some(),
+                        received_events,
+                        received_posts,
+                    ))
+                })
+                .await?;
+
+            assert!(!snapshot.1, "predeleted FOLLOW content must not project");
+            assert!(matches!(
+                snapshot.2,
+                Some(EventContentState::Deleted { .. })
+            ));
+            assert!(snapshot.3, "unrelated retained post must project");
+            assert_eq!(snapshot.5, vec![post_id]);
+            if let Some(expected) = baseline.as_ref() {
+                assert_eq!(
+                    &snapshot, expected,
+                    "two-phase semantic state changed for envelope order \
+                     {envelope_order:?}, content order {content_order:?}"
+                );
+            } else {
+                baseline = Some(snapshot);
+            }
+        }
+    }
+
+    Ok(())
+}
+
+/// Manual large-source regression for streaming migration resource behavior.
+#[test_log::test(tokio::test(flavor = "multi_thread"))]
+#[ignore = "manual large-database migration benchmark"]
+async fn benchmark_large_total_migration_streaming() -> BoxedErrorResult<()> {
+    const EVENT_COUNT: usize = 10_000;
+
+    let secret = RostraIdSecretKey::from_bytes([73; 32]);
+    let author = secret.id();
+    let dir = tempfile::tempdir()?;
+    let path = dir.path().join("db.redb");
+    let db = Database::open(&path, author).await?;
+    db.write_with(|tx| {
+        tx.discard_commit_hooks();
+        let mut parent = None;
+        for timestamp in 0..EVENT_COUNT {
+            let event = Event::builder_raw_content()
+                .author(author)
+                .kind(EventKind::NULL)
+                .maybe_parent_prev(parent)
+                .timestamp(
+                    time::OffsetDateTime::from_unix_timestamp(
+                        timestamp.try_into().expect("benchmark timestamp"),
+                    )
+                    .expect("benchmark timestamp is valid"),
+                )
+                .build();
+            let event = VerifiedEvent::verify_signed(author, event.signed_by(secret))
+                .expect("benchmark event verifies");
+            parent = Some(event.event_id.to_short());
+            db.process_event_tx(&event, event.timestamp(), tx)?;
+        }
+        Ok(())
+    })
+    .await?;
+    drop(db);
+
+    let before_bytes = std::fs::metadata(&path)?.len();
+    let raw = redb_bincode::Database::from(redb::Database::open(&path)?);
+    let tx = raw.begin_write()?;
+    tx.open_table(&crate::db_version::TABLE)?.insert(&(), &24)?;
+    tx.commit()?;
+    drop(raw);
+
+    let started = std::time::Instant::now();
+    let replayed = Database::open(&path, author).await?;
+    let elapsed = started.elapsed();
+    let after_bytes = std::fs::metadata(&path)?.len();
+    let event_count = replayed
+        .read_with(|tx| Ok(tx.open_table(&events::TABLE)?.range(..)?.count()))
+        .await?;
+    assert_eq!(event_count, EVENT_COUNT);
+    eprintln!(
+        "streamed {EVENT_COUNT} events in {elapsed:?}; file bytes {before_bytes} -> {after_bytes}"
+    );
 
     Ok(())
 }
@@ -4685,7 +5232,7 @@ async fn test_predeleted_envelope_bookkeeping_converges() -> BoxedErrorResult<()
         let write_txn = raw_db.begin_write()?;
         {
             let mut table = write_txn.open_table(&db_version::TABLE)?;
-            table.insert(&(), &23)?;
+            table.insert(&(), &24)?;
         }
         write_txn.commit()?;
         Ok(())

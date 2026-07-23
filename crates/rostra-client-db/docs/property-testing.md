@@ -59,8 +59,10 @@ PROPTEST_CASES=200 cargo test -p rostra-client-db \
 ```
 
 Total replay remains in focused migration and lifecycle regression tests; the
-shared property runner does not model it. Append-only post/reply pagination,
-failed-fetch queue/CAS behavior, and receipt-index uniqueness as a standalone
-local invariant remain possible future families. Evidence from the two
-prioritized lifecycle families should justify adding their disk runtime rather
-than expanding the default suite automatically.
+shared property runner does not model it. The focused two-phase regression
+compares semantic state across forward and reverse envelope/content passes while
+excluding database-local receipt sequence values. Append-only post/reply
+pagination, failed-fetch queue/CAS behavior, and receipt-index uniqueness as a
+standalone local invariant remain possible future families. Evidence from the
+two prioritized lifecycle families should justify adding their disk runtime
+rather than expanding the default suite automatically.

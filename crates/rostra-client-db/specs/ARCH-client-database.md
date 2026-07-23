@@ -1,41 +1,5 @@
 # ARCH-client-database: Per-identity state and projections
 
-## Status
-
-Fresh databases and databases rebuilt from retained events derive the follow
-epoch described below. Until the final total-rebuild change tracked as `t4vh`,
-a version-24 database already using the compatible stacked-development schema
-opens without backfilling follow history or retained unfollow boundaries; its
-active-winner fallback cannot fully recover the epoch from legacy rows.
-Pre-series production version-24 follow rows use an incompatible encoding and
-may not open until `t4vh`. Late follow or unfollow changes also do not rewrite
-receipt indexes that were already materialized. The final rebuild supplies the
-follow-history backfill; as specified below, rebuilt receipt indexes use authored
-timestamps because historical local receipt times are unavailable.
-
-The shortened-identity collision guard applies to new ingestion and total
-replay. Existing version-24 databases are not proactively scanned, so a mapping
-written before the guard may remain until encountered. The final rebuild tracked
-by `t4vh` validates retained event authors under the guard.
-
-New social-post projection insertion and reversion use the symmetric
-applicability rule below. Existing version-24 databases are not scanned or
-repaired by this staged change: reply or reaction counts that the former
-asymmetric blank-post reversion already decremented can remain incorrect until
-the final total rebuild tracked by `t4vh`.
-
-Current-schema social-vote singleton rows retain the winning full target and
-value inline. Pre-series production version-24 singleton rows use a
-decode-incompatible encoding and are not safely usable with the current
-singleton projection until `t4vh` rebuilds winners and vote aggregates from
-retained source events.
-
-New and total-replay-built social receipt rows have the reverse mapping required
-for exact reversion. Existing version-24 `social_posts_by_received_at` rows are
-not scanned or backfilled by this staged change. If one of those legacy posts is
-deleted before `t4vh`, its unaddressable stale receipt row can remain until the
-final total rebuild discards and reconstructs both receipt directions.
-
 `rostra-client-db` is the authoritative state and projection layer for one
 local Rostra identity during a database instance's lifetime. It stores
 verified graph data, tracks incomplete replication, and materializes
@@ -153,7 +117,69 @@ reverse row in the insertion transaction. Reverting that processed post removes
 the forward and reverse rows atomically. Removal does not rewind the shared
 allocator or make its sequence value reusable. A present reverse row that does
 not resolve to the same event in the forward index is corruption and aborts the
-deletion transaction.
+deletion transaction. An absent reverse row is a no-op when deletion ordering
+prevented the ordinary post projection from being materialized.
+
+## Total rebuild
+
+Schema version 25 performs one total rebuild of every earlier production
+database before derived version-24 rows are decoded. The preparation transaction
+stashes retained signed event headers, available hash-keyed content, the database
+identity and iroh secret, initialization time, per-event acquisition source,
+canonical forward replacement metadata, and the source version needed for legacy
+content decoding. Caller-owned extension tables remain untouched. It deletes all
+other reserved built-in state and creates the current schema.
+
+Replay trusts that retained rows crossed the authentication boundary during
+normal ingestion; it is not a cryptographic integrity scrub. Typed decoding and
+the payload hash-and-length check required to construct verified content still
+apply. A separate explicit audit may reauthenticate retained source.
+Malformed value decoding returns an error and preserves the stash. The current
+storage wrapper still validates range keys infallibly and has no migration-local
+allocation limit for corrupt encoded length prefixes; trusted-filesystem
+corruption can therefore panic or exhaust memory before replay returns an error.
+Recovery for that accepted non-adversarial corruption case is restoring the
+pre-upgrade backup or using a separate audited repair tool.
+
+Replay uses two stable `ShortEventId`-ordered streaming passes. The first inserts
+every envelope and establishes complete graph, deletion, pruning, and missing
+state. The second processes each available eligible payload. This phase boundary
+is required because a deleting envelope must be known before content-derived
+state is rebuilt; no parent topology or ordering is required within a pass.
+Receipt indexes preserve semantic membership and acquisition source but use
+authored timestamps under one uniform rebuild policy. Preparation deliberately
+discards available envelope receipt timestamps, while content-specific effective
+receipt times cannot generally be reconstructed. Allocator values remain
+database-local and noncanonical.
+
+Preparation and replay are separate transactions. Preparation commits the fresh
+schema and complete reserved stash. Replay and stash cleanup commit together, so
+failure rolls back all rebuilt state and the stash forces an identical retry at
+the next open. Replay suppresses incremental publication hooks and refreshes
+current-state watches once before the database becomes visible.
+
+Replay does not retain the event graph or per-event publication closures.
+Application and codec code transiently hold the current source record, decoded
+below-limit payload, payload clones, and encoding scratch space. Follow-history
+pruning uses fixed 256-key batches. Runtime includes B-tree work proportional to
+events and references plus hashing/decoding proportional to total referenced
+payload bytes, even when many events share one stored payload. The final watch
+refresh allocates proportional to self followees, followers, and two-hop WoT.
+
+The backend still runs one long atomic write transaction. redb tracks dirty,
+allocated, and freed pages in process memory while retaining copy-on-write
+rollback pages on disk, so total RAM and peak disk usage can scale with the
+rebuilt database despite streaming application traversal. There is no resource
+preflight or safe fixed free-space multiplier. Operators must measure a
+production-shaped copy, provision monitored RAM and disk headroom, and retain a
+restorable backup. Replay delays open and does not compact the file.
+
+Release engineering must ship the stacked version-24 schema changes and this
+version-25 rebuild as one deployable unit. An intermediate ancestor that still
+reports version 24 must never be deployed against production storage: it can
+write decode-incompatible derived rows without the final rebuild gate. Once
+preparation commits version 25, rollback requires restoring the pre-upgrade
+backup; an older binary cannot open the database.
 
 ## Invariants
 
@@ -214,10 +240,11 @@ deletion transaction.
   including payloads whose envelopes arrive already Deleted.
 - Total migration rebuilds reception-order indexes and their sequence from
   retained event envelopes and available retained content. It preserves
-  semantic membership, not historical reception timestamps or sequence values:
-  rebuilt entries use authored timestamps as the deterministic fallback because
-  their original local receipt times are not retained. Social-post replay also
-  rebuilds the exact event-to-reception-key reverse mapping.
+  acquisition source and semantic membership, not historical reception
+  timestamps or sequence values: rebuilt entries use authored timestamps as the
+  deterministic fallback because their original local receipt times are not
+  retained. Social-post replay also rebuilds the exact event-to-reception-key
+  reverse mapping.
 - Total migration preserves canonical forward social-post replacement rows and
   rebuilds their reverse lookup index.
 - Total migration preserves caller-owned extension tables byte-for-byte without

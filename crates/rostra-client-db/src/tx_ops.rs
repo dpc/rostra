@@ -863,15 +863,25 @@ impl Database {
         boundary: EventOrder,
         follow_events_table: &mut Table<(RostraId, RostraId, Timestamp, ShortEventId), ()>,
     ) -> DbResult<()> {
-        let keys = follow_events_table
-            .range(
-                (author, followee, Timestamp::ZERO, ShortEventId::ZERO)
-                    ..=(author, followee, boundary.timestamp(), boundary.event_id()),
-            )?
-            .map(|entry| entry.map(|(key, _)| key.value()))
-            .collect::<Result<Vec<_>, _>>()?;
-        for key in keys {
-            follow_events_table.remove(&key)?;
+        const BATCH_SIZE: usize = 256;
+        let range = (author, followee, Timestamp::ZERO, ShortEventId::ZERO)
+            ..=(author, followee, boundary.timestamp(), boundary.event_id());
+        loop {
+            // redb does not allow mutation while a range iterator borrows the
+            // table. Bound the temporary key set and resume from the beginning
+            // after deleting each batch.
+            let keys = follow_events_table
+                .range(range.clone())?
+                .take(BATCH_SIZE)
+                .map(|entry| entry.map(|(key, _)| key.value()))
+                .collect::<Result<Vec<_>, _>>()?;
+            let len = keys.len();
+            for key in keys {
+                follow_events_table.remove(&key)?;
+            }
+            if len < BATCH_SIZE {
+                break;
+            }
         }
         Ok(())
     }
