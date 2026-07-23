@@ -4,12 +4,12 @@ use std::time::{Duration, Instant};
 use pkarr::dns::rdata::TXT;
 use pkarr::{Keypair, SignedPacket};
 use rand::Rng as _;
+use rostra_client_db::CurrentState;
 use rostra_core::ShortEventId;
 use rostra_core::id::{RostraId, RostraIdSecretKey, ToShort as _};
 use rostra_util_error::BoxedErrorResult;
 use rostra_util_fmt::AsFmtOption as _;
 use snafu::ResultExt as _;
-use tokio::sync::watch;
 use tracing::{debug, info, instrument, trace, warn};
 
 use crate::client::Client;
@@ -26,7 +26,7 @@ pub struct PkarrIdPublisher {
     client: crate::client::ClientHandle,
     pkarr_client: Arc<pkarr::Client>,
     keypair: pkarr::Keypair,
-    self_head_rx: watch::Receiver<Option<ShortEventId>>,
+    self_head: CurrentState<Option<ShortEventId>>,
 }
 
 impl PkarrIdPublisher {
@@ -77,7 +77,7 @@ impl PkarrIdPublisher {
             client: client.handle(),
             keypair: id_secret.into(),
             pkarr_client: client.pkarr_client(),
-            self_head_rx: client.self_head_subscribe(),
+            self_head: client.self_head_subscribe(),
         }
     }
 
@@ -91,7 +91,7 @@ impl PkarrIdPublisher {
                 // either periodically
                 _ = interval.tick() => (),
                 // or when our head changes
-                res = self.self_head_rx.changed() => {
+                res = self.self_head.changed() => {
                     debug!(target: LOG_TARGET, "Publishing updated after our head changed");
                     if res.is_err() {
                         break;

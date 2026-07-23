@@ -3564,11 +3564,11 @@ async fn test_total_migration() -> BoxedErrorResult<()> {
     let migrated_followers = db.self_followers_subscribe();
     let migrated_wot = db.self_wot_subscribe();
     let migrated_head = db.self_head_subscribe();
-    assert!(migrated_followees.borrow().contains_key(&user_b));
-    assert!(migrated_followers.borrow().contains_key(&user_b));
-    assert!(migrated_wot.borrow().followees.contains_key(&user_b));
+    assert!(migrated_followees.snapshot().contains_key(&user_b));
+    assert!(migrated_followers.snapshot().contains_key(&user_b));
+    assert!(migrated_wot.snapshot().followees.contains_key(&user_b));
     let authoritative_head = db.get_self_current_head().await;
-    assert_eq!(*migrated_head.borrow(), authoritative_head);
+    assert_eq!(migrated_head.snapshot(), authoritative_head);
 
     let (posts_after, _) = db.paginate_social_posts_rev(None, 10, |_| true).await;
     info!(
@@ -5573,13 +5573,13 @@ async fn test_current_state_watches_retain_state_and_match_restart() -> BoxedErr
     let wot_rx = db.self_wot_subscribe();
     let head_rx = db.self_head_subscribe();
 
-    assert!(followees_rx.borrow().contains_key(&direct_followee));
-    assert!(followers_rx.borrow().contains_key(&follower));
-    assert!(wot_rx.borrow().followees.contains_key(&direct_followee));
-    assert!(wot_rx.borrow().extended.contains(&extended_followee));
-    assert_eq!(*head_rx.borrow(), Some(expected_head));
+    assert!(followees_rx.snapshot().contains_key(&direct_followee));
+    assert!(followers_rx.snapshot().contains_key(&follower));
+    assert!(wot_rx.snapshot().followees.contains_key(&direct_followee));
+    assert!(wot_rx.snapshot().extended.contains(&extended_followee));
+    assert_eq!(head_rx.snapshot(), Some(expected_head));
 
-    let continuous_head = *head_rx.borrow();
+    let continuous_head = head_rx.snapshot();
 
     drop((followees_rx, followers_rx, wot_rx, head_rx));
     drop(db);
@@ -5590,20 +5590,127 @@ async fn test_current_state_watches_retain_state_and_match_restart() -> BoxedErr
     let reopened_wot = reopened.self_wot_subscribe();
     let reopened_head = reopened.self_head_subscribe();
 
-    assert_eq!(reopened_followees.borrow().len(), 1);
-    assert!(reopened_followees.borrow().contains_key(&direct_followee));
-    assert_eq!(reopened_followers.borrow().len(), 1);
-    assert!(reopened_followers.borrow().contains_key(&follower));
-    assert_eq!(reopened_wot.borrow().followees.len(), 1);
+    assert_eq!(reopened_followees.snapshot().len(), 1);
+    assert!(reopened_followees.snapshot().contains_key(&direct_followee));
+    assert_eq!(reopened_followers.snapshot().len(), 1);
+    assert!(reopened_followers.snapshot().contains_key(&follower));
+    assert_eq!(reopened_wot.snapshot().followees.len(), 1);
     assert!(
         reopened_wot
-            .borrow()
+            .snapshot()
             .followees
             .contains_key(&direct_followee)
     );
-    assert_eq!(reopened_wot.borrow().extended.len(), 1);
-    assert!(reopened_wot.borrow().extended.contains(&extended_followee));
-    assert_eq!(*reopened_head.borrow(), continuous_head);
+    assert_eq!(reopened_wot.snapshot().extended.len(), 1);
+    assert!(
+        reopened_wot
+            .snapshot()
+            .extended
+            .contains(&extended_followee)
+    );
+    assert_eq!(reopened_head.snapshot(), continuous_head);
+
+    Ok(())
+}
+
+#[test_log::test(tokio::test(flavor = "multi_thread"))]
+async fn test_owned_current_state_snapshot_does_not_block_database_writes() -> BoxedErrorResult<()>
+{
+    use std::time::Duration;
+
+    let self_secret = RostraIdSecretKey::generate();
+    let self_id = self_secret.id();
+    let followee = RostraIdSecretKey::generate().id();
+    let (_dir, db) = temp_db(self_id).await?;
+    let mut followees = db.self_followees_subscribe();
+    let initial = followees.snapshot();
+    let follow = build_follow_event_content(
+        self_secret,
+        followee,
+        time::OffsetDateTime::UNIX_EPOCH,
+        None,
+    );
+
+    tokio::time::timeout(
+        Duration::from_secs(1),
+        db.process_event_with_content(&follow),
+    )
+    .await
+    .expect("an owned snapshot must not block current-state publication");
+
+    assert!(initial.is_empty(), "the earlier snapshot remains immutable");
+    let updated = tokio::time::timeout(Duration::from_secs(1), followees.changed())
+        .await
+        .expect("committed state must be published")
+        .expect("database still owns the publisher");
+    assert!(updated.contains_key(&followee));
+
+    Ok(())
+}
+
+#[test_log::test(tokio::test(flavor = "multi_thread"))]
+async fn test_current_state_snapshot_and_clone_have_independent_cursors() -> BoxedErrorResult<()> {
+    use std::time::Duration;
+
+    let self_secret = RostraIdSecretKey::generate();
+    let self_id = self_secret.id();
+    let followee = RostraIdSecretKey::generate().id();
+    let (_dir, db) = temp_db(self_id).await?;
+    let mut first = db.self_followees_subscribe();
+    let mut second = first.clone();
+    let mut closes_with_unseen_update = first.clone();
+    let follow = build_follow_event_content(
+        self_secret,
+        followee,
+        time::OffsetDateTime::UNIX_EPOCH,
+        None,
+    );
+
+    db.process_event_with_content(&follow).await;
+    let snapshot = first.snapshot();
+    assert!(snapshot.contains_key(&followee));
+
+    let first_update = tokio::time::timeout(Duration::from_secs(1), first.changed())
+        .await
+        .expect("snapshot must not advance the first cursor")
+        .expect("database still owns the publisher");
+    let second_update = tokio::time::timeout(Duration::from_secs(1), second.changed())
+        .await
+        .expect("the cloned cursor must advance independently")
+        .expect("database still owns the publisher");
+    assert!(first_update.contains_key(&followee));
+    assert!(second_update.contains_key(&followee));
+
+    assert!(
+        tokio::time::timeout(Duration::from_millis(50), first.changed())
+            .await
+            .is_err(),
+        "the first cursor must consume the publication"
+    );
+    assert!(
+        tokio::time::timeout(Duration::from_millis(50), second.changed())
+            .await
+            .is_err(),
+        "the cloned cursor must consume the publication independently"
+    );
+
+    drop(db);
+    assert_eq!(first.snapshot().len(), 1);
+    assert!(matches!(
+        first.changed().await,
+        Err(crate::CurrentStateClosed)
+    ));
+    assert!(
+        closes_with_unseen_update
+            .changed()
+            .await
+            .expect("closure must not hide the last unseen publication")
+            .contains_key(&followee)
+    );
+    assert!(matches!(
+        closes_with_unseen_update.changed().await,
+        Err(crate::CurrentStateClosed)
+    ));
 
     Ok(())
 }
@@ -5738,14 +5845,14 @@ async fn test_current_state_watches_cannot_regress_between_commits() -> BoxedErr
         .expect("Newer task must not panic")
         .expect("Newer transaction must commit");
 
-    assert!(followees_rx.borrow().contains_key(&direct_a));
-    assert!(followees_rx.borrow().contains_key(&direct_b));
-    assert!(followers_rx.borrow().contains_key(&follower_a));
-    assert!(followers_rx.borrow().contains_key(&follower_b));
-    assert!(wot_rx.borrow().followees.contains_key(&direct_a));
-    assert!(wot_rx.borrow().followees.contains_key(&direct_b));
-    assert!(wot_rx.borrow().extended.contains(&extended));
-    assert_eq!(*head_rx.borrow(), Some(expected_head));
+    assert!(followees_rx.snapshot().contains_key(&direct_a));
+    assert!(followees_rx.snapshot().contains_key(&direct_b));
+    assert!(followers_rx.snapshot().contains_key(&follower_a));
+    assert!(followers_rx.snapshot().contains_key(&follower_b));
+    assert!(wot_rx.snapshot().followees.contains_key(&direct_a));
+    assert!(wot_rx.snapshot().followees.contains_key(&direct_b));
+    assert!(wot_rx.snapshot().extended.contains(&extended));
+    assert_eq!(head_rx.snapshot(), Some(expected_head));
 
     Ok(())
 }
@@ -5792,12 +5899,12 @@ async fn test_current_state_publication_survives_earlier_hook_panic() -> BoxedEr
 
     let followees_rx = db.self_followees_subscribe();
     let wot_rx = db.self_wot_subscribe();
-    assert!(followees_rx.borrow().contains_key(&followee));
-    assert!(wot_rx.borrow().followees.contains_key(&followee));
+    assert!(followees_rx.snapshot().contains_key(&followee));
+    assert!(wot_rx.snapshot().followees.contains_key(&followee));
 
     db.process_event_with_content(&post).await;
     assert_eq!(
-        *db.self_head_subscribe().borrow(),
+        db.self_head_subscribe().snapshot(),
         Some(post.event_id().to_short())
     );
 
@@ -5949,7 +6056,7 @@ async fn test_self_head_updated_broadcast() -> BoxedErrorResult<()> {
     );
     assert!(result.unwrap().is_ok(), "Channel should not be closed");
 
-    let received_head = *self_head_rx.borrow();
+    let received_head = self_head_rx.snapshot();
     assert_eq!(received_head, Some(event_id.into()));
 
     info!("=== self_head_updated_broadcast test passed ===");
@@ -6115,7 +6222,7 @@ async fn test_self_followees_watch_channel() -> BoxedErrorResult<()> {
 
     // Initially should be empty
     assert!(
-        followees_rx.borrow().is_empty(),
+        followees_rx.snapshot().is_empty(),
         "Should start with no followees"
     );
 
@@ -6148,7 +6255,7 @@ async fn test_self_followees_watch_channel() -> BoxedErrorResult<()> {
     assert!(result.unwrap().is_ok(), "Channel should not be closed");
 
     // Verify the followee is now in the map
-    let followees = followees_rx.borrow();
+    let followees = followees_rx.snapshot();
     assert!(
         followees.contains_key(&followee),
         "Followee should be in the map"
@@ -6179,7 +6286,7 @@ async fn test_self_followers_watch_channel() -> BoxedErrorResult<()> {
 
     // Initially should be empty
     assert!(
-        followers_rx.borrow().is_empty(),
+        followers_rx.snapshot().is_empty(),
         "Should start with no followers"
     );
 
@@ -6212,7 +6319,7 @@ async fn test_self_followers_watch_channel() -> BoxedErrorResult<()> {
     assert!(result.unwrap().is_ok(), "Channel should not be closed");
 
     // Verify the follower is now in the map
-    let followers = followers_rx.borrow();
+    let followers = followers_rx.snapshot();
     assert!(
         followers.contains_key(&other_id),
         "Follower should be in the map"
@@ -6241,7 +6348,7 @@ async fn test_self_wot_watch_channel() -> BoxedErrorResult<()> {
     let mut wot_rx = db.self_wot_subscribe();
 
     // Initially should be empty
-    assert!(wot_rx.borrow().is_empty(), "Should start with empty WoT");
+    assert!(wot_rx.snapshot().is_empty(), "Should start with empty WoT");
 
     // Self follows A
     let follow_a_content = content_kind::Follow {
@@ -6269,7 +6376,7 @@ async fn test_self_wot_watch_channel() -> BoxedErrorResult<()> {
 
     // Verify WoT now contains followee_a as a direct followee
     {
-        let wot = wot_rx.borrow();
+        let wot = wot_rx.snapshot();
         assert!(
             wot.followees.contains_key(&followee_a),
             "A should be in direct followees"
@@ -6320,7 +6427,7 @@ async fn test_wot_contains() -> BoxedErrorResult<()> {
     db.process_event_with_content(&verified_content).await;
 
     // Check contains
-    let wot = wot_rx.borrow();
+    let wot = wot_rx.snapshot();
     assert!(wot.contains(self_id, self_id), "Self should be in WoT");
     assert!(wot.contains(followee, self_id), "Followee should be in WoT");
     assert!(

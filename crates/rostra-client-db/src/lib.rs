@@ -1,3 +1,4 @@
+mod current_state;
 mod event_order;
 mod events_content_missing_ops;
 mod extension;
@@ -39,6 +40,7 @@ use tokio::sync::{Notify, broadcast, watch};
 use tokio::task::JoinError;
 use tracing::{debug, error, info, instrument};
 
+pub use self::current_state::{CurrentState, CurrentStateClosed};
 pub use self::extension::{
     EXTENSION_RESERVED_TABLE_PREFIXES, ExtensionReadTransaction, ExtensionTableDefinition,
     ExtensionWriteTransaction,
@@ -529,45 +531,37 @@ impl Database {
         .expect("Database panic")
     }
 
-    /// Subscribes to the retained current self-followee projection.
-    ///
-    /// Drop values borrowed from the receiver before awaiting or calling the
-    /// database; publication waits for outstanding watch borrows.
+    /// Subscribe to owned snapshots of the retained current self-followee
+    /// projection.
     pub fn self_followees_subscribe(
         &self,
-    ) -> watch::Receiver<Arc<HashMap<RostraId, IdsFolloweesRecord>>> {
-        self.self_followees_updated.subscribe()
+    ) -> CurrentState<Arc<HashMap<RostraId, IdsFolloweesRecord>>> {
+        CurrentState::new(self.self_followees_updated.subscribe())
     }
 
-    /// Subscribes to the retained current self-follower projection.
-    ///
-    /// Drop values borrowed from the receiver before awaiting or calling the
-    /// database; publication waits for outstanding watch borrows.
+    /// Subscribe to owned snapshots of the retained current self-follower
+    /// projection.
     pub fn self_followers_subscribe(
         &self,
-    ) -> watch::Receiver<Arc<HashMap<RostraId, IdsFollowersRecord>>> {
-        self.self_followers_updated.subscribe()
+    ) -> CurrentState<Arc<HashMap<RostraId, IdsFollowersRecord>>> {
+        CurrentState::new(self.self_followers_updated.subscribe())
     }
 
-    /// Subscribes to the retained current Web-of-Trust projection.
-    ///
-    /// Drop values borrowed from the receiver before awaiting or calling the
-    /// database; publication waits for outstanding watch borrows.
-    pub fn self_wot_subscribe(&self) -> watch::Receiver<Arc<WotData>> {
-        self.self_wot_updated.subscribe()
+    /// Subscribe to owned snapshots of the retained current Web-of-Trust
+    /// projection.
+    pub fn self_wot_subscribe(&self) -> CurrentState<Arc<WotData>> {
+        CurrentState::new(self.self_wot_updated.subscribe())
     }
 
-    /// Subscribe to the retained deterministic self-head representative.
+    /// Subscribe to owned snapshots of the retained deterministic self-head
+    /// representative.
     ///
     /// The value is the minimum current `ShortEventId`. It is a stable default,
     /// not a claim that the current head set is a singleton. Every committed
     /// self-event insertion publishes, even when the representative is
     /// unchanged.
-    ///
-    /// Drop values borrowed from the receiver before awaiting or calling the
-    /// database; publication waits for outstanding watch borrows.
-    pub fn self_head_subscribe(&self) -> watch::Receiver<Option<ShortEventId>> {
-        self.self_head_updated.subscribe()
+    pub fn self_head_subscribe(&self) -> CurrentState<Option<ShortEventId>> {
+        CurrentState::new(self.self_head_updated.subscribe())
     }
 
     pub fn new_content_subscribe(&self) -> broadcast::Receiver<VerifiedEventContent> {

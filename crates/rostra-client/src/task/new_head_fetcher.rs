@@ -2,7 +2,7 @@ use std::collections::{BTreeSet, HashSet};
 use std::sync::{Arc, Mutex};
 
 use n0_future::task::AbortOnDropHandle;
-use rostra_client_db::{Database, DbResult, WotData};
+use rostra_client_db::{CurrentState, Database, DbResult, WotData};
 use rostra_core::ShortEventId;
 use rostra_core::id::{RostraId, ToShort as _};
 use tokio::sync::{broadcast, watch};
@@ -89,7 +89,7 @@ pub struct NewHeadFetcher {
     db: Arc<Database>,
     self_id: RostraId,
     new_heads_rx: broadcast::Receiver<(RostraId, ShortEventId)>,
-    wot_rx: watch::Receiver<Arc<WotData>>,
+    wot: CurrentState<Arc<WotData>>,
     connections: ConnectionCache,
 }
 
@@ -101,7 +101,7 @@ impl NewHeadFetcher {
             db: client.db().clone(),
             self_id: client.rostra_id(),
             new_heads_rx: client.new_heads_subscribe(),
-            wot_rx: client.self_wot_subscribe(),
+            wot: client.self_wot_subscribe(),
             connections: client.connection_cache().clone(),
         }
     }
@@ -110,7 +110,7 @@ impl NewHeadFetcher {
     pub async fn run(mut self) {
         debug!(
             target: LOG_TARGET,
-            count = self.wot_rx.borrow().len(),
+            count = self.wot.snapshot().len(),
             "Started with web of trust cache"
         );
 
@@ -148,7 +148,7 @@ impl NewHeadFetcher {
 
                     // Check if author is in our web of trust using the cached WoT
                     let in_wot = {
-                        let wot = self.wot_rx.borrow();
+                        let wot = self.wot.snapshot();
                         wot.contains(author, self.self_id)
                     };
 
@@ -164,14 +164,14 @@ impl NewHeadFetcher {
 
                     queue.enqueue(author);
                 }
-                res = self.wot_rx.changed() => {
+                res = self.wot.changed() => {
                     if res.is_err() {
                         debug!(target: LOG_TARGET, "WoT channel closed, shutting down");
                         break;
                     }
                     debug!(
                         target: LOG_TARGET,
-                        count = self.wot_rx.borrow().len(),
+                        count = self.wot.snapshot().len(),
                         "Web of trust cache updated"
                     );
                 }

@@ -14,7 +14,9 @@ use std::time::Duration;
 use backon::Retryable as _;
 use iroh_base::EndpointAddr;
 use n0_future::task::AbortOnDropHandle;
-use rostra_client_db::{Database, DbResult, IdsFolloweesRecord, IdsFollowersRecord, WotData};
+use rostra_client_db::{
+    CurrentState, Database, DbResult, IdsFolloweesRecord, IdsFollowersRecord, WotData,
+};
 use rostra_core::event::{
     Event, EventContentRaw, EventExt as _, IrohNodeId, PersonaTag, PersonasTagsSelector,
     SignedEvent, SocialPost, VerifiedEvent, VerifiedEventContent, content_kind,
@@ -26,7 +28,7 @@ use rostra_p2p::connection::{Connection, FeedEventResponse};
 use rostra_p2p_api::ROSTRA_P2P_V0_ALPN;
 use rostra_util_error::{FmtCompact as _, WhateverResult};
 use snafu::{Location, OptionExt as _, ResultExt as _, Snafu, ensure};
-use tokio::sync::{RwLock, broadcast, watch};
+use tokio::sync::{RwLock, broadcast};
 use tokio::time::Instant;
 use tracing::{debug, info, trace, warn};
 
@@ -637,11 +639,12 @@ impl Client {
         Ok(sanitize_endpoint_addr(self.networking.endpoint.addr()))
     }
 
-    /// Subscribe to the minimum current self-head representative.
+    /// Subscribe to owned snapshots of the minimum current self-head
+    /// representative.
     ///
     /// The retained value is a deterministic default and does not imply that
     /// the complete current head set is a singleton.
-    pub fn self_head_subscribe(&self) -> watch::Receiver<Option<ShortEventId>> {
+    pub fn self_head_subscribe(&self) -> CurrentState<Option<ShortEventId>> {
         self.db.self_head_subscribe()
     }
 
@@ -1027,19 +1030,22 @@ impl Client {
         Ok(())
     }
 
+    /// Subscribe to owned snapshots of the retained self-followee projection.
     pub fn self_followees_subscribe(
         &self,
-    ) -> watch::Receiver<Arc<HashMap<RostraId, IdsFolloweesRecord>>> {
+    ) -> CurrentState<Arc<HashMap<RostraId, IdsFolloweesRecord>>> {
         self.db.self_followees_subscribe()
     }
 
+    /// Subscribe to owned snapshots of the retained self-follower projection.
     pub fn self_followers_subscribe(
         &self,
-    ) -> watch::Receiver<Arc<HashMap<RostraId, IdsFollowersRecord>>> {
+    ) -> CurrentState<Arc<HashMap<RostraId, IdsFollowersRecord>>> {
         self.db.self_followers_subscribe()
     }
 
-    pub fn self_wot_subscribe(&self) -> watch::Receiver<Arc<WotData>> {
+    /// Subscribe to owned snapshots of the retained Web-of-Trust projection.
+    pub fn self_wot_subscribe(&self) -> CurrentState<Arc<WotData>> {
         self.db.self_wot_subscribe()
     }
 }

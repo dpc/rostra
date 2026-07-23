@@ -41,10 +41,9 @@
 use std::sync::Arc;
 use std::time::Duration;
 
-use rostra_client_db::{Database, DbResult, WotData};
+use rostra_client_db::{CurrentState, Database, DbResult, WotData};
 use rostra_core::id::{RostraId, ToShort as _};
 use rostra_util_error::FmtCompact as _;
-use tokio::sync::watch;
 use tracing::{debug, error, instrument, trace};
 
 use crate::client::{Client, ClientHandle};
@@ -59,7 +58,7 @@ pub struct WotHeadSync {
     networking: Arc<ClientNetworking>,
     db: Arc<Database>,
     self_id: RostraId,
-    wot_rx: watch::Receiver<Arc<WotData>>,
+    wot: CurrentState<Arc<WotData>>,
     connections: ConnectionCache,
 }
 
@@ -71,7 +70,7 @@ impl WotHeadSync {
             networking: client.networking().clone(),
             db: client.db().clone(),
             self_id: client.rostra_id(),
-            wot_rx: client.self_wot_subscribe(),
+            wot: client.self_wot_subscribe(),
             connections: client.connection_cache().clone(),
         }
     }
@@ -104,12 +103,10 @@ impl WotHeadSync {
     }
 
     async fn sync_cycle(&self) -> DbResult<()> {
-        let wot_ids: Vec<RostraId> = {
-            let wot = self.wot_rx.borrow();
-            std::iter::once(self.self_id)
-                .chain(wot.iter_all())
-                .collect()
-        };
+        let wot = self.wot.snapshot();
+        let wot_ids: Vec<RostraId> = std::iter::once(self.self_id)
+            .chain(wot.iter_all())
+            .collect();
 
         debug!(
             target: LOG_TARGET,

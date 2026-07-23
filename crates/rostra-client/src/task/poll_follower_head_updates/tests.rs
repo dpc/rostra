@@ -2,7 +2,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Duration;
 
-use rostra_client_db::{Database, WotData};
+use rostra_client_db::Database;
 use rostra_core::event::{Event, EventContentRaw, EventKind, SignedEvent, VerifiedEvent};
 use rostra_core::id::{RostraId, RostraIdSecretKey};
 use rostra_p2p::connection::{
@@ -10,7 +10,7 @@ use rostra_p2p::connection::{
     WaitFollowersNewHeadsResponse,
 };
 use rostra_p2p_api::ROSTRA_P2P_V0_ALPN;
-use tokio::sync::{RwLock, oneshot, watch};
+use tokio::sync::{RwLock, oneshot};
 
 use super::{PeerBackoffState, PollFollowerHeadUpdates, SharedBackoffState};
 
@@ -111,7 +111,7 @@ async fn rpc_ingests_event_when_claimed_and_signed_authors_match() {
     let db = Database::new_in_memory(self_id)
         .await
         .expect("in-memory database");
-    let (_, wot_rx) = watch::channel(Arc::new(WotData::default()));
+    let wot = db.self_wot_subscribe();
     let (connection, caller_endpoint, release_server, server) =
         connection_returning(WaitFollowersNewHeadsResponse {
             author: self_id,
@@ -119,7 +119,7 @@ async fn rpc_ingests_event_when_claimed_and_signed_authors_match() {
         })
         .await;
 
-    let event = PollFollowerHeadUpdates::poll_once(&connection, self_id, &wot_rx)
+    let event = PollFollowerHeadUpdates::poll_once(&connection, self_id, &wot)
         .await
         .expect("matching self-authored response is admitted")
         .expect("self-authored response is in the web of trust");
@@ -144,7 +144,7 @@ async fn rpc_rejects_trusted_claim_with_event_signed_by_another_author() {
     let db = Database::new_in_memory(self_id)
         .await
         .expect("in-memory database");
-    let (_, wot_rx) = watch::channel(Arc::new(WotData::default()));
+    let wot = db.self_wot_subscribe();
     let (connection, caller_endpoint, release_server, server) =
         connection_returning(WaitFollowersNewHeadsResponse {
             author: self_id,
@@ -152,7 +152,7 @@ async fn rpc_rejects_trusted_claim_with_event_signed_by_another_author() {
         })
         .await;
 
-    let error = PollFollowerHeadUpdates::poll_once(&connection, self_id, &wot_rx)
+    let error = PollFollowerHeadUpdates::poll_once(&connection, self_id, &wot)
         .await
         .expect_err("claimed author must match the signed event author");
     release_server.send(()).expect("release server");

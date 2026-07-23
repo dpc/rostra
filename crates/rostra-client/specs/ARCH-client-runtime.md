@@ -56,6 +56,12 @@ than owning a second graph state. They must tolerate duplicate wakeups,
 temporary peer failure, and out-of-order delivery. Task handles are owned by
 the client, so dropping the client stops its background work.
 
+Retained current-state subscriptions expose owned snapshots of the self head,
+followees, followers, and Web of Trust. Runtime tasks may keep those snapshots
+across network waits or database operations without retaining a Tokio watch
+borrow that can block post-commit publication. Lossy broadcasts and
+deduplicating work signals retain their incremental semantics.
+
 Verified-data ingestion uses the database's fallible processing boundary.
 Invariant, transaction, and storage failures are local database failures, not
 peer-availability failures: request and publication paths return them to their

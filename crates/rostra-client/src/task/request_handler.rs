@@ -6,7 +6,7 @@ use futures::stream::FuturesUnordered;
 use iroh::Endpoint;
 use iroh::endpoint::Incoming;
 use n0_future::task::AbortOnDropHandle;
-use rostra_client_db::{DbError, IdsFolloweesRecord, IdsFollowersRecord};
+use rostra_client_db::{CurrentState, DbError, IdsFolloweesRecord, IdsFollowersRecord};
 use rostra_core::event::{EventContentRaw, EventExt as _, VerifiedEvent, VerifiedEventContent};
 use rostra_core::id::RostraId;
 use rostra_p2p::RpcError;
@@ -20,7 +20,7 @@ use rostra_p2p::connection::{
 use rostra_p2p::util::ToShort as _;
 use rostra_util_error::{BoxedError, FmtCompact as _};
 use snafu::{Location, OptionExt as _, ResultExt as _, Snafu};
-use tokio::sync::{Semaphore, watch};
+use tokio::sync::Semaphore;
 use tracing::{debug, error, info, instrument, trace};
 
 use crate::client::Client;
@@ -88,8 +88,8 @@ pub struct RequestHandler {
     client: ClientHandle,
     endpoint: Endpoint,
     our_id: RostraId,
-    self_followees_rx: watch::Receiver<Arc<HashMap<RostraId, IdsFolloweesRecord>>>,
-    self_followers_rx: watch::Receiver<Arc<HashMap<RostraId, IdsFollowersRecord>>>,
+    self_followees: CurrentState<Arc<HashMap<RostraId, IdsFolloweesRecord>>>,
+    self_followers: CurrentState<Arc<HashMap<RostraId, IdsFollowersRecord>>>,
 }
 
 impl RequestHandler {
@@ -99,8 +99,8 @@ impl RequestHandler {
             client: client.handle(),
             endpoint,
             our_id: client.rostra_id(),
-            self_followees_rx: client.self_followees_subscribe(),
-            self_followers_rx: client.self_followers_subscribe(),
+            self_followees: client.self_followees_subscribe(),
+            self_followers: client.self_followers_subscribe(),
         }
         .into()
     }
@@ -239,11 +239,7 @@ impl RequestHandler {
             FeedEventRequest::decode_whole::<MAX_REQUEST_SIZE>(&req_msg).context(DecodingSnafu)?;
         let our_id = self.our_id;
 
-        if event.author() == our_id
-            || self
-                .self_followees_rx
-                .borrow()
-                .contains_key(&event.author())
+        if event.author() == our_id || self.self_followees.snapshot().contains_key(&event.author())
         {
             // accept
         } else {
@@ -480,7 +476,7 @@ impl RequestHandler {
             // Check if author is a direct follower (not extended).
             // Own head changes are served via WAIT_HEAD_UPDATE instead.
             let is_relevant = {
-                let followers = self.self_followers_rx.borrow();
+                let followers = self.self_followers.snapshot();
                 followers.contains_key(&author)
             };
 

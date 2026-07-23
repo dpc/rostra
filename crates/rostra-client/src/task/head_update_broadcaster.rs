@@ -1,13 +1,15 @@
 use std::collections::{BTreeSet, HashMap};
 use std::sync::Arc;
 
-use rostra_client_db::{Database, EventContentState, EventRecord, IdsFollowersRecord};
+use rostra_client_db::{
+    CurrentState, Database, EventContentState, EventRecord, IdsFollowersRecord,
+};
 use rostra_core::ShortEventId;
 use rostra_core::event::{EventContentRaw, EventExt as _, SignedEvent, VerifiedEventContent};
 use rostra_core::id::{RostraId, ToShort as _};
 use rostra_util_error::{FmtCompact, WhateverResult};
 use snafu::ResultExt as _;
-use tokio::sync::{broadcast, watch};
+use tokio::sync::broadcast;
 use tracing::{debug, instrument, trace, warn};
 
 /// Arc-wrapped followers map for cheap cloning
@@ -23,7 +25,7 @@ pub struct HeadUpdateBroadcaster {
     networking: Arc<crate::net::ClientNetworking>,
     db: Arc<Database>,
     self_id: RostraId,
-    self_followers_rx: watch::Receiver<FollowersMap>,
+    self_followers: CurrentState<FollowersMap>,
     new_heads_rx: broadcast::Receiver<(RostraId, ShortEventId)>,
     new_content_rx: broadcast::Receiver<VerifiedEventContent>,
 }
@@ -37,7 +39,7 @@ impl HeadUpdateBroadcaster {
             db: client.db().to_owned(),
             self_id: client.rostra_id(),
 
-            self_followers_rx: client.self_followers_subscribe(),
+            self_followers: client.self_followers_subscribe(),
             new_heads_rx: client.db().new_heads_subscribe(),
             new_content_rx: client.db().new_content_subscribe(),
         }
@@ -46,12 +48,12 @@ impl HeadUpdateBroadcaster {
     /// Run the thread
     #[instrument(name = "head-update-broadcaster", skip(self), fields(self_id = %self.self_id.fmt_short()), ret)]
     pub async fn run(mut self) {
-        let mut self_followers_rx = self.self_followers_rx.clone();
+        let mut self_followers = self.self_followers.clone();
         let mut pending_heads = BTreeSet::new();
         reconcile_current_heads(&self.db, &mut pending_heads).await;
 
         loop {
-            let followers = self_followers_rx.borrow().clone();
+            let followers = self_followers.snapshot();
             if let Some((head, event, event_content)) =
                 take_one_ready_head(&self.db, &mut pending_heads).await
             {
@@ -110,7 +112,7 @@ impl HeadUpdateBroadcaster {
                         }
                     }
                     }
-                    res = self_followers_rx.changed() => {
+                    res = self_followers.changed() => {
                         if res.is_err() {
                             return;
                         }

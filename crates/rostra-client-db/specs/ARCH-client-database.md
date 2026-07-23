@@ -115,9 +115,13 @@ from separate committed transactions could race and publish older state after
 newer state. Watch channels retain the latest committed identity-scoped
 projection, including the self head, followees, followers, and Web of Trust.
 Subscribing after a period with no receivers still yields the latest committed
-value. Broadcast or deduplicating channels remain lossy or incremental signals
-for new content and work queues. The database remains authoritative; these
-watch payloads are retained current-state projections.
+value. Public current-state subscriptions return owned snapshots rather than
+Tokio watch borrows, so consumers can retain a snapshot across awaits or
+database operations without blocking publication. Cloning a subscription
+creates an independent change cursor over the same retained state. Broadcast or
+deduplicating channels remain lossy or incremental signals for new content and
+work queues. The database remains authoritative; these watch payloads are
+retained current-state projections.
 
 Write closures and post-commit hooks must not synchronously re-enter database
 writes: the non-reentrant mutex would deadlock. A hook panic propagates after

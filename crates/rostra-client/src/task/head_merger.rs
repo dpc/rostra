@@ -1,11 +1,10 @@
 use std::time::Duration;
 
 use rand::Rng as _;
-use rostra_client_db::DbResult;
+use rostra_client_db::{CurrentState, DbResult};
 use rostra_core::event::{EventContentRaw, EventKind, VerifiedEvent};
 use rostra_core::id::{RostraId, RostraIdSecretKey};
 use rostra_core::{Event, ShortEventId};
-use tokio::sync::watch;
 use tracing::{debug, error, instrument, trace};
 
 use crate::client::Client;
@@ -17,7 +16,7 @@ const MAX_MERGE_DELAY: Duration = Duration::from_secs(60);
 pub struct HeadMerger {
     client: crate::client::ClientHandle,
     id: RostraId,
-    self_head_rx: watch::Receiver<Option<ShortEventId>>,
+    self_head: CurrentState<Option<ShortEventId>>,
     id_secret: RostraIdSecretKey,
     max_merge_delay: Duration,
 }
@@ -34,7 +33,7 @@ impl HeadMerger {
         Self {
             client: client.handle(),
             id: client.rostra_id(),
-            self_head_rx: client.self_head_subscribe(),
+            self_head: client.self_head_subscribe(),
             id_secret,
             max_merge_delay: MAX_MERGE_DELAY,
         }
@@ -43,7 +42,7 @@ impl HeadMerger {
     /// Run the thread
     #[instrument(name = "head-merger", skip(self), fields(self_id = %self.id.fmt_short()), ret)]
     pub async fn run(self) {
-        let mut head_rx = self.self_head_rx.clone();
+        let mut self_head = self.self_head.clone();
         loop {
             match self.merge_one_fork().await {
                 Err(err) => {
@@ -59,7 +58,7 @@ impl HeadMerger {
                 Ok(MergeOutcome::NoFork) => {}
             }
 
-            if head_rx.changed().await.is_err() {
+            if self_head.changed().await.is_err() {
                 break;
             }
             trace!(target: LOG_TARGET, "Woke up");

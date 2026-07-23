@@ -43,8 +43,7 @@ impl MissingEventFetcher {
             let Ok(client) = self.client.client_ref() else {
                 return;
             };
-            let wot = client.self_wot_subscribe();
-            let wot = wot.borrow();
+            let wot = client.self_wot_subscribe().snapshot();
             wot.iter_all().collect()
         };
         let mut ids_with_missing_events_rx = self.ids_with_missing_events_rx.clone();

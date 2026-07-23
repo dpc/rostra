@@ -426,7 +426,7 @@ async fn metadata_only_epoch_changes_publish_followee_state() -> BoxedErrorResul
     db.process_event_with_content(&winner).await;
     let mut followees = db.self_followees_subscribe();
     let initial = followees
-        .borrow()
+        .snapshot()
         .get(&followee)
         .expect("active follow")
         .clone();
@@ -439,7 +439,7 @@ async fn metadata_only_epoch_changes_publish_followee_state() -> BoxedErrorResul
         .expect("late follow publication")
         .expect("watch remains open");
     {
-        let updated = followees.borrow();
+        let updated = followees.snapshot();
         let record = updated.get(&followee).expect("follow remains active");
         assert_eq!(record.latest_event_id, winner.event_id().to_short());
         assert_eq!(record.first_ts, Timestamp::from(20));
@@ -450,7 +450,7 @@ async fn metadata_only_epoch_changes_publish_followee_state() -> BoxedErrorResul
         .await
         .expect("late unfollow publication")
         .expect("watch remains open");
-    let updated = followees.borrow();
+    let updated = followees.snapshot();
     let record = updated.get(&followee).expect("follow remains active");
     assert_eq!(record.latest_event_id, winner.event_id().to_short());
     assert_eq!(record.first_ts, Timestamp::from(30));

@@ -5,12 +5,12 @@ use std::time::Duration;
 use futures::StreamExt as _;
 use futures::future::BoxFuture;
 use futures::stream::FuturesUnordered;
-use rostra_client_db::{Database, DbResult, IdsFollowersRecord, WotData};
+use rostra_client_db::{CurrentState, Database, DbResult, IdsFollowersRecord, WotData};
 use rostra_core::event::{EventExt as _, VerifiedEvent};
 use rostra_core::id::{RostraId, ToShort as _};
 use rostra_p2p::Connection;
 use rostra_util_error::FmtCompact as _;
-use tokio::sync::{RwLock, watch};
+use tokio::sync::RwLock;
 use tokio::time::Instant;
 use tracing::{debug, error, instrument, trace, warn};
 
@@ -88,8 +88,8 @@ pub struct PollFollowerHeadUpdates {
     networking: Arc<ClientNetworking>,
     db: Arc<Database>,
     self_id: RostraId,
-    self_followers_rx: watch::Receiver<Arc<HashMap<RostraId, IdsFollowersRecord>>>,
-    self_wot_rx: watch::Receiver<Arc<WotData>>,
+    self_followers: CurrentState<Arc<HashMap<RostraId, IdsFollowersRecord>>>,
+    self_wot: CurrentState<Arc<WotData>>,
     connections: ConnectionCache,
 }
 
@@ -101,8 +101,8 @@ impl PollFollowerHeadUpdates {
             networking: client.networking().clone(),
             db: client.db().clone(),
             self_id: client.rostra_id(),
-            self_followers_rx: client.self_followers_subscribe(),
-            self_wot_rx: client.self_wot_subscribe(),
+            self_followers: client.self_followers_subscribe(),
+            self_wot: client.self_wot_subscribe(),
             connections: client.connection_cache().clone(),
         }
     }
@@ -141,7 +141,7 @@ impl PollFollowerHeadUpdates {
                         pending_peers.insert(peer_id);
                     }
                 }
-                res = self.self_followers_rx.changed() => {
+                res = self.self_followers.changed() => {
                     if res.is_err() {
                         debug!(target: LOG_TARGET, "Followers channel closed, shutting down");
                         break;
@@ -177,7 +177,7 @@ impl PollFollowerHeadUpdates {
     ) {
         desired_peers.clear();
         desired_peers.insert(self.self_id);
-        desired_peers.extend(self.self_followers_rx.borrow().keys().copied());
+        desired_peers.extend(self.self_followers.snapshot().keys().copied());
         pending_peers.retain(|id| desired_peers.contains(id));
 
         for peer_id in desired_peers.difference(active_peers) {
@@ -204,7 +204,7 @@ impl PollFollowerHeadUpdates {
             let connections = self.connections.clone();
             let db = self.db.clone();
             let self_id = self.self_id;
-            let wot_rx = self.self_wot_rx.clone();
+            let wot = self.self_wot.clone();
             let backoff = backoff_state.clone();
             poll_futures.push(Box::pin(async move {
                 let result = tokio::time::timeout(
@@ -215,7 +215,7 @@ impl PollFollowerHeadUpdates {
                         db,
                         self_id,
                         peer_id,
-                        wot_rx,
+                        wot,
                         backoff,
                     ),
                 )
@@ -232,7 +232,7 @@ impl PollFollowerHeadUpdates {
         db: Arc<Database>,
         self_id: RostraId,
         peer_id: RostraId,
-        wot_rx: watch::Receiver<Arc<WotData>>,
+        wot: CurrentState<Arc<WotData>>,
         backoff_state: SharedBackoffState,
     ) -> DbResult<()> {
         loop {
@@ -283,7 +283,7 @@ impl PollFollowerHeadUpdates {
                 }
             };
 
-            match Self::poll_once(&conn, self_id, &wot_rx).await {
+            match Self::poll_once(&conn, self_id, &wot).await {
                 Ok(event) => {
                     if let Some(insert_outcome) =
                         Self::finish_successful_poll(&db, peer_id, event.as_ref(), &backoff_state)
@@ -364,7 +364,7 @@ impl PollFollowerHeadUpdates {
     async fn poll_once(
         conn: &Connection,
         self_id: RostraId,
-        wot_rx: &watch::Receiver<Arc<WotData>>,
+        wot: &CurrentState<Arc<WotData>>,
     ) -> Result<Option<VerifiedEvent>, String> {
         // Call the blocking RPC
         let response = conn
@@ -392,10 +392,7 @@ impl PollFollowerHeadUpdates {
 
         // Check the cryptographically authenticated author against our Web of
         // Trust only after the response binding has succeeded.
-        let in_wot = {
-            let wot = wot_rx.borrow();
-            wot.contains(authenticated_author, self_id)
-        };
+        let in_wot = { wot.snapshot().contains(authenticated_author, self_id) };
 
         if !in_wot {
             warn!(

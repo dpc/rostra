@@ -5,11 +5,11 @@ use std::time::Duration;
 use futures::StreamExt as _;
 use futures::future::BoxFuture;
 use futures::stream::FuturesUnordered;
-use rostra_client_db::{Database, DbResult, IdsFolloweesRecord};
+use rostra_client_db::{CurrentState, Database, DbResult, IdsFolloweesRecord};
 use rostra_core::event::VerifiedEvent;
 use rostra_core::id::{RostraId, ToShort as _};
 use rostra_util_error::FmtCompact as _;
-use tokio::sync::{RwLock, watch};
+use tokio::sync::RwLock;
 use tokio::time::Instant;
 use tracing::{debug, error, instrument, trace, warn};
 
@@ -80,7 +80,7 @@ pub struct PollFolloweeHeadUpdates {
     networking: Arc<ClientNetworking>,
     db: Arc<Database>,
     self_id: RostraId,
-    self_followees_rx: watch::Receiver<Arc<HashMap<RostraId, IdsFolloweesRecord>>>,
+    self_followees: CurrentState<Arc<HashMap<RostraId, IdsFolloweesRecord>>>,
     connections: ConnectionCache,
 }
 
@@ -92,7 +92,7 @@ impl PollFolloweeHeadUpdates {
             networking: client.networking().clone(),
             db: client.db().clone(),
             self_id: client.rostra_id(),
-            self_followees_rx: client.self_followees_subscribe(),
+            self_followees: client.self_followees_subscribe(),
             connections: client.connection_cache().clone(),
         }
     }
@@ -106,7 +106,7 @@ impl PollFolloweeHeadUpdates {
         let backoff_state: SharedBackoffState = Arc::new(RwLock::new(HashMap::new()));
 
         Self::update_desired_followees(
-            &self.self_followees_rx,
+            &self.self_followees,
             &mut desired_peers,
             &active_peers,
             &mut pending_peers,
@@ -136,14 +136,14 @@ impl PollFolloweeHeadUpdates {
                         pending_peers.insert(peer_id);
                     }
                 }
-                res = self.self_followees_rx.changed() => {
+                res = self.self_followees.changed() => {
                     if res.is_err() {
                         debug!(target: LOG_TARGET, "Followees channel closed, shutting down");
                         break;
                     }
                     debug!(target: LOG_TARGET, "Followees changed, updating poll list");
                     Self::update_desired_followees(
-                        &self.self_followees_rx,
+                        &self.self_followees,
                         &mut desired_peers,
                         &active_peers,
                         &mut pending_peers,
@@ -166,13 +166,13 @@ impl PollFolloweeHeadUpdates {
     }
 
     fn update_desired_followees(
-        self_followees_rx: &watch::Receiver<Arc<HashMap<RostraId, IdsFolloweesRecord>>>,
+        self_followees: &CurrentState<Arc<HashMap<RostraId, IdsFolloweesRecord>>>,
         desired_peers: &mut BTreeSet<RostraId>,
         active_peers: &BTreeSet<RostraId>,
         pending_peers: &mut BTreeSet<RostraId>,
     ) {
         desired_peers.clear();
-        desired_peers.extend(self_followees_rx.borrow().keys().copied());
+        desired_peers.extend(self_followees.snapshot().keys().copied());
         pending_peers.retain(|id| desired_peers.contains(id));
 
         for peer_id in desired_peers.difference(active_peers) {
