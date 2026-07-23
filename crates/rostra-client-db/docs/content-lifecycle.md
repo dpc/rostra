@@ -635,6 +635,15 @@ Both cases indicate bugs in the calling code and will panic in debug builds.
   unresolved canonical deletion attribution converge
 - `prop_live_raw_content_lifecycle_converges` - Live RAW content bytes, RC,
   queue termination, and complete usage accounting converge
+- `prop_terminal_content_lifecycle_converges` - Generated shared payloads,
+  direct deletion, explicit pruning, eligible zero-RC byte collection, and
+  usage buckets converge under one semantic oracle that ignores permitted
+  physical residue
+- `prop_replacement_projection_reversion_converges` - Deleting-post chains
+  deterministically cover absent, empty, and whitespace bodies in both chain
+  positions plus live and finally deleted edit chains, composing immutable
+  replacement lineage with authored-time, reply, both public news orders,
+  self-mention, receipt-membership, and visibility reversion
 - `prop_follow_semantics_converge` - Follow winners, reverse membership,
   canonical epochs, and retained unfollow boundaries converge
 - `prop_profile_and_singleton_semantics_converge` - Profile fields and

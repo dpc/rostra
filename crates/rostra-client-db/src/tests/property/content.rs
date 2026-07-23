@@ -6,6 +6,7 @@ use rostra_core::id::{RostraId, RostraIdSecretKey};
 use rostra_core::{ContentHash, ShortEventId};
 
 use super::runner::{Plan, plan_strategy, run_pair, run_property, with_content};
+use super::usage::Usage;
 use crate::{
     Database, DbResult, content_rc, content_store, events_content_missing, events_content_state,
     ids_data_usage,
@@ -16,26 +17,6 @@ struct ContentSpec {
     author: u8,
     payload: u8,
     byte: u8,
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-struct Usage {
-    current_metadata_size: u64,
-    total_metadata_size: u64,
-    current_metadata_num: u64,
-    total_metadata_num: u64,
-    current_content_size: u64,
-    total_content_size: u64,
-    current_payload_num: u64,
-    total_payload_num: u64,
-    missing_payload_size: u64,
-    missing_payload_num: u64,
-    deleted_payload_size: u64,
-    deleted_payload_num: u64,
-    pruned_payload_size: u64,
-    pruned_payload_num: u64,
-    invalid_payload_size: u64,
-    invalid_payload_num: u64,
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -109,24 +90,7 @@ fn model(events: &[rostra_core::event::VerifiedEventContent]) -> ContentSnapshot
         let hash = content.compute_content_hash();
         store.insert(hash, content.as_ref().to_vec());
         *reference_counts.entry(hash).or_default() += 1;
-        let author_usage = usage.entry(event.author()).or_insert(Usage {
-            current_metadata_size: 0,
-            total_metadata_size: 0,
-            current_metadata_num: 0,
-            total_metadata_num: 0,
-            current_content_size: 0,
-            total_content_size: 0,
-            current_payload_num: 0,
-            total_payload_num: 0,
-            missing_payload_size: 0,
-            missing_payload_num: 0,
-            deleted_payload_size: 0,
-            deleted_payload_num: 0,
-            pruned_payload_size: 0,
-            pruned_payload_num: 0,
-            invalid_payload_size: 0,
-            invalid_payload_num: 0,
-        });
+        let author_usage = usage.entry(event.author()).or_default();
         author_usage.current_metadata_size += 192;
         author_usage.total_metadata_size += 192;
         author_usage.current_metadata_num += 1;
@@ -180,27 +144,7 @@ async fn snapshot(db: &Database) -> DbResult<ContentSnapshot> {
             .map(|entry| {
                 entry.map(|(key, value)| {
                     let value = value.value();
-                    (
-                        key.value(),
-                        Usage {
-                            current_metadata_size: value.current_metadata_size,
-                            total_metadata_size: value.total_metadata_size,
-                            current_metadata_num: value.current_metadata_num,
-                            total_metadata_num: value.total_metadata_num,
-                            current_content_size: value.current_content_size,
-                            total_content_size: value.total_content_size,
-                            current_payload_num: value.current_payload_num,
-                            total_payload_num: value.total_payload_num,
-                            missing_payload_size: value.missing_payload_size,
-                            missing_payload_num: value.missing_payload_num,
-                            deleted_payload_size: value.deleted_payload_size,
-                            deleted_payload_num: value.deleted_payload_num,
-                            pruned_payload_size: value.pruned_payload_size,
-                            pruned_payload_num: value.pruned_payload_num,
-                            invalid_payload_size: value.invalid_payload_size,
-                            invalid_payload_num: value.invalid_payload_num,
-                        },
-                    )
+                    (key.value(), value.into())
                 })
             })
             .collect::<Result<_, _>>()?;
