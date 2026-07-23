@@ -97,6 +97,7 @@
                 rostraCoreFeatures = craneLib.mkCargoDerivation {
                   pname = "rostra-core-features";
                   cargoArtifacts = workspaceDeps;
+                  doInstallCargoArtifacts = false;
                   installArtifacts = false;
                   buildPhaseCargoCommand = ''
                     for combo in \
@@ -118,6 +119,7 @@
 
                 tests = craneLib.cargoNextest {
                   cargoArtifacts = workspace;
+                  doInstallCargoArtifacts = false;
                   cargoNextestExtraArgs = "--workspace --show-progress none";
                 };
 
@@ -125,6 +127,7 @@
                   # must be deps, otherwise it will not rebuild
                   # anything and thus not detect anything
                   cargoArtifacts = workspaceDeps;
+                  doInstallCargoArtifacts = false;
                   cargoClippyExtraArgs = "-- -D warnings";
                 };
 
