@@ -1,10 +1,11 @@
 # Inspecting the live development UI
 
-`rostra-ui-preview` is a small Rust CDP client for repeatable visual inspection.
-It deliberately supports only navigation, activation by accessible label or
-element ID, viewport scrolling, readiness waits, structured element evidence,
-screenshots, and explicitly approved existing-dev-identity unlock. It does not
-introduce a Python, Node.js, WebDriver, or general browser-test project.
+`rostra-ui-preview` is a small Rust CDP client for repeatable UI interaction and
+visual inspection. It deliberately supports only navigation, activation and
+text entry by accessible label or element ID, viewport scrolling, readiness
+waits, structured element evidence, screenshots, and explicitly approved
+existing-dev-identity unlock. It does not introduce a Python, Node.js,
+WebDriver, or general browser-test project.
 
 ## Start and inspect
 
@@ -39,6 +40,16 @@ called directly. The default viewport is 1280×900; use
 `--width 390 --height 844` for a typical mobile viewport. With `--headed` and
 an interactive terminal, enter one action per line and press Ctrl-D to close
 the browser. Run `just ui-inspect --help` for all flags.
+
+`fill-label LABEL<TAB>TEXT` and `fill-id ID<TAB>TEXT` replace an input,
+textarea, or editable element's text using Chromium text input. The separator
+between the target and text is one literal tab, which keeps spaces in both
+arguments unambiguous:
+
+```text
+fill-label Display Name	My Rostra Name
+fill-id post-body	Hello, Rostra!
+```
 
 `hover-label LABEL` and `hover-id ID` scroll a target into view and move
 Chromium's pointer to its center. Subsequent inspection therefore observes real
@@ -148,12 +159,15 @@ $ cargo test -p rostra-ui-preview
 ```
 
 The ignored smoke test starts a controlled loopback HTML fixture, launches the
-pinned Chromium, exercises both activation methods and scrolling, and verifies
-structured inspection (including visible toggle context and output bounds), the
-exact unlock control with redacted secret errors, transient marker recovery,
-nearby label suggestions, real hover/unhover state, bounded child-layout
-cardinality/form-value omission, authenticated error cleanup, and a PNG capture. Run it
-after changing CDP, Chromium, web-UI marker/unlock markup, or lifecycle code:
+pinned Chromium, exercises activation, scrolling, and text fill by label and ID,
+and verifies structured inspection (including visible toggle context and output
+bounds), editable input/textarea/contenteditable replacement and clearing,
+bubbling input events, generic password and immutable-control refusal, the exact
+unlock control with redacted secret errors, transient marker recovery, nearby
+label suggestions, real hover/unhover state, bounded child-layout
+cardinality/form-value omission, authenticated error cleanup, and a PNG capture.
+Run it after changing CDP, Chromium, web-UI marker/unlock markup, or lifecycle
+code:
 
 ```console
 $ cargo test -p rostra-ui-preview browser::tests::chromium_smoke -- --ignored

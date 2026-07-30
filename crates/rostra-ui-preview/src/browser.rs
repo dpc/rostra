@@ -30,6 +30,17 @@ impl std::fmt::Display for ElementLookupError {
 
 impl std::error::Error for ElementLookupError {}
 
+/// Semantic accessibility target selected by a label-based action.
+#[derive(Clone, Copy)]
+enum LabelTarget {
+    /// An activatable control.
+    Interactive,
+    /// Any meaningful rendered element.
+    Inspectable,
+    /// An editable text element.
+    Editable,
+}
+
 /// Owned isolated Chromium process and its page-level DevTools client.
 pub struct Browser {
     /// Chromium process and profile cleanup owner.
@@ -156,7 +167,7 @@ impl Browser {
     /// Activate the unique interactive accessibility node with an exact label.
     pub fn click_label(&mut self, label: &str) -> Result<()> {
         self.ensure_rostra_page()?;
-        let object_id = self.label_object_id(label, true)?;
+        let object_id = self.label_object_id(label, LabelTarget::Interactive)?;
         self.cdp.call(
             "Runtime.callFunctionOn",
             json!({
@@ -183,10 +194,91 @@ impl Browser {
         self.settle_after_interaction()
     }
 
+    /// Replace the text in an editable element found by its accessible label.
+    pub fn fill_label(&mut self, label: &str, text: &str) -> Result<()> {
+        self.ensure_rostra_page()?;
+        let object_id = self.label_object_id(label, LabelTarget::Editable)?;
+        self.fill_object(&object_id, text)
+    }
+
+    /// Replace the text in an editable element found by its exact HTML ID.
+    pub fn fill_id(&mut self, id: &str, text: &str) -> Result<()> {
+        self.ensure_rostra_page()?;
+        let object_id = self.id_object_id(id)?;
+        self.fill_object(&object_id, text)
+    }
+
+    /// Replace the text in a resolved editable element.
+    fn fill_object(&mut self, object_id: &str, text: &str) -> Result<()> {
+        self.cdp.call(
+            "Runtime.callFunctionOn",
+            json!({
+                "functionDeclaration": "function () {\
+                    const input = this instanceof HTMLInputElement;\
+                    const textarea = this instanceof HTMLTextAreaElement;\
+                    const textInputTypes = new Set(['text', 'search', 'email', 'url', 'tel']);\
+                    if (input && this.type === 'password')\
+                        throw new Error('generic fill refuses password controls');\
+                    if (input && !textInputTypes.has(this.type))\
+                        throw new Error('named input is not a textual input');\
+                    if (!input && !textarea && !this.isContentEditable)\
+                        throw new Error('named element is not editable');\
+                    if ((input || textarea) && (this.disabled || this.readOnly))\
+                        throw new Error('named control is disabled or read-only');\
+                    if (this.isContentEditable && this.getAttribute('aria-disabled') === 'true')\
+                        throw new Error('named editable element is disabled');\
+                    this.focus();\
+                    if (document.activeElement !== this && !this.contains(document.activeElement))\
+                        throw new Error('named editable element did not receive focus');\
+                    if (input || textarea) this.select();\
+                    else {\
+                        const selection = window.getSelection();\
+                        const range = document.createRange();\
+                        range.selectNodeContents(this);\
+                        selection.removeAllRanges();\
+                        selection.addRange(range);\
+                        if (!selection.containsNode(this, true))\
+                            throw new Error('named editable element could not be selected');\
+                    }\
+                }",
+                "objectId": object_id,
+                "userGesture": true,
+            }),
+        )?;
+        if text.is_empty() {
+            self.cdp.call(
+                "Runtime.callFunctionOn",
+                json!({
+                    "functionDeclaration": "function () {\
+                        if (this instanceof HTMLInputElement\
+                            || this instanceof HTMLTextAreaElement) {\
+                            const prototype = Object.getPrototypeOf(this);\
+                            const setter = Object.getOwnPropertyDescriptor(prototype, 'value')?.set;\
+                            if (!setter) throw new Error('editable control has no native value setter');\
+                            setter.call(this, '');\
+                        } else {\
+                            this.textContent = '';\
+                        }\
+                        this.dispatchEvent(new InputEvent('input', {\
+                            bubbles: true,\
+                            inputType: 'deleteContentBackward',\
+                            data: null,\
+                        }));\
+                    }",
+                    "objectId": object_id,
+                    "userGesture": true,
+                }),
+            )?;
+        } else {
+            self.cdp.call("Input.insertText", json!({ "text": text }))?;
+        }
+        self.settle_after_interaction()
+    }
+
     /// Print-ready structured rendered evidence for an accessible label.
     pub fn inspect_label(&mut self, label: &str) -> Result<Value> {
         self.ensure_rostra_page()?;
-        let object_id = self.label_object_id(label, false)?;
+        let object_id = self.label_object_id(label, LabelTarget::Inspectable)?;
         self.inspect_object(&object_id)
     }
 
@@ -200,7 +292,7 @@ impl Browser {
     /// Move Chromium's pointer onto an exact accessible-label target.
     pub fn hover_label(&mut self, label: &str) -> Result<()> {
         self.ensure_rostra_page()?;
-        let object_id = self.label_object_id(label, false)?;
+        let object_id = self.label_object_id(label, LabelTarget::Inspectable)?;
         self.hover_object(&object_id)
     }
 
@@ -389,8 +481,8 @@ impl Browser {
         Ok(())
     }
 
-    /// Resolve a unique interactive accessibility label to a remote object.
-    fn label_object_id(&mut self, label: &str, interactive_only: bool) -> Result<String> {
+    /// Resolve a unique accessibility label of the requested semantic target.
+    fn label_object_id(&mut self, label: &str, target: LabelTarget) -> Result<String> {
         self.cdp.call("Accessibility.enable", json!({}))?;
         let document = self.cdp.call("DOM.getDocument", json!({ "depth": 0 }))?;
         let node_id = document["root"]["nodeId"]
@@ -406,22 +498,22 @@ impl Browser {
         let matching = nodes
             .iter()
             .filter(|node| {
-                let allowed = if interactive_only {
-                    is_interactive(node)
-                } else {
-                    is_inspectable(node)
+                let allowed = match target {
+                    LabelTarget::Interactive => is_interactive(node),
+                    LabelTarget::Inspectable => is_inspectable(node),
+                    LabelTarget::Editable => is_editable(node),
                 };
                 allowed && ax_value(node, "name") == Some(label)
             })
             .collect::<Vec<_>>();
         let [node] = matching.as_slice() else {
-            let kind = if interactive_only {
-                "interactive element"
-            } else {
-                "inspectable element"
+            let kind = match target {
+                LabelTarget::Interactive => "interactive element",
+                LabelTarget::Inspectable => "inspectable element",
+                LabelTarget::Editable => "editable element",
             };
             let suggestions = if matching.is_empty() {
-                self.label_suggestions(label, interactive_only)?
+                self.label_suggestions(label, target)?
             } else {
                 String::new()
             };
@@ -447,18 +539,16 @@ impl Browser {
     }
 
     /// Build a bounded nearby-name hint after an exact AX lookup misses.
-    fn label_suggestions(&mut self, label: &str, interactive_only: bool) -> Result<String> {
+    fn label_suggestions(&mut self, label: &str, target: LabelTarget) -> Result<String> {
         let tree = self.cdp.call("Accessibility.getFullAXTree", json!({}))?;
         let mut candidates = tree["nodes"]
             .as_array()
             .context("accessibility tree has no nodes")?
             .iter()
-            .filter(|node| {
-                if interactive_only {
-                    is_interactive(node)
-                } else {
-                    is_inspectable(node)
-                }
+            .filter(|node| match target {
+                LabelTarget::Interactive => is_interactive(node),
+                LabelTarget::Inspectable => is_inspectable(node),
+                LabelTarget::Editable => is_editable(node),
             })
             .filter_map(|node| {
                 let name = ax_value(node, "name")?;
@@ -1137,6 +1227,13 @@ fn is_interactive(node: &Value) -> bool {
     )
 }
 
+/// Return whether an accessibility node represents an editable text control.
+fn is_editable(node: &Value) -> bool {
+    matches!(ax_value(node, "role"), Some("textbox" | "searchbox"))
+        && node["ignored"] != Value::Bool(true)
+        && node["backendDOMNodeId"].as_u64().is_some()
+}
+
 /// Return whether an AX node is a meaningful labelled inspection target.
 fn is_inspectable(node: &Value) -> bool {
     node["ignored"] != Value::Bool(true)
@@ -1252,6 +1349,14 @@ mod tests {
                     <label><input id="fixture-toggle" type="checkbox"><span class="slider"></span></label>
                     <div class="o-unlockScreen"><form class="o-unlockScreen__form" action="/unlock">
                     <input id="secret-input" name="password" type="password"></form></div>
+                    <label for="plain-text">Plain text</label>
+                    <input id="plain-text" value="old" oninput="this.dataset.inputBubbled=event.bubbles">
+                    <textarea id="plain-textarea">old area</textarea>
+                    <div id="editable" role="textbox" aria-label="Editable text" contenteditable>old editable</div>
+                    <input id="non-text-input" type="checkbox">
+                    <input id="readonly-input" value="old" readonly>
+                    <textarea id="disabled-textarea" disabled>old</textarea>
+                    <div id="not-editable">old</div>
                     <div id="hidden-root" style="display:none"><span>HIDDEN-ROOT-SENTINEL</span></div>
                     <section id="layout-container">
                       <form class="dialog-content" style="padding:20px">
@@ -1291,6 +1396,51 @@ mod tests {
         browser.open("/#fragment").unwrap();
         let fragment = browser.evaluate("location.hash").unwrap();
         assert_eq!(fragment["result"]["value"], "#fragment");
+        browser.fill_label("Plain text", "new value").unwrap();
+        let filled = browser
+            .evaluate(
+                "({ value: document.getElementById('plain-text').value,\
+                    bubbled: document.getElementById('plain-text').dataset.inputBubbled })",
+            )
+            .unwrap();
+        assert_eq!(filled["result"]["value"]["value"], "new value");
+        assert_eq!(filled["result"]["value"]["bubbled"], "true");
+        browser.fill_id("plain-textarea", "new area").unwrap();
+        assert_eq!(
+            browser
+                .evaluate("document.getElementById('plain-textarea').value")
+                .unwrap()["result"]["value"],
+            "new area"
+        );
+        browser.fill_id("plain-textarea", "").unwrap();
+        assert_eq!(
+            browser
+                .evaluate("document.getElementById('plain-textarea').value")
+                .unwrap()["result"]["value"],
+            ""
+        );
+        browser.fill_label("Editable text", "new editable").unwrap();
+        assert_eq!(
+            browser
+                .evaluate("document.getElementById('editable').textContent")
+                .unwrap()["result"]["value"],
+            "new editable"
+        );
+        assert!(
+            browser
+                .fill_id("secret-input", "refused")
+                .unwrap_err()
+                .to_string()
+                .contains("password")
+        );
+        for id in [
+            "non-text-input",
+            "readonly-input",
+            "disabled-textarea",
+            "not-editable",
+        ] {
+            assert!(browser.fill_id(id, "refused").is_err(), "{id} was accepted");
+        }
         browser.click_label("Change label").unwrap();
         browser.click_id("change-id").unwrap();
         let inspection = browser.inspect_label("Change label").unwrap();

@@ -1,9 +1,10 @@
 ---
 name: preview-rostra
 description: >
-  Use this skill to inspect Rostra's live development UI through structured
-  rendered evidence or human-readable screenshots while navigating, activating
-  controls, and scrolling without Python or JavaScript tooling.
+  Use this skill to interact with Rostra's live development UI by navigating,
+  activating controls, entering text, scrolling, and inspecting structured
+  rendered evidence or human-readable screenshots without Python or JavaScript
+  tooling.
 user-invocable: true
 ---
 
@@ -55,7 +56,19 @@ EOF
 pointer to its center, so `:hover`, pseudo-elements, and transitions are real
 browser state. Always `unhover` before unrelated evidence.
 
-4. Capture PNGs only when an image-capable human or tool will actually read them:
+4. Fill ordinary text controls by accessible label or HTML ID. Separate the
+   target and text with one literal tab:
+
+```text
+fill-label Display Name	My Rostra Name
+fill-id new-post-content	Hello, Rostra!
+```
+
+These actions replace the current text through Chromium text input and support
+inputs, textareas, and editable elements. Prefer labels; use IDs when a control
+has no accessible label. Do not use these actions for secrets.
+
+5. Capture PNGs only when an image-capable human or tool will actually read them:
 
 ```bash
 just ui-inspect --path /news <<'EOF'
@@ -70,9 +83,9 @@ Use `click-label Accessible name` for a uniquely labelled control or
 later navigation. Input lines execute from top to bottom. For mobile inspection
 add `--width 390 --height 844` before the here-document.
 
-5. Read each PNG with an image-capable tool. Do not claim visual inspection
+6. Read each PNG with an image-capable tool. Do not claim visual inspection
    based only on a successful command.
-6. Delete screenshots after reporting findings.
+7. Delete screenshots after reporting findings.
 
 ## Existing development identity
 

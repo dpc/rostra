@@ -1,7 +1,7 @@
 use std::path::PathBuf;
 use std::str::FromStr;
 
-use anyhow::{Result, bail};
+use anyhow::{Context, Result, bail};
 
 /// Vertical direction used by the viewport-sized scroll action.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -21,6 +21,10 @@ pub enum Action {
     ClickLabel(String),
     /// Activate the element with this HTML ID.
     ClickId(String),
+    /// Replace an accessible editable element's text.
+    FillLabel { label: String, text: String },
+    /// Replace an editable element's text by its HTML ID.
+    FillId { id: String, text: String },
     /// Scroll by three quarters of the viewport.
     Scroll(ScrollDirection),
     /// Wait for document and font readiness plus two animation frames.
@@ -48,11 +52,12 @@ impl FromStr for Action {
     type Err = anyhow::Error;
 
     fn from_str(input: &str) -> Result<Self> {
-        let (command, argument) = input
-            .split_once(char::is_whitespace)
-            .map_or((input, ""), |(command, argument)| {
-                (command, argument.trim())
-            });
+        let (command, raw_argument) = input.split_once(char::is_whitespace).unwrap_or((input, ""));
+        let argument = if matches!(command, "fill-label" | "fill-id") {
+            raw_argument
+        } else {
+            raw_argument.trim()
+        };
 
         match (command, argument) {
             ("open", "") => bail!("open requires a path"),
@@ -61,6 +66,14 @@ impl FromStr for Action {
             ("click-label", label) => Ok(Self::ClickLabel(label.to_owned())),
             ("click-id", "") => bail!("click-id requires an element ID"),
             ("click-id", id) => Ok(Self::ClickId(id.to_owned())),
+            ("fill-label", argument) => {
+                let (label, text) = parse_fill_arguments("fill-label", argument)?;
+                Ok(Self::FillLabel { label, text })
+            }
+            ("fill-id", argument) => {
+                let (id, text) = parse_fill_arguments("fill-id", argument)?;
+                Ok(Self::FillId { id, text })
+            }
             ("scroll", "up") => Ok(Self::Scroll(ScrollDirection::Up)),
             ("scroll", "down") => Ok(Self::Scroll(ScrollDirection::Down)),
             ("scroll", _) => bail!("scroll direction must be `up` or `down`"),
@@ -85,6 +98,16 @@ impl FromStr for Action {
             _ => bail!("unknown action `{command}`"),
         }
     }
+}
+
+fn parse_fill_arguments(command: &str, argument: &str) -> Result<(String, String)> {
+    let (target, text) = argument
+        .split_once('\t')
+        .with_context(|| format!("{command} requires TARGET, a tab, and TEXT"))?;
+    if target.is_empty() {
+        bail!("{command} requires a non-empty target");
+    }
+    Ok((target.to_owned(), text.to_owned()))
 }
 
 impl Action {
@@ -128,6 +151,42 @@ mod tests {
                 path: "dev/2345/secret".into(),
             }
         );
+    }
+
+    #[test]
+    fn parses_fill_text_without_losing_spaces() {
+        assert_eq!(
+            "fill-label Post content\tHello, Rostra!"
+                .parse::<Action>()
+                .unwrap(),
+            Action::FillLabel {
+                label: "Post content".into(),
+                text: "Hello, Rostra!".into(),
+            }
+        );
+        assert_eq!(
+            "fill-id field\ttrailing  ".parse::<Action>().unwrap(),
+            Action::FillId {
+                id: "field".into(),
+                text: "trailing  ".into(),
+            }
+        );
+        assert_eq!(
+            "fill-id field\t".parse::<Action>().unwrap(),
+            Action::FillId {
+                id: "field".into(),
+                text: String::new(),
+            }
+        );
+        assert_eq!(
+            "fill-id field\t  padded  ".parse::<Action>().unwrap(),
+            Action::FillId {
+                id: "field".into(),
+                text: "  padded  ".into(),
+            }
+        );
+        assert!("fill-id \ttext".parse::<Action>().is_err());
+        assert!("fill-label Post content Hello".parse::<Action>().is_err());
     }
 
     #[test]

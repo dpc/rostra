@@ -60,3 +60,9 @@ final cleanup step that closes open dialogs and posts Rostra logout after
 success or ordinary errors. Chromium/CDP loss or forced termination can prevent
 that cleanup and leave server-memory signing authority until server restart or
 later GC.
+
+Generic `fill-label` and `fill-id` actions accept only enabled, mutable textual
+inputs, textareas, and editable elements. They reject password controls; secrets
+remain exclusive to the protected `unlock-from-dev-secret` action. The live page
+and its scripts receive ordinary fill input events and may react to or persist
+the entered text.

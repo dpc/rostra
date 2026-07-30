@@ -53,7 +53,9 @@ struct Args {
     /// from stdin.
     ///
     /// Supported values include: "open PATH", "click-label LABEL", "click-id
-    /// ID", "inspect-label LABEL", "inspect-id ID", "hover-label LABEL",
+    /// ID", "fill-label LABEL [literal tab] TEXT", "fill-id ID [literal tab]
+    /// TEXT",
+    /// "inspect-label LABEL", "inspect-id ID", "hover-label LABEL",
     /// "hover-id ID", "unhover", "scroll up", "scroll down", "ready",
     /// "screenshot PATH", and "unlock-from-dev-secret PATH".
     #[arg(long = "action", value_name = "COMMAND")]
@@ -168,6 +170,8 @@ fn execute(browser: &mut Browser, action: &Action, allow_secret_input: bool) -> 
         Action::Open(target) => browser.open(target),
         Action::ClickLabel(label) => browser.click_label(label),
         Action::ClickId(id) => browser.click_id(id),
+        Action::FillLabel { label, text } => browser.fill_label(label, text),
+        Action::FillId { id, text } => browser.fill_id(id, text),
         Action::Scroll(direction) => browser.scroll(*direction),
         Action::Ready => browser.verify_ready(),
         Action::Screenshot(path) => {
