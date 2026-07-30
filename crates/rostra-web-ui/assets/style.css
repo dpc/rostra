@@ -2545,11 +2545,12 @@ h4.o-settingsContent__sectionHeader {
   display: flex;
   flex-direction: column;
   gap: 0.5rem;
+  min-width: 0;
 }
 
 .m-eventExplorer__row {
   display: grid;
-  grid-template-columns: [label] 5rem [col1] 1fr [col2] auto [col3] auto [end];
+  grid-template-columns: [label] 5rem [col1] minmax(0, 1fr) [col2] auto [col3] auto [end];
   gap: 0.25rem 0.75rem;
   padding: 0.75rem;
   background: var(--color-post-bg);
@@ -2557,6 +2558,7 @@ h4.o-settingsContent__sectionHeader {
   border-radius: var(--border-radius-std);
   font-size: 0.875rem;
   align-items: baseline;
+  min-width: 0;
 }
 
 .m-eventExplorer__row:target {
@@ -2583,6 +2585,8 @@ h4.o-settingsContent__sectionHeader {
   background-color: var(--color-pre-bg);
   padding: 0.125rem 0.375rem;
   border-radius: var(--border-radius-std);
+  min-width: 0;
+  overflow-wrap: anywhere;
 }
 
 .m-eventExplorer__flags {
@@ -2660,6 +2664,7 @@ h4.o-settingsContent__sectionHeader {
   font-family: monospace;
   color: var(--color-link);
   text-decoration: none;
+  overflow-wrap: anywhere;
 }
 
 .m-eventExplorer__parentLink:hover {
@@ -2691,6 +2696,21 @@ h4.o-settingsContent__sectionHeader {
 .m-eventExplorer__binaryNote {
   font-style: italic;
   opacity: 0.6;
+}
+
+@media (max-width: 767px) {
+  .m-eventExplorer__row {
+    grid-template-columns: [label] 5rem [value] minmax(0, 1fr) [end];
+    gap: 0.25rem 0.5rem;
+  }
+
+  .m-eventExplorer__contentHash,
+  .m-eventExplorer__contentSize,
+  .m-eventExplorer__contentState,
+  .m-eventExplorer__parentPrev,
+  .m-eventExplorer__parentAux {
+    grid-column: value;
+  }
 }
 
 /* P2P Explorer */
