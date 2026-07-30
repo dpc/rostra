@@ -376,13 +376,33 @@ function personaTagSelectToggle(toggleEl) {
   const wasOpen = widget.classList.contains("-open");
   widget.classList.toggle("-open");
 
-  // Position the fixed dropdown relative to the toggle button
   if (!wasOpen) {
     const dropdown = widget.querySelector(".m-personaTagSelect__dropdown");
     const rect = toggleEl.getBoundingClientRect();
-    dropdown.style.top = rect.bottom + "px";
-    dropdown.style.left = rect.left + "px";
-    dropdown.style.width = Math.max(rect.width, 160) + "px";
+    const viewportMargin = 8;
+    const availableBelow = window.innerHeight - rect.bottom - viewportMargin;
+    const availableAbove = rect.top - viewportMargin;
+    const preferredHeight = Math.min(dropdown.scrollHeight, 200);
+    const openAbove =
+      availableBelow < preferredHeight && availableBelow < availableAbove;
+    const availableHeight = openAbove ? availableAbove : availableBelow;
+    const width = Math.min(
+      Math.max(rect.width, 160),
+      window.innerWidth - 2 * viewportMargin,
+    );
+
+    dropdown.style.top = openAbove ? "auto" : rect.bottom + "px";
+    dropdown.style.bottom = openAbove
+      ? window.innerHeight - rect.top + "px"
+      : "auto";
+    dropdown.style.left =
+      Math.max(
+        viewportMargin,
+        Math.min(rect.left, window.innerWidth - width - viewportMargin),
+      ) + "px";
+    dropdown.style.width = width + "px";
+    dropdown.style.maxHeight =
+      Math.max(Math.min(availableHeight, 200), 0) + "px";
   }
 }
 
