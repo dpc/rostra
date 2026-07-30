@@ -1,0 +1,28 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+skill_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+
+exec env \
+  -u AGENT_BROWSER_ARGS \
+  -u AGENT_BROWSER_AUTO_CONNECT \
+  -u AGENT_BROWSER_CDP \
+  -u AGENT_BROWSER_CONFIG \
+  -u AGENT_BROWSER_ENABLE \
+  -u AGENT_BROWSER_EXECUTABLE_PATH \
+  -u AGENT_BROWSER_EXTENSIONS \
+  -u AGENT_BROWSER_INIT_SCRIPTS \
+  -u AGENT_BROWSER_PLUGINS \
+  -u AGENT_BROWSER_PROFILE \
+  -u AGENT_BROWSER_PROVIDER \
+  -u AGENT_BROWSER_PROXY \
+  -u AGENT_BROWSER_PROXY_BYPASS \
+  -u AGENT_BROWSER_RESTORE \
+  -u AGENT_BROWSER_SESSION \
+  -u AGENT_BROWSER_SESSION_NAME \
+  -u AGENT_BROWSER_STATE \
+  -u ALL_PROXY \
+  -u HTTP_PROXY \
+  -u HTTPS_PROXY \
+  -u NO_PROXY \
+  agent-browser --config "$skill_dir/agent-browser.json" "$@"

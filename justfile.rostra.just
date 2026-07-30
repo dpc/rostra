@@ -67,7 +67,3 @@ _dev PORT OPEN_BROWSER:
             --reuseport \
             --default-profile rs64xtoy61x4grdcd4d75pazf8dcwrjrm4krqfcfz7oxhmm33ci74o \
           "
-
-# inspect the live development UI with an isolated Chromium profile
-ui-inspect *ARGS:
-    cargo run --locked -p rostra-ui-preview -- {{ARGS}}

@@ -4289,19 +4289,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "rostra-ui-preview"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "clap",
- "data-encoding",
- "serde_json",
- "tempfile",
- "tungstenite",
- "url",
-]
-
-[[package]]
 name = "rostra-util"
 version = "0.1.0"
 dependencies = [

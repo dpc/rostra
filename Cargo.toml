@@ -12,7 +12,6 @@ members = [
   "crates/rostra-util-error",
   "crates/rostra-util-fmt",
   "crates/rostra-web-ui",
-  "crates/rostra-ui-preview",
   "crates/rostra-djot",
   "crates/axum-dpc-static-assets",
   "crates/tower-sessions-redb-store",
@@ -115,7 +114,6 @@ tower-sessions-redb-store = { path = "crates/tower-sessions-redb-store" }
 tower-service = "0.3.3"
 tracing = "0.1.41"
 tracing-subscriber = { version = "0.3.19", features = ["env-filter"] }
-tungstenite = { version = "0.28.0", default-features = false, features = ["handshake"] }
 z32 = "1.1.1"
 reqwest = { version = "0.12", default-features = false, features = [
   "rustls-tls",
