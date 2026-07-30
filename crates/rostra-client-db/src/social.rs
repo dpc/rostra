@@ -672,7 +672,7 @@ impl Database {
                 }
             }
 
-            records.sort_by(|a, b| (b.ts, b.event_id).cmp(&(a.ts, a.event_id)));
+            records.sort_by_key(|record| std::cmp::Reverse((record.ts, record.event_id)));
             records.truncate(limit);
             let cursor = records.last().map(|record| EventPaginationCursor {
                 ts: record.ts,
@@ -741,7 +741,7 @@ impl Database {
                 }
             }
 
-            records.sort_by(|a, b| (b.ts, b.event_id).cmp(&(a.ts, a.event_id)));
+            records.sort_by_key(|record| std::cmp::Reverse((record.ts, record.event_id)));
             records.truncate(limit);
             let cursor = records.last().map(|record| EventPaginationCursor {
                 ts: record.ts,

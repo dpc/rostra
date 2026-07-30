@@ -68,6 +68,21 @@ test: build
   cargo test
 
 
+# scan the project with ast-grep rules
+ast-grep *ARGS="":
+  ast-grep scan --config sgconfig.yml {{ARGS}}
+
+
+# run cargo-crap on the workspace
+crap *ARGS="--workspace":
+  #!/usr/bin/env bash
+  set -euo pipefail
+  if [ ! -f Cargo.toml ]; then
+    cd {{invocation_directory()}}
+  fi
+  cargo-crap {{ARGS}}
+
+
 # run `cargo clippy` on everything
 clippy *ARGS="--locked --offline --workspace --all-targets":
   cargo clippy {{ARGS}} -- --deny warnings --allow deprecated

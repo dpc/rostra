@@ -1,4 +1,4 @@
-error[E0433]: failed to resolve: could not find `def_table` in `rostra_client_db`
+error[E0433]: cannot find `def_table` in `rostra_client_db`
  --> tests/ui/fail/internal_table_macro.rs:1:19
   |
 1 | rostra_client_db::def_table!(forbidden: u64 => u64);

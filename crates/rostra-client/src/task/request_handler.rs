@@ -134,7 +134,7 @@ impl RequestHandler {
         if let Err(err) = Arc::clone(&self).handle_incoming_try(incoming).await {
             match err {
                 // normal, mostly ignore
-                IncomingConnectionError::Connection { source: _, .. } => {
+                IncomingConnectionError::Connection { .. } => {
                     trace!(target: LOG_TARGET, err = %err.fmt_compact(), ?peer_addr, "Client disconnected");
                 }
                 _ => {

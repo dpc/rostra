@@ -4,7 +4,7 @@
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-25.11";
     flake-utils.url = "github:numtide/flake-utils";
-    flakebox.url = "github:rustshop/flakebox?rev=9a9e59ca13f67a17f77addeebc054e3cdedfd179";
+    flakebox.url = "github:rustshop/flakebox?rev=6e598cc15b5c2b576f24862cd1bc22edad5f00a1";
 
     bundlers = {
       url = "github:NixOS/bundlers";
@@ -34,6 +34,8 @@
             github.ci.buildOutputs = [ ".#ci.${projectName}" ];
             just.importPaths = [ "justfile.rostra.just" ];
             just.rules.watch.enable = false;
+            linker.mold.enable = true;
+            linker.wild.enable = false;
             toolchain.channel = "stable";
             rust.rustfmt.enable = false;
           };
@@ -58,16 +60,10 @@
           "Cargo.toml"
           "Cargo.lock"
           "crates"
-          "crates/.*"
-          ".*/Cargo.toml"
-          ".*\.rs"
         ];
 
-        buildSrc = flakeboxLib.filterSubPaths {
-          root = builtins.path {
-            name = projectName;
-            path = ./.;
-          };
+        buildSrc = flakeboxLib.source.fromPaths {
+          root = ./.;
           paths = buildPaths;
         };
 
