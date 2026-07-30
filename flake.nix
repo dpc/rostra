@@ -3,6 +3,7 @@
 
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-25.11";
+    nixpkgs-agent-browser.url = "github:NixOS/nixpkgs/nixos-unstable";
     flake-utils.url = "github:numtide/flake-utils";
     flakebox.url = "github:rustshop/flakebox?rev=6e598cc15b5c2b576f24862cd1bc22edad5f00a1";
 
@@ -16,6 +17,7 @@
     {
       self,
       nixpkgs,
+      nixpkgs-agent-browser,
       flake-utils,
       flakebox,
       bundlers,
@@ -27,6 +29,7 @@
       system:
       let
         pkgs = nixpkgs.legacyPackages.${system};
+        agentBrowser = nixpkgs-agent-browser.legacyPackages.${system}.agent-browser;
         projectName = "rostra";
 
         flakeboxLib = flakebox.lib.mkLib pkgs {
@@ -215,6 +218,7 @@
         devShells = flakeboxLib.mkShells {
           toolchain = toolchainAll;
           packages = with pkgs; [
+            agentBrowser
             chromium
             jq
             systemfd
