@@ -2716,8 +2716,9 @@ h4.o-settingsContent__sectionHeader {
 /* P2P Explorer */
 .m-p2pExplorer__statusGrid {
   display: grid;
-  grid-template-columns: 20% 80%;
+  grid-template-columns: minmax(0, 20%) minmax(0, 1fr);
   gap: 0.5rem 1rem;
+  min-width: 0;
 }
 
 .m-p2pExplorer__statusLabel {
@@ -2727,6 +2728,7 @@ h4.o-settingsContent__sectionHeader {
 
 .m-p2pExplorer__statusValue {
   font-family: var(--font-mono);
+  min-width: 0;
 }
 
 .m-p2pExplorer__statusValue.-success {
