@@ -82,7 +82,7 @@ test-log = { version = "0.2.16", features = ["trace"] }
 trybuild = "1"
 rand = "0.9"
 redb = "2.3.0"
-redb-bincode = { git = "https://github.com/rustshop/redb-bincode", rev = "3f7414710f1d86610277c759c640fc2213730d22" }
+redb-bincode = "0.5.0"
 rostra-core = { version = "0.1.0", path = "crates/rostra-core" }
 rostra-client = { path = "crates/rostra-client" }
 rostra-client-db = { version = "0.1.0", path = "crates/rostra-client-db" }

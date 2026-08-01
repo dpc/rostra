@@ -23,7 +23,6 @@ data-encoding = { workspace = true }
 bincode = { workspace = true }
 clap = { workspace = true }
 futures = { workspace = true }
-redb-bincode = { workspace = true }
 reqwest = { workspace = true, features = [
   "rustls-tls",
 ], default-features = false }
