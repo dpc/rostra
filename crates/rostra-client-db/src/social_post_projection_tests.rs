@@ -733,3 +733,62 @@ async fn inconsistent_eligible_reaction_reversion_fails_and_rolls_back() -> Boxe
 
     Ok(())
 }
+
+#[test_log::test(tokio::test(flavor = "multi_thread"))]
+async fn deleting_unprocessed_shared_content_does_not_revert_projection() -> BoxedErrorResult<()> {
+    let secret = RostraIdSecretKey::from_bytes([87; 32]);
+    let author = secret.id();
+    let db = Database::new_in_memory(author).await?;
+    let reply_target = social_post(
+        secret,
+        59,
+        None,
+        None,
+        content_kind::SocialPost::new_text("target".to_owned(), None, Default::default()),
+    );
+    let reply_to = ExternalEventId::new(author, reply_target.event_id());
+    let content = content_kind::SocialPost::new_text(
+        "shared reply".to_owned(),
+        Some(reply_to),
+        Default::default(),
+    );
+    let processed = social_post(secret, 60, None, None, content.clone());
+    let unprocessed = social_post(secret, 61, None, None, content);
+    let deleting = deletion(secret, 62, unprocessed.event_id(), unprocessed.event_id());
+
+    assert_eq!(processed.content_hash(), unprocessed.content_hash());
+    db.try_process_event_with_content(&processed).await?;
+    db.try_process_event(&unprocessed.event).await?;
+    db.try_process_event(&deleting).await?;
+
+    db.read_with(|tx| {
+        let aggregate = tx
+            .open_table(&social_posts::TABLE)?
+            .get(&reply_target.event_id().to_short())?
+            .expect("processed reply aggregate must exist")
+            .value();
+        assert_eq!(aggregate.reply_count, 1);
+        assert!(
+            tx.open_table(&social_posts_replies::TABLE)?
+                .get(&(
+                    reply_target.event_id().to_short(),
+                    processed.timestamp(),
+                    processed.event_id().to_short(),
+                ))?
+                .is_some()
+        );
+        assert!(
+            tx.open_table(&social_posts_replies::TABLE)?
+                .get(&(
+                    reply_target.event_id().to_short(),
+                    unprocessed.timestamp(),
+                    unprocessed.event_id().to_short(),
+                ))?
+                .is_none()
+        );
+        Ok(())
+    })
+    .await?;
+
+    Ok(())
+}

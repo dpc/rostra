@@ -305,15 +305,18 @@ impl Database {
                         )
                     );
 
-                    if !rc_already_decremented {
-                        // Look up content from content_store to return for
-                        // reverting
+                    if old_state.is_none() {
+                        // Only processed content applied projections. Bytes in
+                        // the shared store can also belong to an unprocessed
+                        // Missing event.
                         if let Some(ContentStoreRecord(cow)) = content_store_table
                             .get(&parent_content_hash)?
                             .map(|g| g.value())
                         {
                             reverted_parent_content = Some(cow.into_owned());
                         }
+                    }
+                    if !rc_already_decremented {
                         // Decrement RC for the deleted content
                         Database::decrement_content_rc_tx(parent_content_hash, content_rc_table)?;
                     }

@@ -1,0 +1,4 @@
+# Seeds for failure cases proptest has generated in the past. It is
+# automatically read and these particular cases re-run before any
+# novel cases are generated.
+cc b84ca13e949fb8de0f099c9a0fc7670ca0b8ea7e7519beba093fe4d66b4a1f15 # Integer overflow in replacement schedule
