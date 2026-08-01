@@ -3115,6 +3115,21 @@ h4.o-settingsContent__sectionHeader {
   box-sizing: border-box;
 }
 
+@media (max-width: 767px) {
+  .o-pageLayout:has(.o-shoutbox) {
+    height: 100dvh;
+  }
+
+  .o-pageLayout:has(.o-shoutbox) .o-navBar {
+    flex: 0 0 auto;
+  }
+
+  .o-mainBar:has(.o-shoutbox) {
+    height: auto;
+    min-height: 0;
+  }
+}
+
 .o-shoutbox__messages {
   flex: 1;
   overflow-y: auto;
