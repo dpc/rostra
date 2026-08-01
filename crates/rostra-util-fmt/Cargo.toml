@@ -1,4 +1,5 @@
 [package]
+rust-version = { workspace = true }
 name = "rostra-util-fmt"
 description = "Formatting helpers shared by Rostra crates"
 edition = { workspace = true }

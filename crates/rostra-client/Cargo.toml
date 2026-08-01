@@ -2,6 +2,7 @@
 name = "rostra-client"
 description = "Integration runtime for Rostra peer-to-peer clients"
 edition = { workspace = true }
+rust-version = { workspace = true }
 license = "MIT OR Apache-2.0 OR MPL-2.0"
 version = { workspace = true }
 repository = "https://github.com/dpc/rostra"

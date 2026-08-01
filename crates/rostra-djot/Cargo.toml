@@ -1,4 +1,5 @@
 [package]
+rust-version = { workspace = true }
 name = "rostra-djot"
 description = "Djot content utilities for Rostra"
 edition = { workspace = true }

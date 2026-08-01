@@ -3,6 +3,7 @@ name = "rostra"
 
 description = { workspace = true }
 edition = { workspace = true }
+rust-version = { workspace = true }
 license = { workspace = true }
 version = { workspace = true }
 

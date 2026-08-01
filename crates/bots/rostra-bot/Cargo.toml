@@ -1,4 +1,5 @@
 [package]
+rust-version = { workspace = true }
 name = "rostra-bot"
 
 description = { workspace = true }

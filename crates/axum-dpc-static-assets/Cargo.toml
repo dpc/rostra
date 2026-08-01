@@ -1,4 +1,5 @@
 [package]
+rust-version = { workspace = true }
 name = "axum-dpc-static-assets"
 
 description = "dpc's static asset handler for axum"

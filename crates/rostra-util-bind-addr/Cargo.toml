@@ -1,4 +1,5 @@
 [package]
+rust-version = { workspace = true }
 name = "rostra-util-bind-addr"
 version.workspace = true
 edition.workspace = true
