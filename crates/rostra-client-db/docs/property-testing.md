@@ -13,9 +13,10 @@ envelope retry, payload retry, intervention retry, and reopen form the
 quiescence fence.
 
 The properties cover the invariants governed by
-[`SPEC-event-graph`](../../rostra-core/specs/SPEC-event-graph.md),
-[`ARCH-client-database`](../specs/ARCH-client-database.md), and
-[`SPEC-event-content-lifecycle`](../specs/SPEC-event-content-lifecycle.md):
+[`SPEC-event-graph`](https://github.com/dpc/rostra/blob/master/crates/rostra-core/specs/SPEC-event-graph.md),
+[`ARCH-client-database`](https://github.com/dpc/rostra/blob/master/crates/rostra-client-db/specs/ARCH-client-database.md),
+and
+[`SPEC-event-content-lifecycle`](https://github.com/dpc/rostra/blob/master/crates/rostra-client-db/specs/SPEC-event-content-lifecycle.md):
 
 - author-scoped envelope graph state, including cross-author raw parent matches
   and canonical deletion attribution for unresolved parents;

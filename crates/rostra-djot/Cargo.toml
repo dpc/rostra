@@ -1,10 +1,23 @@
 [package]
 name = "rostra-djot"
-
-description = { workspace = true }
+description = "Djot content utilities for Rostra"
 edition = { workspace = true }
-license = { workspace = true }
+license = "MIT OR Apache-2.0 OR MPL-2.0"
 version = { workspace = true }
+repository = "https://github.com/dpc/rostra"
+homepage = "https://rostra.me"
+documentation = "https://docs.rs/rostra-djot"
+readme = "README.md"
+keywords = ["rostra", "djot", "markup", "text"]
+categories = ["text-processing"]
+include = [
+  "Cargo.toml",
+  "README.md",
+  "LICENSE-APACHE",
+  "LICENSE-MIT",
+  "LICENSE-MPL",
+  "src/**",
+]
 
 [lints]
 workspace = true

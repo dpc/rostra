@@ -257,9 +257,9 @@ receipt time.
 ### Flow 3: Content Deletion Before Target Event Arrives
 
 Parent IDs resolve only within the deleting event's author graph, as specified
-by [SPEC-event-graph](../../rostra-core/specs/SPEC-event-graph.md). A present
-event by another author with the same short ID follows this missing-target flow
-and cannot be mutated.
+by [SPEC-event-graph](https://github.com/dpc/rostra/blob/master/crates/rostra-core/specs/SPEC-event-graph.md).
+A present event by another author with the same short ID follows this
+missing-target flow and cannot be mutated.
 
 ```
 1. Delete event D arrives, same-author target T not in `events`:

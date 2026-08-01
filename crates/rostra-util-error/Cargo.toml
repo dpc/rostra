@@ -1,10 +1,22 @@
 [package]
 name = "rostra-util-error"
-
-description = { workspace = true }
+description = "Error handling helpers shared by Rostra crates"
 edition = { workspace = true }
-license = { workspace = true }
+license = "MIT OR Apache-2.0 OR MPL-2.0"
 version = { workspace = true }
+repository = "https://github.com/dpc/rostra"
+homepage = "https://rostra.me"
+documentation = "https://docs.rs/rostra-util-error"
+readme = "README.md"
+keywords = ["rostra", "error-handling"]
+include = [
+  "Cargo.toml",
+  "README.md",
+  "LICENSE-APACHE",
+  "LICENSE-MIT",
+  "LICENSE-MPL",
+  "src/**",
+]
 
 [features]
 default = []

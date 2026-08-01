@@ -1,10 +1,23 @@
 [package]
 name = "rostra-p2p"
-
-description = { workspace = true }
+description = "Iroh transport and RPC support for the Rostra protocol"
 edition = { workspace = true }
-license = { workspace = true }
+license = "MIT OR Apache-2.0 OR MPL-2.0"
 version = { workspace = true }
+repository = "https://github.com/dpc/rostra"
+homepage = "https://rostra.me"
+documentation = "https://docs.rs/rostra-p2p"
+readme = "README.md"
+keywords = ["rostra", "p2p", "iroh", "networking"]
+categories = ["asynchronous", "network-programming"]
+include = [
+  "Cargo.toml",
+  "README.md",
+  "LICENSE-APACHE",
+  "LICENSE-MIT",
+  "LICENSE-MPL",
+  "src/**",
+]
 
 [dependencies]
 anyhow = { workspace = true }
