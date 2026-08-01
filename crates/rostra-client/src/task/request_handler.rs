@@ -23,10 +23,10 @@ use snafu::{Location, OptionExt as _, ResultExt as _, Snafu};
 use tokio::sync::Semaphore;
 use tracing::{debug, error, info, instrument, trace};
 
-use crate::client::Client;
+use crate::client::{Client, ClientRefSnafu};
 use crate::error::StoreEventError;
 use crate::task::head_selection::sample_head;
-use crate::{ClientHandle, ClientRefError, ClientRefSnafu};
+use crate::{ClientHandle, ClientRefError};
 
 const LOG_TARGET: &str = "rostra::req_handler";
 

@@ -126,20 +126,13 @@ async fn test_download_events_from_child() -> BoxedErrorResult<()> {
         );
     }
 
-    // Client B calls download_events_from_child to fetch all events
-    let connections = client_b.connection_cache().clone();
+    // Client B explicitly synchronizes all ancestors from the discovered head.
     let peers = vec![id_a, id_b];
 
-    let downloaded = rostra_client::util::rpc::download_events_from_child(
-        id_a,
-        head_id,
-        client_b.networking(),
-        &connections,
-        &peers,
-        db_b,
-    )
-    .await
-    .expect("download_events_from_child should not fail");
+    let downloaded = client_b
+        .sync_event_from_peers(id_a, head_id, &peers)
+        .await
+        .expect("event synchronization should not fail");
 
     assert!(downloaded, "Should have downloaded new events");
 

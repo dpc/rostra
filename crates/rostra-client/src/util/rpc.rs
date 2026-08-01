@@ -12,7 +12,7 @@ use crate::LOG_TARGET;
 use crate::connection_cache::ConnectionCache;
 use crate::net::ClientNetworking;
 
-pub async fn get_event_content_from_followers(
+pub(crate) async fn get_event_content_from_followers(
     networking: &ClientNetworking,
     self_id: RostraId,
     author_id: RostraId,
@@ -91,7 +91,7 @@ pub async fn get_event_content_from_followers(
 /// content.
 ///
 /// Returns true if any new data was downloaded.
-pub async fn download_events_from_child(
+pub(crate) async fn download_events_from_child(
     rostra_id: RostraId,
     head: ShortEventId,
     networking: &ClientNetworking,

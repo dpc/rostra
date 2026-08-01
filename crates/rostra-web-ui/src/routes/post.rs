@@ -5,7 +5,6 @@ use axum::response::IntoResponse;
 use axum_extra::extract::Form;
 use maud::{Markup, PreEscaped, html};
 use rostra_client::ClientRef;
-use rostra_client::util::rpc::get_event_content_from_followers;
 use rostra_client_db::IdSocialProfileRecord;
 use rostra_client_db::social::SocialPostRecord;
 use rostra_core::event::{PersonaTag, SocialPost};
@@ -735,20 +734,14 @@ pub async fn fetch_missing_post(
 
     let content_id = post_content_html_id(post_thread_id, event_id);
 
-    if !get_event_content_from_followers(
-        client.networking(),
-        client.rostra_id(),
-        author_id,
-        event_id,
-        client.connection_cache(),
-        &mut followers_cache,
-        client.db(),
-    )
-    .await
-    .context(EventContentStorageSnafu {
-        author_id,
-        event_id,
-    })? {
+    if !client
+        .fetch_event_content(author_id, event_id, &mut followers_cache)
+        .await
+        .context(EventContentStorageSnafu {
+            author_id,
+            event_id,
+        })?
+    {
         debug!(
             author = %author_id.to_short(),
             %event_id,

@@ -1,13 +1,41 @@
+//! A runtime client for one Rostra identity.
+//!
+//! [`Client`] is the supported entry point. Construct it with [`Client::builder`]:
+//! omitting [`Database`] creates a temporary in-memory, light client. Supplying
+//! a durable database creates a full client and enables replication and
+//! projection tasks. Clients start read-only unless the builder receives a
+//! [`RostraIdSecretKey`] or [`Client::unlock_active`] is called later.
+//!
+//! Client-created transports default to relay-only mode so that creating a
+//! client does not expose its host's IP address. Call the builder's
+//! `public_mode(true)` only when direct IP connectivity is an intentional
+//! privacy tradeoff. A caller that supplies `iroh_endpoint` owns that
+//! endpoint's transport and privacy policy. The request handler is enabled by
+//! default in both storage modes; durable clients also start background
+//! synchronization by default.
+//!
+//! A client owns its background tasks. Clone the returned [`std::sync::Arc`] to
+//! keep the runtime alive; dropping the final strong reference aborts those
+//! tasks. [`ClientHandle`] is weak and does not extend the runtime's lifetime.
+//! There is no separate shutdown protocol.
+//!
+//! Initialization, activation, peer connection, publication, and explicit
+//! synchronization return typed errors from [`error`] or [`DbError`]. A
+//! database failure in background ingestion is logged and stops the affected
+//! worker; the client does not globally restart failed workers. Database access
+//! remains available through [`Client::db`] for integrations that need Rostra's
+//! materialized views.
+
 pub mod error;
 
-pub mod connection_cache;
+mod connection_cache;
 pub(crate) mod task;
 
 pub mod multiclient;
 
 pub mod id;
 
-pub mod util;
+mod util;
 
 use std::str::FromStr;
 
@@ -26,7 +54,16 @@ const LOG_TARGET: &str = "rostra";
 
 mod client;
 mod net;
-pub use crate::client::*;
+pub use rostra_client_db::{Database, DbError};
+pub use rostra_core::id::{RostraId, RostraIdSecretKey};
+pub use rostra_core::{ExternalEventId, ShortEventId};
+
+pub use crate::client::{
+    Client, ClientHandle, ClientRef, ClientRefError, ClientRefResult, IdP2PState, NodeP2PState,
+    NodeSource, P2PState,
+};
+pub use crate::id::{CompactTicket, IdPublishedData, IdResolvedData};
+pub use crate::multiclient::{MultiClient, MultiClientError, MultiClientResult};
 
 fn get_rrecord_typed<T>(
     packet: &pkarr::SignedPacket,

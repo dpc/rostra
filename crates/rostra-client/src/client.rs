@@ -15,7 +15,7 @@ use backon::Retryable as _;
 use iroh_base::EndpointAddr;
 use n0_future::task::AbortOnDropHandle;
 use rostra_client_db::{
-    CurrentState, Database, DbResult, IdsFolloweesRecord, IdsFollowersRecord, WotData,
+    CurrentState, Database, DbError, DbResult, IdsFolloweesRecord, IdsFollowersRecord, WotData,
 };
 use rostra_core::event::{
     Event, EventContentRaw, EventExt as _, IrohNodeId, PersonaTag, PersonasTagsSelector,
@@ -99,7 +99,7 @@ impl NodeP2PState {
     /// Calculate the backoff duration based on consecutive failures.
     ///
     /// Uses exponential backoff: 1s, 2s, 4s, 8s, ... capped at 10 minutes.
-    pub fn calculate_backoff_duration(&self) -> Duration {
+    pub(crate) fn calculate_backoff_duration(&self) -> Duration {
         if self.consecutive_failures == 0 {
             return Duration::ZERO;
         }
@@ -119,14 +119,14 @@ impl NodeP2PState {
     }
 
     /// Record a successful connection, resetting backoff state.
-    pub fn record_success(&mut self, now: Timestamp) {
+    pub(crate) fn record_success(&mut self, now: Timestamp) {
         self.last_success = Some(now);
         self.consecutive_failures = 0;
         self.backoff_until = None;
     }
 
     /// Record a failed connection, updating backoff state.
-    pub fn record_failure(&mut self, now: Timestamp) {
+    pub(crate) fn record_failure(&mut self, now: Timestamp) {
         self.last_failure = Some(now);
         self.consecutive_failures = self.consecutive_failures.saturating_add(1);
         let backoff_duration = self.calculate_backoff_duration();
@@ -157,7 +157,7 @@ const P2P_IDS_WARN_LIMIT: usize = 10_000;
 const P2P_NODES_WARN_LIMIT: usize = 10_000;
 
 impl P2PState {
-    pub fn new() -> Self {
+    pub(crate) fn new() -> Self {
         Self::default()
     }
 
@@ -172,7 +172,7 @@ impl P2PState {
     }
 
     /// Update the P2P state for an identity.
-    pub async fn update(&self, id: RostraId, f: impl FnOnce(&mut IdP2PState)) {
+    pub(crate) async fn update(&self, id: RostraId, f: impl FnOnce(&mut IdP2PState)) {
         let mut ids = self.ids.write().await;
         let state = ids.entry(id).or_default();
         f(state);
@@ -202,7 +202,7 @@ impl P2PState {
     }
 
     /// Update the P2P state for a node.
-    pub async fn update_node(&self, node_id: IrohNodeId, f: impl FnOnce(&mut NodeP2PState)) {
+    pub(crate) async fn update_node(&self, node_id: IrohNodeId, f: impl FnOnce(&mut NodeP2PState)) {
         let mut nodes = self.nodes.write().await;
         let state = nodes.entry(node_id).or_default();
         f(state);
@@ -245,18 +245,6 @@ pub struct ClientRefError {
 
 pub type ClientRefResult<T> = Result<T, ClientRefError>;
 
-#[derive(Debug)]
-#[allow(clippy::large_enum_variant)]
-pub enum ClientMode {
-    Full(Database),
-    Light,
-}
-
-impl ClientMode {
-    pub fn is_full(&self) -> bool {
-        matches!(self, Self::Full(_))
-    }
-}
 /// Weak handle to [`Client`]
 #[derive(Debug, Clone)]
 pub struct ClientHandle(Weak<Client>);
@@ -319,6 +307,11 @@ impl ClientRef<'_> {
     }
 }
 
+/// The networked runtime for one Rostra identity.
+///
+/// Construct clients with [`Client::builder`]. The returned [`Arc<Self>`] owns
+/// all request handling and background work, which stops when the final strong
+/// reference is dropped.
 pub struct Client {
     /// Weak self-reference that can be given out to components
     pub(crate) handle: ClientHandle,
@@ -341,6 +334,15 @@ pub struct Client {
 
 #[bon::bon]
 impl Client {
+    /// Construct a client for `id`.
+    ///
+    /// Without `db`, the client uses temporary in-memory storage and does not
+    /// start full-client background synchronization tasks. Supplying a durable
+    /// `db` enables the supported full-client mode. The request handler starts
+    /// by default, background tasks start by default for full clients, and
+    /// client-created networking is relay-only unless `public_mode` is
+    /// explicitly enabled. A supplied `iroh_endpoint` retains its existing
+    /// transport and privacy policy instead.
     #[builder(finish_fn(name = "build"))]
     pub async fn new(
         #[builder(start_fn)] id: RostraId,
@@ -357,7 +359,8 @@ impl Client {
         public_mode: bool,
         /// Pre-built iroh endpoint. If provided, uses this instead of
         /// creating a new one. Useful for tests that need custom endpoint
-        /// configuration.
+        /// configuration. The caller owns the endpoint's direct-transport and
+        /// privacy policy; `public_mode` does not reconfigure it.
         iroh_endpoint: Option<iroh::Endpoint>,
         /// Pre-built pkarr client. If provided, uses this instead of
         /// creating a new one. Since the pkarr client is identity-agnostic,
@@ -438,10 +441,15 @@ impl Client {
 
 #[bon::bon]
 impl Client {
+    /// Return the identity served by this client.
     pub fn rostra_id(&self) -> RostraId {
         self.id
     }
 
+    /// Unlock signing operations and start signing-dependent background tasks.
+    ///
+    /// The secret must belong to [`Client::rostra_id`]. Calling this method
+    /// more than once is harmless after the first successful activation.
     pub async fn unlock_active(&self, id_secret: RostraIdSecretKey) -> ActivateResult<()> {
         let unlock_start = Instant::now();
         ensure!(self.id == id_secret.id(), SecretMismatchSnafu);
@@ -648,16 +656,19 @@ impl Client {
         self.db.self_head_subscribe()
     }
 
+    /// Subscribe to newly accepted verified event content.
     pub fn new_content_subscribe(&self) -> broadcast::Receiver<VerifiedEventContent> {
         self.db.new_content_subscribe()
     }
 
+    /// Subscribe to newly accepted social posts.
     pub fn new_posts_subscribe(
         &self,
     ) -> broadcast::Receiver<(VerifiedEventContent, content_kind::SocialPost)> {
         self.db.new_posts_subscribe()
     }
 
+    /// Subscribe to newly accepted shoutbox messages.
     pub fn new_shoutbox_subscribe(
         &self,
     ) -> broadcast::Receiver<(VerifiedEventContent, content_kind::Shoutbox)> {
@@ -672,6 +683,7 @@ impl Client {
         self.db.new_heads_subscribe()
     }
 
+    /// Subscribe to deduplicated identities whose event history is incomplete.
     pub fn ids_with_missing_events_subscribe(
         &self,
         capacity: usize,
@@ -679,6 +691,7 @@ impl Client {
         self.db.ids_with_missing_events_subscribe(capacity)
     }
 
+    /// Access the identity's database and materialized views.
     pub fn db(&self) -> &Arc<Database> {
         &self.db
     }
@@ -688,6 +701,7 @@ impl Client {
         self.db.get_self_current_head().await
     }
 
+    /// Create a weak handle that does not keep this client running.
     pub fn handle(&self) -> ClientHandle {
         self.handle.clone()
     }
@@ -697,13 +711,11 @@ impl Client {
         self.networking.p2p_state()
     }
 
-    /// Access the shared connection cache.
-    pub fn connection_cache(&self) -> &crate::connection_cache::ConnectionCache {
+    pub(crate) fn connection_cache(&self) -> &crate::connection_cache::ConnectionCache {
         self.networking.connection_cache()
     }
 
-    /// Access the networking layer.
-    pub fn networking(&self) -> &Arc<crate::net::ClientNetworking> {
+    pub(crate) fn networking(&self) -> &Arc<crate::net::ClientNetworking> {
         &self.networking
     }
 
@@ -712,24 +724,74 @@ impl Client {
         IrohNodeId::from_bytes(*self.networking.endpoint.id().as_bytes())
     }
 
+    /// Resolve an identity's published transport and graph-head information.
     pub async fn resolve_id_data(&self, id: RostraId) -> IdResolveResult<IdResolvedData> {
         self.networking.resolve_id_data(id).await
     }
 
+    /// Resolve an identity's compact transport ticket.
     pub async fn resolve_id_ticket(&self, id: RostraId) -> IdResolveResult<CompactTicket> {
         self.networking.resolve_id_ticket(id).await
     }
 
+    /// Open a fresh typed RPC connection to an identity.
     pub async fn connect_uncached(&self, id: RostraId) -> ConnectResult<Connection> {
         self.networking.connect_uncached(id).await
     }
 
+    /// Resolve an identity through Pkarr and open a fresh typed RPC connection.
     pub async fn connect_by_pkarr_resolution(&self, id: RostraId) -> ConnectResult<Connection> {
         self.networking.connect_by_pkarr_resolution(id).await
     }
 
+    /// Open a typed RPC connection using a previously resolved compact ticket.
     pub async fn connect_ticket(&self, ticket: CompactTicket) -> ConnectResult<Connection> {
         self.networking.connect_ticket(ticket).await
+    }
+
+    /// Fetch an event and its content from its author or known followers.
+    ///
+    /// The caller-owned cache avoids repeating follower lookups while fetching
+    /// a batch of related events. The method returns `true` when content
+    /// was found and stored.
+    pub async fn fetch_event_content(
+        &self,
+        author_id: RostraId,
+        event_id: ShortEventId,
+        followers_cache: &mut std::collections::BTreeMap<RostraId, Vec<RostraId>>,
+    ) -> Result<bool, DbError> {
+        crate::util::rpc::get_event_content_from_followers(
+            self.networking(),
+            self.rostra_id(),
+            author_id,
+            event_id,
+            self.connection_cache(),
+            followers_cache,
+            self.db(),
+        )
+        .await
+    }
+
+    /// Synchronize an event and its ancestors from a set of candidate peers.
+    ///
+    /// This explicit synchronization boundary is useful when an integration
+    /// learns a remote head outside the client's normal background discovery.
+    /// It returns `true` when any new envelope or content was stored.
+    pub async fn sync_event_from_peers(
+        &self,
+        author_id: RostraId,
+        head: ShortEventId,
+        peers: &[RostraId],
+    ) -> Result<bool, DbError> {
+        crate::util::rpc::download_events_from_child(
+            author_id,
+            head,
+            self.networking(),
+            self.connection_cache(),
+            peers,
+            self.db(),
+        )
+        .await
     }
 
     pub(crate) fn pkarr_client(&self) -> Arc<pkarr::Client> {
@@ -770,6 +832,7 @@ impl Client {
         16 * 1024 * 1024
     }
 
+    /// Read and parse a secret identity key from a UTF-8 file.
     pub async fn read_id_secret(path: &Path) -> IdSecretReadResult<RostraIdSecretKey> {
         let content = tokio::fs::read_to_string(path).await.context(IoSnafu)?;
         RostraIdSecretKey::from_str(&content).context(ParsingSnafu)
