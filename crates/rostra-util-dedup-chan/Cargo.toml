@@ -25,10 +25,11 @@ default = []
 
 [dependencies]
 snafu = { workspace = true }
-tokio = { workspace = true }
+tokio = { workspace = true, features = ["sync"] }
 
 [dev-dependencies]
 test-log = { workspace = true, features = ["trace"] }
+tokio = { workspace = true, features = ["rt-multi-thread"] }
 
 [lints]
 workspace = true
