@@ -82,19 +82,19 @@ trybuild = "1"
 rand = "0.9"
 redb = "2.3.0"
 redb-bincode = { git = "https://github.com/rustshop/redb-bincode", rev = "3f7414710f1d86610277c759c640fc2213730d22" }
-rostra-core = { path = "crates/rostra-core" }
+rostra-core = { version = "0.1.0", path = "crates/rostra-core" }
 rostra-client = { path = "crates/rostra-client" }
-rostra-client-db = { path = "crates/rostra-client-db" }
-rostra-p2p = { path = "crates/rostra-p2p" }
-rostra-p2p-api = { path = "crates/rostra-p2p-api" }
-rostra-util = { path = "crates/rostra-util" }
+rostra-client-db = { version = "0.1.0", path = "crates/rostra-client-db" }
+rostra-p2p = { version = "0.1.0", path = "crates/rostra-p2p" }
+rostra-p2p-api = { version = "0.1.0", path = "crates/rostra-p2p-api" }
+rostra-util = { version = "0.1.0", path = "crates/rostra-util" }
 rostra-util-bind-addr = { path = "crates/rostra-util-bind-addr" }
 # rostra-util-dedup-chan = { path = "crates/rostra-util-dedup-chan" }
-dedup-chan = { path = "crates/rostra-util-dedup-chan", package = "rostra-util-dedup-chan" }
-rostra-util-error = { path = "crates/rostra-util-error" }
-rostra-util-fmt = { path = "crates/rostra-util-fmt" }
+dedup-chan = { version = "0.1.0", path = "crates/rostra-util-dedup-chan", package = "rostra-util-dedup-chan" }
+rostra-util-error = { version = "0.1.0", path = "crates/rostra-util-error" }
+rostra-util-fmt = { version = "0.1.0", path = "crates/rostra-util-fmt" }
 rostra-web-ui = { path = "crates/rostra-web-ui" }
-rostra-djot = { path = "crates/rostra-djot" }
+rostra-djot = { version = "0.1.0", path = "crates/rostra-djot" }
 serde = "1.0.216"
 serde_bytes = "0.11.15"
 serde_json = "1.0.134"
