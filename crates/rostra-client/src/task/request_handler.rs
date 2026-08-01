@@ -256,15 +256,14 @@ impl RequestHandler {
             let client = self.client.app_ref_opt().context(ExitingSnafu)?;
 
             if client.event_size_limit() < event.content_len() {
-                client
-                    .store_event_too_large(event.event_id, *event.event())
-                    .await?;
+                client.store_event_too_large(&event).await?;
                 Connection::write_return_code(
                     &mut send,
                     FeedEventResponse::RETURN_CODE_ALREADY_HAVE,
                 )
                 .await
                 .context(RpcSnafu)?;
+                return Ok(());
             }
 
             if client.does_have_event(event.event_id).await {

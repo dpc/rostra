@@ -760,12 +760,9 @@ impl Client {
             })
     }
 
-    pub async fn store_event_too_large(
-        &self,
-        _event_id: impl Into<ShortEventId>,
-        _event: Event,
-    ) -> DbResult<()> {
-        unimplemented!()
+    /// Store an oversized verified envelope without accepting its payload.
+    pub(crate) async fn store_event_too_large(&self, event: &VerifiedEvent) -> DbResult<()> {
+        self.db.try_process_event(event).await.map(|_| ())
     }
 
     pub(crate) fn event_size_limit(&self) -> u32 {
@@ -1053,10 +1050,14 @@ impl Client {
 #[cfg(test)]
 mod tests {
     use std::sync::atomic::Ordering::SeqCst;
+    use std::time::Duration;
 
     use iroh::endpoint::presets;
-    use rostra_client_db::DbError;
-    use rostra_core::id::RostraIdSecretKey;
+    use rostra_client_db::{Database, DbError, EventContentState};
+    use rostra_core::event::{Event, EventContentRaw, EventKind};
+    use rostra_core::id::{RostraIdSecretKey, ToShort as _};
+    use rostra_p2p::connection::FeedEventResponse;
+    use rostra_p2p::{Connection, RpcError};
     use rostra_p2p_api::ROSTRA_P2P_V0_ALPN;
 
     use super::Client;
@@ -1098,6 +1099,70 @@ mod tests {
             client.task_handles.lock().expect("task handles").len(),
             2,
             "the retry starts each signing task exactly once"
+        );
+    }
+
+    #[test_log::test(tokio::test(flavor = "multi_thread"))]
+    async fn oversized_feed_event_retains_pruned_envelope() {
+        let secret = RostraIdSecretKey::from_bytes([52; 32]);
+        let lookup = iroh::address_lookup::memory::MemoryLookup::new();
+        let server_endpoint = iroh::Endpoint::builder(presets::Minimal)
+            .relay_mode(iroh::RelayMode::Disabled)
+            .alpns(vec![ROSTRA_P2P_V0_ALPN.to_vec()])
+            .address_lookup(lookup.clone())
+            .bind()
+            .await
+            .expect("server endpoint");
+        let server_id = server_endpoint.id();
+        lookup.add_endpoint_info(server_endpoint.addr());
+        let client = Client::builder(secret.id())
+            .db(Database::new_in_memory(secret.id())
+                .await
+                .expect("in-memory database"))
+            .iroh_endpoint(server_endpoint)
+            .start_background_tasks(false)
+            .build()
+            .await
+            .expect("server client");
+        let caller_endpoint = iroh::Endpoint::builder(presets::Minimal)
+            .relay_mode(iroh::RelayMode::Disabled)
+            .alpns(vec![ROSTRA_P2P_V0_ALPN.to_vec()])
+            .address_lookup(lookup)
+            .bind()
+            .await
+            .expect("caller endpoint");
+        let connection = Connection::from(
+            caller_endpoint
+                .connect(server_id, ROSTRA_P2P_V0_ALPN)
+                .await
+                .expect("connect to server"),
+        );
+        let content = EventContentRaw::new(vec![0; client.event_size_limit() as usize + 1]);
+        let event = Event::builder_raw_content()
+            .author(secret.id())
+            .kind(EventKind::NULL)
+            .content(&content)
+            .build()
+            .signed_by(secret);
+        let event_id = event.event.compute_id().to_short();
+
+        let error = tokio::time::timeout(
+            Duration::from_secs(5),
+            connection.feed_event(event, content),
+        )
+        .await
+        .expect("oversized event response")
+        .expect_err("oversized event must not transfer its content");
+
+        assert!(matches!(
+            error,
+            RpcError::Failed {
+                return_code: FeedEventResponse::RETURN_CODE_ALREADY_HAVE
+            }
+        ));
+        assert_eq!(
+            client.db().get_event_content_state(event_id).await,
+            Some(EventContentState::Pruned)
         );
     }
 }
