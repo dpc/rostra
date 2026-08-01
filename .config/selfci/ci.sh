@@ -39,11 +39,19 @@ function job_core_features() {
     nix build -L .#ci.rostraCoreFeatures
 }
 
+function job_client_release() {
+    selfci step start "rostra-client release artifacts"
+    if ! just check-client-release; then
+      selfci step fail
+    fi
+}
+
 case "$SELFCI_JOB_NAME" in
   main)
     selfci job start "lint"
     selfci job start "cargo"
     selfci job start "core-features"
+    selfci job start "client-release"
     ;;
 
   cargo)
@@ -52,6 +60,10 @@ case "$SELFCI_JOB_NAME" in
 
   core-features)
     job_core_features
+    ;;
+
+  client-release)
+    job_client_release
     ;;
 
   lint)

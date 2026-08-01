@@ -1,0 +1,228 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+readonly packages=(
+  rostra-util
+  rostra-util-error
+  rostra-util-fmt
+  rostra-util-dedup-chan
+  rostra-core
+  rostra-p2p-api
+  rostra-djot
+  rostra-p2p
+  rostra-client-db
+  rostra-client
+)
+readonly registry_dry_run_packages=(
+  rostra-util
+  rostra-util-error
+  rostra-util-fmt
+  rostra-util-dedup-chan
+  rostra-core
+  rostra-p2p-api
+)
+
+repo_root=$(git rev-parse --show-toplevel)
+cd "$repo_root"
+
+tmpdir=$(mktemp -d "${TMPDIR:-/tmp}/rostra-client-release.XXXXXX")
+trap 'rm -rf "$tmpdir"' EXIT
+mkdir -p "$tmpdir/crates"
+patch_config="$tmpdir/package-patches.toml"
+metadata="$tmpdir/workspace-metadata.json"
+cargo metadata --format-version 1 --no-deps > "$metadata"
+cargo_target_dir=$(
+  python3 -c 'import json, sys; print(json.load(open(sys.argv[1]))["target_directory"])' \
+    "$metadata"
+)
+version=$(
+  python3 -c '
+import json
+import sys
+
+metadata = json.load(open(sys.argv[1]))
+expected = set(sys.argv[2:])
+versions = {
+    package["version"]
+    for package in metadata["packages"]
+    if package["name"] in expected
+}
+found = {
+    package["name"]
+    for package in metadata["packages"]
+    if package["name"] in expected
+}
+if found != expected:
+    print("release packages missing from workspace metadata:", file=sys.stderr)
+    print(" ".join(sorted(expected - found)), file=sys.stderr)
+    sys.exit(1)
+if len(versions) != 1:
+    print("release packages do not share one version:", file=sys.stderr)
+    print(" ".join(sorted(versions)), file=sys.stderr)
+    sys.exit(1)
+print(versions.pop())
+' "$metadata" "${packages[@]}"
+)
+readonly cargo_target_dir version
+
+package_dir() {
+  case "$1" in
+    rostra-util | rostra-util-error | rostra-util-fmt | rostra-util-dedup-chan | \
+      rostra-core | rostra-p2p-api | rostra-djot | rostra-p2p | \
+      rostra-client-db | rostra-client)
+      printf 'crates/%s\n' "$1"
+      ;;
+    *)
+      echo "Unknown release package: $1" >&2
+      return 1
+      ;;
+  esac
+}
+
+content_roots() {
+  case "$1" in
+    rostra-core)
+      printf '%s\n' benches src
+      ;;
+    rostra-client-db)
+      printf '%s\n' docs proptest-regressions src tests
+      ;;
+    rostra-client)
+      printf '%s\n' examples src tests
+      ;;
+    *)
+      printf '%s\n' src
+      ;;
+  esac
+}
+
+unpublished_dependencies() {
+  case "$1" in
+    rostra-djot)
+      printf '%s\n' rostra-core
+      ;;
+    rostra-p2p)
+      printf '%s\n' rostra-core rostra-util-error
+      ;;
+    rostra-client-db)
+      printf '%s\n' \
+        rostra-util rostra-util-error rostra-util-fmt \
+        rostra-util-dedup-chan rostra-core rostra-p2p-api rostra-djot rostra-p2p
+      ;;
+    rostra-client)
+      printf '%s\n' "${packages[@]:0:9}"
+      ;;
+  esac
+}
+
+validate_archive_contents() {
+  local package=$1
+  local crate_dir archive archive_root actual expected root
+  crate_dir=$(package_dir "$package")
+  archive="$cargo_target_dir/package/$package-$version.crate"
+  archive_root="$package-$version/"
+  actual="$tmpdir/$package.actual"
+  expected="$tmpdir/$package.expected"
+
+  tar -tzf "$archive" |
+    sed -n "s|^$archive_root||p" |
+    sort > "$actual"
+
+  {
+    printf '%s\n' Cargo.lock Cargo.toml Cargo.toml.orig
+    if grep -qxF .cargo_vcs_info.json "$actual"; then
+      printf '%s\n' .cargo_vcs_info.json
+    fi
+    printf '%s\n' LICENSE-APACHE LICENSE-MIT LICENSE-MPL README.md
+    while IFS= read -r root; do
+      git ls-files "$crate_dir/$root" |
+        sed "s|^$crate_dir/||"
+    done < <(content_roots "$package")
+  } | sort -u > "$expected"
+
+  if ! diff -u "$expected" "$actual"; then
+    echo "$package artifact contents differ from its curated release files" >&2
+    return 1
+  fi
+
+  tar -xzf "$archive" -C "$tmpdir/crates"
+}
+
+echo "Packaging the rostra-client publication closure"
+for package in "${packages[@]}"; do
+  mapfile -t dependencies < <(unpublished_dependencies "$package")
+  if ((${#dependencies[@]})); then
+    {
+      printf '[patch.crates-io]\n'
+      for dependency in "${dependencies[@]}"; do
+        printf '%s = { path = "%s/crates/%s-%s" }\n' \
+          "$dependency" "$tmpdir" "$dependency" "$version"
+      done
+    } > "$patch_config"
+    cargo --config "$patch_config" package --allow-dirty --no-verify -p "$package"
+  else
+    cargo package --allow-dirty --no-verify -p "$package"
+  fi
+  validate_archive_contents "$package"
+done
+
+consumer="$tmpdir/consumer"
+mkdir -p "$consumer/src"
+cat > "$consumer/Cargo.toml" <<EOF
+[package]
+name = "rostra-client-package-consumer"
+version = "0.0.0"
+edition = "2024"
+publish = false
+
+[dependencies]
+rostra-client = "=$version"
+
+[patch.crates-io]
+EOF
+for package in "${packages[@]}"; do
+  printf '%s = { path = "%s/crates/%s-%s" }\n' \
+    "$package" "$tmpdir" "$package" "$version" >> "$consumer/Cargo.toml"
+done
+cat > "$consumer/src/main.rs" <<'EOF'
+fn main() {
+    let _: Option<rostra_client::Client> = None;
+}
+EOF
+
+echo "Checking an isolated consumer against extracted package artifacts"
+(
+  cd "$consumer"
+  CARGO_TARGET_DIR="$tmpdir/target" cargo check
+  cargo metadata --format-version 1 |
+    python3 -c '
+import json
+import pathlib
+import sys
+
+metadata = json.load(sys.stdin)
+root = pathlib.Path(sys.argv[1]).resolve()
+expected = set(sys.argv[2:])
+actual = {
+    package["name"]
+    for package in metadata["packages"]
+    if package["name"] in expected
+    and pathlib.Path(package["manifest_path"]).resolve().is_relative_to(root)
+}
+if actual != expected:
+    print("consumer did not use every extracted Rostra package", file=sys.stderr)
+    print("missing:", " ".join(sorted(expected - actual)), file=sys.stderr)
+    sys.exit(1)
+' "$tmpdir/crates" "${packages[@]}"
+)
+
+echo "Running crates.io publish dry-runs for packages without unpublished Rostra dependencies"
+for package in "${registry_dry_run_packages[@]}"; do
+  cargo publish --allow-dirty --dry-run -p "$package"
+done
+
+cat <<'EOF'
+Validated all ten local package artifacts and the isolated rostra-client consumer.
+Registry dry-runs for the four remaining packages require publishing their
+internal Rostra dependencies first; see docs/releasing-rostra-client.md.
+EOF

@@ -23,3 +23,4 @@ jobs:
           toolchain: 1.91.0
       - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32
       - run: cargo check --locked --workspace --all-targets
+      - run: just check-client-release

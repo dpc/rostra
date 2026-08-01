@@ -17,6 +17,7 @@ include = [
   "LICENSE-APACHE",
   "LICENSE-MIT",
   "LICENSE-MPL",
+  "examples/**",
   "src/**",
   "tests/**",
 ]

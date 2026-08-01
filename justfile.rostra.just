@@ -11,6 +11,10 @@ alias mutants-db := _mutants-db
 _mutants-db *ARGS:
     cargo mutants --package rostra-client-db {{ARGS}}
 
+# validate crates.io artifacts and a fresh rostra-client consumer
+check-client-release:
+    ./misc/check-rostra-client-release
+
 # run and restart on changes, then open the site in the default browser
 dev PORT="2345":
     just _dev "{{PORT}}" 1
