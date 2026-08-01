@@ -23,15 +23,18 @@ rostra-client
 
 For every crate, it generates the actual `.crate` archive and compares its file
 list with the package's curated source, documentation, tests, examples, README,
-and license files. While generating downstream archives, temporary Cargo
-configuration patches already generated internal dependencies because their
-versions do not exist in the crates.io index yet. It then extracts all ten
-archives into a temporary directory and creates an unrelated binary crate
-outside the workspace. A narrowly scoped `[patch.crates-io]` table points each
-Rostra dependency at one extracted archive. `cargo check` compiles that consumer
-in a fresh target directory, and `cargo metadata` confirms that every Rostra
-package came from the extracted artifacts rather than a sibling workspace
-source.
+and license files. The check first snapshots all package inputs, including
+untracked or ignored files under `crates`, into an isolated temporary workspace.
+This preserves the file-selection behavior of a live publish while preventing
+temporary dependency resolution from rewriting the live `Cargo.lock` during
+parallel CI jobs. While generating downstream archives, temporary Cargo
+configuration patches use already generated internal dependencies because their
+versions do not exist in the crates.io index yet. The check then extracts all ten
+archives into a temporary directory and creates an unrelated binary crate outside
+the workspace. A narrowly scoped `[patch.crates-io]` table points each Rostra
+dependency at one extracted archive. `cargo check` compiles that consumer in a
+fresh target directory, and `cargo metadata` confirms that every Rostra package
+came from the extracted artifacts rather than a sibling workspace source.
 
 This local patch is intentionally not a registry simulation. It proves that the
 artifacts form a compilable `rostra-client` closure before their versions exist

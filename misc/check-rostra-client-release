@@ -28,9 +28,25 @@ cd "$repo_root"
 tmpdir=$(mktemp -d "${TMPDIR:-/tmp}/rostra-client-release.XXXXXX")
 trap 'rm -rf "$tmpdir"' EXIT
 mkdir -p "$tmpdir/crates"
+package_workspace="$tmpdir/workspace"
+mkdir -p "$package_workspace"
+tar --create Cargo.toml Cargo.lock crates |
+  tar --directory="$package_workspace" --extract
+git_objects=$(git rev-parse --path-format=absolute --git-path objects)
+mkdir -p "$package_workspace/.git/objects/info" "$package_workspace/.git/refs"
+cat > "$package_workspace/.git/config" <<'EOF'
+[core]
+	repositoryformatversion = 0
+	filemode = true
+	bare = false
+EOF
+git_head=$(git rev-parse HEAD)
+printf '%s\n' "$git_head" > "$package_workspace/.git/HEAD"
+printf '%s\n' "$git_objects" > "$package_workspace/.git/objects/info/alternates"
+GIT_DIR="$package_workspace/.git" git read-tree HEAD
 patch_config="$tmpdir/package-patches.toml"
 metadata="$tmpdir/workspace-metadata.json"
-cargo metadata --format-version 1 --no-deps > "$metadata"
+cargo metadata --locked --format-version 1 --no-deps > "$metadata"
 cargo_target_dir=$(
   python3 -c 'import json, sys; print(json.load(open(sys.argv[1]))["target_directory"])' \
     "$metadata"
@@ -129,10 +145,7 @@ validate_archive_contents() {
     sort > "$actual"
 
   {
-    printf '%s\n' Cargo.lock Cargo.toml Cargo.toml.orig
-    if grep -qxF .cargo_vcs_info.json "$actual"; then
-      printf '%s\n' .cargo_vcs_info.json
-    fi
+    printf '%s\n' .cargo_vcs_info.json Cargo.lock Cargo.toml Cargo.toml.orig
     printf '%s\n' LICENSE-APACHE LICENSE-MIT LICENSE-MPL README.md
     while IFS= read -r root; do
       git ls-files "$crate_dir/$root" |
@@ -146,6 +159,25 @@ validate_archive_contents() {
   fi
 
   tar -xzf "$archive" -C "$tmpdir/crates"
+  python3 -c '
+import json
+import sys
+
+metadata = json.load(open(sys.argv[1]))
+expected = {
+    "sha1": sys.argv[2],
+    "path_in_vcs": sys.argv[3],
+}
+actual = {
+    "sha1": metadata.get("git", {}).get("sha1"),
+    "path_in_vcs": metadata.get("path_in_vcs"),
+}
+if actual != expected:
+    print("package VCS metadata differs from the source workspace:", file=sys.stderr)
+    print(f"expected: {expected}", file=sys.stderr)
+    print(f"actual: {actual}", file=sys.stderr)
+    sys.exit(1)
+' "$tmpdir/crates/$package-$version/.cargo_vcs_info.json" "$git_head" "$crate_dir"
 }
 
 echo "Packaging the rostra-client publication closure"
@@ -159,9 +191,13 @@ for package in "${packages[@]}"; do
           "$dependency" "$tmpdir" "$dependency" "$version"
       done
     } > "$patch_config"
-    cargo --config "$patch_config" package --allow-dirty --no-verify -p "$package"
+    cargo --config "$patch_config" package \
+      --manifest-path "$package_workspace/Cargo.toml" \
+      --target-dir "$cargo_target_dir" --allow-dirty --no-verify -p "$package"
   else
-    cargo package --allow-dirty --no-verify -p "$package"
+    cargo package --manifest-path "$package_workspace/Cargo.toml" \
+      --target-dir "$cargo_target_dir" \
+      --allow-dirty --no-verify -p "$package"
   fi
   validate_archive_contents "$package"
 done
@@ -218,7 +254,9 @@ if actual != expected:
 
 echo "Running crates.io publish dry-runs for packages without unpublished Rostra dependencies"
 for package in "${registry_dry_run_packages[@]}"; do
-  cargo publish --allow-dirty --dry-run -p "$package"
+  cargo publish --manifest-path "$package_workspace/Cargo.toml" \
+    --target-dir "$cargo_target_dir" \
+    --allow-dirty --dry-run -p "$package"
 done
 
 cat <<'EOF'
