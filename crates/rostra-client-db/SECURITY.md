@@ -24,6 +24,13 @@ For a replaced post, the scan validates coherent lifecycle before returning
 `Removed`; if lifecycle claims it remains processed, retained bytes must also be
 present and decodable. Replacement metadata does not mask corruption.
 
+The public self-follow snapshot scans the complete encoded self-identity key
+prefix through its exclusive lexicographic successor, then exactly decodes every
+matching key and value. This prevents malformed self-owned rows with truncated
+or trailing followee bytes from falling outside well-formed tuple bounds and
+silently producing a partial snapshot. Rows under adjacent identity prefixes
+remain outside the snapshot.
+
 Schema 25 performs a forward-only total rebuild. Preparation atomically stashes
 retained source and installs the current schema; replay and stash cleanup commit
 atomically. Any replay error leaves the complete stash retryable, and code must

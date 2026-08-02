@@ -11,6 +11,7 @@ mod paginate;
 mod process_event_content_ops;
 mod process_event_ops;
 mod reception_order_ops;
+mod self_followee;
 pub mod social;
 mod social_post_materialization;
 mod table_ops;
@@ -46,6 +47,7 @@ pub use self::extension::{
     EXTENSION_RESERVED_TABLE_PREFIXES, ExtensionReadTransaction, ExtensionTableDefinition,
     ExtensionWriteTransaction,
 };
+pub use self::self_followee::SelfFollowee;
 pub use self::social_post_materialization::{
     SOCIAL_POST_MATERIALIZATION_SCAN_MAX, SocialPostMaterialization,
     SocialPostMaterializationCursor, SocialPostMaterializationPage,

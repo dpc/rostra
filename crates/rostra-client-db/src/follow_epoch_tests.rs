@@ -13,8 +13,8 @@ use rostra_util_error::BoxedErrorResult;
 use snafu::ResultExt as _;
 
 use crate::{
-    Database, db_version, ids_follow_events, ids_followees, ids_unfollowed,
-    shoutbox_posts_by_received_at, social_posts_by_received_at,
+    Database, DbError, IdsFolloweesRecord, db_version, ids_follow_events, ids_followees,
+    ids_unfollowed, shoutbox_posts_by_received_at, social_posts_by_received_at,
 };
 
 #[derive(Debug, PartialEq, Eq)]
@@ -496,6 +496,103 @@ async fn metadata_only_epoch_changes_publish_followee_state() -> BoxedErrorResul
     assert_eq!(record.latest_event_id, winner.event_id().to_short());
     assert_eq!(record.first_ts, Timestamp::from(30));
 
+    Ok(())
+}
+
+#[test_log::test(tokio::test(flavor = "multi_thread"))]
+async fn public_self_follow_snapshot_tracks_uninterrupted_epochs() -> BoxedErrorResult<()> {
+    let follower_secret = RostraIdSecretKey::from_bytes([101; 32]);
+    let follower = follower_secret.id();
+    let followee = RostraIdSecretKey::from_bytes([102; 32]).id();
+    let first = follow_event(follower_secret, followee, 10, Some("old"), 1);
+    let unfollow = follow_event(follower_secret, followee, 20, None, 2);
+    let refollow = follow_event(follower_secret, followee, 30, Some("winner"), 3);
+    let earlier_current = follow_event(follower_secret, followee, 25, Some("earlier"), 4);
+    let db = Database::new_in_memory(follower).await?;
+
+    db.process_event_with_content(&first).await;
+    assert_eq!(
+        db.get_self_followees_snapshot().await?,
+        [crate::SelfFollowee {
+            followee,
+            persona_selector: selector("old"),
+            first_ts: Timestamp::from(10),
+        }]
+    );
+
+    db.process_event_with_content(&unfollow).await;
+    assert!(db.get_self_followees_snapshot().await?.is_empty());
+
+    db.process_event_with_content(&refollow).await;
+    assert_eq!(
+        db.get_self_followees_snapshot().await?,
+        [crate::SelfFollowee {
+            followee,
+            persona_selector: selector("winner"),
+            first_ts: Timestamp::from(30),
+        }]
+    );
+
+    db.process_event_with_content(&earlier_current).await;
+    assert_eq!(
+        db.get_self_followees_snapshot().await?,
+        [crate::SelfFollowee {
+            followee,
+            persona_selector: selector("winner"),
+            first_ts: Timestamp::from(25),
+        }]
+    );
+    Ok(())
+}
+
+#[test_log::test(tokio::test(flavor = "multi_thread"))]
+async fn public_self_follow_snapshot_fails_on_owned_corruption_only() -> BoxedErrorResult<()> {
+    let owner = RostraIdSecretKey::from_bytes([103; 32]).id();
+    let followee = RostraIdSecretKey::from_bytes([104; 32]).id();
+    let adjacent_owner = RostraIdSecretKey::from_bytes([105; 32]).id();
+    let prefix = bincode::encode_to_vec(owner, redb_bincode::BINCODE_CONFIG)?;
+    let key = bincode::encode_to_vec((owner, followee), redb_bincode::BINCODE_CONFIG)?;
+    let adjacent_key =
+        bincode::encode_to_vec((adjacent_owner, followee), redb_bincode::BINCODE_CONFIG)?;
+    let record = IdsFolloweesRecord::new(
+        Timestamp::from(10),
+        ShortEventId::ZERO,
+        Timestamp::from(10),
+        None,
+        None,
+    );
+    let value = bincode::encode_to_vec(record, redb_bincode::BINCODE_CONFIG)?;
+
+    let mut corruptions = vec![
+        (prefix.clone(), value.clone()),
+        ([key.as_slice(), &[0]].concat(), value.clone()),
+        (key.clone(), vec![0xff]),
+        (key.clone(), [value.as_slice(), &[0]].concat()),
+    ];
+    for (corrupt_key, corrupt_value) in corruptions.drain(..) {
+        let db = Database::new_in_memory(owner).await?;
+        db.write_with(|tx| {
+            tx.as_raw()
+                .open_table(ids_followees::TABLE.as_raw())?
+                .insert(corrupt_key.as_slice(), corrupt_value.as_slice())?;
+            Ok(())
+        })
+        .await?;
+        assert!(matches!(
+            db.get_self_followees_snapshot().await,
+            Err(DbError::StoredDecode { .. })
+        ));
+    }
+
+    let db = Database::new_in_memory(owner).await?;
+    db.write_with(|tx| {
+        tx.as_raw()
+            .open_table(ids_followees::TABLE.as_raw())?
+            .insert(adjacent_key.as_slice(), &[0xff][..])?;
+        Ok(())
+    })
+    .await?;
+    assert!(db.get_self_followees_snapshot().await?.is_empty());
     Ok(())
 }
 
