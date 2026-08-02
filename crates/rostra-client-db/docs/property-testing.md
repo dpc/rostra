@@ -43,6 +43,11 @@ availability after eligible collection are covered. The excluded values either
 are intentionally local, require a different concurrency oracle, or are
 permitted physical representations of the same lifecycle state.
 
+The append-only SocialPost materialization feed is schedule-local rather than a
+convergent projection and is therefore covered by focused transaction, cursor,
+late-content, reversion, corruption, and rebuild tests instead of the
+cross-replica equality model.
+
 Normal test runs use small disk-specific case budgets. `PROPTEST_CASES` overrides
 the budget separately for every selected property while preserving proptest
 shrinking and failure persistence. The following full-family command is a long

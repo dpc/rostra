@@ -12,6 +12,7 @@ mod process_event_content_ops;
 mod process_event_ops;
 mod reception_order_ops;
 pub mod social;
+mod social_post_materialization;
 mod table_ops;
 mod tables;
 mod tx_ops;
@@ -44,6 +45,10 @@ pub use self::current_state::{CurrentState, CurrentStateClosed};
 pub use self::extension::{
     EXTENSION_RESERVED_TABLE_PREFIXES, ExtensionReadTransaction, ExtensionTableDefinition,
     ExtensionWriteTransaction,
+};
+pub use self::social_post_materialization::{
+    SOCIAL_POST_MATERIALIZATION_SCAN_MAX, SocialPostMaterialization,
+    SocialPostMaterializationCursor, SocialPostMaterializationPage,
 };
 pub(crate) use self::tables::*;
 pub use self::tables::{
@@ -100,6 +105,7 @@ type CommitHook = Box<dyn FnOnce() + 'static>;
 pub(crate) struct WriteTransactionCtx {
     dbtx: WriteTransaction,
     on_commit: std::sync::Mutex<Option<Vec<CommitHook>>>,
+    materialization_emission_enabled: std::sync::atomic::AtomicBool,
 }
 
 impl From<WriteTransaction> for WriteTransactionCtx {
@@ -107,6 +113,7 @@ impl From<WriteTransaction> for WriteTransactionCtx {
         Self {
             dbtx,
             on_commit: std::sync::Mutex::new(Some(vec![])),
+            materialization_emission_enabled: std::sync::atomic::AtomicBool::new(true),
         }
     }
 }
@@ -151,8 +158,24 @@ impl WriteTransactionCtx {
         self.on_commit.lock().expect("Locking failed").is_some()
     }
 
+    /// Suppress durable occurrence emission during a projection rebuild.
+    pub(crate) fn suppress_materialization_emission(&self) {
+        self.materialization_emission_enabled
+            .store(false, std::sync::atomic::Ordering::Release);
+    }
+
+    /// Return whether durable materialization occurrences should be emitted.
+    pub(crate) fn materialization_emission_enabled(&self) -> bool {
+        self.materialization_emission_enabled
+            .load(std::sync::atomic::Ordering::Acquire)
+    }
+
     fn commit(self) -> result::Result<(), redb::CommitError> {
-        let Self { dbtx, on_commit } = self;
+        let Self {
+            dbtx,
+            on_commit,
+            materialization_emission_enabled: _,
+        } = self;
 
         dbtx.commit()?;
 
@@ -289,6 +312,36 @@ pub enum DbError {
     },
     #[snafu(display("Extension access to built-in table `{name}` is forbidden"))]
     ReservedExtensionTable { name: String },
+    #[snafu(display(
+        "SocialPost materialization cursor {position} exceeds durable position {durable_next}"
+    ))]
+    SocialPostMaterializationCursorOutOfRange { position: u64, durable_next: u64 },
+    #[snafu(display(
+        "SocialPost materialization scan limit {requested} exceeds maximum {maximum}"
+    ))]
+    SocialPostMaterializationScanLimitTooHigh { requested: usize, maximum: usize },
+    #[snafu(display(
+        "SocialPost materialization feed has a gap: expected {expected}, found {actual}"
+    ))]
+    SocialPostMaterializationLogGap { expected: u64, actual: u64 },
+    #[snafu(display("SocialPost materialization {event_id} references a missing event"))]
+    MissingSocialPostMaterializationEvent { event_id: ShortEventId },
+    #[snafu(display("SocialPost materialization {event_id} references event kind {kind} instead"))]
+    InvalidSocialPostMaterializationKind {
+        event_id: ShortEventId,
+        kind: EventKind,
+    },
+    #[snafu(display("SocialPost materialization {event_id} unexpectedly became Missing"))]
+    MissingSocialPostMaterializationState { event_id: ShortEventId },
+    #[snafu(display("SocialPost materialization {event_id} unexpectedly became Invalid"))]
+    InvalidSocialPostMaterializationState { event_id: ShortEventId },
+    #[snafu(display("SocialPost materialization {event_id} has no current content"))]
+    MissingSocialPostMaterializationContent { event_id: ShortEventId },
+    #[snafu(display("SocialPost materialization {event_id} has invalid processed content"))]
+    InvalidSocialPostMaterializationContent {
+        event_id: ShortEventId,
+        source: BoxedError,
+    },
     #[snafu(display("Stored vote singleton {event_id} has no inline vote projection"))]
     MissingVoteSingletonProjection {
         event_id: ShortEventId,
@@ -1648,6 +1701,8 @@ mod follow_epoch_tests;
 mod identity_collision_tests;
 #[cfg(test)]
 mod reception_order_tests;
+#[cfg(test)]
+mod social_post_materialization_tests;
 #[cfg(test)]
 mod social_post_projection_tests;
 #[cfg(test)]

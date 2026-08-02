@@ -531,6 +531,15 @@ def_table! {
 }
 
 def_table! {
+    /// Append-only ordinary SocialPost materializations in local commit order.
+    ///
+    /// Keys are dense, monotonic database-local sequence values. Values retain
+    /// only event identity; scans resolve high-level content against current
+    /// lifecycle state in one read snapshot.
+    social_post_materializations: u64 => ShortEventId
+}
+
+def_table! {
     /// Time-ordered index of social posts by effective notification time.
     ///
     /// Key: (effective_timestamp, reception_order)

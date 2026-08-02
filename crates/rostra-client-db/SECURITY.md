@@ -14,6 +14,16 @@ cryptographic audit. Caller extension tables are trusted in-process state
 outside core replay invariants and remain the extension owner's compatibility
 responsibility.
 
+The SocialPost materialization feed stores event identities, not payload copies.
+A scan therefore trusts retained events, lifecycle tables, replacement metadata,
+and the content store as one coherent snapshot. Missing events, impossible
+Missing/Invalid state, absent current bytes, invalid processed content, or
+sequence gaps fail closed without returning a checkpoint. Deleted, pruned, or
+replaced content is an expected `Removed` result.
+For a replaced post, the scan validates coherent lifecycle before returning
+`Removed`; if lifecycle claims it remains processed, retained bytes must also be
+present and decodable. Replacement metadata does not mask corruption.
+
 Schema 25 performs a forward-only total rebuild. Preparation atomically stashes
 retained source and installs the current schema; replay and stash cleanup commit
 atomically. Any replay error leaves the complete stash retryable, and code must
@@ -22,8 +32,11 @@ encodings require fixtures using the corresponding released layouts. A
 malformed authoritative stash must fail closed; disposable metadata corruption
 must not destroy authoritative source.
 
-Replay runs before the database is published, suppresses incremental hooks, and
-refreshes current-state watches after commit. It does not retain an event graph
+Replay runs before the database is published, suppresses incremental hooks and
+materialization-feed emission, and refreshes current-state watches after commit.
+Total migration preserves a feed from schema 26 or newer byte-for-byte; older
+schemas and the version-26 cutover create an empty feed without reconstructing
+historical occurrences. Replay does not retain an event graph
 or per-event publication closures. It transiently owns decoded payload and
 codec copies, then allocates the final follow/follower/WoT snapshot. The redb
 backend also tracks dirty, allocated, and freed pages for the whole atomic

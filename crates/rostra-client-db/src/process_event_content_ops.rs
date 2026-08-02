@@ -531,6 +531,9 @@ impl Database {
                             .insert(&reply_to.event_id(), &reply_to_social_post_record)
                             .map_err(DbError::from)?;
                     }
+
+                    Database::append_social_post_materialization_tx(event_id, tx)
+                        .map_err(ProcessEventError::from)?;
                 }
                 EventKind::SOCIAL_VOTE => {
                     let content = event_content

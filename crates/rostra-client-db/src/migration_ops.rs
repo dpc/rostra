@@ -75,8 +75,9 @@ pub(crate) struct LegacyEventReceivedRecord {
 /// Increment this when making schema changes that require migration.
 ///
 /// Version 25 performs the single final rebuild for the stacked version-24
-/// schema changes.
-const DB_VER: u64 = 25;
+/// schema changes. Version 26 adds the empty append-only SocialPost
+/// materialization feed without backfill.
+const DB_VER: u64 = 26;
 
 /// Versions older than this require a total migration.
 ///
@@ -114,6 +115,10 @@ const MIGRATION_SOURCE_VER_TEMP_TABLE: &str = "_total_migration_source_ver";
 
 /// Name of the temp table retaining per-event acquisition provenance.
 const MIGRATION_EVENT_SOURCES_TEMP_TABLE: &str = "_total_migration_event_sources";
+
+/// Name of the temp table preserving the append-only post materialization feed.
+const MIGRATION_SOCIAL_POST_MATERIALIZATIONS_TEMP_TABLE: &str =
+    "_total_migration_social_post_materializations";
 
 impl Database {
     /// Check if there's a pending migration stash that needs reprocessing.
@@ -169,6 +174,7 @@ impl Database {
         tx.open_table(&crate::social_profiles::TABLE)?;
         tx.open_table(&crate::social_posts::TABLE)?;
         tx.open_table(&crate::social_posts_by_time::TABLE)?;
+        tx.open_table(&crate::social_post_materializations::TABLE)?;
         tx.open_table(&crate::social_posts_by_received_at::TABLE)?;
         tx.open_table(&crate::social_posts_received_at_keys::TABLE)?;
         tx.open_table(&crate::social_posts_replies::TABLE)?;
@@ -309,6 +315,8 @@ impl Database {
             (RostraId, ShortEventId, ShortEventId),
             (),
         > = redb_bincode::TableDefinition::new("_total_migration_social_posts_replaced_by");
+        let materializations_temp: redb_bincode::TableDefinition<'_, u64, ShortEventId> =
+            redb_bincode::TableDefinition::new(MIGRATION_SOCIAL_POST_MATERIALIZATIONS_TEMP_TABLE);
 
         // Legacy table definition for old event-id-based content store
         let legacy_events_content: redb_bincode::TableDefinition<
@@ -328,6 +336,13 @@ impl Database {
         Self::copy_table_raw(dbtx, &content_store::TABLE, &content_store_temp)?;
         Self::copy_table_raw(dbtx, &ids_self::TABLE, &ids_self_temp)?;
         Self::copy_table_raw(dbtx, &crate::db_init_time::TABLE, &db_init_time_temp)?;
+        if 26 <= source_ver {
+            Self::copy_table_raw(
+                dbtx,
+                &crate::social_post_materializations::TABLE,
+                &materializations_temp,
+            )?;
+        }
 
         // Receipt timestamps and allocator values are disposable, but acquisition
         // provenance is stable local source metadata. Re-key it by event ID for
@@ -478,6 +493,8 @@ impl Database {
             (RostraId, ShortEventId, ShortEventId),
             (),
         > = redb_bincode::TableDefinition::new("_total_migration_social_posts_replaced_by");
+        let materializations_temp: redb_bincode::TableDefinition<'_, u64, ShortEventId> =
+            redb_bincode::TableDefinition::new(MIGRATION_SOCIAL_POST_MATERIALIZATIONS_TEMP_TABLE);
 
         // Delete built-in tables except temp and db_version.
         info!(target: LOG_TARGET, "Deleting old tables...");
@@ -486,6 +503,24 @@ impl Database {
             .list_tables()?
             .map(|h| h.name().to_string())
             .collect();
+        let source_ver = dbtx
+            .open_table(&redb_bincode::TableDefinition::<(), u64>::new(
+                MIGRATION_SOURCE_VER_TEMP_TABLE,
+            ))?
+            .get(&())?
+            .map(|value| value.value_try())
+            .transpose()?
+            .unwrap_or(0);
+        if 26 <= source_ver
+            && !table_names
+                .iter()
+                .any(|name| name == MIGRATION_SOCIAL_POST_MATERIALIZATIONS_TEMP_TABLE)
+        {
+            return crate::MissingMigrationStashTableSnafu {
+                table: MIGRATION_SOCIAL_POST_MATERIALIZATIONS_TEMP_TABLE.to_owned(),
+            }
+            .fail();
+        }
 
         for name in &table_names {
             if name.starts_with(MIGRATION_TEMP_PREFIX)
@@ -524,6 +559,13 @@ impl Database {
             &replaced_by_temp,
             &crate::social_posts_replaced_by::TABLE,
         )?;
+        if 26 <= source_ver {
+            Self::copy_table_raw(
+                dbtx,
+                &materializations_temp,
+                &crate::social_post_materializations::TABLE,
+            )?;
+        }
 
         Ok(())
     }
@@ -550,6 +592,8 @@ impl Database {
             (RostraId, ShortEventId, ShortEventId),
             (),
         > = redb_bincode::TableDefinition::new("_total_migration_social_posts_replaced_by");
+        let materializations_temp: redb_bincode::TableDefinition<'_, u64, ShortEventId> =
+            redb_bincode::TableDefinition::new(MIGRATION_SOCIAL_POST_MATERIALIZATIONS_TEMP_TABLE);
 
         // Read source DB version to determine content store format
         let source_ver_temp: redb_bincode::TableDefinition<'_, (), u64> =
@@ -598,6 +642,7 @@ impl Database {
         // Incremental publication closures would otherwise retain one or more
         // heap allocations per event for the full transaction.
         dbtx.discard_commit_hooks();
+        dbtx.suppress_materialization_emission();
 
         let events_temp_table = dbtx.open_table(&events_temp)?;
         let event_sources = dbtx.open_table(&event_sources_temp)?;
@@ -881,6 +926,7 @@ impl Database {
         dbtx.as_raw().delete_table(ids_self_temp.as_raw())?;
         dbtx.as_raw().delete_table(db_init_time_temp.as_raw())?;
         dbtx.as_raw().delete_table(replaced_by_temp.as_raw())?;
+        dbtx.as_raw().delete_table(materializations_temp.as_raw())?;
         dbtx.as_raw().delete_table(source_ver_temp.as_raw())?;
         dbtx.as_raw().delete_table(event_sources_temp.as_raw())?;
         // Try to delete legacy temp table (may not exist)

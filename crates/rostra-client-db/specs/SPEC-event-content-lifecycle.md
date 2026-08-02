@@ -71,6 +71,14 @@ reference counts, reply counts, follow changes, or other projections.
 Eligibility is established before fetch scheduling is removed, so rejected or
 terminal-state payload delivery cannot orphan a Missing event.
 
+Successful ordinary SocialPost projection also appends one occurrence to the
+database-local materialization feed in the ingestion transaction. This includes
+top-level posts, replies, reactions, news posts, and applicable nonblank edits.
+Header-only or still-Missing content, malformed content, pruned oversized
+content, blank deletion posts, already-Deleted lineage-only processing, and
+duplicates append nothing. A late payload appends when it materializes rather
+than at envelope receipt time.
+
 Projections that retain one latest source event use the maximum
 `(event.timestamp, ShortEventId)` defined by
 [SPEC-event-graph](../../rostra-core/specs/SPEC-event-graph.md). Follow and
@@ -113,6 +121,12 @@ when deletion ordering prevented the ordinary projection from being
 materialized. A mapped key that names another event, or a mapped key with no
 forward row, is corruption and aborts the deletion transaction.
 Derived projections for other content kinds are currently retained.
+
+Reverting, pruning, replacing, or deleting a logged SocialPost never removes its
+materialization occurrence. Scans resolve the immutable event identity against
+one current-state snapshot and report it as removed when ordinary content is no
+longer readable. Replay suppresses occurrence emission because it reconstructs
+state rather than observing a new materialization.
 
 Ordinary social-post projection insertion and reversion use one applicability
 rule. A social post whose header deletes its auxiliary parent's content applies

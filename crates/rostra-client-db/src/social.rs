@@ -107,7 +107,7 @@ pub struct ShoutboxPostRecord {
 }
 
 impl Database {
-    fn is_social_post_replaced_tx(
+    pub(crate) fn is_social_post_replaced_tx(
         author: RostraId,
         event_id: ShortEventId,
         social_posts_replaced_by_table: &impl social_posts_replaced_by::ReadableTable,

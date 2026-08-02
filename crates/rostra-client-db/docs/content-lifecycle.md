@@ -42,6 +42,7 @@ New ingestion and total replay enforce the exclusive maximum described below.
 | `events_content_missing` | `(Timestamp, ShortEventId)` | Events waiting for content, sorted by next fetch time |
 | `social_posts_by_received_at` | `(Timestamp, u64)` | Social posts ordered by effective local receipt time |
 | `social_posts_received_at_keys` | `ShortEventId` | Exact reverse key for removing a social receipt without scanning |
+| `social_post_materializations` | `u64` | Append-only ordinary SocialPost materializations in local commit order |
 
 ## Total Replay
 
@@ -81,6 +82,13 @@ therefore scale with database size. There is no resource preflight or safe fixed
 free-space multiplier. Measure a production-shaped copy, provision monitored RAM
 and disk headroom, retain a restorable backup, and plan a long first open. Replay
 does not compact the file.
+
+Schema 26 adds an empty SocialPost materialization feed without backfill. Normal
+ingestion appends after a successful ordinary projection in the same
+transaction. Total replay suppresses new feed rows and preserves an existing
+schema-26 feed byte-for-byte. A scan resolves each retained event identity
+against current state, so later deletion, pruning, or replacement returns a
+removed marker while leaving the occurrence and sequence intact.
 
 The stacked version-24 schema changes and the version-25 rebuild must ship as one
 deployable release. Never deploy an intermediate version-24 ancestor against
@@ -589,6 +597,10 @@ Both cases indicate bugs in the calling code and will panic in debug builds.
 - `version_24_unmapped_receipt_is_rebuilt_before_open` - The version-25 total
   rebuild replaces an unmapped legacy receipt with exact authored-time forward
   and reverse membership before normal access
+- `social_post_materialization_tests` - Atomic append/rollback, late payload
+  materialization, exclusion paths, deletion/replacement resolution, bounded
+  cursor and crash replay, sequence exhaustion, no-backfill cutover, exact
+  rebuild preservation/retry, and fail-closed gap/lifecycle/content corruption
 
 ### Edge Case Tests
 

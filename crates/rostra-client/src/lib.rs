@@ -54,7 +54,10 @@ const LOG_TARGET: &str = "rostra";
 
 mod client;
 mod net;
-pub use rostra_client_db::{Database, DbError};
+pub use rostra_client_db::{
+    Database, DbError, SOCIAL_POST_MATERIALIZATION_SCAN_MAX, SocialPostMaterialization,
+    SocialPostMaterializationCursor, SocialPostMaterializationPage,
+};
 pub use rostra_core::id::{RostraId, RostraIdSecretKey};
 pub use rostra_core::{ExternalEventId, ShortEventId};
 

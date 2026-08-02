@@ -50,6 +50,13 @@ extension tables. Total migrations preserve those tables byte-for-byte without
 validating or rebuilding them. The bot's existing unqualified table names remain
 supported for storage compatibility; new tables use component-qualified names.
 
+The database owns an append-only ordinary SocialPost materialization feed. Each
+successful ordinary projection appends one dense database-local sequence row
+containing its `ShortEventId` in the same transaction. The bounded public scan
+resolves each identity against current lifecycle state and returns high-level
+present content or a removed marker. This feed is a durable delivery journal,
+unlike mutable timeline indexes and lossy broadcasts.
+
 ## Transaction and notification boundary
 
 Event insertion and any immediately available content processing update the
@@ -86,6 +93,11 @@ creates an independent change cursor over the same retained state. Broadcast or
 deduplicating channels remain lossy or incremental signals for new content and
 work queues. The database remains authoritative; these watch payloads are
 retained current-state projections.
+
+Materialization cursors identify the next sequence a consumer is waiting for.
+They belong to one database lineage and have no cross-lineage meaning. Consumers
+durably handle a complete page before checkpointing its `scanned_through`
+position. Snapshot exhaustion does not prevent a later append.
 
 Write closures and post-commit hooks must not synchronously re-enter database
 writes: the non-reentrant mutex would deadlock. A hook panic propagates after
@@ -157,6 +169,12 @@ schema and complete reserved stash. Replay and stash cleanup commit together, so
 failure rolls back all rebuilt state and the stash forces an identical retry at
 the next open. Replay suppresses incremental publication hooks and refreshes
 current-state watches once before the database becomes visible.
+
+Total rebuild preserves an existing materialization feed byte-for-byte and
+suppresses occurrence emission while replay reconstructs current projections.
+A rebuild from a schema predating the feed creates it empty. The version-26
+incremental upgrade likewise performs no backfill, so only materializations
+committed after cutover appear.
 
 Replay does not retain the event graph or per-event publication closures.
 Application and codec code transiently hold the current source record, decoded
@@ -249,6 +267,14 @@ backup; an older binary cannot open the database.
   rebuilds their reverse lookup index.
 - Total migration preserves caller-owned extension tables byte-for-byte without
   replaying or validating their contents.
+- Materialization-feed rows are never removed, reordered, or reused. Deletion,
+  pruning, and replacement change scan-time resolution to `Removed`; an
+  applicable replacement has its own occurrence. Missing envelopes, impossible
+  lifecycle state, or invalid processed content are corruption and fail a scan
+  without returning an acknowledgment.
+  Replacement is classified only after validating lifecycle and, when lifecycle
+  claims content remains processed, retained content. Replacement metadata
+  cannot mask corruption.
 
 The detailed payload state machine is specified by
 [SPEC-event-content-lifecycle](SPEC-event-content-lifecycle.md). The
