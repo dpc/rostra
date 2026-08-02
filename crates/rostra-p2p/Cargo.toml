@@ -30,7 +30,7 @@ futures = { workspace = true }
 iroh-io = { workspace = true }
 iroh = { workspace = true }
 pkarr = { workspace = true, features = ["dht", "relays"] }
-rostra-core = { workspace = true, features = ["bincode"] }
+rostra-core = { workspace = true, features = ["bincode", "ed25519-dalek"] }
 rostra-util-error = { workspace = true }
 serde = { workspace = true, optional = true }
 snafu = { workspace = true }

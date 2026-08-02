@@ -202,6 +202,39 @@ for package in "${packages[@]}"; do
   validate_archive_contents "$package"
 done
 
+p2p_package="$tmpdir/crates/rostra-p2p-$version"
+echo "Checking extracted rostra-p2p against registry rostra-core"
+(
+  cd "$p2p_package"
+  CARGO_TARGET_DIR="$tmpdir/p2p-target" cargo check
+  cargo metadata --format-version 1 |
+    python3 -c '
+import json
+import sys
+
+metadata = json.load(sys.stdin)
+expected = {
+    "name": "rostra-core",
+    "version": sys.argv[1],
+    "source": "registry+https://github.com/rust-lang/crates.io-index",
+}
+actual = [
+    {
+        "name": package["name"],
+        "version": package["version"],
+        "source": package["source"],
+    }
+    for package in metadata["packages"]
+    if package["name"] == "rostra-core"
+]
+if actual != [expected]:
+    print("extracted rostra-p2p did not resolve published rostra-core", file=sys.stderr)
+    print("expected:", expected, file=sys.stderr)
+    print("actual:", actual, file=sys.stderr)
+    sys.exit(1)
+' "$version"
+)
+
 consumer="$tmpdir/consumer"
 mkdir -p "$consumer/src"
 cat > "$consumer/Cargo.toml" <<EOF
@@ -260,7 +293,8 @@ for package in "${registry_dry_run_packages[@]}"; do
 done
 
 cat <<'EOF'
-Validated all ten local package artifacts and the isolated rostra-client consumer.
+Validated all ten local package artifacts, standalone rostra-p2p, and the
+isolated rostra-client consumer.
 Registry dry-runs for the four remaining packages require publishing their
 internal Rostra dependencies first; see docs/releasing-rostra-client.md.
 EOF
