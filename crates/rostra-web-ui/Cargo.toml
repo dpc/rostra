@@ -1,4 +1,5 @@
 [package]
+publish = false
 rust-version = { workspace = true }
 name = "rostra-web-ui"
 
