@@ -1,4 +1,5 @@
 use std::num::NonZeroUsize;
+use std::sync::Arc;
 
 use redb::ReadableTable as _;
 use rostra_core::event::content_kind::{self, EventContentKind as _};
@@ -264,6 +265,115 @@ async fn cursor_is_bounded_resumable_and_safe_for_checkpoint_replay() -> anyhow:
         scan(&db, Some(out_of_range), 1).await,
         Err(DbError::SocialPostMaterializationCursorOutOfRange { .. })
     ));
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn materialization_tip_handles_empty_and_nonempty_feeds() -> anyhow::Result<()> {
+    let secret = RostraIdSecretKey::generate();
+    let db = Database::new_in_memory(secret.id()).await?;
+
+    let empty_tip = db.get_social_post_materialization_tip().await?;
+    assert_eq!(empty_tip, scan(&db, None, 1).await?.scanned_through);
+
+    db.try_process_event_with_content(&social_post(secret, 35, None, None, "baseline"))
+        .await?;
+    let nonempty_tip = db.get_social_post_materialization_tip().await?;
+    let at_tip = scan(&db, Some(nonempty_tip), 1).await?;
+    assert!(at_tip.items.is_empty());
+    assert!(at_tip.exhausted);
+
+    let after_post = social_post(secret, 36, None, None, "after");
+    db.try_process_event_with_content(&after_post).await?;
+    let after = scan(&db, Some(nonempty_tip), 1).await?;
+    assert_eq!(after.items.len(), 1);
+    assert_present(
+        &after.items[0],
+        ExternalEventId::new(secret.id(), after_post.event_id().to_short()),
+        "after",
+    );
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn materialization_tip_returns_corruption_and_overflow_errors() -> anyhow::Result<()> {
+    let secret = RostraIdSecretKey::generate();
+    let db = Database::new_in_memory(secret.id()).await?;
+    db.write_with(|tx| {
+        tx.as_raw()
+            .open_table(social_post_materializations::TABLE.as_raw())?
+            .insert(&[0xff][..], &[][..])?;
+        Ok(())
+    })
+    .await?;
+    assert!(matches!(
+        db.get_social_post_materialization_tip().await,
+        Err(DbError::StoredDecode { .. })
+    ));
+
+    let db = Database::new_in_memory(secret.id()).await?;
+    let max_key = bincode::encode_to_vec(u64::MAX, redb_bincode::BINCODE_CONFIG)?;
+    db.write_with(|tx| {
+        tx.as_raw()
+            .open_table(social_post_materializations::TABLE.as_raw())?
+            .insert(max_key.as_slice(), &[][..])?;
+        Ok(())
+    })
+    .await?;
+    assert!(matches!(
+        db.get_social_post_materialization_tip().await,
+        Err(DbError::Overflow)
+    ));
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn materialization_tip_is_a_concurrent_enablement_boundary() -> anyhow::Result<()> {
+    let secret = RostraIdSecretKey::generate();
+    let db = Arc::new(Database::new_in_memory(secret.id()).await?);
+    db.try_process_event_with_content(&social_post(secret, 37, None, None, "baseline"))
+        .await?;
+
+    let start = Arc::new(tokio::sync::Barrier::new(2));
+    let tip = {
+        let db = Arc::clone(&db);
+        let start = Arc::clone(&start);
+        async move {
+            start.wait().await;
+            db.get_social_post_materialization_tip().await
+        }
+    };
+    let raced_write = {
+        let db = Arc::clone(&db);
+        let start = Arc::clone(&start);
+        async move {
+            start.wait().await;
+            db.try_process_event_with_content(&social_post(secret, 38, None, None, "raced"))
+                .await
+        }
+    };
+    let (tip, write_result) = tokio::join!(tip, raced_write);
+    let tip = tip?;
+    write_result?;
+
+    db.try_process_event_with_content(&social_post(secret, 39, None, None, "after"))
+        .await?;
+    let page = scan(&db, Some(tip), 3).await?;
+    let bodies = page
+        .items
+        .iter()
+        .map(|item| match item {
+            SocialPostMaterialization::Present { content, .. } => content
+                .djot_content
+                .as_deref()
+                .expect("test post has a body"),
+            SocialPostMaterialization::Removed { .. } => panic!("test post remains present"),
+        })
+        .collect::<Vec<_>>();
+    assert!(
+        bodies == ["after"] || bodies == ["raced", "after"],
+        "the racing commit must fall entirely before or after the observed tip"
+    );
     Ok(())
 }
 

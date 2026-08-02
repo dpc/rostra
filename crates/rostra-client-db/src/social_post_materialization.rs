@@ -1,6 +1,7 @@
 use std::num::NonZeroUsize;
 
 use bincode::{Decode, Encode};
+use redb::ReadableTable as _;
 use rostra_core::event::{EventExt as _, EventKind, content_kind};
 use rostra_core::{ExternalEventId, ShortEventId, Timestamp};
 use serde::{Deserialize, Serialize};
@@ -70,18 +71,46 @@ impl Database {
         }
 
         let mut table = tx.open_table(&social_post_materializations::TABLE)?;
-        let next = table
-            .last()?
-            .map(|entry| entry.0.value_try())
-            .transpose()?
-            .map(|last| last.checked_add(1).context(OverflowSnafu))
-            .transpose()?
-            .unwrap_or(0);
+        let next = {
+            let last = table.as_raw().last()?;
+            Self::social_post_materialization_next_sequence(
+                last.as_ref().map(|entry| entry.0.value()),
+            )?
+        };
         if next == u64::MAX {
             return OverflowSnafu.fail();
         }
         table.insert(&next, &event_id)?;
         Ok(())
+    }
+
+    /// Gets a cursor at the current tip of the SocialPost materialization feed.
+    ///
+    /// The cursor denotes the next sequence in one read snapshot. Establishing
+    /// that snapshot is the consumer-enablement linearization point: every
+    /// occurrence visible before the tip is acknowledged by the cursor, while
+    /// an occurrence committed after the snapshot has a sequence at or after
+    /// the cursor and remains discoverable by a later scan. A commit concurrent
+    /// with this call may fall on either side of that boundary.
+    ///
+    /// This reads only the feed's last key; it does not enumerate or resolve
+    /// feed rows. An empty feed returns the sequence-zero cursor.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error on storage, key decode, or sequence overflow.
+    pub async fn get_social_post_materialization_tip(
+        &self,
+    ) -> DbResult<SocialPostMaterializationCursor> {
+        self.read_with(|tx| {
+            let feed = tx.open_table(&social_post_materializations::TABLE)?;
+            let last = feed.as_raw().last()?;
+            let next = Self::social_post_materialization_next_sequence(
+                last.as_ref().map(|entry| entry.0.value()),
+            )?;
+            Ok(SocialPostMaterializationCursor(next))
+        })
+        .await
     }
 
     /// Scans ordinary SocialPost materializations in commit order.
@@ -119,13 +148,10 @@ impl Database {
         }
         self.read_with(|tx| {
             let feed = tx.open_table(&social_post_materializations::TABLE)?;
-            let durable_next = feed
-                .last()?
-                .map(|entry| entry.0.value_try())
-                .transpose()?
-                .map(|last| last.checked_add(1).context(OverflowSnafu))
-                .transpose()?
-                .unwrap_or(0);
+            let last = feed.as_raw().last()?;
+            let durable_next = Self::social_post_materialization_next_sequence(
+                last.as_ref().map(|entry| entry.0.value()),
+            )?;
             let mut expected = after.map_or(0, |cursor| cursor.0);
             if durable_next < expected {
                 return crate::SocialPostMaterializationCursorOutOfRangeSnafu {
@@ -184,6 +210,20 @@ impl Database {
             })
         })
         .await
+    }
+
+    fn social_post_materialization_next_sequence(last_key: Option<&[u8]>) -> DbResult<u64> {
+        let Some(last_key) = last_key else {
+            return Ok(0);
+        };
+        let (last, consumed) =
+            bincode::decode_from_slice::<u64, _>(last_key, redb_bincode::BINCODE_CONFIG)?;
+        if consumed != last_key.len() {
+            return Err(
+                bincode::error::DecodeError::Other("Trailing bytes after encoded value").into(),
+            );
+        }
+        last.checked_add(1).context(OverflowSnafu)
     }
 
     fn resolve_social_post_materialization_tx(

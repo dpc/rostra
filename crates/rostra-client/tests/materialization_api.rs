@@ -11,6 +11,7 @@ fn materialization_feed_types_and_scan_are_reexported() {
         database: &Database,
         cursor: Option<SocialPostMaterializationCursor>,
     ) -> Result<SocialPostMaterializationPage, DbError> {
+        let _tip = database.get_social_post_materialization_tip().await?;
         database
             .scan_social_post_materializations(cursor, NonZeroUsize::MIN)
             .await

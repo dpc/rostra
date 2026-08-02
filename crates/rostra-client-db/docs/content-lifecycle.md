@@ -599,8 +599,9 @@ Both cases indicate bugs in the calling code and will panic in debug builds.
   and reverse membership before normal access
 - `social_post_materialization_tests` - Atomic append/rollback, late payload
   materialization, exclusion paths, deletion/replacement resolution, bounded
-  cursor and crash replay, sequence exhaustion, no-backfill cutover, exact
-  rebuild preservation/retry, and fail-closed gap/lifecycle/content corruption
+  cursor and crash replay, enablement-tip baseline and concurrent boundary,
+  sequence exhaustion, no-backfill cutover, exact rebuild preservation/retry,
+  and fail-closed gap/lifecycle/content corruption
 
 ### Edge Case Tests
 
