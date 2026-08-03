@@ -1,9 +1,8 @@
-use std::collections::BTreeMap;
 use std::time::Duration;
 
 use rostra_core::Timestamp;
 use rostra_core::id::{RostraId, ToShort as _};
-use tracing::{debug, error, instrument, trace, warn};
+use tracing::{debug, error, instrument, trace};
 
 use crate::LOG_TARGET;
 use crate::client::Client;
@@ -15,8 +14,6 @@ const INITIAL_CONTENT_FETCH_BACKOFF_SECS: u64 = 60;
 
 /// Maximum backoff for content fetch retries (24 hours).
 const MAX_CONTENT_FETCH_BACKOFF_SECS: u64 = 86400;
-const FOLLOWERS_BY_FOLLOWEE_WARN_LIMIT: usize = 10_000;
-
 /// Calculate exponential backoff seconds for a given attempt count.
 ///
 /// Uses `min(INITIAL * 1.5^(count-1), MAX)`.
@@ -64,8 +61,6 @@ impl MissingEventContentFetcher {
         };
         let notify = db.content_missing_notify();
 
-        let mut followers_by_followee: BTreeMap<RostraId, Vec<RostraId>> = BTreeMap::new();
-
         loop {
             let Ok(db) = self.client.db() else {
                 break;
@@ -99,21 +94,9 @@ impl MissingEventContentFetcher {
             let author_id = next.author;
             let event_id = next.event_id;
 
-            let followers = if let Some(followers) = followers_by_followee.get(&author_id) {
-                followers.clone()
-            } else {
-                let followers = db.get_followers(author_id).await;
-                followers_by_followee.insert(author_id, followers.clone());
-                if followers_by_followee.len() == FOLLOWERS_BY_FOLLOWEE_WARN_LIMIT + 1 {
-                    warn!(
-                        target: LOG_TARGET,
-                        len = followers_by_followee.len(),
-                        limit = FOLLOWERS_BY_FOLLOWEE_WARN_LIMIT,
-                        "Followers-by-followee cache is large"
-                    );
-                }
-                followers
-            };
+            // Follower membership is durable, mutable routing state. Reload it for
+            // every attempt so a newly learned peer participates in the next retry.
+            let followers = db.get_followers(author_id).await;
 
             let peers: Vec<RostraId> = followers
                 .into_iter()

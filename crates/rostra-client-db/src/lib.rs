@@ -750,12 +750,62 @@ impl Database {
         .expect("Database panic")
     }
 
+    /// Lists unique authors that still have missing event envelopes.
+    ///
+    /// The page starts strictly after `after`, is ordered by author ID, and
+    /// contains at most `limit` authors. A zero limit returns an empty page.
+    ///
+    /// Each call uses an independent read transaction. Callers that reconcile
+    /// multiple pages should capture [`Self::get_last_id_with_missing_events`]
+    /// first and stop at that high-water author.
+    ///
+    /// This compatibility query panics if the database read fails.
+    pub async fn get_ids_with_missing_events(
+        &self,
+        after: Option<RostraId>,
+        limit: usize,
+    ) -> Vec<RostraId> {
+        self.read_with(|tx| {
+            let events_missing_tbl = tx.open_table(&events_missing::TABLE)?;
+            Database::get_ids_with_missing_events_tx(after, limit, &events_missing_tbl)
+        })
+        .await
+        .expect("Database panic")
+    }
+
+    /// Returns the greatest author ID that currently has missing event
+    /// envelopes.
+    ///
+    /// This compatibility query panics if the database read fails.
+    pub async fn get_last_id_with_missing_events(&self) -> Option<RostraId> {
+        self.read_with(|tx| {
+            let events_missing_tbl = tx.open_table(&events_missing::TABLE)?;
+            Database::get_last_id_with_missing_events_tx(&events_missing_tbl)
+        })
+        .await
+        .expect("Database panic")
+    }
+
     pub async fn get_heads_events_for_id(&self, id: RostraId) -> Vec<ShortEventId> {
         self.read_with(|tx| {
             let events_heads_tbl = tx.open_table(&events_heads::TABLE)?;
             Ok(Database::get_heads_events_tx(id, &events_heads_tbl)?
                 .into_iter()
                 .collect())
+        })
+        .await
+        .expect("Database panic")
+    }
+
+    /// Lists a bounded ordered page of unique authors with current durable
+    /// heads.
+    ///
+    /// The page starts strictly after `after`. A zero limit returns an empty
+    /// page. This compatibility query panics if the database read fails.
+    pub async fn get_ids_with_heads(&self, after: Option<RostraId>, limit: usize) -> Vec<RostraId> {
+        self.read_with(|tx| {
+            let events_heads_tbl = tx.open_table(&events_heads::TABLE)?;
+            Database::get_ids_with_heads_tx(after, limit, &events_heads_tbl)
         })
         .await
         .expect("Database panic")

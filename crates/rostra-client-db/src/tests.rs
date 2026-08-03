@@ -7223,3 +7223,39 @@ async fn test_news_rank_at_max_age_not_removed_on_score_recalculation() -> Boxed
 
     Ok(())
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn missing_event_author_pagination_is_unique_bounded_and_exclusive() -> BoxedErrorResult<()> {
+    let (_dir, db) = temp_db_rng().await?;
+    let mut authors = [
+        RostraIdSecretKey::from_bytes([71; 32]).id(),
+        RostraIdSecretKey::from_bytes([72; 32]).id(),
+        RostraIdSecretKey::from_bytes([73; 32]).id(),
+    ];
+    authors.sort_unstable();
+
+    db.write_with(|tx| {
+        let mut missing = tx.open_table(&events_missing::TABLE)?;
+        let record = crate::event::EventsMissingRecord { deleted_by: None };
+        missing.insert(&(authors[0], rostra_core::ShortEventId::ZERO), &record)?;
+        missing.insert(&(authors[0], rostra_core::ShortEventId::MAX), &record)?;
+        missing.insert(&(authors[1], rostra_core::ShortEventId::ZERO), &record)?;
+        missing.insert(&(authors[2], rostra_core::ShortEventId::ZERO), &record)?;
+        Ok(())
+    })
+    .await?;
+
+    assert!(db.get_ids_with_missing_events(None, 0).await.is_empty());
+    assert_eq!(db.get_ids_with_missing_events(None, 2).await, authors[..2]);
+    assert_eq!(
+        db.get_ids_with_missing_events(Some(authors[1]), 2).await,
+        authors[2..]
+    );
+    assert_eq!(
+        db.get_ids_with_missing_events(Some(authors[2]), 2).await,
+        Vec::<RostraId>::new()
+    );
+    assert_eq!(db.get_last_id_with_missing_events().await, Some(authors[2]));
+
+    Ok(())
+}

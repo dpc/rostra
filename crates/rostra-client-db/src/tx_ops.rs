@@ -540,6 +540,45 @@ impl Database {
             .collect::<Result<Vec<_>, _>>()?)
     }
 
+    pub(crate) fn get_ids_with_missing_events_tx(
+        after: Option<RostraId>,
+        limit: usize,
+        events_missing_table: &impl events_missing::ReadableTable,
+    ) -> DbResult<Vec<RostraId>> {
+        if limit == 0 {
+            return Ok(Vec::new());
+        }
+        let start = after.map_or(std::ops::Bound::Unbounded, |author| {
+            std::ops::Bound::Excluded((author, ShortEventId::MAX))
+        });
+        let mut authors = Vec::with_capacity(limit);
+
+        for row in events_missing_table.range((start, std::ops::Bound::Unbounded))? {
+            let author = row?.0.value().0;
+            if authors.last() != Some(&author) {
+                authors.push(author);
+                if limit <= authors.len() {
+                    break;
+                }
+            }
+        }
+
+        Ok(authors)
+    }
+
+    pub(crate) fn get_last_id_with_missing_events_tx(
+        events_missing_table: &impl events_missing::ReadableTable,
+    ) -> DbResult<Option<RostraId>> {
+        Ok(events_missing_table
+            .range((
+                std::ops::Bound::<(RostraId, ShortEventId)>::Unbounded,
+                std::ops::Bound::<(RostraId, ShortEventId)>::Unbounded,
+            ))?
+            .next_back()
+            .transpose()?
+            .map(|(key, _)| key.value().0))
+    }
+
     pub(crate) fn get_heads_events_tx(
         author: RostraId,
         events_heads_table: &impl events_heads::ReadableTable,
@@ -548,6 +587,32 @@ impl Database {
             .range((author, ShortEventId::ZERO)..=(author, ShortEventId::MAX))?
             .map(|r| r.map(|(k, _v)| k.value().1))
             .collect::<Result<Vec<_>, _>>()?)
+    }
+
+    pub(crate) fn get_ids_with_heads_tx(
+        after: Option<RostraId>,
+        limit: usize,
+        events_heads_table: &impl events_heads::ReadableTable,
+    ) -> DbResult<Vec<RostraId>> {
+        if limit == 0 {
+            return Ok(Vec::new());
+        }
+        let start = after.map_or(std::ops::Bound::Unbounded, |author| {
+            std::ops::Bound::Excluded((author, ShortEventId::MAX))
+        });
+        let mut authors = Vec::with_capacity(limit);
+
+        for row in events_heads_table.range((start, std::ops::Bound::Unbounded))? {
+            let author = row?.0.value().0;
+            if authors.last() != Some(&author) {
+                authors.push(author);
+                if limit <= authors.len() {
+                    break;
+                }
+            }
+        }
+
+        Ok(authors)
     }
 
     pub(crate) fn count_missing_events_for_id_tx(
