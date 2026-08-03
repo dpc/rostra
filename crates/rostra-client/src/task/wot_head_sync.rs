@@ -44,14 +44,21 @@ use std::time::Duration;
 use rostra_client_db::{CurrentState, Database, DbResult, WotData};
 use rostra_core::id::{RostraId, ToShort as _};
 use rostra_util_error::FmtCompact as _;
-use tracing::{debug, error, instrument, trace};
+use tracing::{debug, error, instrument, trace, warn};
 
 use crate::client::{Client, ClientHandle};
 use crate::connection_cache::ConnectionCache;
 use crate::net::ClientNetworking;
+use crate::task::outbound_deadline::{PEER_OPERATION_DEADLINE, WOT_SYNC_CYCLE_DEADLINE, within};
 
 const LOG_TARGET: &str = "rostra::wot_head_sync";
 const SYNC_INTERVAL: Duration = Duration::from_secs(60 * 60);
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum SyncCycleOutcome {
+    Complete,
+    TimedOut,
+}
 
 pub struct WotHeadSync {
     client: ClientHandle,
@@ -61,6 +68,9 @@ pub struct WotHeadSync {
     wot: CurrentState<Arc<WotData>>,
     connections: ConnectionCache,
 }
+
+#[cfg(test)]
+mod tests;
 
 impl WotHeadSync {
     pub fn new(client: &Client) -> Self {
@@ -78,13 +88,26 @@ impl WotHeadSync {
     #[instrument(name = "wot-head-sync", skip(self), fields(self_id = %self.self_id.fmt_short()), ret)]
     pub async fn run(self) {
         loop {
-            if let Err(err) = self.sync_cycle().await {
-                error!(
-                    target: LOG_TARGET,
-                    err = %err,
-                    "Database ingestion failed; stopping WoT head sync"
-                );
-                return;
+            let sync_result = self
+                .sync_cycle_with_deadlines(PEER_OPERATION_DEADLINE, WOT_SYNC_CYCLE_DEADLINE)
+                .await;
+            match sync_result {
+                Ok(SyncCycleOutcome::Complete) => {}
+                Ok(SyncCycleOutcome::TimedOut) => {
+                    warn!(
+                        target: LOG_TARGET,
+                        timeout_secs = WOT_SYNC_CYCLE_DEADLINE.as_secs(),
+                        "WoT head sync cycle exceeded its deadline"
+                    );
+                }
+                Err(err) => {
+                    error!(
+                        target: LOG_TARGET,
+                        err = %err,
+                        "Database ingestion failed; stopping WoT head sync"
+                    );
+                    return;
+                }
             }
 
             if self.client.app_ref_opt().is_none() {
@@ -102,7 +125,24 @@ impl WotHeadSync {
         }
     }
 
-    async fn sync_cycle(&self) -> DbResult<()> {
+    async fn sync_cycle_with_deadlines(
+        &self,
+        peer_deadline: Duration,
+        cycle_deadline: Duration,
+    ) -> DbResult<SyncCycleOutcome> {
+        match within(
+            cycle_deadline,
+            self.sync_cycle_with_peer_deadline(peer_deadline),
+        )
+        .await
+        {
+            Ok(Ok(())) => Ok(SyncCycleOutcome::Complete),
+            Ok(Err(err)) => Err(err),
+            Err(_) => Ok(SyncCycleOutcome::TimedOut),
+        }
+    }
+
+    async fn sync_cycle_with_peer_deadline(&self, peer_deadline: Duration) -> DbResult<()> {
         let wot = self.wot.snapshot();
         let wot_ids: Vec<RostraId> = std::iter::once(self.self_id)
             .chain(wot.iter_all())
@@ -119,23 +159,24 @@ impl WotHeadSync {
                 break;
             }
 
-            self.sync_id(*id).await?;
+            self.sync_id_with_deadline(*id, peer_deadline).await?;
         }
         Ok(())
     }
 
-    async fn sync_id(&self, id: RostraId) -> DbResult<()> {
+    async fn sync_id_with_deadline(&self, id: RostraId, deadline: Duration) -> DbResult<()> {
         let followers = self.db.get_followers(id).await;
         let peers: Vec<RostraId> = followers.into_iter().chain([id, self.self_id]).collect();
 
         for &peer_id in &peers {
-            let conn = match self
-                .connections
-                .get_or_connect(&self.networking, peer_id)
-                .await
+            let conn = match within(
+                deadline,
+                self.connections.get_or_connect(&self.networking, peer_id),
+            )
+            .await
             {
-                Ok(conn) => conn,
-                Err(_) => {
+                Ok(Ok(conn)) => conn,
+                Ok(Err(_)) => {
                     trace!(
                         target: LOG_TARGET,
                         id = %id.to_short(),
@@ -144,18 +185,38 @@ impl WotHeadSync {
                     );
                     continue;
                 }
+                Err(_) => {
+                    trace!(
+                        target: LOG_TARGET,
+                        id = %id.to_short(),
+                        peer = %peer_id.to_short(),
+                        timeout_secs = deadline.as_secs(),
+                        "Timed out connecting to peer, skipping"
+                    );
+                    continue;
+                }
             };
 
-            let remote_head = match conn.get_head(id).await {
-                Ok(Some(head)) => head,
-                Ok(None) => continue,
-                Err(err) => {
+            let remote_head = match within(deadline, conn.get_head(id)).await {
+                Ok(Ok(Some(head))) => head,
+                Ok(Ok(None)) => continue,
+                Ok(Err(err)) => {
                     trace!(
                         target: LOG_TARGET,
                         id = %id.to_short(),
                         peer = %peer_id.to_short(),
                         err = %err.fmt_compact(),
                         "GET_HEAD failed, skipping peer"
+                    );
+                    continue;
+                }
+                Err(_) => {
+                    trace!(
+                        target: LOG_TARGET,
+                        id = %id.to_short(),
+                        peer = %peer_id.to_short(),
+                        timeout_secs = deadline.as_secs(),
+                        "GET_HEAD timed out, skipping peer"
                     );
                     continue;
                 }
@@ -180,18 +241,21 @@ impl WotHeadSync {
                 "Found unknown head, fetching events"
             );
 
-            let download_result = crate::util::rpc::download_events_from_child(
-                id,
-                remote_head,
-                &self.networking,
-                &self.connections,
-                &peers,
-                &self.db,
+            let downloaded = match within(
+                deadline,
+                crate::util::rpc::download_events_from_child(
+                    id,
+                    remote_head,
+                    &self.networking,
+                    &self.connections,
+                    &peers,
+                    &self.db,
+                ),
             )
-            .await;
-            let downloaded = match download_result {
-                Ok(downloaded) => downloaded,
-                Err(err) => {
+            .await
+            {
+                Ok(Ok(downloaded)) => downloaded,
+                Ok(Err(err)) => {
                     error!(
                         target: LOG_TARGET,
                         id = %id.to_short(),
@@ -201,6 +265,17 @@ impl WotHeadSync {
                         "Database ingestion failed while syncing a WoT head"
                     );
                     return Err(err);
+                }
+                Err(_) => {
+                    trace!(
+                        target: LOG_TARGET,
+                        id = %id.to_short(),
+                        peer = %peer_id.to_short(),
+                        head = %remote_head.to_short(),
+                        timeout_secs = deadline.as_secs(),
+                        "Event download timed out, skipping peer"
+                    );
+                    continue;
                 }
             };
             match downloaded {

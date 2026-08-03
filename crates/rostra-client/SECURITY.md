@@ -99,6 +99,23 @@ identity uses the winning follow event. The
 `coalesced_unfollow_readd_cancels_active_epoch_and_prunes_stale_state`
 regressions enforce these boundaries.
 
+Outbound maintenance workers keep deadline policy local rather than changing
+the generic typed-RPC helpers, because callers such as long polls own different
+lifetimes. Each head-broadcast recipient and each Web-of-Trust sync connect,
+`GET_HEAD`, or event-download operation has a 30-second deadline. Network
+timeout or error skips only that peer; later recipients and identities continue.
+The Web-of-Trust worker also abandons a sweep after 30 minutes before the normal
+hourly sleep. Database ingestion errors still stop that worker rather than
+becoming network retries.
+
+A head remains pending until every recipient in a broadcast pass accepts it. If
+any recipient times out or fails, the broadcaster retries the durable current
+head with a capped exponential delay from one to 60 seconds. Restart
+reconciliation also restores pending current heads after task cancellation.
+`hanging_follower_does_not_block_later_follower_and_head_retries` and
+`hanging_peer_does_not_block_later_wot_head_sync` exercise a hanging typed-RPC
+peer followed by a responsive peer and protect these outbound safeguards.
+
 The v0 wire shape retains a separate author claim for compatibility; security
 comes from binding it at every consumer, not from trusting the field. Re-check
 this boundary and extend adversarial coverage whenever adding a consumer,

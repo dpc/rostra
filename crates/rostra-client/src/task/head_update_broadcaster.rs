@@ -1,5 +1,6 @@
-use std::collections::{BTreeSet, HashMap};
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::sync::Arc;
+use std::time::Duration;
 
 use rostra_client_db::{
     CurrentState, Database, EventContentState, EventRecord, IdsFollowersRecord,
@@ -10,6 +11,7 @@ use rostra_core::id::{RostraId, ToShort as _};
 use rostra_util_error::{FmtCompact, WhateverResult};
 use snafu::ResultExt as _;
 use tokio::sync::broadcast;
+use tokio::time::Instant;
 use tracing::{debug, instrument, trace, warn};
 
 /// Arc-wrapped followers map for cheap cloning
@@ -17,8 +19,31 @@ type FollowersMap = Arc<HashMap<RostraId, IdsFollowersRecord>>;
 
 use crate::client::Client;
 use crate::task::head_selection::sorted_heads;
+use crate::task::outbound_deadline::{PEER_OPERATION_DEADLINE, within};
 
 const LOG_TARGET: &str = "rostra::head_broadcaster";
+const BROADCAST_RETRY_INITIAL_DELAY: Duration = Duration::from_secs(1);
+const BROADCAST_RETRY_MAX_DELAY: Duration = Duration::from_secs(60);
+
+#[derive(Debug, Clone, Copy)]
+struct BroadcastPolicy {
+    peer_deadline: Duration,
+    retry_initial_delay: Duration,
+    retry_max_delay: Duration,
+}
+
+const BROADCAST_POLICY: BroadcastPolicy = BroadcastPolicy {
+    peer_deadline: PEER_OPERATION_DEADLINE,
+    retry_initial_delay: BROADCAST_RETRY_INITIAL_DELAY,
+    retry_max_delay: BROADCAST_RETRY_MAX_DELAY,
+};
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum BroadcastHeadOutcome {
+    Delivered,
+    Retry,
+    Stop,
+}
 
 pub struct HeadUpdateBroadcaster {
     client: crate::client::ClientHandle,
@@ -47,32 +72,65 @@ impl HeadUpdateBroadcaster {
 
     /// Run the thread
     #[instrument(name = "head-update-broadcaster", skip(self), fields(self_id = %self.self_id.fmt_short()), ret)]
-    pub async fn run(mut self) {
+    pub async fn run(self) {
+        self.run_with_policy(BROADCAST_POLICY).await;
+    }
+
+    async fn run_with_policy(mut self, policy: BroadcastPolicy) {
         let mut self_followers = self.self_followers.clone();
         let mut pending_heads = BTreeSet::new();
-        reconcile_current_heads(&self.db, &mut pending_heads).await;
+        let mut retry_at = BTreeMap::new();
+        reconcile_pending_heads(&self.db, &mut pending_heads, &mut retry_at).await;
 
         loop {
             let followers = self_followers.snapshot();
             if let Some((head, event, event_content)) =
-                take_one_ready_head(&self.db, &mut pending_heads).await
+                take_one_ready_head(&self.db, &mut pending_heads, &retry_at).await
             {
-                if !self
-                    .broadcast_head(head, &event, &event_content, &followers)
+                match self
+                    .broadcast_head(
+                        head,
+                        &event,
+                        &event_content,
+                        &followers,
+                        policy.peer_deadline,
+                    )
                     .await
                 {
-                    return;
+                    BroadcastHeadOutcome::Delivered => {
+                        pending_heads.remove(&head);
+                        retry_at.remove(&head);
+                    }
+                    BroadcastHeadOutcome::Retry => {
+                        let retry_count = retry_at
+                            .get(&head)
+                            .map_or(0, |retry_at| retry_at.retry_count);
+                        retry_at.insert(
+                            head,
+                            BroadcastRetry {
+                                retry_count: retry_count.saturating_add(1),
+                                at: Instant::now() + broadcast_retry_delay(retry_count, policy),
+                            },
+                        );
+                    }
+                    BroadcastHeadOutcome::Stop => return,
                 }
                 continue;
             }
 
             loop {
+                let next_retry = retry_at
+                    .iter()
+                    .filter(|(head, _)| pending_heads.contains(head))
+                    .map(|(_, retry_at)| retry_at.at)
+                    .min()
+                    .unwrap_or_else(|| Instant::now() + Duration::from_secs(24 * 60 * 60));
                 let should_retry = tokio::select! {
                     res = self.new_heads_rx.recv() => {
                         match res {
                         Ok((author, head)) if author == self.self_id => {
                             trace!(target: LOG_TARGET, event_id = %head.to_short(), "Received exact self-head signal");
-                            reconcile_current_heads(&self.db, &mut pending_heads).await;
+                            reconcile_pending_heads(&self.db, &mut pending_heads, &mut retry_at).await;
                             true
                         }
                         Ok(_) => false,
@@ -83,7 +141,7 @@ impl HeadUpdateBroadcaster {
                                 skipped,
                                 "Head broadcast receiver lagged; recovering durable heads"
                             );
-                            reconcile_current_heads(&self.db, &mut pending_heads).await;
+                            reconcile_pending_heads(&self.db, &mut pending_heads, &mut retry_at).await;
                             true
                         }
                     }
@@ -107,7 +165,7 @@ impl HeadUpdateBroadcaster {
                                 skipped,
                                 "Content broadcast receiver lagged; reconciling durable heads"
                             );
-                            reconcile_current_heads(&self.db, &mut pending_heads).await;
+                            reconcile_pending_heads(&self.db, &mut pending_heads, &mut retry_at).await;
                             true
                         }
                     }
@@ -118,9 +176,10 @@ impl HeadUpdateBroadcaster {
                         }
                         // New followers did not observe earlier incremental signals.
                         // Recover from the complete durable set.
-                        reconcile_current_heads(&self.db, &mut pending_heads).await;
+                        reconcile_pending_heads(&self.db, &mut pending_heads, &mut retry_at).await;
                         true
                     }
+                    _ = tokio::time::sleep_until(next_retry) => true,
                 };
                 if should_retry {
                     break;
@@ -136,7 +195,8 @@ impl HeadUpdateBroadcaster {
         event: &EventRecord,
         event_content: &EventContentRaw,
         followers: &FollowersMap,
-    ) -> bool {
+        deadline: Duration,
+    ) -> BroadcastHeadOutcome {
         debug!(
             target: LOG_TARGET,
             event_id = %head.to_short(),
@@ -144,23 +204,47 @@ impl HeadUpdateBroadcaster {
             "Broadcasting new head event to followers"
         );
 
+        let mut retry = false;
+
         // Send to ourselves first, in case we have redundant nodes.
         for id in [self.self_id].into_iter().chain(followers.keys().copied()) {
             if self.client.app_ref_opt().is_none() {
                 debug!(target: LOG_TARGET, "Client gone, quitting");
-                return false;
+                return BroadcastHeadOutcome::Stop;
             }
 
-            if let Err(err) = self.broadcast_event(id, &event.signed, event_content).await {
-                debug!(
-                    target: LOG_TARGET,
-                    err = %err.fmt_compact(),
-                    id = %id.to_short(),
-                    "Failed to broadcast new head to node"
-                );
+            match within(
+                deadline,
+                self.broadcast_event(id, &event.signed, event_content),
+            )
+            .await
+            {
+                Ok(Ok(())) => {}
+                Ok(Err(err)) => {
+                    retry = true;
+                    debug!(
+                        target: LOG_TARGET,
+                        err = %err.fmt_compact(),
+                        id = %id.to_short(),
+                        "Failed to broadcast new head to node"
+                    );
+                }
+                Err(_) => {
+                    retry = true;
+                    warn!(
+                        target: LOG_TARGET,
+                        id = %id.to_short(),
+                        timeout_ms = deadline.as_millis(),
+                        "Timed out broadcasting new head to node"
+                    );
+                }
             }
         }
-        true
+        if retry {
+            BroadcastHeadOutcome::Retry
+        } else {
+            BroadcastHeadOutcome::Delivered
+        }
     }
 
     async fn broadcast_event(
@@ -189,6 +273,29 @@ async fn reconcile_current_heads(db: &Database, pending_heads: &mut BTreeSet<Sho
         .collect();
 }
 
+async fn reconcile_pending_heads(
+    db: &Database,
+    pending_heads: &mut BTreeSet<ShortEventId>,
+    retry_at: &mut BTreeMap<ShortEventId, BroadcastRetry>,
+) {
+    reconcile_current_heads(db, pending_heads).await;
+    retry_at.retain(|head, _| pending_heads.contains(head));
+}
+
+#[derive(Debug, Clone, Copy)]
+struct BroadcastRetry {
+    retry_count: u32,
+    at: Instant,
+}
+
+fn broadcast_retry_delay(retry_count: u32, policy: BroadcastPolicy) -> Duration {
+    policy
+        .retry_initial_delay
+        .checked_mul(1u32 << retry_count.min(31))
+        .unwrap_or(Duration::MAX)
+        .min(policy.retry_max_delay)
+}
+
 fn content_completes_pending(
     content: &VerifiedEventContent,
     self_id: RostraId,
@@ -200,8 +307,15 @@ fn content_completes_pending(
 async fn take_one_ready_head(
     db: &Database,
     pending_heads: &mut BTreeSet<ShortEventId>,
+    retry_at: &BTreeMap<ShortEventId, BroadcastRetry>,
 ) -> Option<(ShortEventId, EventRecord, EventContentRaw)> {
     for head in pending_heads.iter().copied().collect::<Vec<_>>() {
+        if retry_at
+            .get(&head)
+            .is_some_and(|retry_at| Instant::now() < retry_at.at)
+        {
+            continue;
+        }
         let Some(event) = db.get_event(head).await else {
             warn!(target: LOG_TARGET, event_id = %head.to_short(), "No head event!?");
             pending_heads.remove(&head);
@@ -209,11 +323,9 @@ async fn take_one_ready_head(
         };
         let content = db.get_event_content(head).await;
         if let Some(content) = content {
-            pending_heads.remove(&head);
             return Some((head, event, content));
         }
         if event.content_len() == 0 {
-            pending_heads.remove(&head);
             return Some((head, event, EventContentRaw::new(Vec::new())));
         }
 
