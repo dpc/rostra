@@ -21,6 +21,26 @@ fn owning_form<'a>(document: &'a Html, control: ElementRef<'a>) -> Option<Elemen
         .find(|element| element.value().name() == "form")
 }
 
+fn assert_link_precedes(document: &Html, first: &str, second: &str) {
+    let links = Selector::parse("a[href]").unwrap();
+    let hrefs: Vec<_> = document
+        .select(&links)
+        .filter_map(|link| link.value().attr("href"))
+        .collect();
+    let first_index = hrefs
+        .iter()
+        .position(|href| *href == first)
+        .unwrap_or_else(|| panic!("missing link to {first}"));
+    let second_index = hrefs
+        .iter()
+        .position(|href| *href == second)
+        .unwrap_or_else(|| panic!("missing link to {second}"));
+    assert!(
+        first_index < second_index,
+        "expected {first} to precede {second}, found {hrefs:?}"
+    );
+}
+
 #[test_log::test(tokio::test(flavor = "multi_thread"))]
 async fn unauthenticated_landing_page_returns_200() {
     let server = TestServer::start().await;
@@ -58,8 +78,58 @@ async fn login_then_access_followees() {
 
     driver.login_new_identity().await;
 
+    let resp = driver.get("/").await;
+    assert_eq!(resp.status(), 307);
+    assert_eq!(resp.headers().get(header::LOCATION).unwrap(), "/home");
+
+    let resp = driver.get("/home").await;
+    assert_eq!(resp.status(), 307);
+    assert_eq!(resp.headers().get(header::LOCATION).unwrap(), "/following");
+
     let resp = driver.get("/following").await;
     assert_eq!(resp.status(), 200);
+
+    let document = Html::parse_document(&resp.text().await.unwrap());
+    assert_link_precedes(&document, "/following", "/news");
+}
+
+#[test_log::test(tokio::test(flavor = "multi_thread"))]
+async fn explicit_news_url_remains_available() {
+    let server = TestServer::start().await;
+    let driver = server.driver();
+
+    driver.login_new_identity().await;
+
+    let resp = driver.get("/news").await;
+    assert_eq!(resp.status(), 200);
+
+    let document = Html::parse_document(&resp.text().await.unwrap());
+    assert_link_precedes(&document, "/following", "/news");
+    let active_news = Selector::parse(r#"a[href="/news"][aria-current="page"]"#).unwrap();
+    assert_eq!(
+        document.select(&active_news).count(),
+        1,
+        "the explicit News URL should keep News selected"
+    );
+
+    let resp = driver.get("/shoutbox").await;
+    assert_eq!(resp.status(), 200);
+    let document = Html::parse_document(&resp.text().await.unwrap());
+    assert_link_precedes(&document, "/following", "/news");
+
+    let resp = driver.get("/sitemap.xml").await;
+    assert_eq!(resp.status(), 200);
+    let body = resp.text().await.unwrap();
+    let following = body
+        .find("/following</loc>")
+        .expect("sitemap should include Following");
+    let news = body
+        .find("/news</loc>")
+        .expect("sitemap should include News");
+    assert!(
+        following < news,
+        "sitemap should list Following before News: {body}"
+    );
 }
 
 #[test_log::test(tokio::test(flavor = "multi_thread"))]

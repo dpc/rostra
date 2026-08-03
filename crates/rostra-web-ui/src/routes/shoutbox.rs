@@ -128,11 +128,6 @@ pub async fn get_shoutbox(
                 "@badges:updated.window"="onUpdate($event.detail)"
             {
                 a ."o-mainBarTimeline__back" href="/" onclick="history.back(); return false;" { "<" }
-                a ."o-mainBarTimeline__news"
-                    href="/news"
-                {
-                    "News"
-                }
                 a ."o-mainBarTimeline__followees"
                     href="/following"
                 {
@@ -145,6 +140,11 @@ pub async fn get_shoutbox(
                     "Network"
                     span ."o-mainBarTimeline__newCount" x-text="formatCount(network)" {}
                 }
+                a ."o-mainBarTimeline__news"
+                    href="/news"
+                {
+                    "News"
+                }
                 a ."o-mainBarTimeline__notifications"
                     href="/notifications"
                     ":class"="{ '-pending': notifications > 0 }"
@@ -154,6 +154,7 @@ pub async fn get_shoutbox(
                 }
                 a ."o-mainBarTimeline__shoutbox -active"
                     href="/shoutbox"
+                    aria-current="page"
                     ":class"="{ '-pending': shoutbox > 0 }"
                 {
                     "Shoutbox"

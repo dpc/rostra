@@ -844,6 +844,7 @@ impl UiState {
                         a ."o-mainBarTimeline__profile"
                             ."-active"[mode.is_profile()]
                             href=(mode.to_path())
+                            aria-current=[mode.is_profile().then_some("page")]
                         { "Profile" }
                         a ."o-mainBarTimeline__feedLink"
                             href=(format!("/profile/{profile_id}/atom.xml"))
@@ -854,15 +855,10 @@ impl UiState {
 
                     } @else {
 
-                        a ."o-mainBarTimeline__news"
-                            ."-active"[mode.is_news()]
-                            href=(TimelineMode::News.to_path())
-                        {
-                            "News"
-                        }
                         a ."o-mainBarTimeline__followees"
                             ."-active"[mode.is_followees()]
                             href=(TimelineMode::Followees.to_path())
+                            aria-current=[mode.is_followees().then_some("page")]
                         {
                             "Following"
                             span ."o-mainBarTimeline__newCount" x-text="formatCount(followees)" {}
@@ -870,13 +866,22 @@ impl UiState {
                         a ."o-mainBarTimeline__network"
                             ."-active"[mode.is_network()]
                             href=(TimelineMode::Network.to_path())
+                            aria-current=[mode.is_network().then_some("page")]
                         {
                             "Network"
                             span ."o-mainBarTimeline__newCount" x-text="formatCount(network)" {}
                         }
+                        a ."o-mainBarTimeline__news"
+                            ."-active"[mode.is_news()]
+                            href=(TimelineMode::News.to_path())
+                            aria-current=[mode.is_news().then_some("page")]
+                        {
+                            "News"
+                        }
                         a ."o-mainBarTimeline__notifications"
                             ."-active"[mode.is_notifications()]
                             href=(TimelineMode::Notifications.to_path())
+                            aria-current=[mode.is_notifications().then_some("page")]
                             ":class"="{ '-pending': notifications > 0 }"
                         {
                             "Notifications"
