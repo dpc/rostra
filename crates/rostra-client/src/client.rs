@@ -360,7 +360,11 @@ impl Client {
         /// Pre-built iroh endpoint. If provided, uses this instead of
         /// creating a new one. Useful for tests that need custom endpoint
         /// configuration. The caller owns the endpoint's direct-transport and
-        /// privacy policy; `public_mode` does not reconfigure it.
+        /// privacy policy; `public_mode` does not reconfigure it. The caller
+        /// must also configure safe QUIC stream counts and receive
+        /// windows before binding. Post-handshake reductions cannot
+        /// retract transport credit that an endpoint already
+        /// advertised.
         iroh_endpoint: Option<iroh::Endpoint>,
         /// Pre-built pkarr client. If provided, uses this instead of
         /// creating a new one. Since the pkarr client is identity-agnostic,
@@ -525,15 +529,22 @@ impl Client {
         iroh_secret: impl Into<Option<iroh::SecretKey>>,
         public_mode: bool,
     ) -> InitResult<iroh::Endpoint> {
-        use iroh::endpoint::presets;
+        use iroh::endpoint::{QuicTransportConfig, VarInt, presets};
         use iroh::{Endpoint, SecretKey};
         let secret_key = iroh_secret.into().unwrap_or_else(SecretKey::generate);
 
         // Use the n0 preset for relay transport and Pkarr/DNS address lookup.
         // Rostra publishes its own tickets through Pkarr for each identity.
+        let transport = QuicTransportConfig::builder()
+            .max_concurrent_bidi_streams(VarInt::from_u32(32))
+            .max_concurrent_uni_streams(VarInt::from_u32(0))
+            .stream_receive_window(VarInt::from_u32(64 * 1024))
+            .receive_window(VarInt::from_u32(2 * 1024 * 1024))
+            .build();
         let mut builder = Endpoint::builder(presets::N0)
             .secret_key(secret_key)
-            .alpns(vec![ROSTRA_P2P_V0_ALPN.to_vec()]);
+            .alpns(vec![ROSTRA_P2P_V0_ALPN.to_vec()])
+            .transport_config(transport);
 
         // By default, use relay-only mode for privacy (no direct IP connections).
         // In public mode, allow direct IP connections (useful for hosted nodes).

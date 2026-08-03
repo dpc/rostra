@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 use std::sync::Arc;
+use std::time::Duration;
 
 use futures::StreamExt as _;
 use futures::stream::FuturesUnordered;
@@ -20,7 +21,7 @@ use rostra_p2p::connection::{
 use rostra_p2p::util::ToShort as _;
 use rostra_util_error::{BoxedError, FmtCompact as _};
 use snafu::{Location, OptionExt as _, ResultExt as _, Snafu};
-use tokio::sync::Semaphore;
+use tokio::sync::{OwnedSemaphorePermit, Semaphore, TryAcquireError};
 use tracing::{debug, error, info, instrument, trace};
 
 use crate::client::{Client, ClientRefSnafu};
@@ -33,6 +34,64 @@ const LOG_TARGET: &str = "rostra::req_handler";
 /// Maximum number of concurrent RPC handlers per connection.
 const MAX_CONCURRENT_RPCS_PER_CONNECTION: usize = 32;
 
+/// Maximum number of inbound connections owned by one client.
+const MAX_INBOUND_CONNECTIONS: usize = 128;
+
+/// Maximum number of inbound RPC handlers owned by one client.
+const MAX_CONCURRENT_INBOUND_RPCS: usize = 256;
+
+/// Slots reserved so long polls cannot starve finite RPCs.
+const RESERVED_ORDINARY_INBOUND_RPCS: usize = 64;
+
+/// Maximum time an accepted transport may spend completing its handshake.
+const INBOUND_HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(10);
+
+/// Maximum time an idle connection may remain without an active RPC.
+const INBOUND_IDLE_TIMEOUT: Duration = Duration::from_secs(2 * 60);
+
+/// Maximum time a peer may spend sending one bounded request header.
+const INBOUND_REQUEST_HEADER_TIMEOUT: Duration = Duration::from_secs(10);
+
+/// Maximum complete lifetime of an ordinary finite RPC.
+#[cfg(not(test))]
+const ORDINARY_RPC_TIMEOUT: Duration = Duration::from_secs(60);
+
+#[cfg(test)]
+const ORDINARY_RPC_TIMEOUT: Duration = Duration::from_millis(100);
+
+#[derive(Clone, Debug)]
+struct InboundAdmission {
+    connections: Arc<Semaphore>,
+    shared_rpcs: Arc<Semaphore>,
+    reserved_ordinary_rpcs: Arc<Semaphore>,
+}
+
+impl InboundAdmission {
+    fn new() -> Self {
+        Self {
+            connections: Arc::new(Semaphore::new(MAX_INBOUND_CONNECTIONS)),
+            shared_rpcs: Arc::new(Semaphore::new(
+                MAX_CONCURRENT_INBOUND_RPCS - RESERVED_ORDINARY_INBOUND_RPCS,
+            )),
+            reserved_ordinary_rpcs: Arc::new(Semaphore::new(RESERVED_ORDINARY_INBOUND_RPCS)),
+        }
+    }
+
+    fn try_admit_connection(&self) -> Result<OwnedSemaphorePermit, TryAcquireError> {
+        self.connections.clone().try_acquire_owned()
+    }
+
+    fn try_admit_rpc(&self, long_poll: bool) -> Result<OwnedSemaphorePermit, TryAcquireError> {
+        if long_poll {
+            return self.shared_rpcs.clone().try_acquire_owned();
+        }
+        self.reserved_ordinary_rpcs
+            .clone()
+            .try_acquire_owned()
+            .or_else(|_| self.shared_rpcs.clone().try_acquire_owned())
+    }
+}
+
 #[derive(Debug, Snafu)]
 pub enum IncomingConnectionError {
     Connection {
@@ -43,6 +102,26 @@ pub enum IncomingConnectionError {
     #[snafu(display("Connection stream error: {source}"))]
     ConnectionStream {
         source: iroh::endpoint::ConnectionError,
+        #[snafu(implicit)]
+        location: Location,
+    },
+    #[snafu(display("Connection handshake timed out"))]
+    HandshakeTimeout {
+        #[snafu(implicit)]
+        location: Location,
+    },
+    #[snafu(display("Idle connection timed out"))]
+    IdleTimeout {
+        #[snafu(implicit)]
+        location: Location,
+    },
+    #[snafu(display("Request header timed out"))]
+    RequestHeaderTimeout {
+        #[snafu(implicit)]
+        location: Location,
+    },
+    #[snafu(display("Ordinary RPC timed out"))]
+    OrdinaryRpcTimeout {
         #[snafu(implicit)]
         location: Location,
     },
@@ -90,6 +169,7 @@ pub struct RequestHandler {
     our_id: RostraId,
     self_followees: CurrentState<Arc<HashMap<RostraId, IdsFolloweesRecord>>>,
     self_followers: CurrentState<Arc<HashMap<RostraId, IdsFollowersRecord>>>,
+    inbound_admission: InboundAdmission,
 }
 
 impl RequestHandler {
@@ -101,6 +181,7 @@ impl RequestHandler {
             our_id: client.rostra_id(),
             self_followees: client.self_followees_subscribe(),
             self_followers: client.self_followers_subscribe(),
+            inbound_admission: InboundAdmission::new(),
         }
         .into()
     }
@@ -122,14 +203,28 @@ impl RequestHandler {
                         return;
                     };
 
+                    let Ok(connection_permit) = self.inbound_admission.try_admit_connection() else {
+                        debug!(
+                            target: LOG_TARGET,
+                            max_connections = MAX_INBOUND_CONNECTIONS,
+                            "Rejecting connection: client-wide inbound connection limit reached"
+                        );
+                        continue;
+                    };
                     trace!(target: LOG_TARGET, "New connection" );
-                    connection_tasks.push(AbortOnDropHandle::new(tokio::spawn(self.clone().handle_incoming(incoming))));
+                    connection_tasks.push(AbortOnDropHandle::new(tokio::spawn(
+                        self.clone().handle_incoming(incoming, connection_permit),
+                    )));
                 }
                 Some(_) = connection_tasks.next(), if !connection_tasks.is_empty() => {}
             }
         }
     }
-    pub async fn handle_incoming(self: Arc<Self>, incoming: Incoming) {
+    async fn handle_incoming(
+        self: Arc<Self>,
+        incoming: Incoming,
+        _connection_permit: OwnedSemaphorePermit,
+    ) {
         let peer_addr = incoming.remote_addr();
         if let Err(err) = Arc::clone(&self).handle_incoming_try(incoming).await {
             match err {
@@ -143,25 +238,38 @@ impl RequestHandler {
             }
         }
     }
-    pub async fn handle_incoming_try(
+    async fn handle_incoming_try(
         self: &Arc<Self>,
         incoming: Incoming,
     ) -> IncomingConnectionResult<()> {
-        let conn = incoming
-            .accept()
-            .context(ConnectionStreamSnafu)?
+        let connecting = incoming.accept().context(ConnectionStreamSnafu)?;
+        let conn = tokio::time::timeout(INBOUND_HANDSHAKE_TIMEOUT, connecting)
             .await
+            .map_err(|_| HandshakeTimeoutSnafu.build())?
             .context(ConnectionSnafu)?;
+        conn.set_max_concurrent_bi_streams(
+            u32::try_from(MAX_CONCURRENT_RPCS_PER_CONNECTION)
+                .expect("RPC limit fits u32")
+                .into(),
+        );
+        conn.set_max_concurrent_uni_streams(0u32.into());
 
         let semaphore = Arc::new(Semaphore::new(MAX_CONCURRENT_RPCS_PER_CONNECTION));
         let mut rpc_tasks = FuturesUnordered::new();
 
         loop {
             tokio::select! {
+                _ = tokio::time::sleep(INBOUND_IDLE_TIMEOUT), if rpc_tasks.is_empty() => {
+                    return IdleTimeoutSnafu.fail();
+                }
                 stream = conn.accept_bi() => {
                     let (send, mut recv) = stream.context(ConnectionStreamSnafu)?;
-                    let (rpc_id, req_msg) = Connection::read_request_raw(&mut recv)
+                    let (rpc_id, req_msg) = tokio::time::timeout(
+                        INBOUND_REQUEST_HEADER_TIMEOUT,
+                        Connection::read_request_raw(&mut recv),
+                    )
                         .await
+                        .map_err(|_| RequestHeaderTimeoutSnafu.build())?
                         .context(RpcSnafu)?;
 
                     debug!(
@@ -171,39 +279,72 @@ impl RequestHandler {
                         "Rpc request"
                     );
 
-                    let permit = semaphore
-                        .clone()
-                        .acquire_owned()
-                        .await
-                        .expect("semaphore never closed");
+                    let Ok(connection_permit) = semaphore.clone().try_acquire_owned() else {
+                        debug!(
+                            target: LOG_TARGET,
+                            rpc_id = %rpc_id,
+                            max_rpcs = MAX_CONCURRENT_RPCS_PER_CONNECTION,
+                            "Rejecting RPC: per-connection limit reached"
+                        );
+                        continue;
+                    };
+                    let long_poll = matches!(
+                        rpc_id,
+                        RpcId::WAIT_HEAD_UPDATE | RpcId::WAIT_FOLLOWERS_NEW_HEADS
+                    );
+                    let Ok(client_permit) = self.inbound_admission.try_admit_rpc(long_poll) else {
+                        debug!(
+                            target: LOG_TARGET,
+                            rpc_id = %rpc_id,
+                            max_rpcs = MAX_CONCURRENT_INBOUND_RPCS,
+                            "Rejecting RPC: client-wide inbound RPC limit reached"
+                        );
+                        continue;
+                    };
 
                     // Spawn each RPC handler as a separate task so that blocking
                     // RPCs (WAIT_HEAD_UPDATE, WAIT_FOLLOWERS_NEW_HEADS) don't
                     // prevent other RPCs on the same connection from being accepted.
                     let handler = self.clone();
                     rpc_tasks.push(AbortOnDropHandle::new(tokio::spawn(async move {
-                        let result = match rpc_id {
-                            RpcId::PING => handler.handle_ping_request(req_msg, send).await,
-                            RpcId::FEED_EVENT => handler.handle_feed_event(req_msg, send, recv).await,
-                            RpcId::GET_EVENT => handler.handle_get_event(req_msg, send, recv).await,
-                            RpcId::GET_EVENT_CONTENT => {
-                                handler.handle_get_event_content(req_msg, send, recv).await
-                            }
-                            RpcId::WAIT_HEAD_UPDATE => {
-                                handler.handle_wait_head_update(req_msg, send, recv).await
-                            }
-                            RpcId::GET_HEAD => handler.handle_get_head(req_msg, send, recv).await,
-                            RpcId::WAIT_FOLLOWERS_NEW_HEADS => {
-                                handler
-                                    .handle_wait_followers_new_heads(req_msg, send, recv)
-                                    .await
-                            }
-                            _ => {
-                                debug!(target: LOG_TARGET, %rpc_id, "Unknown RPC ID");
-                                return;
+                        let request = async {
+                            match rpc_id {
+                                RpcId::PING => handler.handle_ping_request(req_msg, send).await,
+                                RpcId::FEED_EVENT => {
+                                    handler.handle_feed_event(req_msg, send, recv).await
+                                }
+                                RpcId::GET_EVENT => {
+                                    handler.handle_get_event(req_msg, send, recv).await
+                                }
+                                RpcId::GET_EVENT_CONTENT => {
+                                    handler.handle_get_event_content(req_msg, send, recv).await
+                                }
+                                RpcId::WAIT_HEAD_UPDATE => {
+                                    handler.handle_wait_head_update(req_msg, send, recv).await
+                                }
+                                RpcId::GET_HEAD => {
+                                    handler.handle_get_head(req_msg, send, recv).await
+                                }
+                                RpcId::WAIT_FOLLOWERS_NEW_HEADS => {
+                                    handler
+                                        .handle_wait_followers_new_heads(req_msg, send, recv)
+                                        .await
+                                }
+                                _ => {
+                                    debug!(target: LOG_TARGET, %rpc_id, "Unknown RPC ID");
+                                    Ok(())
+                                }
                             }
                         };
-                        drop(permit);
+                        let result = if long_poll {
+                            request.await
+                        } else {
+                            match tokio::time::timeout(ORDINARY_RPC_TIMEOUT, request).await {
+                                Ok(result) => result,
+                                Err(_) => Err(OrdinaryRpcTimeoutSnafu.build()),
+                            }
+                        };
+                        drop((connection_permit, client_permit));
                         if let Err(err) = result {
                             debug!(target: LOG_TARGET, err = %err.fmt_compact(), "RPC handler error");
                         }
@@ -503,3 +644,7 @@ impl RequestHandler {
         }
     }
 }
+
+#[cfg(test)]
+#[path = "request_handler/tests.rs"]
+mod tests;
