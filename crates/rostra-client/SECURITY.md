@@ -54,7 +54,18 @@ already-present event or an event outside the local Web of Trust, waits one
 second before the next `WAIT_FOLLOWERS_NEW_HEADS` request. This bounds replayed
 successful responses without delaying genuinely new head ingestion.
 `replayed_follower_head_responses_are_rate_limited` exercises that safeguard
-through typed RPC under paused time.
+through typed RPC and asserts the complete configured delay using elapsed time.
+
+Followee `WAIT_HEAD_UPDATE` cursor and pending-envelope retry state belongs to
+one winning follow-event generation. Slot cancellation preserves both within
+that generation, including cancellation between envelope retrieval and durable
+ingestion. Unfollow or a new winning follow event cancels the retired poll and
+discards its state before scheduling fresh work. This intentionally also resets
+state for an update within an uninterrupted follow epoch because generation
+identity uses the winning follow event. The
+`poll_slots_retain_cursor_and_retry_pending_event_after_cancellation` and
+`coalesced_unfollow_readd_cancels_active_epoch_and_prunes_stale_state`
+regressions enforce these boundaries.
 
 The v0 wire shape retains a separate author claim for compatibility; security
 comes from binding it at every consumer, not from trusting the field. Re-check
