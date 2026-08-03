@@ -6,7 +6,7 @@ use futures::StreamExt as _;
 use futures::future::BoxFuture;
 use futures::stream::FuturesUnordered;
 use rostra_client_db::{CurrentState, Database, DbError, DbResult, IdsFollowersRecord, WotData};
-use rostra_core::event::{EventExt as _, VerifiedEvent};
+use rostra_core::event::{EventExt as _, VerifiedEvent, VerifiedEventError};
 use rostra_core::id::{RostraId, ToShort as _};
 use rostra_p2p::Connection;
 use rostra_util_error::FmtCompact as _;
@@ -86,8 +86,29 @@ enum PollProgress {
 
 #[derive(Debug)]
 enum FollowerPollError {
-    Peer(String),
+    Peer(FollowerPeerError),
     Database(DbError),
+}
+
+#[derive(Debug)]
+enum FollowerPeerError {
+    Rpc(rostra_p2p::RpcError),
+    Verification(VerifiedEventError),
+}
+
+impl std::fmt::Display for FollowerPeerError {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Rpc(err) => write!(formatter, "RPC error: {}", err.fmt_compact()),
+            Self::Verification(err) => {
+                write!(
+                    formatter,
+                    "Event verification failed: {}",
+                    err.fmt_compact()
+                )
+            }
+        }
+    }
 }
 
 /// Polls followers for new head updates using the WAIT_FOLLOWERS_NEW_HEADS RPC.
@@ -422,12 +443,12 @@ impl PollFollowerHeadUpdates {
         conn: &Connection,
         self_id: RostraId,
         wot: &CurrentState<Arc<WotData>>,
-    ) -> Result<Option<VerifiedEvent>, String> {
+    ) -> Result<Option<VerifiedEvent>, FollowerPeerError> {
         // Call the blocking RPC
         let response = conn
             .wait_followers_new_heads()
             .await
-            .map_err(|e| format!("RPC error: {}", e.fmt_compact()))?;
+            .map_err(FollowerPeerError::Rpc)?;
 
         let author = response.author;
         let event = response.event;
@@ -443,8 +464,8 @@ impl PollFollowerHeadUpdates {
         // Bind the routing/admission claim to the signed envelope. The response
         // author is peer-controlled and must not independently grant WoT
         // admission to an event signed by another identity.
-        let verified_event = VerifiedEvent::verify_signed(author, event)
-            .map_err(|e| format!("Event verification failed: {}", e.fmt_compact()))?;
+        let verified_event =
+            VerifiedEvent::verify_signed(author, event).map_err(FollowerPeerError::Verification)?;
         let authenticated_author = verified_event.author();
 
         // Check the cryptographically authenticated author against our Web of

@@ -1,5 +1,6 @@
-use std::collections::{BTreeSet, HashMap};
-use std::sync::{Arc, Mutex};
+use std::collections::HashMap;
+use std::future::Future;
+use std::sync::Arc;
 use std::time::Duration;
 
 use futures::StreamExt as _;
@@ -9,7 +10,7 @@ use rostra_client_db::{CurrentState, Database, DbError, DbResult, IdsFolloweesRe
 use rostra_core::event::VerifiedEvent;
 use rostra_core::id::{RostraId, ToShort as _};
 use rostra_util_error::FmtCompact as _;
-use tokio::sync::RwLock;
+use tokio::sync::{RwLock, oneshot};
 use tokio::time::Instant;
 use tracing::{debug, error, instrument, trace, warn};
 
@@ -23,13 +24,27 @@ const MAX_ACTIVE_POLLS: usize = 32;
 const POLL_SLOT_TIMEOUT: Duration = Duration::from_secs(5 * 60);
 const MISSING_EVENT_RETRY_DELAY: Duration = Duration::from_secs(1);
 
-/// Per-peer state for followee polling.
+/// Remote progress retained for one uninterrupted follow epoch.
+///
+/// A new remote head becomes `Pending` before any cancellable fetch or
+/// persistence await. It becomes `Persisted` only after durable ingestion, so
+/// cancellation always leaves enough state to retry without repeating `WAIT`.
+#[derive(Debug, Clone, Copy, Default)]
+enum RemoteProgress {
+    #[default]
+    Unknown,
+    Pending(rostra_core::ShortEventId),
+    Persisted(rostra_core::ShortEventId),
+}
+
+/// Per-peer state for one uninterrupted followee polling epoch.
+///
+/// The scheduler discards this state when the follow epoch changes.
 #[derive(Debug, Clone, Default)]
 struct FolloweePollState {
     consecutive_failures: u32,
     backoff_until: Option<Instant>,
-    remote_head_cursor: Option<rostra_core::ShortEventId>,
-    pending_event: Option<rostra_core::ShortEventId>,
+    remote_progress: RemoteProgress,
 }
 
 impl FolloweePollState {
@@ -69,27 +84,42 @@ impl FolloweePollState {
     }
 
     fn wait_cursor(&self, local_head: rostra_core::ShortEventId) -> rostra_core::ShortEventId {
-        self.remote_head_cursor.unwrap_or(local_head)
+        match self.remote_progress {
+            RemoteProgress::Unknown => local_head,
+            RemoteProgress::Pending(head) | RemoteProgress::Persisted(head) => head,
+        }
+    }
+
+    fn pending_event(&self) -> Option<rostra_core::ShortEventId> {
+        match self.remote_progress {
+            RemoteProgress::Pending(event_id) => Some(event_id),
+            RemoteProgress::Unknown | RemoteProgress::Persisted(_) => None,
+        }
     }
 
     fn record_remote_head(&mut self, head: rostra_core::ShortEventId) {
-        self.remote_head_cursor = Some(head);
-        self.pending_event = Some(head);
+        self.remote_progress = RemoteProgress::Pending(head);
     }
 
     fn complete_pending_event(&mut self, event_id: rostra_core::ShortEventId) {
-        if self.pending_event == Some(event_id) {
-            self.pending_event = None;
+        if matches!(self.remote_progress, RemoteProgress::Pending(pending) if pending == event_id) {
+            self.remote_progress = RemoteProgress::Persisted(event_id);
         }
     }
 }
 
 type FolloweeState = Arc<RwLock<FolloweePollState>>;
-type SharedFolloweeStates = Arc<Mutex<HashMap<RostraId, FolloweeState>>>;
+type FolloweeStates = HashMap<RostraId, FolloweeState>;
+type FollowEpoch = rostra_core::ShortEventId;
+
+struct ActiveFolloweePoll {
+    epoch: FollowEpoch,
+    cancel: oneshot::Sender<()>,
+}
 
 #[derive(Debug)]
 enum FolloweePollError {
-    Peer(String),
+    Peer(rostra_p2p::RpcError),
     Database(DbError),
 }
 
@@ -124,29 +154,32 @@ impl PollFolloweeHeadUpdates {
 
     #[instrument(name = "poll-followee-head-updates", skip(self), fields(self_id = %self.self_id.fmt_short()), ret)]
     pub async fn run(mut self) {
-        let mut desired_peers = BTreeSet::new();
-        let mut pending_peers = BTreeSet::new();
-        let mut active_peers = BTreeSet::new();
+        let mut desired_peers = HashMap::new();
+        let mut pending_peers = std::collections::BTreeMap::new();
+        let mut active_peers = HashMap::new();
         let mut poll_futures = FuturesUnordered::new();
-        let followee_states: SharedFolloweeStates = Arc::new(Mutex::new(HashMap::new()));
+        let mut followee_states = HashMap::new();
 
-        let _ = Self::update_desired_followees(
+        Self::update_desired_followees(
             &self.self_followees,
             &mut desired_peers,
-            &active_peers,
             &mut pending_peers,
+            &mut active_peers,
+            &mut followee_states,
         );
         self.schedule_pending(
             &mut pending_peers,
             &mut active_peers,
             &mut poll_futures,
-            &followee_states,
+            &mut followee_states,
         );
 
         loop {
             tokio::select! {
-                Some((peer_id, result)) = poll_futures.next() => {
-                    active_peers.remove(&peer_id);
+                Some((peer_id, epoch, result)) = poll_futures.next() => {
+                    if active_peers.get(&peer_id).is_some_and(|active| active.epoch == epoch) {
+                        active_peers.remove(&peer_id);
+                    }
                     if let Err(err) = result {
                         error!(
                             target: LOG_TARGET,
@@ -157,13 +190,8 @@ impl PollFolloweeHeadUpdates {
                         return;
                     }
                     trace!(target: LOG_TARGET, peer_id = %peer_id.to_short(), "Poll task completed");
-                    if desired_peers.contains(&peer_id) {
-                        pending_peers.insert(peer_id);
-                    } else {
-                        followee_states
-                            .lock()
-                            .expect("followee state lock poisoned")
-                            .remove(&peer_id);
+                    if desired_peers.get(&peer_id) == Some(&epoch) {
+                        pending_peers.insert(peer_id, epoch);
                     }
                 }
                 res = self.self_followees.changed() => {
@@ -172,13 +200,13 @@ impl PollFolloweeHeadUpdates {
                         break;
                     }
                     debug!(target: LOG_TARGET, "Followees changed, updating poll list");
-                    let removed_peers = Self::update_desired_followees(
+                    Self::update_desired_followees(
                         &self.self_followees,
                         &mut desired_peers,
-                        &active_peers,
                         &mut pending_peers,
+                        &mut active_peers,
+                        &mut followee_states,
                     );
-                    Self::remove_followee_states(&followee_states, &removed_peers);
                 }
             }
 
@@ -186,7 +214,7 @@ impl PollFolloweeHeadUpdates {
                 &mut pending_peers,
                 &mut active_peers,
                 &mut poll_futures,
-                &followee_states,
+                &mut followee_states,
             );
 
             if self.client.app_ref_opt().is_none() {
@@ -198,59 +226,82 @@ impl PollFolloweeHeadUpdates {
 
     fn update_desired_followees(
         self_followees: &CurrentState<Arc<HashMap<RostraId, IdsFolloweesRecord>>>,
-        desired_peers: &mut BTreeSet<RostraId>,
-        active_peers: &BTreeSet<RostraId>,
-        pending_peers: &mut BTreeSet<RostraId>,
-    ) -> BTreeSet<RostraId> {
-        let previous_peers = desired_peers.clone();
-        desired_peers.clear();
-        desired_peers.extend(self_followees.snapshot().keys().copied());
-        pending_peers.retain(|id| desired_peers.contains(id));
-
-        for peer_id in desired_peers.difference(active_peers) {
-            pending_peers.insert(*peer_id);
-        }
-        previous_peers.difference(desired_peers).copied().collect()
+        desired_peers: &mut HashMap<RostraId, FollowEpoch>,
+        pending_peers: &mut std::collections::BTreeMap<RostraId, FollowEpoch>,
+        active_peers: &mut HashMap<RostraId, ActiveFolloweePoll>,
+        followee_states: &mut FolloweeStates,
+    ) {
+        let new_desired: HashMap<_, _> = self_followees
+            .snapshot()
+            .iter()
+            .map(|(peer_id, record)| (*peer_id, record.latest_event_id))
+            .collect();
+        Self::reconcile_followee_epochs(
+            new_desired,
+            desired_peers,
+            pending_peers,
+            active_peers,
+            followee_states,
+        );
     }
 
-    fn remove_followee_states(
-        followee_states: &SharedFolloweeStates,
-        removed_peers: &BTreeSet<RostraId>,
+    fn reconcile_followee_epochs(
+        new_desired: HashMap<RostraId, FollowEpoch>,
+        desired_peers: &mut HashMap<RostraId, FollowEpoch>,
+        pending_peers: &mut std::collections::BTreeMap<RostraId, FollowEpoch>,
+        active_peers: &mut HashMap<RostraId, ActiveFolloweePoll>,
+        followee_states: &mut FolloweeStates,
     ) {
-        let mut states = followee_states
-            .lock()
-            .expect("followee state lock poisoned");
-        states.retain(|peer_id, _| !removed_peers.contains(peer_id));
+        let retired: Vec<_> = active_peers
+            .iter()
+            .filter_map(|(peer_id, active)| {
+                (new_desired.get(peer_id) != Some(&active.epoch)).then_some(*peer_id)
+            })
+            .collect();
+        for peer_id in retired {
+            if let Some(active) = active_peers.remove(&peer_id) {
+                let _ = active.cancel.send(());
+            }
+        }
+        pending_peers.retain(|peer_id, epoch| new_desired.get(peer_id) == Some(epoch));
+        followee_states.retain(|peer_id, _| desired_peers.get(peer_id) == new_desired.get(peer_id));
+        for (peer_id, epoch) in &new_desired {
+            if !active_peers.contains_key(peer_id) {
+                pending_peers.insert(*peer_id, *epoch);
+            }
+        }
+        *desired_peers = new_desired;
     }
 
     fn schedule_pending(
         &self,
-        pending_peers: &mut BTreeSet<RostraId>,
-        active_peers: &mut BTreeSet<RostraId>,
-        poll_futures: &mut FuturesUnordered<BoxFuture<'static, (RostraId, DbResult<()>)>>,
-        followee_states: &SharedFolloweeStates,
+        pending_peers: &mut std::collections::BTreeMap<RostraId, FollowEpoch>,
+        active_peers: &mut HashMap<RostraId, ActiveFolloweePoll>,
+        poll_futures: &mut FuturesUnordered<
+            BoxFuture<'static, (RostraId, FollowEpoch, DbResult<()>)>,
+        >,
+        followee_states: &mut FolloweeStates,
     ) {
         while active_peers.len() < MAX_ACTIVE_POLLS {
-            let Some(peer_id) = pending_peers.pop_first() else {
+            let Some((peer_id, epoch)) = pending_peers.pop_first() else {
                 break;
             };
-            if !active_peers.insert(peer_id) {
+            if active_peers.contains_key(&peer_id) {
                 continue;
             }
 
             let networking = self.networking.clone();
             let connections = self.connections.clone();
             let db = self.db.clone();
-            let followee_state = followee_states
-                .lock()
-                .expect("followee state lock poisoned")
-                .entry(peer_id)
-                .or_default()
-                .clone();
+            let followee_state = followee_states.entry(peer_id).or_default().clone();
+            let (cancel, cancelled) = oneshot::channel();
+            active_peers.insert(peer_id, ActiveFolloweePoll { epoch, cancel });
             poll_futures.push(Box::pin(async move {
-                let result =
-                    Self::poll_slot(networking, connections, db, peer_id, followee_state).await;
-                (peer_id, result)
+                let result = tokio::select! {
+                    result = Self::poll_slot(networking, connections, db, peer_id, followee_state) => result,
+                    _ = cancelled => Ok(()),
+                };
+                (peer_id, epoch, result)
             }));
         }
     }
@@ -328,8 +379,8 @@ impl PollFolloweeHeadUpdates {
                 &followee_state,
                 |event| {
                     let db = db.clone();
-                    Box::pin(async move {
-                        let (insert_outcome, _process_state) = db.try_process_event(event).await?;
+                    async move {
+                        let (insert_outcome, _process_state) = db.try_process_event(&event).await?;
                         debug!(
                             target: LOG_TARGET,
                             followee_id = %followee_id.to_short(),
@@ -338,7 +389,7 @@ impl PollFolloweeHeadUpdates {
                             "Stored followee head event (content deferred to NewHeadFetcher)"
                         );
                         Ok(())
-                    })
+                    }
                 },
             )
             .await
@@ -367,25 +418,26 @@ impl PollFolloweeHeadUpdates {
         Ok(())
     }
 
-    async fn poll_connection_slot<'a>(
+    async fn poll_connection_slot<F, Fut>(
         conn: &rostra_p2p::Connection,
         followee_id: RostraId,
         local_head: rostra_core::ShortEventId,
         followee_state: &RwLock<FolloweePollState>,
-        mut persist_event: impl for<'event> FnMut(
-            &'event VerifiedEvent,
-        ) -> BoxFuture<'event, DbResult<()>>
-        + 'a,
-    ) -> Result<(), FolloweePollError> {
+        mut persist_event: F,
+    ) -> Result<(), FolloweePollError>
+    where
+        F: FnMut(VerifiedEvent) -> Fut,
+        Fut: Future<Output = DbResult<()>>,
+    {
         loop {
-            let pending_event = followee_state.read().await.pending_event;
+            let pending_event = followee_state.read().await.pending_event();
             if let Some(event_id) = pending_event {
                 tokio::time::sleep(MISSING_EVENT_RETRY_DELAY).await;
                 let Some(event) = Self::fetch_pending_event(conn, followee_id, event_id).await?
                 else {
                     continue;
                 };
-                persist_event(&event)
+                persist_event(event)
                     .await
                     .map_err(FolloweePollError::Database)?;
                 let mut state = followee_state.write().await;
@@ -402,9 +454,10 @@ impl PollFolloweeHeadUpdates {
             );
 
             // Wait for head to change (responds immediately if stale)
-            let new_head_id = conn.wait_head_update(known_head).await.map_err(|err| {
-                FolloweePollError::Peer(format!("RPC error: {}", err.fmt_compact()))
-            })?;
+            let new_head_id = conn
+                .wait_head_update(known_head)
+                .await
+                .map_err(FolloweePollError::Peer)?;
 
             if new_head_id == known_head {
                 debug!(
@@ -435,7 +488,7 @@ impl PollFolloweeHeadUpdates {
                 );
                 continue;
             };
-            persist_event(&event)
+            persist_event(event)
                 .await
                 .map_err(FolloweePollError::Database)?;
             let mut state = followee_state.write().await;
@@ -450,9 +503,9 @@ impl PollFolloweeHeadUpdates {
         followee_id: RostraId,
         event_id: rostra_core::ShortEventId,
     ) -> Result<Option<VerifiedEvent>, FolloweePollError> {
-        conn.get_event(followee_id, event_id).await.map_err(|err| {
-            FolloweePollError::Peer(format!("Failed to fetch event: {}", err.fmt_compact()))
-        })
+        conn.get_event(followee_id, event_id)
+            .await
+            .map_err(FolloweePollError::Peer)
     }
 }
 

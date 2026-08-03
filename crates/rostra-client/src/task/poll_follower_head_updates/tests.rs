@@ -161,7 +161,7 @@ async fn rpc_rejects_trusted_claim_with_event_signed_by_another_author() {
     caller_endpoint.close().await;
 
     assert!(
-        error.contains("AuthorMismatch"),
+        error.to_string().contains("AuthorMismatch"),
         "unexpected verification error: {error}"
     );
     assert!(!db.has_event(attacker_event_id).await);
@@ -321,6 +321,7 @@ async fn replayed_follower_head_responses_are_rate_limited() {
     });
 
     requests_rx.recv().await.expect("first replay request");
+    let first_request_at = tokio::time::Instant::now();
     assert!(
         tokio::time::timeout(Duration::from_millis(200), requests_rx.recv())
             .await
@@ -332,10 +333,19 @@ async fn replayed_follower_head_responses_are_rate_limited() {
         .await
         .expect("rate-limit interval")
         .expect("second request after replay delay");
+    assert!(
+        super::NO_PROGRESS_POLL_DELAY <= first_request_at.elapsed(),
+        "replay delay was shorter than the configured interval"
+    );
+    let insertion_request_at = tokio::time::Instant::now();
     tokio::time::timeout(Duration::from_millis(200), requests_rx.recv())
         .await
         .expect("new insertion must repoll immediately")
         .expect("third request after insertion");
+    assert!(
+        insertion_request_at.elapsed() < Duration::from_millis(200),
+        "new insertion did not trigger an immediate poll"
+    );
     assert!(
         tokio::time::timeout(Duration::from_millis(200), requests_rx.recv())
             .await

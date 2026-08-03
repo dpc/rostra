@@ -1,6 +1,6 @@
-use std::collections::{BTreeSet, HashMap};
+use std::collections::{BTreeMap, HashMap};
+use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
-use std::sync::{Arc, Mutex};
 
 use rostra_core::ShortEventId;
 use rostra_core::event::{Event, EventContentRaw, EventKind, VerifiedEvent, VerifiedEventContent};
@@ -10,9 +10,9 @@ use rostra_p2p::connection::{
     WaitHeadUpdateRequest, WaitHeadUpdateResponse,
 };
 use rostra_p2p_api::ROSTRA_P2P_V0_ALPN;
-use tokio::sync::{RwLock, mpsc};
+use tokio::sync::{RwLock, mpsc, oneshot};
 
-use super::{FolloweePollState, PollFolloweeHeadUpdates, SharedFolloweeStates};
+use super::{ActiveFolloweePoll, FolloweePollState, PollFolloweeHeadUpdates, RemoteProgress};
 
 fn build_event(
     id_secret: RostraIdSecretKey,
@@ -144,7 +144,7 @@ async fn poll_slots_retain_cursor_and_retry_pending_event_after_cancellation() {
                 &slot_state,
                 move |_| {
                     slot_attempts.fetch_add(1, Ordering::SeqCst);
-                    Box::pin(std::future::pending())
+                    std::future::pending()
                 },
             ),
         )
@@ -166,8 +166,10 @@ async fn poll_slots_retain_cursor_and_retry_pending_event_after_cancellation() {
     assert!(first_slot.await.expect("first slot task").is_err());
     {
         let state = followee_state.read().await;
-        assert_eq!(state.remote_head_cursor, Some(remote_head_id));
-        assert_eq!(state.pending_event, Some(remote_head_id));
+        assert!(matches!(
+            state.remote_progress,
+            RemoteProgress::Pending(id) if id == remote_head_id
+        ));
     }
 
     let slot_connection = connection.clone();
@@ -180,7 +182,7 @@ async fn poll_slots_retain_cursor_and_retry_pending_event_after_cancellation() {
                 remote_id,
                 local_descendant_id,
                 &slot_state,
-                |_| Box::pin(async { Ok(()) }),
+                |_| async { Ok(()) },
             ),
         )
         .await
@@ -199,8 +201,10 @@ async fn poll_slots_retain_cursor_and_retry_pending_event_after_cancellation() {
     );
     {
         let state = followee_state.read().await;
-        assert_eq!(state.remote_head_cursor, Some(remote_head_id));
-        assert_eq!(state.pending_event, None);
+        assert!(matches!(
+            state.remote_progress,
+            RemoteProgress::Persisted(id) if id == remote_head_id
+        ));
     }
 
     second_slot.abort();
@@ -212,32 +216,64 @@ async fn poll_slots_retain_cursor_and_retry_pending_event_after_cancellation() {
 }
 
 #[test]
-fn unfollow_prunes_state_and_readd_starts_without_stale_cursor() {
+fn coalesced_unfollow_readd_cancels_active_epoch_and_prunes_stale_state() {
     let followee_id = RostraIdSecretKey::generate().id();
     let stale_head = build_event(RostraIdSecretKey::generate(), 9, None)
         .event
         .event_id
         .to_short();
-    let stale_state = Arc::new(RwLock::new(FolloweePollState {
-        remote_head_cursor: Some(stale_head),
-        pending_event: Some(stale_head),
-        ..FolloweePollState::default()
-    }));
-    let states: SharedFolloweeStates =
-        Arc::new(Mutex::new(HashMap::from([(followee_id, stale_state)])));
+    let old_epoch = build_event(RostraIdSecretKey::generate(), 10, None)
+        .event
+        .event_id
+        .to_short();
+    let new_epoch = build_event(RostraIdSecretKey::generate(), 11, None)
+        .event
+        .event_id
+        .to_short();
+    let mut desired = HashMap::from([(followee_id, old_epoch)]);
+    let mut pending = BTreeMap::new();
+    let (cancel, mut cancelled) = oneshot::channel();
+    let mut active = HashMap::from([(
+        followee_id,
+        ActiveFolloweePoll {
+            epoch: old_epoch,
+            cancel,
+        },
+    )]);
+    let mut states = HashMap::from([(
+        followee_id,
+        Arc::new(RwLock::new(FolloweePollState {
+            remote_progress: RemoteProgress::Pending(stale_head),
+            ..FolloweePollState::default()
+        })),
+    )]);
 
-    PollFolloweeHeadUpdates::remove_followee_states(&states, &BTreeSet::from([followee_id]));
-    assert!(states.lock().expect("state lock").is_empty());
+    PollFolloweeHeadUpdates::reconcile_followee_epochs(
+        HashMap::from([(followee_id, new_epoch)]),
+        &mut desired,
+        &mut pending,
+        &mut active,
+        &mut states,
+    );
+    assert_eq!(cancelled.try_recv(), Ok(()));
+    assert!(active.is_empty());
+    assert_eq!(pending.get(&followee_id), Some(&new_epoch));
+    assert!(states.is_empty());
 
-    let readded = states
-        .lock()
-        .expect("state lock")
-        .entry(followee_id)
-        .or_default()
-        .clone();
+    let readded = states.entry(followee_id).or_default().clone();
     assert_eq!(
         readded.blocking_read().wait_cursor(ShortEventId::ZERO),
         ShortEventId::ZERO
     );
-    assert_eq!(states.lock().expect("state lock").len(), 1);
+    assert_eq!(states.len(), 1);
+
+    PollFolloweeHeadUpdates::reconcile_followee_epochs(
+        HashMap::new(),
+        &mut desired,
+        &mut pending,
+        &mut active,
+        &mut states,
+    );
+    assert!(states.is_empty());
+    assert!(pending.is_empty());
 }
