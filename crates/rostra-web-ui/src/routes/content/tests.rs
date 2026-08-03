@@ -31,6 +31,74 @@ fn test_extract_rostra_media_link() {
     assert_eq!(UiState::extract_rostra_media_link("not-a-media-link"), None);
 }
 
+#[test]
+fn post_content_images_keep_intrinsic_width() {
+    let stylesheet = include_str!("../../../assets/style.css");
+
+    fn has_declaration(declarations: &str, property: &str, value: &str) -> bool {
+        let declarations = declarations
+            .chars()
+            .filter(|character| !character.is_whitespace())
+            .collect::<String>();
+        declarations.split(';').any(|declaration| {
+            let declaration = declaration
+                .rsplit_once('{')
+                .map_or(declaration, |(_, declaration)| declaration);
+            declaration
+                .split_once(':')
+                .is_some_and(|(name, declared_value)| name == property && declared_value == value)
+        })
+    }
+
+    fn has_image_element_selector(selector: &str) -> bool {
+        selector
+            .split(|character: char| {
+                character.is_whitespace() || matches!(character, '>' | '+' | '~' | ',')
+            })
+            .any(|compound| {
+                compound.strip_prefix("img").is_some_and(|suffix| {
+                    suffix.chars().next().is_none_or(|character| {
+                        !(character.is_ascii_alphanumeric() || character == '-' || character == '_')
+                    })
+                })
+            })
+    }
+
+    fn has_nested_image_element_selector(declarations: &str) -> bool {
+        declarations.split_once('{').is_some_and(|(prefix, _)| {
+            prefix.rsplit(';').next().is_some_and(|selector| {
+                selector
+                    .trim()
+                    .strip_prefix('&')
+                    .is_some_and(has_image_element_selector)
+            })
+        })
+    }
+
+    assert!(
+        stylesheet
+            .split('}')
+            .filter_map(|rule| rule.split_once('{'))
+            .any(|(selector, declarations)| {
+                selector.trim() == "img" && has_declaration(declarations, "max-width", "100%")
+            }),
+        "images should shrink to their container"
+    );
+
+    assert!(
+        !stylesheet
+            .split('}')
+            .filter_map(|rule| rule.split_once('{'))
+            .any(|(selector, declarations)| {
+                selector.contains(".m-postView__content")
+                    && (has_image_element_selector(selector)
+                        || has_nested_image_element_selector(declarations))
+                    && has_declaration(declarations, "width", "100%")
+            }),
+        "post content images should not expand beyond their intrinsic width"
+    );
+}
+
 /// Helper to render djot content with code block filter only
 async fn render_with_prism(content: &str) -> String {
     let renderer = jotup::html::tokio::Renderer::default().prism_code_blocks();

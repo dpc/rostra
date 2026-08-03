@@ -617,10 +617,6 @@ body:not(.-keyboard-nav) .m-postView__body:has(.m-postView__main[data-href]):hov
   position: relative;
   padding-left: .25em;
   padding-right: .25em;
-
-  & img {
-    width: 100%;
-  }
 }
 
 /* Unexpanded (folded) reply-parent's should be truncated, so the response itself is uncluttered */
