@@ -5,7 +5,7 @@ use std::time::Duration;
 use futures::StreamExt as _;
 use futures::future::BoxFuture;
 use futures::stream::FuturesUnordered;
-use rostra_client_db::{CurrentState, Database, DbResult, IdsFollowersRecord, WotData};
+use rostra_client_db::{CurrentState, Database, DbError, DbResult, IdsFollowersRecord, WotData};
 use rostra_core::event::{EventExt as _, VerifiedEvent};
 use rostra_core::id::{RostraId, ToShort as _};
 use rostra_p2p::Connection;
@@ -82,6 +82,12 @@ type SharedBackoffState = Arc<RwLock<HashMap<RostraId, PeerBackoffState>>>;
 enum PollProgress {
     Inserted(rostra_client_db::InsertEventOutcome),
     NoProgress,
+}
+
+#[derive(Debug)]
+enum FollowerPollError {
+    Peer(String),
+    Database(DbError),
 }
 
 /// Polls followers for new head updates using the WAIT_FOLLOWERS_NEW_HEADS RPC.
@@ -291,11 +297,19 @@ impl PollFollowerHeadUpdates {
                 }
             };
 
-            let Err(err) =
-                Self::poll_connection_for_heads(&conn, &db, self_id, peer_id, &wot, &backoff_state)
-                    .await?
-            else {
-                unreachable!("a connected follower poll only returns after an RPC error");
+            let err = match Self::poll_connection_for_heads(
+                &conn,
+                &db,
+                self_id,
+                peer_id,
+                &wot,
+                &backoff_state,
+            )
+            .await
+            {
+                Err(FollowerPollError::Peer(err)) => err,
+                Err(FollowerPollError::Database(err)) => return Err(err),
+                Ok(()) => unreachable!("a connected follower poll only returns after an RPC error"),
             };
             debug!(
                 target: LOG_TARGET,
@@ -329,12 +343,13 @@ impl PollFollowerHeadUpdates {
         peer_id: RostraId,
         wot: &CurrentState<Arc<WotData>>,
         backoff_state: &SharedBackoffState,
-    ) -> DbResult<Result<(), String>> {
+    ) -> Result<(), FollowerPollError> {
         loop {
             match Self::poll_once(conn, self_id, wot).await {
                 Ok(event) => {
                     match Self::finish_successful_poll(db, peer_id, event.as_ref(), backoff_state)
-                        .await?
+                        .await
+                        .map_err(FollowerPollError::Database)?
                     {
                         PollProgress::Inserted(insert_outcome) => {
                             let event = event.as_ref().expect("insert outcome requires an event");
@@ -359,7 +374,7 @@ impl PollFollowerHeadUpdates {
                     trace!(target: LOG_TARGET, %peer_id, "Successfully polled peer");
                 }
                 Err(err) => {
-                    return Ok(Err(err));
+                    return Err(FollowerPollError::Peer(err));
                 }
             }
         }

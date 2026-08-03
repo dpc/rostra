@@ -1,5 +1,6 @@
-use std::collections::HashMap;
-use std::sync::Arc;
+use std::collections::{BTreeSet, HashMap};
+use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::{Arc, Mutex};
 
 use rostra_core::ShortEventId;
 use rostra_core::event::{Event, EventContentRaw, EventKind, VerifiedEvent, VerifiedEventContent};
@@ -11,7 +12,7 @@ use rostra_p2p::connection::{
 use rostra_p2p_api::ROSTRA_P2P_V0_ALPN;
 use tokio::sync::{RwLock, mpsc};
 
-use super::{PeerPollState, PollFolloweeHeadUpdates, SharedPollState};
+use super::{FolloweePollState, PollFolloweeHeadUpdates, SharedFolloweeStates};
 
 fn build_event(
     id_secret: RostraIdSecretKey,
@@ -31,29 +32,12 @@ fn build_event(
     VerifiedEventContent::verify(event, content).expect("matching test content")
 }
 
-async fn poll_from_local_head(
-    connection: &Connection,
-    followee_id: rostra_core::id::RostraId,
-    local_head: ShortEventId,
-    poll_state: &SharedPollState,
-) -> Result<(), String> {
-    loop {
-        PollFolloweeHeadUpdates::poll_remote_head_update(
-            connection,
-            followee_id,
-            local_head,
-            poll_state,
-        )
-        .await?;
-    }
-}
-
 #[test_log::test(tokio::test(start_paused = true))]
-async fn polling_reuses_returned_remote_head_as_wait_cursor() {
+async fn poll_slots_retain_cursor_and_retry_pending_event_after_cancellation() {
     let remote_secret = RostraIdSecretKey::generate();
     let remote_id = remote_secret.id();
-    let remote_head = build_event(remote_secret, 1, None);
-    let remote_head_id = remote_head.event.event_id.to_short();
+    let remote_head = build_event(remote_secret, 1, None).event;
+    let remote_head_id = remote_head.event_id.to_short();
     let local_descendant = build_event(remote_secret, 2, Some(remote_head_id));
     let local_descendant_id = local_descendant.event.event_id.to_short();
 
@@ -75,7 +59,7 @@ async fn polling_reuses_returned_remote_head_as_wait_cursor() {
         .bind()
         .await
         .expect("client endpoint");
-    let (wait_requests_tx, mut wait_requests_rx) = mpsc::channel(3);
+    let (requests_tx, mut requests_rx) = mpsc::channel(4);
     let server = tokio::spawn(async move {
         let incoming = server_endpoint.accept().await.expect("incoming connection");
         let connection = incoming
@@ -92,10 +76,10 @@ async fn polling_reuses_returned_remote_head_as_wait_cursor() {
         let requested_head = WaitHeadUpdateRequest::decode_whole::<MAX_REQUEST_SIZE>(&request)
             .expect("decode first wait")
             .0;
-        wait_requests_tx
-            .send(requested_head)
+        requests_tx
+            .send((rpc_id, requested_head))
             .await
-            .expect("first wait receiver");
+            .expect("request receiver");
         Connection::write_success_return_code(&mut send)
             .await
             .expect("first wait success");
@@ -103,51 +87,39 @@ async fn polling_reuses_returned_remote_head_as_wait_cursor() {
             .await
             .expect("first wait response");
 
-        let (mut send, mut recv) = connection.accept_bi().await.expect("event stream");
-        let (rpc_id, request) = Connection::read_request_raw(&mut recv)
-            .await
-            .expect("event request");
-        assert_eq!(rpc_id, RpcId::GET_EVENT);
-        assert_eq!(
-            GetEventRequest::decode_whole::<MAX_REQUEST_SIZE>(&request)
+        for _ in 0..2 {
+            let (mut send, mut recv) = connection.accept_bi().await.expect("event stream");
+            let (rpc_id, request) = Connection::read_request_raw(&mut recv)
+                .await
+                .expect("event request");
+            assert_eq!(rpc_id, RpcId::GET_EVENT);
+            let event_id = GetEventRequest::decode_whole::<MAX_REQUEST_SIZE>(&request)
                 .expect("decode event request")
-                .0,
-            remote_head_id
-        );
-        Connection::write_success_return_code(&mut send)
-            .await
-            .expect("event success");
-        Connection::write_message(&mut send, &GetEventResponse(None))
-            .await
-            .expect("event response");
+                .0;
+            requests_tx
+                .send((rpc_id, event_id))
+                .await
+                .expect("request receiver");
+            Connection::write_success_return_code(&mut send)
+                .await
+                .expect("event success");
+            Connection::write_message(&mut send, &GetEventResponse(Some(remote_head.into())))
+                .await
+                .expect("event response");
+        }
 
-        let (_second_send, mut second_recv) =
-            connection.accept_bi().await.expect("second wait stream");
-        let (rpc_id, request) = Connection::read_request_raw(&mut second_recv)
+        let (_send, mut recv) = connection.accept_bi().await.expect("second wait stream");
+        let (rpc_id, request) = Connection::read_request_raw(&mut recv)
             .await
             .expect("second wait request");
         assert_eq!(rpc_id, RpcId::WAIT_HEAD_UPDATE);
         let requested_head = WaitHeadUpdateRequest::decode_whole::<MAX_REQUEST_SIZE>(&request)
             .expect("decode second wait")
             .0;
-        wait_requests_tx
-            .send(requested_head)
+        requests_tx
+            .send((rpc_id, requested_head))
             .await
-            .expect("second wait receiver");
-
-        let (_send, mut recv) = connection.accept_bi().await.expect("third wait stream");
-        let (rpc_id, request) = Connection::read_request_raw(&mut recv)
-            .await
-            .expect("third wait request");
-        assert_eq!(rpc_id, RpcId::WAIT_HEAD_UPDATE);
-        let requested_head = WaitHeadUpdateRequest::decode_whole::<MAX_REQUEST_SIZE>(&request)
-            .expect("decode third wait")
-            .0;
-        wait_requests_tx
-            .send(requested_head)
-            .await
-            .expect("third wait receiver");
-
+            .expect("request receiver");
         std::future::pending::<()>().await;
     });
     let connection = Connection::from(
@@ -156,54 +128,116 @@ async fn polling_reuses_returned_remote_head_as_wait_cursor() {
             .await
             .expect("connect to server"),
     );
-    let poll_state: SharedPollState = Arc::new(RwLock::new(HashMap::<_, PeerPollState>::new()));
-    let polling_connection = connection.clone();
-    let polling_state = poll_state.clone();
-    let polling = tokio::spawn(async move {
+    let followee_state = Arc::new(RwLock::new(FolloweePollState::default()));
+    let persist_attempts = Arc::new(AtomicUsize::new(0));
+
+    let slot_connection = connection.clone();
+    let slot_state = followee_state.clone();
+    let slot_attempts = persist_attempts.clone();
+    let first_slot = tokio::spawn(async move {
         tokio::time::timeout(
             super::POLL_SLOT_TIMEOUT,
-            poll_from_local_head(
-                &polling_connection,
+            PollFolloweeHeadUpdates::poll_connection_slot(
+                &slot_connection,
                 remote_id,
                 local_descendant_id,
-                &polling_state,
+                &slot_state,
+                move |_| {
+                    slot_attempts.fetch_add(1, Ordering::SeqCst);
+                    Box::pin(std::future::pending())
+                },
             ),
         )
         .await
-        .unwrap_or(Ok(()))
     });
 
-    let first_request = wait_requests_rx.recv().await.expect("first wait request");
-    assert_eq!(first_request, local_descendant_id);
-
-    let second_request = wait_requests_rx.recv().await.expect("second wait request");
-    assert_eq!(second_request, remote_head_id);
-
+    assert_eq!(
+        requests_rx.recv().await,
+        Some((RpcId::WAIT_HEAD_UPDATE, local_descendant_id))
+    );
+    assert_eq!(
+        requests_rx.recv().await,
+        Some((RpcId::GET_EVENT, remote_head_id))
+    );
+    while persist_attempts.load(Ordering::SeqCst) == 0 {
+        tokio::task::yield_now().await;
+    }
     tokio::time::advance(super::POLL_SLOT_TIMEOUT).await;
-    polling
-        .await
-        .expect("first poll slot task")
-        .expect("first poll slot result");
+    assert!(first_slot.await.expect("first slot task").is_err());
+    {
+        let state = followee_state.read().await;
+        assert_eq!(state.remote_head_cursor, Some(remote_head_id));
+        assert_eq!(state.pending_event, Some(remote_head_id));
+    }
 
-    let polling_connection = connection.clone();
-    let polling = tokio::spawn(async move {
+    let slot_connection = connection.clone();
+    let slot_state = followee_state.clone();
+    let second_slot = tokio::spawn(async move {
         tokio::time::timeout(
             super::POLL_SLOT_TIMEOUT,
-            poll_from_local_head(
-                &polling_connection,
+            PollFolloweeHeadUpdates::poll_connection_slot(
+                &slot_connection,
                 remote_id,
                 local_descendant_id,
-                &poll_state,
+                &slot_state,
+                |_| Box::pin(async { Ok(()) }),
             ),
         )
         .await
-        .unwrap_or(Ok(()))
     });
-    let third_request = wait_requests_rx.recv().await.expect("third wait request");
-    assert_eq!(third_request, remote_head_id);
+    for _ in 0..8 {
+        tokio::task::yield_now().await;
+    }
+    tokio::time::advance(super::MISSING_EVENT_RETRY_DELAY).await;
+    assert_eq!(
+        requests_rx.recv().await,
+        Some((RpcId::GET_EVENT, remote_head_id))
+    );
+    assert_eq!(
+        requests_rx.recv().await,
+        Some((RpcId::WAIT_HEAD_UPDATE, remote_head_id))
+    );
+    {
+        let state = followee_state.read().await;
+        assert_eq!(state.remote_head_cursor, Some(remote_head_id));
+        assert_eq!(state.pending_event, None);
+    }
 
-    polling.abort();
+    second_slot.abort();
+    second_slot.await.expect_err("second slot cancelled");
     server.abort();
+    server.await.expect_err("server cancelled");
     drop(connection);
-    client_endpoint.close().await;
+    drop(client_endpoint);
+}
+
+#[test]
+fn unfollow_prunes_state_and_readd_starts_without_stale_cursor() {
+    let followee_id = RostraIdSecretKey::generate().id();
+    let stale_head = build_event(RostraIdSecretKey::generate(), 9, None)
+        .event
+        .event_id
+        .to_short();
+    let stale_state = Arc::new(RwLock::new(FolloweePollState {
+        remote_head_cursor: Some(stale_head),
+        pending_event: Some(stale_head),
+        ..FolloweePollState::default()
+    }));
+    let states: SharedFolloweeStates =
+        Arc::new(Mutex::new(HashMap::from([(followee_id, stale_state)])));
+
+    PollFolloweeHeadUpdates::remove_followee_states(&states, &BTreeSet::from([followee_id]));
+    assert!(states.lock().expect("state lock").is_empty());
+
+    let readded = states
+        .lock()
+        .expect("state lock")
+        .entry(followee_id)
+        .or_default()
+        .clone();
+    assert_eq!(
+        readded.blocking_read().wait_cursor(ShortEventId::ZERO),
+        ShortEventId::ZERO
+    );
+    assert_eq!(states.lock().expect("state lock").len(), 1);
 }

@@ -36,22 +36,6 @@ fn verified_event_with_author(
     event
 }
 
-fn paused_time_database(self_id: RostraId) -> Database {
-    std::thread::spawn(move || {
-        tokio::runtime::Builder::new_multi_thread()
-            .enable_all()
-            .build()
-            .expect("database runtime")
-            .block_on(async move {
-                Database::new_in_memory(self_id)
-                    .await
-                    .expect("in-memory database")
-            })
-    })
-    .join()
-    .expect("database setup thread")
-}
-
 async fn connection_returning(
     response: WaitFollowersNewHeadsResponse,
 ) -> (
@@ -220,14 +204,25 @@ async fn storage_failure_stops_before_resetting_peer_backoff() {
     assert_eq!(peer_state.backoff_until, Some(backoff_until));
 }
 
-#[test_log::test(tokio::test(start_paused = true))]
+#[test_log::test(tokio::test(flavor = "multi_thread"))]
 async fn replayed_follower_head_responses_are_rate_limited() {
     let self_secret = RostraIdSecretKey::generate();
     let self_id = self_secret.id();
-    let replayed_secret = RostraIdSecretKey::generate();
-    let replayed_author = replayed_secret.id();
-    let replayed_event = signed_event(replayed_secret, 7);
-    let db = paused_time_database(self_id);
+    let replayed_event = signed_event(self_secret, 7);
+    let inserted_event = signed_event(self_secret, 8);
+    let admitted_replay =
+        VerifiedEvent::verify_signed(self_id, replayed_event).expect("correctly signed replay");
+    let db = Database::new_in_memory(self_id)
+        .await
+        .expect("in-memory database");
+    let (outcome, _) = db
+        .try_process_event(&admitted_replay)
+        .await
+        .expect("seed replay in database");
+    assert!(matches!(
+        outcome,
+        rostra_client_db::InsertEventOutcome::Inserted { .. }
+    ));
 
     let lookup = iroh::address_lookup::memory::MemoryLookup::new();
     let server_endpoint = iroh::Endpoint::builder(iroh::endpoint::presets::Minimal)
@@ -248,6 +243,7 @@ async fn replayed_follower_head_responses_are_rate_limited() {
             .expect("accept connection")
             .await
             .expect("complete handshake");
+        let mut response_count = 0;
         loop {
             let (mut send, mut recv) = connection.accept_bi().await.expect("RPC stream");
             let (rpc_id, request) = Connection::read_request_raw(&mut recv)
@@ -272,14 +268,20 @@ async fn replayed_follower_head_responses_are_rate_limited() {
                     WaitFollowersNewHeadsRequest::decode_whole::<MAX_REQUEST_SIZE>(&request)
                         .expect("decode follower-head request");
                     requests_tx.send(()).expect("request receiver");
+                    let event = if response_count == 0 {
+                        replayed_event
+                    } else {
+                        inserted_event
+                    };
+                    response_count += 1;
                     Connection::write_success_return_code(&mut send)
                         .await
                         .expect("poll success");
                     Connection::write_message(
                         &mut send,
                         &WaitFollowersNewHeadsResponse {
-                            author: replayed_author,
-                            event: replayed_event,
+                            author: self_id,
+                            event,
                         },
                     )
                     .await
@@ -319,29 +321,27 @@ async fn replayed_follower_head_responses_are_rate_limited() {
     });
 
     requests_rx.recv().await.expect("first replay request");
-    for _ in 0..8 {
-        tokio::task::yield_now().await;
-    }
     assert!(
-        requests_rx.try_recv().is_err(),
+        tokio::time::timeout(Duration::from_millis(200), requests_rx.recv())
+            .await
+            .is_err(),
         "a replay must not trigger an immediate poll"
     );
 
-    for request_count in 2..=4 {
-        tokio::time::advance(super::NO_PROGRESS_POLL_DELAY).await;
-        requests_rx
-            .recv()
+    tokio::time::timeout(Duration::from_secs(2), requests_rx.recv())
+        .await
+        .expect("rate-limit interval")
+        .expect("second request after replay delay");
+    tokio::time::timeout(Duration::from_millis(200), requests_rx.recv())
+        .await
+        .expect("new insertion must repoll immediately")
+        .expect("third request after insertion");
+    assert!(
+        tokio::time::timeout(Duration::from_millis(200), requests_rx.recv())
             .await
-            .unwrap_or_else(|| panic!("replay request {request_count}"));
-        for _ in 0..8 {
-            tokio::task::yield_now().await;
-        }
-        assert!(
-            requests_rx.try_recv().is_err(),
-            "received more than {request_count} requests after {} seconds",
-            request_count - 1
-        );
-    }
+            .is_err(),
+        "the now-replayed inserted event must rate-limit the fourth request"
+    );
 
     polling.abort();
     server.abort();
