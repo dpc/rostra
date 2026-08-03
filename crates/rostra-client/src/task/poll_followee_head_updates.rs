@@ -22,11 +22,28 @@ const LOG_TARGET: &str = "rostra::poll_followee_heads";
 const MAX_ACTIVE_POLLS: usize = 32;
 const POLL_SLOT_TIMEOUT: Duration = Duration::from_secs(5 * 60);
 
+/// Remembers the last current head reported by one remote followee.
+#[derive(Debug, Clone, Default)]
+struct RemoteHeadCursor {
+    head: Option<rostra_core::ShortEventId>,
+}
+
+impl RemoteHeadCursor {
+    fn known_head(&self, local_head: rostra_core::ShortEventId) -> rostra_core::ShortEventId {
+        self.head.unwrap_or(local_head)
+    }
+
+    fn update(&mut self, head: rostra_core::ShortEventId) {
+        self.head = Some(head);
+    }
+}
+
 /// Per-peer backoff state for polling.
 #[derive(Debug, Clone, Default)]
 struct PeerBackoffState {
     consecutive_failures: u32,
     backoff_until: Option<Instant>,
+    remote_head: RemoteHeadCursor,
 }
 
 impl PeerBackoffState {
@@ -67,22 +84,6 @@ impl PeerBackoffState {
 }
 
 type SharedBackoffState = Arc<RwLock<HashMap<RostraId, PeerBackoffState>>>;
-
-/// Remembers the last current head reported by one remote followee.
-#[derive(Default)]
-struct RemoteHeadCursor {
-    head: Option<rostra_core::ShortEventId>,
-}
-
-impl RemoteHeadCursor {
-    fn known_head(&self, local_head: rostra_core::ShortEventId) -> rostra_core::ShortEventId {
-        self.head.unwrap_or(local_head)
-    }
-
-    fn update(&mut self, head: rostra_core::ShortEventId) {
-        self.head = Some(head);
-    }
-}
 
 /// Polls direct followees for head updates using the WAIT_HEAD_UPDATE RPC.
 ///
@@ -216,15 +217,25 @@ impl PollFolloweeHeadUpdates {
             let db = self.db.clone();
             let backoff = backoff_state.clone();
             poll_futures.push(Box::pin(async move {
-                let result = tokio::time::timeout(
-                    POLL_SLOT_TIMEOUT,
-                    Self::poll_followee(networking, connections, db, peer_id, backoff),
-                )
-                .await
-                .unwrap_or(Ok(()));
+                let result = Self::poll_slot(networking, connections, db, peer_id, backoff).await;
                 (peer_id, result)
             }));
         }
+    }
+
+    async fn poll_slot(
+        networking: Arc<ClientNetworking>,
+        connections: ConnectionCache,
+        db: Arc<Database>,
+        followee_id: RostraId,
+        backoff_state: SharedBackoffState,
+    ) -> DbResult<()> {
+        tokio::time::timeout(
+            POLL_SLOT_TIMEOUT,
+            Self::poll_followee(networking, connections, db, followee_id, backoff_state),
+        )
+        .await
+        .unwrap_or(Ok(()))
     }
 
     async fn poll_followee(
@@ -234,8 +245,6 @@ impl PollFolloweeHeadUpdates {
         followee_id: RostraId,
         backoff_state: SharedBackoffState,
     ) -> DbResult<()> {
-        let mut remote_head = RemoteHeadCursor::default();
-
         loop {
             // Check backoff
             {
@@ -280,52 +289,88 @@ impl PollFolloweeHeadUpdates {
                 }
             };
 
-            let local_heads = db.get_heads(followee_id).await;
-            let local_head =
-                representative_head(&local_heads).unwrap_or(rostra_core::ShortEventId::ZERO);
-            let known_head = remote_head.known_head(local_head);
-
-            match Self::poll_once(&conn, followee_id, known_head).await {
-                Ok((new_head, event)) => {
-                    remote_head.update(new_head);
-                    if let Some(event) = event {
-                        let (insert_outcome, _process_state) = db.try_process_event(&event).await?;
-                        debug!(
-                            target: LOG_TARGET,
-                            followee_id = %followee_id.to_short(),
-                            event_id = %event.event_id.to_short(),
-                            ?insert_outcome,
-                            "Stored followee head event (content deferred to NewHeadFetcher)"
-                        );
-                    }
-                    trace!(target: LOG_TARGET, followee_id = %followee_id.to_short(), "Successfully polled followee");
-                    let mut state = backoff_state.write().await;
-                    if let Some(peer_state) = state.get_mut(&followee_id) {
-                        peer_state.record_success();
-                    }
-                }
-                Err(err) => {
-                    debug!(
-                        target: LOG_TARGET,
-                        followee_id = %followee_id.to_short(),
-                        err = %err,
-                        "Error polling followee"
-                    );
-                    let mut state = backoff_state.write().await;
-                    let peer_state = state.entry(followee_id).or_default();
-                    peer_state.record_failure();
-                    debug!(
-                        target: LOG_TARGET,
-                        followee_id = %followee_id.to_short(),
-                        consecutive_failures = peer_state.consecutive_failures,
-                        backoff_secs = peer_state.calculate_backoff_duration().as_secs(),
-                        "Poll failed, applying backoff"
-                    );
-                    break;
-                }
-            }
+            let Err(err) =
+                Self::poll_connection_for_head_updates(&conn, &db, followee_id, &backoff_state)
+                    .await?
+            else {
+                unreachable!("a connected followee poll only returns after an RPC error");
+            };
+            debug!(
+                target: LOG_TARGET,
+                followee_id = %followee_id.to_short(),
+                err = %err,
+                "Error polling followee"
+            );
+            let mut state = backoff_state.write().await;
+            let peer_state = state.entry(followee_id).or_default();
+            peer_state.record_failure();
+            debug!(
+                target: LOG_TARGET,
+                followee_id = %followee_id.to_short(),
+                consecutive_failures = peer_state.consecutive_failures,
+                backoff_secs = peer_state.calculate_backoff_duration().as_secs(),
+                "Poll failed, applying backoff"
+            );
+            break;
         }
         Ok(())
+    }
+
+    async fn poll_connection_for_head_updates(
+        conn: &rostra_p2p::Connection,
+        db: &Database,
+        followee_id: RostraId,
+        backoff_state: &SharedBackoffState,
+    ) -> DbResult<Result<(), String>> {
+        let local_heads = db.get_heads(followee_id).await;
+        let local_head =
+            representative_head(&local_heads).unwrap_or(rostra_core::ShortEventId::ZERO);
+        loop {
+            let (_new_head, event) =
+                match Self::poll_remote_head_update(conn, followee_id, local_head, backoff_state)
+                    .await
+                {
+                    Ok(result) => result,
+                    Err(err) => return Ok(Err(err)),
+                };
+            if let Some(event) = event {
+                let (insert_outcome, _process_state) = db.try_process_event(&event).await?;
+                debug!(
+                    target: LOG_TARGET,
+                    followee_id = %followee_id.to_short(),
+                    event_id = %event.event_id.to_short(),
+                    ?insert_outcome,
+                    "Stored followee head event (content deferred to NewHeadFetcher)"
+                );
+            }
+            trace!(target: LOG_TARGET, followee_id = %followee_id.to_short(), "Successfully polled followee");
+            let mut state = backoff_state.write().await;
+            let peer_state = state.entry(followee_id).or_default();
+            peer_state.record_success();
+        }
+    }
+
+    async fn poll_remote_head_update(
+        conn: &rostra_p2p::Connection,
+        followee_id: RostraId,
+        local_head: rostra_core::ShortEventId,
+        backoff_state: &SharedBackoffState,
+    ) -> Result<(rostra_core::ShortEventId, Option<VerifiedEvent>), String> {
+        let known_head = {
+            let state = backoff_state.read().await;
+            state
+                .get(&followee_id)
+                .map(|peer_state| peer_state.remote_head.known_head(local_head))
+                .unwrap_or(local_head)
+        };
+        let (new_head, event) = Self::poll_once(conn, followee_id, known_head).await?;
+        let mut state = backoff_state.write().await;
+        state
+            .entry(followee_id)
+            .or_default()
+            .remote_head
+            .update(new_head);
+        Ok((new_head, event))
     }
 
     async fn poll_once(

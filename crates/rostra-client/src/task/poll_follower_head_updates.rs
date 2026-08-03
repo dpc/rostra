@@ -21,6 +21,7 @@ use crate::net::ClientNetworking;
 const LOG_TARGET: &str = "rostra::poll_follower_heads";
 const MAX_ACTIVE_POLLS: usize = 32;
 const POLL_SLOT_TIMEOUT: Duration = Duration::from_secs(5 * 60);
+const NO_PROGRESS_POLL_DELAY: Duration = Duration::from_secs(1);
 
 /// Per-peer backoff state for polling.
 #[derive(Debug, Clone, Default)]
@@ -75,6 +76,13 @@ impl PeerBackoffState {
 
 /// Shared backoff state for all peers.
 type SharedBackoffState = Arc<RwLock<HashMap<RostraId, PeerBackoffState>>>;
+
+/// Classifies whether a successful follower poll changed local event state.
+#[derive(Debug)]
+enum PollProgress {
+    Inserted(rostra_client_db::InsertEventOutcome),
+    NoProgress,
+}
 
 /// Polls followers for new head updates using the WAIT_FOLLOWERS_NEW_HEADS RPC.
 ///
@@ -283,49 +291,78 @@ impl PollFollowerHeadUpdates {
                 }
             };
 
-            match Self::poll_once(&conn, self_id, &wot).await {
+            let Err(err) =
+                Self::poll_connection_for_heads(&conn, &db, self_id, peer_id, &wot, &backoff_state)
+                    .await?
+            else {
+                unreachable!("a connected follower poll only returns after an RPC error");
+            };
+            debug!(
+                target: LOG_TARGET,
+                peer_id = %peer_id.to_short(),
+                err = %err,
+                "Error polling peer"
+            );
+            // Record failure and apply backoff
+            {
+                let mut state = backoff_state.write().await;
+                let peer_state = state.entry(peer_id).or_default();
+                peer_state.record_failure();
+                debug!(
+                    target: LOG_TARGET,
+                    peer_id = %peer_id.to_short(),
+                    consecutive_failures = peer_state.consecutive_failures,
+                    backoff_secs = peer_state.calculate_backoff_duration().as_secs(),
+                    "Poll failed, applying backoff"
+                );
+            }
+            // On error, break and let the outer loop restart
+            break;
+        }
+        Ok(())
+    }
+
+    async fn poll_connection_for_heads(
+        conn: &Connection,
+        db: &Database,
+        self_id: RostraId,
+        peer_id: RostraId,
+        wot: &CurrentState<Arc<WotData>>,
+        backoff_state: &SharedBackoffState,
+    ) -> DbResult<Result<(), String>> {
+        loop {
+            match Self::poll_once(conn, self_id, wot).await {
                 Ok(event) => {
-                    if let Some(insert_outcome) =
-                        Self::finish_successful_poll(&db, peer_id, event.as_ref(), &backoff_state)
-                            .await?
+                    match Self::finish_successful_poll(db, peer_id, event.as_ref(), backoff_state)
+                        .await?
                     {
-                        let event = event.as_ref().expect("insert outcome requires an event");
-                        debug!(
-                            target: LOG_TARGET,
-                            author = %event.author().to_short(),
-                            event_id = %event.event_id.to_short(),
-                            ?insert_outcome,
-                            "Stored new head event (content deferred to NewHeadFetcher)"
-                        );
+                        PollProgress::Inserted(insert_outcome) => {
+                            let event = event.as_ref().expect("insert outcome requires an event");
+                            debug!(
+                                target: LOG_TARGET,
+                                author = %event.author().to_short(),
+                                event_id = %event.event_id.to_short(),
+                                ?insert_outcome,
+                                "Stored new head event (content deferred to NewHeadFetcher)"
+                            );
+                        }
+                        PollProgress::NoProgress => {
+                            debug!(
+                                target: LOG_TARGET,
+                                peer_id = %peer_id.to_short(),
+                                delay_secs = NO_PROGRESS_POLL_DELAY.as_secs(),
+                                "Successful follower poll made no progress, delaying retry"
+                            );
+                            tokio::time::sleep(NO_PROGRESS_POLL_DELAY).await;
+                        }
                     }
                     trace!(target: LOG_TARGET, %peer_id, "Successfully polled peer");
                 }
                 Err(err) => {
-                    debug!(
-                        target: LOG_TARGET,
-                        peer_id = %peer_id.to_short(),
-                        err = %err,
-                        "Error polling peer"
-                    );
-                    // Record failure and apply backoff
-                    {
-                        let mut state = backoff_state.write().await;
-                        let peer_state = state.entry(peer_id).or_default();
-                        peer_state.record_failure();
-                        debug!(
-                            target: LOG_TARGET,
-                            peer_id = %peer_id.to_short(),
-                            consecutive_failures = peer_state.consecutive_failures,
-                            backoff_secs = peer_state.calculate_backoff_duration().as_secs(),
-                            "Poll failed, applying backoff"
-                        );
-                    }
-                    // On error, break and let the outer loop restart
-                    break;
+                    return Ok(Err(err));
                 }
             }
         }
-        Ok(())
     }
 
     async fn finish_successful_poll(
@@ -333,8 +370,8 @@ impl PollFollowerHeadUpdates {
         peer_id: RostraId,
         event: Option<&VerifiedEvent>,
         backoff_state: &SharedBackoffState,
-    ) -> DbResult<Option<rostra_client_db::InsertEventOutcome>> {
-        let insert_outcome = if let Some(event) = event {
+    ) -> DbResult<PollProgress> {
+        let progress = if let Some(event) = event {
             let (insert_outcome, _process_state) = match db.try_process_event(event).await {
                 Ok(outcome) => outcome,
                 Err(err) => {
@@ -349,16 +386,21 @@ impl PollFollowerHeadUpdates {
                     return Err(err);
                 }
             };
-            Some(insert_outcome)
+            match insert_outcome {
+                rostra_client_db::InsertEventOutcome::Inserted { .. } => {
+                    PollProgress::Inserted(insert_outcome)
+                }
+                rostra_client_db::InsertEventOutcome::AlreadyPresent => PollProgress::NoProgress,
+            }
         } else {
-            None
+            PollProgress::NoProgress
         };
 
         let mut state = backoff_state.write().await;
         if let Some(peer_state) = state.get_mut(&peer_id) {
             peer_state.record_success();
         }
-        Ok(insert_outcome)
+        Ok(progress)
     }
 
     async fn poll_once(

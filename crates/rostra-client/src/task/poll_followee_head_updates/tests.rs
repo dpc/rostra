@@ -1,22 +1,17 @@
 use std::collections::HashMap;
 use std::sync::Arc;
-use std::time::Duration;
 
-use rostra_client_db::Database;
-use rostra_core::event::{
-    Event, EventContentRaw, EventKind, IrohNodeId, SignedEvent, VerifiedEvent, VerifiedEventContent,
-};
+use rostra_core::ShortEventId;
+use rostra_core::event::{Event, EventContentRaw, EventKind, VerifiedEvent, VerifiedEventContent};
 use rostra_core::id::{RostraIdSecretKey, ToShort as _};
-use rostra_core::{ShortEventId, Timestamp};
 use rostra_p2p::connection::{
-    Connection, GetEventRequest, GetEventResponse, MAX_REQUEST_SIZE, PingRequest, PingResponse,
-    RpcId, RpcMessage as _, WaitHeadUpdateRequest, WaitHeadUpdateResponse,
+    Connection, GetEventRequest, GetEventResponse, MAX_REQUEST_SIZE, RpcId, RpcMessage as _,
+    WaitHeadUpdateRequest, WaitHeadUpdateResponse,
 };
 use rostra_p2p_api::ROSTRA_P2P_V0_ALPN;
 use tokio::sync::{RwLock, mpsc};
 
-use super::{PeerBackoffState, PollFolloweeHeadUpdates};
-use crate::Client;
+use super::{PeerBackoffState, PollFolloweeHeadUpdates, SharedBackoffState};
 
 fn build_event(
     id_secret: RostraIdSecretKey,
@@ -36,7 +31,24 @@ fn build_event(
     VerifiedEventContent::verify(event, content).expect("matching test content")
 }
 
-#[test_log::test(tokio::test(flavor = "multi_thread"))]
+async fn poll_from_local_head(
+    connection: &Connection,
+    followee_id: rostra_core::id::RostraId,
+    local_head: ShortEventId,
+    backoff_state: &SharedBackoffState,
+) -> Result<(), String> {
+    loop {
+        PollFolloweeHeadUpdates::poll_remote_head_update(
+            connection,
+            followee_id,
+            local_head,
+            backoff_state,
+        )
+        .await?;
+    }
+}
+
+#[test_log::test(tokio::test(start_paused = true))]
 async fn polling_reuses_returned_remote_head_as_wait_cursor() {
     let remote_secret = RostraIdSecretKey::generate();
     let remote_id = remote_secret.id();
@@ -63,28 +75,7 @@ async fn polling_reuses_returned_remote_head_as_wait_cursor() {
         .bind()
         .await
         .expect("client endpoint");
-    let client_secret = RostraIdSecretKey::generate();
-    let client = Client::builder(client_secret.id())
-        .db(Database::new_in_memory(client_secret.id())
-            .await
-            .expect("in-memory database"))
-        .iroh_endpoint(client_endpoint)
-        .start_request_handler(false)
-        .start_background_tasks(false)
-        .build()
-        .await
-        .expect("client");
-    let db = client.db().clone();
-    db.process_event_with_content(&remote_head).await;
-    db.process_event_with_content(&local_descendant).await;
-    db.insert_id_node(
-        remote_id,
-        IrohNodeId::from_bytes(*server_id.as_bytes()),
-        Timestamp::now(),
-    )
-    .await;
-
-    let (wait_requests_tx, mut wait_requests_rx) = mpsc::channel(2);
+    let (wait_requests_tx, mut wait_requests_rx) = mpsc::channel(3);
     let server = tokio::spawn(async move {
         let incoming = server_endpoint.accept().await.expect("incoming connection");
         let connection = incoming
@@ -92,24 +83,6 @@ async fn polling_reuses_returned_remote_head_as_wait_cursor() {
             .expect("accept incoming")
             .await
             .expect("connection");
-
-        let (mut send, mut recv) = connection.accept_bi().await.expect("ping stream");
-        let (rpc_id, request) = Connection::read_request_raw(&mut recv)
-            .await
-            .expect("ping request");
-        assert_eq!(rpc_id, RpcId::PING);
-        assert_eq!(
-            PingRequest::decode_whole::<MAX_REQUEST_SIZE>(&request)
-                .expect("decode ping")
-                .0,
-            0
-        );
-        Connection::write_success_return_code(&mut send)
-            .await
-            .expect("ping success");
-        Connection::write_message(&mut send, &PingResponse(0))
-            .await
-            .expect("ping response");
 
         let (mut send, mut recv) = connection.accept_bi().await.expect("first wait stream");
         let (rpc_id, request) = Connection::read_request_raw(&mut recv)
@@ -144,18 +117,13 @@ async fn polling_reuses_returned_remote_head_as_wait_cursor() {
         Connection::write_success_return_code(&mut send)
             .await
             .expect("event success");
-        Connection::write_message(
-            &mut send,
-            &GetEventResponse(Some(SignedEvent {
-                event: remote_head.event.event,
-                sig: remote_head.event.sig,
-            })),
-        )
-        .await
-        .expect("event response");
+        Connection::write_message(&mut send, &GetEventResponse(None))
+            .await
+            .expect("event response");
 
-        let (mut send, mut recv) = connection.accept_bi().await.expect("second wait stream");
-        let (rpc_id, request) = Connection::read_request_raw(&mut recv)
+        let (_second_send, mut second_recv) =
+            connection.accept_bi().await.expect("second wait stream");
+        let (rpc_id, request) = Connection::read_request_raw(&mut second_recv)
             .await
             .expect("second wait request");
         assert_eq!(rpc_id, RpcId::WAIT_HEAD_UPDATE);
@@ -166,33 +134,77 @@ async fn polling_reuses_returned_remote_head_as_wait_cursor() {
             .send(requested_head)
             .await
             .expect("second wait receiver");
-        Connection::write_success_return_code(&mut send)
+
+        let (_send, mut recv) = connection.accept_bi().await.expect("third wait stream");
+        let (rpc_id, request) = Connection::read_request_raw(&mut recv)
             .await
-            .expect("second wait success");
+            .expect("third wait request");
+        assert_eq!(rpc_id, RpcId::WAIT_HEAD_UPDATE);
+        let requested_head = WaitHeadUpdateRequest::decode_whole::<MAX_REQUEST_SIZE>(&request)
+            .expect("decode third wait")
+            .0;
+        wait_requests_tx
+            .send(requested_head)
+            .await
+            .expect("third wait receiver");
 
         std::future::pending::<()>().await;
     });
-
-    let polling = tokio::spawn(PollFolloweeHeadUpdates::poll_followee(
-        client.networking().clone(),
-        client.connection_cache().clone(),
-        db,
-        remote_id,
-        Arc::new(RwLock::new(HashMap::<_, PeerBackoffState>::new())),
-    ));
-
-    let first_request = tokio::time::timeout(Duration::from_secs(2), wait_requests_rx.recv())
+    let connection = Connection::from(
+        client_endpoint
+            .connect(server_id, ROSTRA_P2P_V0_ALPN)
+            .await
+            .expect("connect to server"),
+    );
+    let backoff_state: SharedBackoffState =
+        Arc::new(RwLock::new(HashMap::<_, PeerBackoffState>::new()));
+    let polling_connection = connection.clone();
+    let polling_backoff_state = backoff_state.clone();
+    let polling = tokio::spawn(async move {
+        tokio::time::timeout(
+            super::POLL_SLOT_TIMEOUT,
+            poll_from_local_head(
+                &polling_connection,
+                remote_id,
+                local_descendant_id,
+                &polling_backoff_state,
+            ),
+        )
         .await
-        .expect("first wait request timeout")
-        .expect("first wait request");
+        .unwrap_or(Ok(()))
+    });
+
+    let first_request = wait_requests_rx.recv().await.expect("first wait request");
     assert_eq!(first_request, local_descendant_id);
 
-    let second_request = tokio::time::timeout(Duration::from_secs(2), wait_requests_rx.recv())
-        .await
-        .expect("second wait request timeout")
-        .expect("second wait request");
+    let second_request = wait_requests_rx.recv().await.expect("second wait request");
     assert_eq!(second_request, remote_head_id);
+
+    tokio::time::advance(super::POLL_SLOT_TIMEOUT).await;
+    polling
+        .await
+        .expect("first poll slot task")
+        .expect("first poll slot result");
+
+    let polling_connection = connection.clone();
+    let polling = tokio::spawn(async move {
+        tokio::time::timeout(
+            super::POLL_SLOT_TIMEOUT,
+            poll_from_local_head(
+                &polling_connection,
+                remote_id,
+                local_descendant_id,
+                &backoff_state,
+            ),
+        )
+        .await
+        .unwrap_or(Ok(()))
+    });
+    let third_request = wait_requests_rx.recv().await.expect("third wait request");
+    assert_eq!(third_request, remote_head_id);
 
     polling.abort();
     server.abort();
+    drop(connection);
+    client_endpoint.close().await;
 }

@@ -48,6 +48,14 @@ protects the reject-before-storage boundary, and
 ingestion. Both exercise the typed RPC over an in-memory iroh connection rather
 than calling response validation in isolation.
 
+Successful follower polls only repoll immediately after inserting a new event.
+A valid response that does not change local event state, including an
+already-present event or an event outside the local Web of Trust, waits one
+second before the next `WAIT_FOLLOWERS_NEW_HEADS` request. This bounds replayed
+successful responses without delaying genuinely new head ingestion.
+`replayed_follower_head_responses_are_rate_limited` exercises that safeguard
+through typed RPC under paused time.
+
 The v0 wire shape retains a separate author claim for compatibility; security
 comes from binding it at every consumer, not from trusting the field. Re-check
 this boundary and extend adversarial coverage whenever adding a consumer,
