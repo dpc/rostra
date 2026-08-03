@@ -11,7 +11,7 @@ use rostra_p2p::connection::{
 use rostra_p2p_api::ROSTRA_P2P_V0_ALPN;
 use tokio::sync::{RwLock, mpsc};
 
-use super::{PeerBackoffState, PollFolloweeHeadUpdates, SharedBackoffState};
+use super::{PeerPollState, PollFolloweeHeadUpdates, SharedPollState};
 
 fn build_event(
     id_secret: RostraIdSecretKey,
@@ -35,14 +35,14 @@ async fn poll_from_local_head(
     connection: &Connection,
     followee_id: rostra_core::id::RostraId,
     local_head: ShortEventId,
-    backoff_state: &SharedBackoffState,
+    poll_state: &SharedPollState,
 ) -> Result<(), String> {
     loop {
         PollFolloweeHeadUpdates::poll_remote_head_update(
             connection,
             followee_id,
             local_head,
-            backoff_state,
+            poll_state,
         )
         .await?;
     }
@@ -156,10 +156,9 @@ async fn polling_reuses_returned_remote_head_as_wait_cursor() {
             .await
             .expect("connect to server"),
     );
-    let backoff_state: SharedBackoffState =
-        Arc::new(RwLock::new(HashMap::<_, PeerBackoffState>::new()));
+    let poll_state: SharedPollState = Arc::new(RwLock::new(HashMap::<_, PeerPollState>::new()));
     let polling_connection = connection.clone();
-    let polling_backoff_state = backoff_state.clone();
+    let polling_state = poll_state.clone();
     let polling = tokio::spawn(async move {
         tokio::time::timeout(
             super::POLL_SLOT_TIMEOUT,
@@ -167,7 +166,7 @@ async fn polling_reuses_returned_remote_head_as_wait_cursor() {
                 &polling_connection,
                 remote_id,
                 local_descendant_id,
-                &polling_backoff_state,
+                &polling_state,
             ),
         )
         .await
@@ -194,7 +193,7 @@ async fn polling_reuses_returned_remote_head_as_wait_cursor() {
                 &polling_connection,
                 remote_id,
                 local_descendant_id,
-                &backoff_state,
+                &poll_state,
             ),
         )
         .await
