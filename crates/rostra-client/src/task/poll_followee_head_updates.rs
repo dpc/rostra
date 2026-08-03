@@ -68,6 +68,22 @@ impl PeerBackoffState {
 
 type SharedBackoffState = Arc<RwLock<HashMap<RostraId, PeerBackoffState>>>;
 
+/// Remembers the last current head reported by one remote followee.
+#[derive(Default)]
+struct RemoteHeadCursor {
+    head: Option<rostra_core::ShortEventId>,
+}
+
+impl RemoteHeadCursor {
+    fn known_head(&self, local_head: rostra_core::ShortEventId) -> rostra_core::ShortEventId {
+        self.head.unwrap_or(local_head)
+    }
+
+    fn update(&mut self, head: rostra_core::ShortEventId) {
+        self.head = Some(head);
+    }
+}
+
 /// Polls direct followees for head updates using the WAIT_HEAD_UPDATE RPC.
 ///
 /// For each followee, connects and sends our current known head. The server
@@ -218,6 +234,8 @@ impl PollFolloweeHeadUpdates {
         followee_id: RostraId,
         backoff_state: SharedBackoffState,
     ) -> DbResult<()> {
+        let mut remote_head = RemoteHeadCursor::default();
+
         loop {
             // Check backoff
             {
@@ -262,8 +280,14 @@ impl PollFolloweeHeadUpdates {
                 }
             };
 
-            match Self::poll_once(&conn, &db, followee_id).await {
-                Ok(event) => {
+            let local_heads = db.get_heads(followee_id).await;
+            let local_head =
+                representative_head(&local_heads).unwrap_or(rostra_core::ShortEventId::ZERO);
+            let known_head = remote_head.known_head(local_head);
+
+            match Self::poll_once(&conn, followee_id, known_head).await {
+                Ok((new_head, event)) => {
+                    remote_head.update(new_head);
                     if let Some(event) = event {
                         let (insert_outcome, _process_state) = db.try_process_event(&event).await?;
                         debug!(
@@ -306,14 +330,9 @@ impl PollFolloweeHeadUpdates {
 
     async fn poll_once(
         conn: &rostra_p2p::Connection,
-        db: &Database,
         followee_id: RostraId,
-    ) -> Result<Option<VerifiedEvent>, String> {
-        // Get our current known head for this followee
-        let known_heads = db.get_heads(followee_id).await;
-        let known_head =
-            representative_head(&known_heads).unwrap_or(rostra_core::ShortEventId::ZERO);
-
+        known_head: rostra_core::ShortEventId,
+    ) -> Result<(rostra_core::ShortEventId, Option<VerifiedEvent>), String> {
         debug!(
             target: LOG_TARGET,
             followee_id = %followee_id.to_short(),
@@ -337,7 +356,7 @@ impl PollFolloweeHeadUpdates {
                 "Peer returned same head (likely old handler bug), backing off"
             );
             tokio::time::sleep(Duration::from_secs(60)).await;
-            return Ok(None);
+            return Ok((new_head_id, None));
         }
 
         debug!(
@@ -360,9 +379,12 @@ impl PollFolloweeHeadUpdates {
                 new_head = %new_head_id.to_short(),
                 "Followee reported head but event not found"
             );
-            return Ok(None);
+            return Ok((new_head_id, None));
         };
 
-        Ok(Some(verified_event))
+        Ok((new_head_id, Some(verified_event)))
     }
 }
+
+#[cfg(test)]
+mod tests;
