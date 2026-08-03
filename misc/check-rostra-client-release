@@ -203,36 +203,44 @@ for package in "${packages[@]}"; do
 done
 
 p2p_package="$tmpdir/crates/rostra-p2p-$version"
-echo "Checking extracted rostra-p2p against registry rostra-core"
+echo "Checking extracted rostra-p2p against extracted rostra-core"
+cat > "$patch_config" <<EOF
+[patch.crates-io]
+rostra-core = { path = "$tmpdir/crates/rostra-core-$version" }
+rostra-util-error = { path = "$tmpdir/crates/rostra-util-error-$version" }
+EOF
 (
   cd "$p2p_package"
-  CARGO_TARGET_DIR="$tmpdir/p2p-target" cargo check
-  cargo metadata --format-version 1 |
+  CARGO_TARGET_DIR="$tmpdir/p2p-target" cargo --config "$patch_config" check
+  cargo --config "$patch_config" metadata --format-version 1 |
     python3 -c '
 import json
+import pathlib
 import sys
 
 metadata = json.load(sys.stdin)
 expected = {
     "name": "rostra-core",
     "version": sys.argv[1],
-    "source": "registry+https://github.com/rust-lang/crates.io-index",
+    "manifest_path": str(
+        pathlib.Path(sys.argv[2], "Cargo.toml").resolve()
+    ),
 }
 actual = [
     {
         "name": package["name"],
         "version": package["version"],
-        "source": package["source"],
+        "manifest_path": package["manifest_path"],
     }
     for package in metadata["packages"]
     if package["name"] == "rostra-core"
 ]
 if actual != [expected]:
-    print("extracted rostra-p2p did not resolve published rostra-core", file=sys.stderr)
+    print("extracted rostra-p2p did not resolve extracted rostra-core", file=sys.stderr)
     print("expected:", expected, file=sys.stderr)
     print("actual:", actual, file=sys.stderr)
     sys.exit(1)
-' "$version"
+' "$version" "$tmpdir/crates/rostra-core-$version"
 )
 
 consumer="$tmpdir/consumer"

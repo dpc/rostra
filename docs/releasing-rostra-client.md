@@ -38,11 +38,29 @@ came from the extracted artifacts rather than a sibling workspace source.
 
 This local patch is intentionally not a registry simulation. It proves that the
 artifacts form a compilable `rostra-client` closure before their versions exist
-on crates.io. The check also runs real `cargo publish --dry-run` verification
-for the first six packages, which have no unpublished Rostra dependencies.
+on crates.io. It also compiles the extracted `rostra-p2p` artifact against the
+extracted `rostra-core` artifact, so a synchronized version bump does not depend
+on that version already existing in the registry. The check runs real
+`cargo publish --dry-run` verification for the first six packages, which have no
+unpublished Rostra dependencies.
 
 
 ## Final registry validation and publication
+
+This workflow produces a crates-only SDK release, not a Rostra application
+release. Record user-visible crate changes in the release commit's summary and
+details; the project does not maintain a separate crate changelog. Tag the
+successfully published release commit as `rostra-client-v<VERSION>`. Do not use
+`v<VERSION>`: `v*` is reserved for product releases and triggers the GitHub
+binary, DEB, and RPM release workflow when pushed there.
+
+Create and review the release commit before final validation. Check out that
+exact commit with a clean working tree, run `just check-client-release` and the
+normal CI checks, and make no source changes until all registry uploads finish.
+`cargo publish` repackages the live tree, so this rule keeps every uploaded
+archive aligned with the reviewed and validated commit. If any source change is
+needed, stop publication, amend and re-review the release commit, then restart
+validation from the beginning.
 
 Publish one package at a time in the order above. After crates.io exposes each
 new package to its index, run the next package's real registry dry-run and then
@@ -68,4 +86,6 @@ availability and normalized registry dependency resolution for each staged
 package. A dry-run never uploads; only the subsequent real publish validates
 credentials, package ownership, and the live upload service. Do not include
 `rostra-web-ui` or `axum-dpc-static-assets` in this release; they are outside
-this publication closure.
+this publication closure. After all ten versions are available and a fresh
+registry-only consumer succeeds, tag the unchanged release commit and publish
+that tag through the project's canonical Radicle remote.
