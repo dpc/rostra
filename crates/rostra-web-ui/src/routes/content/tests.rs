@@ -97,6 +97,25 @@ fn post_content_images_keep_intrinsic_width() {
             }),
         "post content images should not expand beyond their intrinsic width"
     );
+
+    for selector in [
+        ".m-postView__content .m-rostraMedia img",
+        ".m-postView__content .lazyload-wrapper img",
+    ] {
+        assert!(
+            stylesheet
+                .split('}')
+                .filter_map(|rule| rule.split_once('{'))
+                .any(|(candidate, declarations)| {
+                    candidate
+                        .split(',')
+                        .any(|candidate| candidate.trim() == selector)
+                        && has_declaration(declarations, "display", "block")
+                        && has_declaration(declarations, "margin-inline", "auto")
+                }),
+            "post images matching {selector} should be centered"
+        );
+    }
 }
 
 /// Helper to render djot content with code block filter only

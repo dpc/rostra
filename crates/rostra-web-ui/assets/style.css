@@ -797,6 +797,12 @@ emoji-picker {
   font-style: italic;
 }
 
+.m-postView__content .m-rostraMedia img,
+.m-postView__content .lazyload-wrapper img {
+  display: block;
+  margin-inline: auto;
+}
+
 .lazyload-message::before {
   content: "";
   display: inline-block;
