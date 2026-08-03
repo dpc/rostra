@@ -118,6 +118,39 @@ fn post_content_images_keep_intrinsic_width() {
     }
 }
 
+#[test]
+fn rendered_post_headings_use_a_scoped_geometric_scale() {
+    let stylesheet = include_str!("../../../assets/style.css");
+    let post_content_scopes = [".m-postView__content", ".o-shoutbox__postContent"];
+    let sizes: [f64; 5] = [1.50, 1.39, 1.28, 1.19, 1.10];
+
+    for (level, size) in (1..=5).zip(sizes) {
+        for scope in post_content_scopes {
+            let selector = format!("{scope} h{level}");
+            assert!(
+                stylesheet
+                    .split('}')
+                    .filter_map(|rule| rule.split_once('{'))
+                    .any(|(selectors, declarations)| {
+                        selectors
+                            .split(',')
+                            .any(|candidate| candidate.trim() == selector)
+                            && declarations.contains(&format!("font-size: {size:.2}rem"))
+                    }),
+                "missing scoped heading rule for {selector}"
+            );
+        }
+    }
+
+    let ratios = sizes.windows(2).map(|sizes| sizes[1] / sizes[0]);
+    for ratio in ratios {
+        assert!(
+            (ratio - 0.925).abs() < 0.01,
+            "heading sizes should approximate a geometric progression"
+        );
+    }
+}
+
 /// Helper to render djot content with code block filter only
 async fn render_with_prism(content: &str) -> String {
     let renderer = jotup::html::tokio::Renderer::default().prism_code_blocks();

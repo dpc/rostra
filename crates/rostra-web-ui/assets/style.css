@@ -779,6 +779,31 @@ emoji-picker {
   word-break: break-word;
 }
 
+.m-postView__content h1,
+.o-shoutbox__postContent h1 {
+  font-size: 1.50rem;
+}
+
+.m-postView__content h2,
+.o-shoutbox__postContent h2 {
+  font-size: 1.39rem;
+}
+
+.m-postView__content h3,
+.o-shoutbox__postContent h3 {
+  font-size: 1.28rem;
+}
+
+.m-postView__content h4,
+.o-shoutbox__postContent h4 {
+  font-size: 1.19rem;
+}
+
+.m-postView__content h5,
+.o-shoutbox__postContent h5 {
+  font-size: 1.10rem;
+}
+
 .m-postView__content ol,
 .m-postView__content ul {
   padding-left: 1.5em;
