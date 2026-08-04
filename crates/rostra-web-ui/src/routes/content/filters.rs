@@ -9,6 +9,7 @@ use rostra_core::id::RostraId;
 use rostra_djot::links::{RostraIdLink, extract_rostra_id_link_reference};
 
 use crate::UiState;
+use crate::routes::url::{media_url, profile_url};
 
 /// Escape HTML special characters for use in attributes and text
 fn escape_html(s: &str) -> String {
@@ -79,7 +80,7 @@ where
                     self.inner
                         .emit(Event::Start(
                             Container::Link(
-                                format!("/profile/{rostra_id}").into(),
+                                profile_url(rostra_id).into(),
                                 jotup::LinkType::Span(jotup::SpanLinkType::Inline),
                             ),
                             attr,
@@ -359,7 +360,7 @@ where
                     match transform {
                         MediaTransform::RostraMedia { event_id, alt } => {
                             // Look up the content to get mime type
-                            let url = format!("/media/{}/{}", self.author_id, event_id);
+                            let url = media_url(self.author_id, event_id);
                             let alt = alt.trim();
                             let display_name = if alt.is_empty() { "media" } else { alt };
 

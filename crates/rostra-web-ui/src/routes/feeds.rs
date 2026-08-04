@@ -1,12 +1,12 @@
 use atom_syndication::{Content, Entry, Feed, Link, Person};
-use axum::extract::{Path, State};
+use axum::extract::{OriginalUri, Path, State};
 use axum::http::header;
 use axum::response::{IntoResponse, Response};
-use rostra_core::id::RostraId;
 
 use super::unlock::session::UserSession;
 use crate::SharedState;
 use crate::error::RequestResult;
+use crate::routes::url::{RostraPathId, post_url, profile_feed_url, redirect_to_canonical};
 
 /// Response wrapper for Atom feeds
 pub struct AtomFeed(pub Feed);
@@ -24,10 +24,17 @@ impl IntoResponse for AtomFeed {
 pub async fn get_profile_feed_atom(
     state: State<SharedState>,
     session: UserSession,
-    Path(profile_id): Path<RostraId>,
+    OriginalUri(original_uri): OriginalUri,
+    Path(profile_id): Path<RostraPathId>,
 ) -> RequestResult<impl IntoResponse> {
     let client = state.client(session.id()).await?;
     let client_ref = client.client_ref()?;
+    let Some(profile_id) = profile_id.resolve(client_ref.db()).await else {
+        return Ok(axum::http::StatusCode::NOT_FOUND.into_response());
+    };
+    if let Some(response) = redirect_to_canonical(&original_uri, profile_feed_url(profile_id)) {
+        return Ok(response);
+    }
 
     // Get profile info
     let profile = state.get_social_profile(profile_id, &client_ref).await;
@@ -76,7 +83,7 @@ pub async fn get_profile_feed_atom(
                 ..Default::default()
             }],
             links: vec![Link {
-                href: super::post::canonical_post_url(post.author, post.event_id),
+                href: post_url(post.author, post.event_id),
                 rel: Some("alternate".to_string()),
                 ..Default::default()
             }],
@@ -99,7 +106,7 @@ pub async fn get_profile_feed_atom(
         updated,
         entries,
         links: vec![Link {
-            href: format!("/profile/{profile_id}/atom.xml"),
+            href: profile_feed_url(profile_id),
             rel: Some("self".to_string()),
             mediatype: Some("application/atom+xml".to_string()),
             ..Default::default()
@@ -111,7 +118,7 @@ pub async fn get_profile_feed_atom(
         ..Default::default()
     };
 
-    Ok(AtomFeed(feed))
+    Ok(AtomFeed(feed).into_response())
 }
 
 /// Convert a rostra Timestamp to RFC 3339 format for Atom feeds

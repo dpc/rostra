@@ -16,6 +16,7 @@ use super::{Maud, fragment};
 use crate::UiState;
 use crate::html_utils::re_typeset;
 use crate::layout::FeedLinks;
+use crate::routes::url::{media_list_url, profile_url};
 use crate::util::extractors::AjaxRequest;
 use crate::util::time::format_timestamp;
 
@@ -207,7 +208,7 @@ pub async fn get_shoutbox(
 
             // Hidden media attach form for pasted images
             form id="shoutbox-media-attach-form"
-                action=(format!("/media/{}/list", rostra_id))
+                action=(media_list_url(rostra_id))
                 method="get"
                 x-target="media-list"
                 style="display: none;"
@@ -410,7 +411,7 @@ pub async fn post_shoutbox_preview(
                 (fragment::avatar("o-shoutbox__avatar", state.avatar_url(self_id, profile.event_id), "Avatar"))
                 div ."o-shoutbox__postBody" {
                     div ."o-shoutbox__postMeta" {
-                        a ."o-shoutbox__author" href=(format!("/profile/{self_id}")) {
+                        a ."o-shoutbox__author" href=(profile_url(self_id)) {
                             (profile.display_name)
                         }
                         span ."o-shoutbox__timestamp" {
@@ -450,7 +451,7 @@ impl UiState {
                 (fragment::avatar("o-shoutbox__avatar", self.avatar_url(post.author, profile.event_id), "Avatar"))
                 div ."o-shoutbox__postBody" {
                     div ."o-shoutbox__postMeta" {
-                        a ."o-shoutbox__author" href=(format!("/profile/{}", post.author)) {
+                        a ."o-shoutbox__author" href=(profile_url(post.author)) {
                             (profile.display_name)
                         }
                         span ."o-shoutbox__timestamp" {

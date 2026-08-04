@@ -17,6 +17,7 @@ mod settings;
 mod shoutbox;
 mod timeline;
 pub(crate) mod unlock;
+mod url;
 mod welcome;
 
 use std::sync::Arc;

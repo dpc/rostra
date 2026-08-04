@@ -214,6 +214,15 @@ impl UiDriver {
             .expect("GET request failed")
     }
 
+    /// Send a HEAD request to the given path.
+    pub async fn head(&self, path: &str) -> reqwest::Response {
+        self.client
+            .head(self.url(path))
+            .send()
+            .await
+            .expect("HEAD request failed")
+    }
+
     /// Send a GET with an explicitly supplied Cookie header.
     pub async fn get_with_cookie(&self, path: &str, cookie: &str) -> reqwest::Response {
         self.client

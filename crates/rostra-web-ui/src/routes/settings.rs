@@ -2,7 +2,7 @@ use std::collections::BTreeMap;
 use std::str::FromStr as _;
 
 use axum::Form;
-use axum::extract::{Path, Query, State};
+use axum::extract::{OriginalUri, Path, Query, State};
 use axum::response::{IntoResponse, Redirect, Response};
 use maud::{Markup, PreEscaped, html};
 use rostra_client::id::IdResolvedData;
@@ -17,6 +17,9 @@ use super::profile_self::extractor;
 use super::unlock::session::UserSession;
 use super::{Maud, fragment, recovery};
 use crate::error::{ReadOnlyModeSnafu, RequestResult};
+use crate::routes::url::{
+    EventPathId, profile_follow_url, profile_url, redirect_to_canonical, settings_event_content_url,
+};
 use crate::util::time::{format_timestamp, format_timestamp_iso};
 use crate::{SharedState, UiState};
 
@@ -317,10 +320,22 @@ pub async fn get_settings_p2p(
 pub async fn get_event_content_json(
     state: State<SharedState>,
     session: UserSession,
-    Path(event_id): Path<ShortEventId>,
+    OriginalUri(original_uri): OriginalUri,
+    Path(event_id): Path<EventPathId>,
 ) -> RequestResult<impl IntoResponse> {
     let client = state.client(session.id()).await?;
     let client_ref = client.client_ref()?;
+    let event_id_is_full = matches!(event_id, EventPathId::Full(_));
+    let Some(event_id) = event_id.resolve(client_ref.db()).await else {
+        return Ok(axum::http::StatusCode::NOT_FOUND.into_response());
+    };
+    if event_id_is_full {
+        if let Some(response) =
+            redirect_to_canonical(&original_uri, settings_event_content_url(event_id))
+        {
+            return Ok(response);
+        }
+    }
 
     let content_id = format!("event-content-{event_id}");
 
@@ -354,7 +369,7 @@ pub async fn get_event_content_json(
         }
     };
 
-    Ok(Maud(markup))
+    Ok(Maud(markup).into_response())
 }
 
 impl UiState {
@@ -697,14 +712,14 @@ impl UiState {
 
                     h3 ."o-settingsContent__sectionHeader" { "Suggestion" }
                     div ."m-followeeList__item" {
-                        (fragment::avatar("m-followeeList__avatar", format!("/profile/{DPC_ROSTRA_ID}/avatar"), "Avatar"))
+                        (fragment::avatar("m-followeeList__avatar", format!("{}/avatar", profile_url(DPC_ROSTRA_ID.parse().expect("valid DPC Rostra ID"))), "Avatar"))
                         a ."m-followeeList__name"
-                            href=(format!("/profile/{DPC_ROSTRA_ID}"))
+                            href=(profile_url(DPC_ROSTRA_ID.parse().expect("valid DPC Rostra ID")))
                         {
                             "dpc (Rostra's author)"
                         }
                         (fragment::ajax_button(
-                            &format!("/profile/{DPC_ROSTRA_ID}/follow"),
+                            &profile_follow_url(DPC_ROSTRA_ID.parse().expect("valid DPC Rostra ID")),
                             "get",
                             "follow-dialog-content",
                             "m-followeeList__followButton",
@@ -721,14 +736,14 @@ impl UiState {
                             (fragment::avatar("m-followeeList__avatar", self.avatar_url(*followee_id, *event_id), "Avatar"))
                             div ."m-followeeList__info" {
                                 a ."m-followeeList__name"
-                                    href=(format!("/profile/{}", followee_id))
+                                    href=(profile_url(*followee_id))
                                 {
                                     (display_name)
                                 }
                                 (Self::render_selector_summary(selector))
                             }
                             (fragment::ajax_button(
-                                &format!("/profile/{followee_id}/follow"),
+                                &profile_follow_url(*followee_id),
                                 "get",
                                 "follow-dialog-content",
                                 "m-followeeList__followButton",
@@ -851,7 +866,7 @@ impl UiState {
                             (fragment::avatar("m-followeeList__avatar", self.avatar_url(*follower_id, *event_id), "Avatar"))
                             div ."m-followeeList__info" {
                                 a ."m-followeeList__name"
-                                    href=(format!("/profile/{}", follower_id))
+                                    href=(profile_url(*follower_id))
                                 {
                                     (display_name)
                                 }
@@ -862,7 +877,7 @@ impl UiState {
                                 }
                             }
                             (fragment::ajax_button(
-                                &format!("/profile/{follower_id}/follow"),
+                                &profile_follow_url(*follower_id),
                                 "get",
                                 "follow-dialog-content",
                                 "m-followeeList__followButton",
@@ -1126,7 +1141,7 @@ impl UiState {
                 // Row 4: Content view (on-demand via AJAX)
                 @if content_state.is_none() {
                     div ."m-eventExplorer__contentView" {
-                        a href=(format!("/settings/events/content/{event_id}"))
+                        a href=(settings_event_content_url(event_id))
                             x-target=(format!("event-content-{event_id}"))
                         {
                             "Content"

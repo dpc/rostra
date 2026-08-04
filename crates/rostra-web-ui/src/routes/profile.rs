@@ -1,5 +1,5 @@
 use axum::Form;
-use axum::extract::{Path, Query, State};
+use axum::extract::{OriginalUri, Path, Query, State};
 use axum::response::IntoResponse;
 use maud::{Markup, html};
 use rostra_client_db::social::EventPaginationCursor;
@@ -12,8 +12,9 @@ use tower_cookies::Cookies;
 use super::timeline::{TimelineCursor, TimelineMode, TimelinePaginationInput};
 use super::unlock::session::{RoMode, UserSession};
 use super::{Maud, fragment};
-use crate::error::{ReadOnlyModeSnafu, RequestResult};
+use crate::error::{ReadOnlyModeSnafu, RequestResult, UserRequestError};
 use crate::layout::{OpenGraphMeta, truncate_at_word_boundary};
+use crate::routes::url::{RostraPathId, profile_follow_url, profile_url, redirect_to_canonical};
 use crate::util::extractors::AjaxRequest;
 use crate::{SharedState, UiState};
 
@@ -22,7 +23,8 @@ pub async fn get_profile(
     session: UserSession,
     mut cookies: Cookies,
     AjaxRequest(is_ajax): AjaxRequest,
-    Path(profile_id): Path<RostraId>,
+    OriginalUri(original_uri): OriginalUri,
+    Path(profile_id): Path<RostraPathId>,
     Form(form): Form<TimelinePaginationInput>,
 ) -> RequestResult<impl IntoResponse> {
     let pagination = form.ts.and_then(|ts| {
@@ -32,9 +34,17 @@ pub async fn get_profile(
 
     let client = state.client(session.id()).await?;
     let client_ref = client.client_ref()?;
+    let profile_id = profile_id.resolve(client_ref.db()).await.ok_or_else(|| {
+        crate::error::RequestError::User {
+            source: UserRequestError::SomethingNotFound,
+        }
+    })?;
+    if let Some(response) = redirect_to_canonical(&original_uri, profile_url(profile_id)) {
+        return Ok(response);
+    }
     let profile = state.get_social_profile(profile_id, &client_ref).await;
 
-    let profile_url = state.absolute_url(&format!("/profile/{profile_id}"));
+    let profile_url = state.absolute_url(&profile_url(profile_id));
     let avatar_url = state.absolute_url(&state.avatar_url(profile_id, profile.event_id));
     let description = truncate_at_word_boundary(&profile.bio, 200);
 
@@ -73,7 +83,8 @@ pub async fn get_profile(
                 Some(&json_ld),
             )
             .await?,
-    ))
+    )
+    .into_response())
 }
 
 #[derive(Deserialize)]
@@ -84,11 +95,20 @@ pub struct FollowQueryParams {
 pub async fn get_follow_dialog(
     state: State<SharedState>,
     session: UserSession,
-    Path(profile_id): Path<RostraId>,
+    OriginalUri(original_uri): OriginalUri,
+    Path(profile_id): Path<RostraPathId>,
     Query(params): Query<FollowQueryParams>,
 ) -> RequestResult<impl IntoResponse> {
     let client = state.client(session.id()).await?;
     let client_ref = client.client_ref()?;
+    let profile_id = profile_id.resolve(client_ref.db()).await.ok_or_else(|| {
+        crate::error::RequestError::User {
+            source: UserRequestError::SomethingNotFound,
+        }
+    })?;
+    if let Some(response) = redirect_to_canonical(&original_uri, profile_follow_url(profile_id)) {
+        return Ok(response);
+    }
     let profile = state.get_social_profile(profile_id, &client_ref).await;
     let mut persona_tags = client_ref.db().get_persona_tags_for_id(profile_id).await;
     persona_tags.extend(PersonaTag::defaults());
@@ -124,7 +144,7 @@ pub async fn get_follow_dialog(
                     (profile.display_name)
                 }
                 form ."o-followDialog__form"
-                    action=(format!("/profile/{}/follow", profile_id))
+                    action=(profile_follow_url(profile_id))
                     method="post"
                     x-target="profile-summary followee-list follower-list follow-dialog-content"
                     "@ajax:before"=(ajax_attrs.before)
@@ -175,7 +195,8 @@ pub async fn get_follow_dialog(
             }
             }
         }
-    }))
+    })
+    .into_response())
 }
 
 #[derive(Deserialize)]
@@ -188,7 +209,7 @@ pub struct FollowFormData {
 pub async fn post_follow(
     state: State<SharedState>,
     session: UserSession,
-    Path(profile_id): Path<RostraId>,
+    Path(profile_id): Path<RostraPathId>,
     axum_extra::extract::Form(form): axum_extra::extract::Form<FollowFormData>,
 ) -> RequestResult<impl IntoResponse> {
     let id_secret = state
@@ -197,6 +218,11 @@ pub async fn post_follow(
 
     let client = state.client(session.id()).await?;
     let client_ref = client.client_ref()?;
+    let profile_id = profile_id.resolve(client_ref.db()).await.ok_or_else(|| {
+        crate::error::RequestError::User {
+            source: UserRequestError::SomethingNotFound,
+        }
+    })?;
 
     match form.follow_type.as_str() {
         "unfollow" => {
@@ -284,7 +310,7 @@ impl UiState {
 
                 div ."m-profileSummary__content" {
                     a ."m-profileSummary__displayName u-displayName"
-                        href=(format!("/profile/{}", profile_id))
+                        href=(profile_url(profile_id))
                     {
                         (profile.display_name)
                     }
@@ -298,7 +324,7 @@ impl UiState {
                         @if session.id() != profile_id {
                             @let label = if following { "Following..." } else { "Follow..." };
                             (fragment::ajax_button(
-                                &format!("/profile/{profile_id}/follow"),
+                                &profile_follow_url(profile_id),
                                 "get",
                                 "follow-dialog-content",
                                 "m-profileSummary__followButton",

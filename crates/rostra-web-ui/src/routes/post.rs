@@ -1,14 +1,15 @@
 use std::collections::{BTreeSet, HashMap, HashSet};
 
-use axum::extract::{Path, Query, State};
-use axum::response::{IntoResponse, Redirect};
+use axum::extract::{OriginalUri, Path, Query, State};
+use axum::http::Method;
+use axum::response::IntoResponse;
 use axum_extra::extract::Form;
 use maud::{Markup, PreEscaped, html};
 use rostra_client::ClientRef;
 use rostra_client_db::IdSocialProfileRecord;
 use rostra_client_db::social::SocialPostRecord;
 use rostra_core::event::{EventExt as _, PersonaTag, SocialPost};
-use rostra_core::id::{RostraId, ShortRostraId, ToShort as _};
+use rostra_core::id::{RostraId, ToShort as _};
 use rostra_core::{ExternalEventId, ShortEventId, Timestamp};
 use serde::Deserialize;
 use snafu::ResultExt as _;
@@ -23,6 +24,10 @@ use crate::error::{
 };
 use crate::html_utils::re_typeset;
 use crate::layout::OpenGraphMeta;
+use crate::routes::url::{
+    EventPathId, RostraPathId, post_delete_url, post_edit_cancel_url, post_edit_url,
+    post_fetch_url, post_url, profile_url, redirect_to_canonical,
+};
 use crate::util::extractors::AjaxRequest;
 use crate::util::time::{format_timestamp, format_timestamp_iso};
 use crate::{SharedState, UiState};
@@ -100,11 +105,6 @@ pub struct EditPostPreviewInput {
     event_id: ShortEventId,
 }
 
-/// Return the canonical relative URL for a post.
-pub(crate) fn canonical_post_url(author: RostraId, event_id: ShortEventId) -> String {
-    format!("/post/{}/{event_id}", author.to_short())
-}
-
 fn post_not_found() -> RequestError {
     RequestError::User {
         source: UserRequestError::SomethingNotFound,
@@ -116,32 +116,7 @@ fn requested_author_matches_event(author: RostraId, event_author: Option<RostraI
 }
 
 /// A post-route author identifier in either canonical or legacy form.
-pub(super) enum PostAuthorId {
-    Full(RostraId),
-    Short(ShortRostraId),
-}
-
-impl std::str::FromStr for PostAuthorId {
-    type Err = rostra_core::id::RostraIdParseError;
-
-    fn from_str(author: &str) -> Result<Self, Self::Err> {
-        match author.parse() {
-            Ok(author) => Ok(Self::Full(author)),
-            Err(_) => author.parse().map(Self::Short),
-        }
-    }
-}
-
-impl<'de> Deserialize<'de> for PostAuthorId {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: serde::Deserializer<'de>,
-    {
-        String::deserialize(deserializer)?
-            .parse()
-            .map_err(serde::de::Error::custom)
-    }
-}
+pub(super) type PostAuthorId = RostraPathId;
 
 pub async fn get_single_post(
     state: State<SharedState>,
@@ -149,25 +124,22 @@ pub async fn get_single_post(
     _cookies: Cookies,
     AjaxRequest(is_ajax): AjaxRequest,
     Query(query): Query<SinglePostQuery>,
-    Path((author, event_id)): Path<(PostAuthorId, ShortEventId)>,
+    OriginalUri(original_uri): OriginalUri,
+    Path((author, event_id)): Path<(PostAuthorId, EventPathId)>,
 ) -> RequestResult<impl IntoResponse> {
     let client_handle = state.client(session.id()).await?;
     let client_ref = client_handle.client_ref()?;
 
-    let author = match author {
-        PostAuthorId::Full(author) => {
-            let mut location = canonical_post_url(author, event_id);
-            if query.raw {
-                location.push_str("?raw=true");
-            }
-            return Ok(Redirect::permanent(&location).into_response());
-        }
-        PostAuthorId::Short(author) => client_ref
-            .db()
-            .get_known_identity(author)
-            .await
-            .ok_or_else(post_not_found)?,
-    };
+    let author_is_full = matches!(author, PostAuthorId::Full(_));
+    let event_is_full = matches!(event_id, EventPathId::Full(_));
+    let author = author
+        .resolve(client_ref.db())
+        .await
+        .ok_or_else(post_not_found)?;
+    let event_id = event_id
+        .resolve(client_ref.db())
+        .await
+        .ok_or_else(post_not_found)?;
 
     let post_record = client_ref.db().get_social_post(event_id).await;
     let event = client_ref.db().get_event(event_id).await;
@@ -179,6 +151,14 @@ pub async fn get_single_post(
         .is_some_and(|post| post.author != author)
     {
         return Err(post_not_found());
+    }
+    if author_is_full || event_is_full {
+        if event.is_none() {
+            return Err(post_not_found());
+        }
+        if let Some(response) = redirect_to_canonical(&original_uri, post_url(author, event_id)) {
+            return Ok(response);
+        }
     }
 
     // Render raw post if it's an AJAX request or raw=true query parameter
@@ -258,9 +238,9 @@ pub async fn get_single_post(
                 reply_target_name.as_deref(),
             );
 
-            let post_url = state.absolute_url(&canonical_post_url(metadata_author, event_id));
+            let post_url = state.absolute_url(&post_url(metadata_author, event_id));
             let avatar_url = state.absolute_url(&state.avatar_url(metadata_author, og_event_id));
-            let profile_url = state.absolute_url(&format!("/profile/{metadata_author}"));
+            let profile_url = state.absolute_url(&profile_url(metadata_author));
 
             let ld = serde_json::json!({
                 "@context": "https://schema.org",
@@ -407,10 +387,18 @@ pub async fn get_single_post(
 pub async fn delete_post(
     state: State<SharedState>,
     session: UserSession,
-    Path((author_id, event_id)): Path<(RostraId, ShortEventId)>,
+    Path((author_id, event_id)): Path<(PostAuthorId, EventPathId)>,
 ) -> RequestResult<impl IntoResponse> {
     let client_handle = state.client(session.id()).await?;
     let client = client_handle.client_ref()?;
+    let author_id = author_id
+        .resolve(client.db())
+        .await
+        .ok_or_else(post_not_found)?;
+    let event_id = event_id
+        .resolve(client.db())
+        .await
+        .ok_or_else(post_not_found)?;
 
     let Some(post_record) = client.db().get_social_post(event_id).await else {
         return Ok(Maud(html! {
@@ -505,7 +493,7 @@ fn render_inline_edit_post_form(
                 }
 
                 form ."m-inlineReply__form"
-                    action=(format!("/post/{author_id}/{event_id}/edit"))
+                    action=(post_edit_url(author_id, event_id))
                     method="post"
                     x-target=(format!("{} ajax-scripts", post_target_id))
                     "@ajax:before"=(save_ajax.before)
@@ -548,7 +536,7 @@ fn render_inline_edit_post_form(
                 }
 
                 form id=(cancel_form_id)
-                    action=(format!("/post/{author_id}/{event_id}/edit_cancel"))
+                    action=(post_edit_cancel_url(author_id, event_id))
                     method="get"
                     x-target=(post_target_id)
                     "@ajax:before"=(cancel_ajax.before)
@@ -571,36 +559,52 @@ pub async fn get_edit_post(
     state: State<SharedState>,
     session: UserSession,
     AjaxRequest(is_ajax): AjaxRequest,
-    Path((author_id, event_id)): Path<(RostraId, ShortEventId)>,
+    OriginalUri(original_uri): OriginalUri,
+    Path((author_id, event_id)): Path<(PostAuthorId, EventPathId)>,
     Query(query): Query<EditPostQuery>,
 ) -> RequestResult<impl IntoResponse> {
     let client_handle = state.client(session.id()).await?;
     let client = client_handle.client_ref()?;
+    let author_is_full = matches!(author_id, PostAuthorId::Full(_));
+    let event_is_full = matches!(event_id, EventPathId::Full(_));
+    let author_id = author_id
+        .resolve(client.db())
+        .await
+        .ok_or_else(post_not_found)?;
+    let event_id = event_id
+        .resolve(client.db())
+        .await
+        .ok_or_else(post_not_found)?;
 
     let post_target_id = query
         .post_target_id
         .clone()
         .unwrap_or_else(|| post_html_id(query.post_thread_id, event_id));
 
-    if state.ro_mode(session.session_token()).is_ro() {
-        return Ok(Maud(render_post_error_id(
-            &post_target_id,
-            "Editing is disabled in ro-mode",
-        )));
-    }
-
     let Some(post_record) = client.db().get_social_post(event_id).await else {
-        return Ok(Maud(render_post_error_id(
-            &post_target_id,
-            "Post not found",
-        )));
+        return Ok(Maud(render_post_error_id(&post_target_id, "Post not found")).into_response());
     };
 
     if author_id != client.rostra_id() || post_record.author != client.rostra_id() {
         return Ok(Maud(render_post_error_id(
             &post_target_id,
             "You can only edit your own posts",
-        )));
+        ))
+        .into_response());
+    }
+    if author_is_full || event_is_full {
+        if let Some(response) =
+            redirect_to_canonical(&original_uri, post_edit_url(author_id, event_id))
+        {
+            return Ok(response);
+        }
+    }
+    if state.ro_mode(session.session_token()).is_ro() {
+        return Ok(Maud(render_post_error_id(
+            &post_target_id,
+            "Editing is disabled in ro-mode",
+        ))
+        .into_response());
     }
 
     let content = post_record
@@ -619,24 +623,36 @@ pub async fn get_edit_post(
     );
 
     if is_ajax {
-        Ok(Maud(form))
+        Ok(Maud(form).into_response())
     } else {
         Ok(Maud(
             state
                 .render_nojs_full_page(&session, "Edit Post", form)
                 .await?,
-        ))
+        )
+        .into_response())
     }
 }
 
 pub async fn get_edit_post_cancel(
     state: State<SharedState>,
     session: UserSession,
-    Path((author_id, event_id)): Path<(RostraId, ShortEventId)>,
+    OriginalUri(original_uri): OriginalUri,
+    Path((author_id, event_id)): Path<(PostAuthorId, EventPathId)>,
     Query(query): Query<EditPostQuery>,
 ) -> RequestResult<impl IntoResponse> {
     let client_handle = state.client(session.id()).await?;
     let client = client_handle.client_ref()?;
+    let author_is_full = matches!(author_id, PostAuthorId::Full(_));
+    let event_is_full = matches!(event_id, EventPathId::Full(_));
+    let author_id = author_id
+        .resolve(client.db())
+        .await
+        .ok_or_else(post_not_found)?;
+    let event_id = event_id
+        .resolve(client.db())
+        .await
+        .ok_or_else(post_not_found)?;
 
     let post_target_id = query
         .post_target_id
@@ -644,11 +660,18 @@ pub async fn get_edit_post_cancel(
         .unwrap_or_else(|| post_html_id(query.post_thread_id, event_id));
 
     let Some(post_record) = client.db().get_social_post(event_id).await else {
-        return Ok(Maud(render_post_error_id(
-            &post_target_id,
-            "Post not found",
-        )));
+        return Ok(Maud(render_post_error_id(&post_target_id, "Post not found")).into_response());
     };
+    if post_record.author != author_id {
+        return Err(post_not_found());
+    }
+    if author_is_full || event_is_full {
+        if let Some(response) =
+            redirect_to_canonical(&original_uri, post_edit_cancel_url(author_id, event_id))
+        {
+            return Ok(response);
+        }
+    }
 
     Ok(Maud(
         state
@@ -665,7 +688,8 @@ pub async fn get_edit_post_cancel(
             .ro(state.ro_mode(session.session_token()))
             .call()
             .await?,
-    ))
+    )
+    .into_response())
 }
 
 pub async fn post_edit_post_preview(
@@ -704,9 +728,20 @@ pub async fn post_edit_post(
     state: State<SharedState>,
     session: UserSession,
     AjaxRequest(is_ajax): AjaxRequest,
-    Path((author_id, event_id)): Path<(RostraId, ShortEventId)>,
+    Path((author_id, event_id)): Path<(PostAuthorId, EventPathId)>,
     Form(form): Form<EditPostInput>,
 ) -> RequestResult<impl IntoResponse> {
+    let client_handle = state.client(session.id()).await?;
+    let client = client_handle.client_ref()?;
+    let author_id = author_id
+        .resolve(client.db())
+        .await
+        .ok_or_else(post_not_found)?;
+    let event_id = event_id
+        .resolve(client.db())
+        .await
+        .ok_or_else(post_not_found)?;
+
     if form.content.trim().is_empty() {
         return Ok(Maud(html! {
             (render_inline_edit_post_form(
@@ -724,9 +759,6 @@ pub async fn post_edit_post(
     let id_secret = state
         .id_secret(session.session_token())
         .ok_or_else(|| ReadOnlyModeSnafu.build())?;
-
-    let client_handle = state.client(session.id()).await?;
-    let client = client_handle.client_ref()?;
 
     let Some(post_record) = client.db().get_social_post(event_id).await else {
         return Ok(Maud(html! {
@@ -769,11 +801,11 @@ pub async fn post_edit_post(
             (maud::DOCTYPE)
             html {
                 head {
-                    meta http-equiv="refresh" content=(format!("0;url={}", canonical_post_url(author_id, new_event_id))) {}
+                    meta http-equiv="refresh" content=(format!("0;url={}", post_url(author_id, new_event_id))) {}
                 }
                 body {
                     p { "Post edited. Redirecting..." }
-                    a href=(canonical_post_url(author_id, new_event_id)) { "Click here if not redirected." }
+                    a href=(post_url(author_id, new_event_id)) { "Click here if not redirected." }
                 }
             }
         }));
@@ -813,23 +845,60 @@ pub async fn post_edit_post(
 pub async fn fetch_missing_post(
     state: State<SharedState>,
     session: UserSession,
-    Path((post_thread_id, author_id, event_id)): Path<(ShortEventId, RostraId, ShortEventId)>,
+    method: Method,
+    OriginalUri(original_uri): OriginalUri,
+    Path((post_thread_id, author_id, event_id)): Path<(EventPathId, PostAuthorId, EventPathId)>,
 ) -> RequestResult<impl IntoResponse> {
     let client_handle = state.client(session.id()).await?;
     let client = client_handle.client_ref()?;
+    let post_thread_is_full = matches!(post_thread_id, EventPathId::Full(_));
+    let author_is_full = matches!(author_id, PostAuthorId::Full(_));
+    let event_is_full = matches!(event_id, EventPathId::Full(_));
+    let post_thread_id = post_thread_id
+        .resolve(client.db())
+        .await
+        .ok_or_else(post_not_found)?;
+    let author_id = author_id
+        .resolve(client.db())
+        .await
+        .ok_or_else(post_not_found)?;
+    let event_id = event_id
+        .resolve(client.db())
+        .await
+        .ok_or_else(post_not_found)?;
+    let event = client.db().get_event(event_id).await;
+    if event
+        .as_ref()
+        .is_some_and(|event| event.author() != author_id)
+    {
+        return Err(post_not_found());
+    }
+    if (method == Method::GET || method == Method::HEAD)
+        && (post_thread_is_full || author_is_full || event_is_full)
+    {
+        if event.is_none() {
+            return Err(post_not_found());
+        }
+        if let Some(response) = redirect_to_canonical(
+            &original_uri,
+            post_fetch_url(post_thread_id, author_id, event_id),
+        ) {
+            return Ok(response);
+        }
+    }
 
     let mut followers_cache = std::collections::BTreeMap::new();
 
     let content_id = post_content_html_id(post_thread_id, event_id);
 
-    if !client
+    let fetched = client
         .fetch_event_content(author_id, event_id, &mut followers_cache)
         .await
         .context(EventContentStorageSnafu {
             author_id,
             event_id,
-        })?
-    {
+        })?;
+    if !fetched {
         debug!(
             author = %author_id.to_short(),
             %event_id,
@@ -838,16 +907,26 @@ pub async fn fetch_missing_post(
     } else {
         // Post was fetched successfully, render the updated content
         let db = client.db();
-        if let Some(post_record) = db.get_social_post(event_id).await {
-            if let Some(djot_content) = post_record.content.djot_content.as_ref() {
-                let post_content_rendered = state
-                    .render_content(&client, post_record.author, djot_content)
-                    .await;
-                return Ok(Maud(html! {
-                    div #(content_id) ."m-postView__content -present" {
-                        (post_content_rendered)
-                    }
-                }));
+        let event = db.get_event(event_id).await;
+        if event
+            .as_ref()
+            .is_some_and(|event| event.author() != author_id)
+        {
+            return Err(post_not_found());
+        }
+        if let (Some(_event), Some(post_record)) = (event, db.get_social_post(event_id).await) {
+            if post_record.author == author_id {
+                if let Some(djot_content) = post_record.content.djot_content.as_ref() {
+                    let post_content_rendered = state
+                        .render_content(&client, post_record.author, djot_content)
+                        .await;
+                    return Ok(Maud(html! {
+                        div #(content_id) ."m-postView__content -present" {
+                            (post_content_rendered)
+                        }
+                    })
+                    .into_response());
+                }
             }
         }
     }
@@ -859,7 +938,8 @@ pub async fn fetch_missing_post(
                 "Post not found"
             }
         }
-    }))
+    })
+    .into_response())
 }
 
 #[bon::bon]
@@ -1067,7 +1147,7 @@ impl UiState {
         } else {
             None
         };
-        let post_url = url.cloned().or_else(|| {
+        let external_url = url.cloned().or_else(|| {
             fetched_post
                 .as_ref()
                 .and_then(|post| post.content.url.clone())
@@ -1099,7 +1179,7 @@ impl UiState {
 
         let post_main = html! {
             div ."m-postView__main"
-                data-href=[event_id.map(|event_id| canonical_post_url(author, event_id))]
+                data-href=[event_id.map(|event_id| post_url(author, event_id))]
                 "@click"="if ($el.dataset.href && !event.target.closest('a, button, details, form, textarea, input, select') && !event.target.closest('.m-postContext__postParent:not(.-expanded)')) window.location = $el.dataset.href"
             {
                 div ."m-postView__topRow" {
@@ -1126,7 +1206,7 @@ impl UiState {
                                 }
                             }
                         }
-                        @if let Some(url) = post_url.as_ref() {
+                        @if let Some(url) = external_url.as_ref() {
                             div ."m-postView__linkHeader" {
                                 a href=(url.as_str()) target="_blank" rel="noopener noreferrer" {
                                     @if let Some(title) = post_title.as_ref() {
@@ -1146,7 +1226,7 @@ impl UiState {
                         details ."m-postView__actionMenu" {
                             summary ."m-postView__actionMenuTrigger" { "\u{22EE}" }
                             div ."m-postView__actionMenuDropdown" {
-                                a ."m-postView__actionMenuItem" href=(canonical_post_url(author, event_id)) {
+                                a ."m-postView__actionMenuItem" href=(post_url(author, event_id)) {
                                     "Share..."
                                 }
                                 @if author == client.rostra_id() {
@@ -1158,7 +1238,7 @@ impl UiState {
                                                 .call())
                                         } @else {
                                             (fragment::ajax_button(
-                                                &format!("/post/{author}/{event_id}/edit"),
+                                                &post_edit_url(author, event_id),
                                                 "get",
                                                 post_target,
                                                 "m-postView__actionMenuItem",
@@ -1172,7 +1252,7 @@ impl UiState {
                                         }
 
                                         (fragment::ajax_button(
-                                            &format!("/post/{author}/{event_id}/delete"),
+                                            &post_delete_url(author, event_id),
                                             "post",
                                             post_target,
                                             "m-postView__deleteMenuItem",
@@ -1220,7 +1300,10 @@ impl UiState {
                                     @let label = if reply_count == 1 { "1 Reply".to_string() } else { format!("{reply_count} Replies") };
                                     @let replies_target = post_replies_html_id(ctx, ext_event_id.event_id().to_short());
                                     (fragment::ajax_form(
-                                        &format!("/replies/{}/{}", ctx, ext_event_id.event_id().to_short()),
+                                        &crate::routes::url::replies_url(
+                                            ctx,
+                                            ext_event_id.event_id().to_short(),
+                                        ),
                                         "get",
                                         &replies_target,
                                         fragment::button("m-postView__repliesButton", &label).call(),
@@ -1234,7 +1317,7 @@ impl UiState {
                             @if let (Some(ctx), Some(event_id)) = (post_thread_id, event_id) {
                                 @let content_target = post_content_html_id(ctx, event_id);
                                 (fragment::ajax_button(
-                                    &format!("/post/{ctx}/{author}/{event_id}/fetch"),
+                                    &post_fetch_url(ctx, author, event_id),
                                     "post",
                                     &content_target,
                                     "m-postView__fetchButton",

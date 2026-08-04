@@ -3,7 +3,7 @@ use std::time::Duration;
 
 use axum::Form;
 use axum::extract::ws::WebSocket;
-use axum::extract::{Path, State, WebSocketUpgrade};
+use axum::extract::{OriginalUri, Path, State, WebSocketUpgrade};
 use axum::response::IntoResponse;
 use maud::{Markup, html};
 use rostra_client::ClientRef;
@@ -20,12 +20,17 @@ use serde::Deserialize;
 use tower_cookies::Cookies;
 use tracing::debug;
 
-use super::super::error::{BadRequestSnafu, ReadOnlyModeSnafu, RequestError, RequestResult};
+use super::super::error::{
+    BadRequestSnafu, ReadOnlyModeSnafu, RequestError, RequestResult, UserRequestError,
+};
 use super::cookies::CookiesExt as _;
 use super::unlock::session::{RoMode, UserSession};
 use super::{Maud, fragment};
 use crate::html_utils::re_typeset;
 use crate::layout::{FeedLinks, OpenGraphMeta};
+use crate::routes::url::{
+    EventPathId, profile_feed_url, profile_url, redirect_to_canonical, replies_url,
+};
 use crate::util::extractors::AjaxRequest;
 use crate::{LOG_TARGET, SharedState, UiState};
 
@@ -267,21 +272,44 @@ pub async fn get_post_replies(
     state: State<SharedState>,
     session: UserSession,
     AjaxRequest(is_ajax): AjaxRequest,
-    Path((post_thread_id, event_id)): Path<(ShortEventId, ShortEventId)>,
+    OriginalUri(original_uri): OriginalUri,
+    Path((post_thread_id, event_id)): Path<(EventPathId, EventPathId)>,
 ) -> RequestResult<impl IntoResponse> {
+    let client_handle = state.client(session.id()).await?;
+    let client_ref = client_handle.client_ref()?;
+    let post_thread_is_full = matches!(post_thread_id, EventPathId::Full(_));
+    let event_is_full = matches!(event_id, EventPathId::Full(_));
+    let post_thread_id = post_thread_id
+        .resolve(client_ref.db())
+        .await
+        .ok_or_else(|| RequestError::User {
+            source: UserRequestError::SomethingNotFound,
+        })?;
+    let event_id = event_id
+        .resolve(client_ref.db())
+        .await
+        .ok_or_else(|| RequestError::User {
+            source: UserRequestError::SomethingNotFound,
+        })?;
+    if post_thread_is_full || event_is_full {
+        if let Some(response) =
+            redirect_to_canonical(&original_uri, replies_url(post_thread_id, event_id))
+        {
+            return Ok(response);
+        }
+    }
+
     // AJAX path: return the fragment
     if is_ajax {
         return Ok(Maud(
             state
                 .render_post_replies(post_thread_id, event_id, &session)
                 .await?,
-        ));
+        )
+        .into_response());
     }
 
     // No-JS path: render full page with parent post and replies
-    let client_handle = state.client(session.id()).await?;
-    let client_ref = client_handle.client_ref()?;
-
     let parent_post = client_ref.db().get_social_post(event_id).await;
 
     let (comments, _) = client_ref
@@ -328,7 +356,8 @@ pub async fn get_post_replies(
         state
             .render_nojs_full_page(&session, "Replies", body)
             .await?,
-    ))
+    )
+    .into_response())
 }
 
 #[bon::bon]
@@ -531,7 +560,7 @@ impl UiState {
                     (fragment::avatar("o-shoutbox__avatar", self.avatar_url(author, profile.event_id), "Avatar"))
                     div ."o-shoutbox__postBody" {
                         div ."o-shoutbox__postMeta" {
-                            a ."o-shoutbox__author" href=(format!("/profile/{}", author)) {
+                            a ."o-shoutbox__author" href=(profile_url(author)) {
                                 (profile.display_name)
                             }
                             span ."o-shoutbox__timestamp" { "just now" }
@@ -600,7 +629,7 @@ impl UiState {
                 let profile = self.get_social_profile(profile_id, &client_ref).await;
                 Some(FeedLinks {
                     title: format!("{} - Rostra Feed", profile.display_name),
-                    atom_url: format!("/profile/{profile_id}/atom.xml"),
+                    atom_url: profile_feed_url(profile_id),
                 })
             }
             _ => None,
@@ -847,7 +876,7 @@ impl UiState {
                             aria-current=[mode.is_profile().then_some("page")]
                         { "Profile" }
                         a ."o-mainBarTimeline__feedLink"
-                            href=(format!("/profile/{profile_id}/atom.xml"))
+                            href=(profile_feed_url(profile_id))
                             title="Atom feed"
                         {
                             span ."o-mainBarTimeline__feedLinkIcon" {}
@@ -1048,7 +1077,7 @@ impl UiState {
             {
                 a
                     ."a-userNameHandle__displayName u-displayName"
-                    href={"/profile/"(id)}
+                    href=(crate::routes::url::profile_url(id))
                 {
                     (display_name)
                 }
@@ -1104,7 +1133,7 @@ impl TimelineMode {
             TimelineMode::Network => "/network".to_string(),
             TimelineMode::News => "/news".to_string(),
             TimelineMode::Notifications => "/notifications".to_string(),
-            TimelineMode::Profile(rostra_id) => format!("/profile/{rostra_id}"),
+            TimelineMode::Profile(rostra_id) => profile_url(rostra_id),
         }
     }
 

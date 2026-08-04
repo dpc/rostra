@@ -1,5 +1,5 @@
 use axum::body::Body;
-use axum::extract::{Path, State};
+use axum::extract::{OriginalUri, Path, State};
 use axum::http::{HeaderMap, HeaderValue, header};
 use axum::response::{IntoResponse, Response};
 use axum_dpc_static_assets::handle_etag;
@@ -8,6 +8,7 @@ use rostra_core::id::RostraId;
 use super::unlock::session::UserSession;
 use crate::SharedState;
 use crate::error::RequestResult;
+use crate::routes::url::{RostraPathId, avatar_path, redirect_to_canonical};
 
 const DEFAULT_AVATAR_SVG: &[u8] = include_bytes!("../../assets/icons/circle-user.svg");
 const DEFAULT_AVATAR_ETAG: &str = "default-circle-user-svg";
@@ -65,7 +66,16 @@ pub async fn get(
     state: State<SharedState>,
     session: UserSession,
     req_headers: HeaderMap,
-    Path(avatar_id): Path<RostraId>,
-) -> RequestResult<Response<Body>> {
+    OriginalUri(original_uri): OriginalUri,
+    Path(avatar_id): Path<RostraPathId>,
+) -> RequestResult<impl IntoResponse> {
+    let client = state.client(session.id()).await?;
+    let client_ref = client.client_ref()?;
+    let Some(avatar_id) = avatar_id.resolve(client_ref.db()).await else {
+        return Ok(axum::http::StatusCode::NOT_FOUND.into_response());
+    };
+    if let Some(response) = redirect_to_canonical(&original_uri, avatar_path(avatar_id)) {
+        return Ok(response);
+    }
     serve_avatar(&state, &session, &req_headers, avatar_id).await
 }

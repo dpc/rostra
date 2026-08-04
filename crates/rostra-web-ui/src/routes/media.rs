@@ -1,12 +1,12 @@
 use axum::body::Body;
-use axum::extract::{Multipart, Path, Query, State};
+use axum::extract::{Multipart, OriginalUri, Path, Query, State};
 use axum::http::{HeaderMap, HeaderValue, StatusCode, header};
 use axum::response::{IntoResponse, Response};
 use axum_dpc_static_assets::handle_etag;
 use maud::{PreEscaped, html};
 use rostra_core::ShortEventId;
-use rostra_core::event::content_kind;
-use rostra_core::id::{RostraId, ToShort as _};
+use rostra_core::event::{EventExt as _, content_kind};
+use rostra_core::id::ToShort as _;
 use serde::Deserialize;
 use snafu::ResultExt as _;
 
@@ -14,15 +14,34 @@ use super::unlock::session::UserSession;
 use super::{Maud, fragment};
 use crate::SharedState;
 use crate::error::{OtherSnafu, ReadOnlyModeSnafu, RequestResult};
+use crate::routes::url::{
+    EventPathId, RostraPathId, media_list_url, media_url, redirect_to_canonical,
+};
 
 pub async fn get(
     state: State<SharedState>,
     session: UserSession,
     req_headers: HeaderMap,
-    Path((_author, event_id)): Path<(RostraId, ShortEventId)>,
+    OriginalUri(original_uri): OriginalUri,
+    Path((author, event_id)): Path<(RostraPathId, EventPathId)>,
 ) -> RequestResult<Response<Body>> {
     let client_handle = state.client(session.id()).await?;
     let client_ref = client_handle.client_ref()?;
+    let Some(author) = author.resolve(client_ref.db()).await else {
+        return Ok(StatusCode::NOT_FOUND.into_response());
+    };
+    let Some(event_id) = event_id.resolve(client_ref.db()).await else {
+        return Ok(StatusCode::NOT_FOUND.into_response());
+    };
+    let Some(event) = client_ref.db().get_event(event_id).await else {
+        return Ok(StatusCode::NOT_FOUND.into_response());
+    };
+    if event.author() != author {
+        return Ok(StatusCode::NOT_FOUND.into_response());
+    }
+    if let Some(response) = redirect_to_canonical(&original_uri, media_url(author, event_id)) {
+        return Ok(response);
+    }
 
     // Look up the event content
     let Some(event_content) = client_ref.db().get_event_content(event_id).await else {
@@ -150,12 +169,19 @@ pub struct ListQuery {
 pub async fn list(
     state: State<SharedState>,
     session: UserSession,
-    Path(author): Path<RostraId>,
+    OriginalUri(original_uri): OriginalUri,
+    Path(author): Path<RostraPathId>,
     Query(query): Query<ListQuery>,
 ) -> RequestResult<impl IntoResponse> {
     let target_selector = query.target;
     let client_handle = state.client(session.id()).await?;
     let client_ref = client_handle.client_ref()?;
+    let Some(author) = author.resolve(client_ref.db()).await else {
+        return Ok(StatusCode::NOT_FOUND.into_response());
+    };
+    if let Some(response) = redirect_to_canonical(&original_uri, media_list_url(author)) {
+        return Ok(response);
+    }
 
     let media_event_ids = client_ref
         .db()
@@ -198,13 +224,13 @@ pub async fn list(
                             {
                                 @if media.is_image {
                                     img
-                                        src=(format!("/media/{}/{}", author, media.event_id))
+                                        src=(media_url(author, media.event_id))
                                         ."o-mediaList__thumbnail"
                                         loading="lazy"
                                         {}
                                 } @else if media.is_video {
                                     video
-                                        src=(format!("/media/{}/{}", author, media.event_id))
+                                        src=(media_url(author, media.event_id))
                                         ."o-mediaList__videoThumbnail"
                                         autoplay
                                         muted
@@ -254,5 +280,6 @@ pub async fn list(
                     {}
             }
         }
-    }))
+    })
+    .into_response())
 }

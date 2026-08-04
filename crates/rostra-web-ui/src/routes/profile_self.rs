@@ -11,6 +11,7 @@ use rostra_core::id::{RostraId, ToShort as _};
 use super::unlock::session::UserSession;
 use super::{Maud, fragment};
 use crate::error::{ReadOnlyModeSnafu, RequestResult};
+use crate::routes::url::{avatar_url, profile_url};
 use crate::{SharedState, UiState};
 
 pub async fn post_self_account_edit(
@@ -70,7 +71,7 @@ impl UiState {
     }
 
     pub fn avatar_url(&self, id: RostraId, event_id: ShortEventId) -> String {
-        format!("/profile/{id}/avatar?v={event_id}")
+        avatar_url(id, event_id)
     }
 
     pub async fn render_self_profile_summary(&self, user: &UserSession) -> RequestResult<Markup> {
@@ -85,7 +86,7 @@ impl UiState {
 
                 div ."m-profileSummary__content" {
                     a ."m-profileSummary__displayName u-displayName"
-                        href=(format!("/profile/{}", self_id))
+                        href=(profile_url(self_id))
                     {
                         (self_profile.display_name)
                     }

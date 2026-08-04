@@ -5,6 +5,20 @@ external browser daemon. Treat the daemon, browser process, local host, page
 content, and development identity as security boundaries rather than ordinary
 test fixtures.
 
+## Canonical resource URL resolution
+
+First-party UI routes accept legacy full RostraId and EventId path components,
+but generate short forms. Resolve a short RostraId only through the retained
+identity index. Resolve a full EventId through its short retained-event key and
+verify that the retained signed envelope recomputes to that exact full ID before
+shortening it. Never treat a matching short prefix as proof of a full EventId.
+
+Before redirecting or serving an author-scoped resource, bind the route author
+to the retained envelope and, where applicable, to the materialized social-post
+record. GET and HEAD requests that use a legacy form return a 308 canonical URL
+without discarding the query string. Mutation POST routes resolve either form
+in place; they must not rely on a redirect to preserve the request body.
+
 The skill wrapper loads a known-empty configuration and clears environment
 settings that could silently select persistent profiles or state, remote CDP or
 cloud providers, proxies, extensions, init scripts, plugins, and browser

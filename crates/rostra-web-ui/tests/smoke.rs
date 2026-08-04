@@ -2,9 +2,9 @@ mod common;
 
 use common::TestServer;
 use reqwest::header;
-use rostra_core::EventId;
 use rostra_core::event::{Event, EventKind, VerifiedEvent};
 use rostra_core::id::{RostraId, RostraIdSecretKey, ToShort as _};
+use rostra_core::{EventId, ShortEventId};
 use scraper::{ElementRef, Html, Selector};
 use serde_json::json;
 
@@ -193,7 +193,9 @@ async fn post_urls_use_short_author_ids_and_redirect_long_urls() {
         );
     }
 
-    let response = driver.get(&format!("/profile/{author}/atom.xml")).await;
+    let response = driver
+        .get(&format!("/profile/{}/atom.xml", author.to_short()))
+        .await;
     assert_eq!(response.status(), 200);
     assert!(
         response.text().await.unwrap().contains(&expected_post_url),
@@ -206,11 +208,85 @@ async fn post_urls_use_short_author_ids_and_redirect_long_urls() {
         .await;
     assert_eq!(response.status(), 404);
 
-    let full_event_id = EventId::from_bytes([0; 32]);
+    let missing_event_id = ShortEventId::from_bytes([24; 16]);
     let response = driver
-        .get(&format!("/post/{}/{full_event_id}", author.to_short()))
+        .get(&format!("/post/{author}/{missing_event_id}"))
         .await;
-    assert_eq!(response.status(), 400);
+    assert_eq!(response.status(), 404);
+
+    let event_id = event_id
+        .parse::<ShortEventId>()
+        .expect("post URL has a valid short event ID");
+    let full_event_id = server
+        .client(author)
+        .await
+        .db()
+        .get_event(event_id)
+        .await
+        .expect("published post retains its envelope")
+        .signed
+        .compute_id();
+    let response = driver
+        .get(&format!(
+            "/post/{}/{full_event_id}?raw=true&source=legacy",
+            author.to_short()
+        ))
+        .await;
+    assert_eq!(response.status(), 308);
+    assert_eq!(
+        response.headers().get(header::LOCATION).unwrap(),
+        &format!(
+            "/post/{}/{event_id}?raw=true&source=legacy",
+            author.to_short()
+        )
+    );
+
+    let mut forged_event_id: [u8; 32] = full_event_id.into();
+    forged_event_id[31] ^= 1;
+    let forged_event_id = EventId::from_bytes(forged_event_id);
+    let response = driver
+        .get(&format!("/post/{}/{forged_event_id}", author.to_short()))
+        .await;
+    assert_eq!(response.status(), 404);
+
+    let edit_query = format!("post_thread_id={event_id}&post_target_id=post-target");
+    let response = driver
+        .get(&format!("/post/{author}/{full_event_id}/edit?{edit_query}"))
+        .await;
+    assert_eq!(response.status(), 308);
+    assert_eq!(
+        response.headers().get(header::LOCATION).unwrap(),
+        &format!("{expected_post_url}/edit?{edit_query}")
+    );
+
+    let response = driver
+        .get(&format!(
+            "/post/{author}/{full_event_id}/edit_cancel?{edit_query}"
+        ))
+        .await;
+    assert_eq!(response.status(), 308);
+    assert_eq!(
+        response.headers().get(header::LOCATION).unwrap(),
+        &format!("{expected_post_url}/edit_cancel?{edit_query}")
+    );
+
+    let event_id_string = event_id.to_string();
+    let response = driver
+        .post_form(
+            &format!("/post/{author}/{full_event_id}/edit"),
+            &[
+                ("content", "Updated canonical post URL"),
+                ("post_thread_id", &event_id_string),
+                ("post_target_id", "post-target"),
+            ],
+        )
+        .await;
+    assert_eq!(response.status(), 200);
+
+    let response = driver
+        .post_form(&format!("/post/{author}/{full_event_id}/delete"), &[])
+        .await;
+    assert_eq!(response.status(), 200);
 }
 
 #[test_log::test(tokio::test(flavor = "multi_thread"))]
@@ -243,6 +319,171 @@ async fn post_url_rejects_another_author_retained_envelope_without_content() {
         .await;
 
     assert_eq!(response.status(), 404);
+
+    let response = driver
+        .get(&format!(
+            "/post/{}/{}",
+            requested_author.to_short(),
+            event.event_id
+        ))
+        .await;
+
+    assert_eq!(response.status(), 404);
+
+    let response = driver
+        .get(&format!(
+            "/media/{}/{}",
+            requested_author.to_short(),
+            event.event_id.to_short()
+        ))
+        .await;
+
+    assert_eq!(response.status(), 404);
+}
+
+#[test_log::test(tokio::test(flavor = "multi_thread"))]
+async fn full_event_resource_urls_validate_and_canonicalize() {
+    let server = TestServer::start().await;
+    let driver = server.driver();
+    let (author, author_secret) = driver.login_new_identity().await;
+    let event = Event::builder_raw_content()
+        .author(author)
+        .kind(EventKind::RAW)
+        .build();
+    let event = VerifiedEvent::verify_received_as_is(event.signed_by(author_secret))
+        .expect("fixture event verifies");
+    server
+        .client(author)
+        .await
+        .db()
+        .try_process_event(&event)
+        .await
+        .expect("store retained envelope without content");
+
+    let full_event_id = event.event_id;
+    let event_id = full_event_id.to_short();
+    let identity_cases = [
+        (
+            format!("/profile/{author}?source=legacy"),
+            format!("/profile/{}?source=legacy", author.to_short()),
+        ),
+        (
+            format!("/profile/{author}/atom.xml?source=legacy"),
+            format!("/profile/{}/atom.xml?source=legacy", author.to_short()),
+        ),
+        (
+            format!("/profile/{author}/follow?following=true&source=legacy"),
+            format!(
+                "/profile/{}/follow?following=true&source=legacy",
+                author.to_short()
+            ),
+        ),
+        (
+            format!("/profile/{author}/avatar?v=legacy"),
+            format!("/profile/{}/avatar?v=legacy", author.to_short()),
+        ),
+        (
+            format!("/media/{author}/list?target=%23content&source=legacy"),
+            format!(
+                "/media/{}/list?target=%23content&source=legacy",
+                author.to_short()
+            ),
+        ),
+    ];
+    for (legacy_url, canonical_url) in identity_cases {
+        let response = driver.get(&legacy_url).await;
+        assert_eq!(response.status(), 308, "legacy URL: {legacy_url}");
+        assert_eq!(
+            response.headers().get(header::LOCATION).unwrap(),
+            &canonical_url
+        );
+    }
+
+    let cases = [
+        (
+            format!("/media/{author}/{full_event_id}?download=1"),
+            format!("/media/{}/{event_id}?download=1", author.to_short()),
+        ),
+        (
+            format!("/settings/events/content/{full_event_id}?pretty=1"),
+            format!("/settings/events/content/{event_id}?pretty=1"),
+        ),
+        (
+            format!("/post/{full_event_id}/{author}/{full_event_id}/fetch?source=legacy"),
+            format!(
+                "/post/{event_id}/{}/{event_id}/fetch?source=legacy",
+                author.to_short()
+            ),
+        ),
+        (
+            format!("/replies/{full_event_id}/{full_event_id}?source=legacy"),
+            format!("/replies/{event_id}/{event_id}?source=legacy"),
+        ),
+    ];
+
+    for (legacy_url, canonical_url) in cases {
+        let response = driver.get(&legacy_url).await;
+        assert_eq!(response.status(), 308, "legacy URL: {legacy_url}");
+        assert_eq!(
+            response.headers().get(header::LOCATION).unwrap(),
+            &canonical_url
+        );
+    }
+
+    let response = driver
+        .head(&format!("/post/{author}/{full_event_id}?source=legacy"))
+        .await;
+    assert_eq!(response.status(), 308);
+    assert_eq!(
+        response.headers().get(header::LOCATION).unwrap(),
+        &format!("/post/{}/{event_id}?source=legacy", author.to_short())
+    );
+
+    let response = driver
+        .head(&format!(
+            "/post/{full_event_id}/{author}/{full_event_id}/fetch?source=legacy"
+        ))
+        .await;
+    assert_eq!(response.status(), 308);
+    assert_eq!(
+        response.headers().get(header::LOCATION).unwrap(),
+        &format!(
+            "/post/{event_id}/{}/{event_id}/fetch?source=legacy",
+            author.to_short()
+        )
+    );
+
+    let response = driver
+        .post_form(
+            &format!("/post/{full_event_id}/{author}/{full_event_id}/fetch"),
+            &[],
+        )
+        .await;
+    assert_eq!(response.status(), 200);
+
+    let missing_event_id = ShortEventId::from_bytes([25; 16]);
+    let response = driver
+        .post_form(
+            &format!(
+                "/post/{missing_event_id}/{}/{missing_event_id}/fetch",
+                author.to_short()
+            ),
+            &[],
+        )
+        .await;
+    assert_eq!(response.status(), 200);
+
+    let mut forged_event_id: [u8; 32] = full_event_id.into();
+    forged_event_id[31] ^= 1;
+    let forged_event_id = EventId::from_bytes(forged_event_id);
+    for url in [
+        format!("/media/{}/{forged_event_id}", author.to_short()),
+        format!("/settings/events/content/{forged_event_id}"),
+        format!("/replies/{event_id}/{forged_event_id}"),
+    ] {
+        let response = driver.get(&url).await;
+        assert_eq!(response.status(), 404, "forged URL: {url}");
+    }
 }
 
 #[test_log::test(tokio::test(flavor = "multi_thread"))]
@@ -643,7 +884,9 @@ async fn default_avatar_returns_svg_directly() {
     let (id, _secret) = driver.login_new_identity().await;
 
     // User has no avatar set — should get SVG directly (no redirect)
-    let resp = driver.get(&format!("/profile/{id}/avatar")).await;
+    let resp = driver
+        .get(&format!("/profile/{}/avatar", id.to_short()))
+        .await;
     assert_eq!(resp.status(), 200);
 
     let content_type = resp
@@ -673,7 +916,9 @@ async fn default_avatar_etag_returns_304() {
 
     let (id, _secret) = driver.login_new_identity().await;
 
-    let resp = driver.get(&format!("/profile/{id}/avatar")).await;
+    let resp = driver
+        .get(&format!("/profile/{}/avatar", id.to_short()))
+        .await;
     assert_eq!(resp.status(), 200);
     let etag = resp
         .headers()
@@ -685,7 +930,7 @@ async fn default_avatar_etag_returns_304() {
 
     // Second request with If-None-Match should return 304
     let resp = driver
-        .get_if_none_match(&format!("/profile/{id}/avatar"), &etag)
+        .get_if_none_match(&format!("/profile/{}/avatar", id.to_short()), &etag)
         .await;
     assert_eq!(resp.status(), 304);
 }
@@ -697,7 +942,9 @@ async fn avatar_by_id_has_24h_cache() {
 
     let (id, _secret) = driver.login_new_identity().await;
 
-    let resp = driver.get(&format!("/profile/{id}/avatar")).await;
+    let resp = driver
+        .get(&format!("/profile/{}/avatar", id.to_short()))
+        .await;
     assert_eq!(resp.status(), 200);
 
     let cache_control = resp
@@ -805,8 +1052,8 @@ async fn post_page_og_meta_resolves_rostra_mentions() {
             "{form} mention should not retain its raw Rostra link, body:\n{body}"
         );
         assert!(
-            body.contains(&format!("href=\"/profile/{author}\"")),
-            "{form} mention should resolve to the existing full profile route, body:\n{body}"
+            body.contains(&format!("href=\"/profile/{}\"", author.to_short())),
+            "{form} mention should resolve to the canonical short profile route, body:\n{body}"
         );
     }
 }

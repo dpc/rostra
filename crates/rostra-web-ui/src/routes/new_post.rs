@@ -23,6 +23,7 @@ use super::unlock::session::{RoMode, UserSession};
 use super::{Maud, fragment};
 use crate::UiState;
 use crate::html_utils::re_typeset;
+use crate::routes::url::media_list_url;
 use crate::util::extractors::ajax_request::AjaxRequest;
 
 #[derive(Deserialize)]
@@ -938,7 +939,7 @@ impl UiState {
                 @let attach_ajax = fragment::AjaxLoadingAttrs::for_document_class("m-inlineReply__attachButton");
                 @let textarea_selector = format!("#inline-reply-content-{id_suffix}");
                 form id=(attach_form_id)
-                    action=(format!("/media/{}/list", self_id))
+                    action=(media_list_url(self_id))
                     method="get"
                     x-target="media-list"
                     style="display: none;"
@@ -1121,7 +1122,7 @@ impl UiState {
 
             @if let Some(uid) = user_id {
                 form id="news-media-attach-form"
-                    action=(format!("/media/{}/list", uid))
+                    action=(media_list_url(uid))
                     method="get"
                     x-target="media-list"
                     style="display: none;"
@@ -1305,7 +1306,7 @@ impl UiState {
             @if let Some(uid) = user_id {
                 @let attach_ajax = fragment::AjaxLoadingAttrs::for_document_class("m-newPostForm__attachButton");
                 form id="media-attach-form"
-                    action=(format!("/media/{}/list", uid))
+                    action=(media_list_url(uid))
                     method="get"
                     x-target="media-list"
                     style="display: none;"
