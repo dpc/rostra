@@ -6,6 +6,9 @@ use snafu::{OptionExt as _, Snafu};
 
 use crate::{EventId, ShortEventId, array_type_define_public, array_type_impl_serde};
 
+#[cfg(test)]
+mod tests;
+
 #[cfg(feature = "ed25519-dalek")]
 mod ed25519;
 
@@ -147,6 +150,25 @@ impl fmt::Display for ShortRostraId {
         assert_eq!(str, str_data_encoding);
 
         Ok(())
+    }
+}
+
+impl FromStr for ShortRostraId {
+    type Err = RostraIdParseError;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        if !s.starts_with("rs") {
+            return Err(InvalidPrefixSnafu.build());
+        }
+
+        let bytes = z32::decode(&s.as_bytes()[2..])
+            .ok()
+            .context(DecodingZ32Snafu)?;
+        if bytes.len() != 16 {
+            return Err(InvalidLengthSnafu.build());
+        }
+
+        Ok(Self(bytes.try_into().expect("Just checked length")))
     }
 }
 

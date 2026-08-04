@@ -1632,6 +1632,18 @@ impl Database {
             .await
             .expect("Database panic")
     }
+
+    /// Resolve a shortened identity that has authored a retained event.
+    ///
+    /// Event ingestion rejects identity-prefix collisions, so a returned
+    /// identity is unambiguous.
+    pub async fn get_known_identity(&self, short_id: ShortRostraId) -> Option<RostraId> {
+        self.read_with(|tx| {
+            Ok(ids_full::get(tx, short_id)?.map(|rest| RostraId::assemble(short_id, rest)))
+        })
+        .await
+        .expect("Database panic")
+    }
 }
 
 fn get_first_in_range<K, V>(

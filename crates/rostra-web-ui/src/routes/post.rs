@@ -1,14 +1,14 @@
 use std::collections::{BTreeSet, HashMap, HashSet};
 
 use axum::extract::{Path, Query, State};
-use axum::response::IntoResponse;
+use axum::response::{IntoResponse, Redirect};
 use axum_extra::extract::Form;
 use maud::{Markup, PreEscaped, html};
 use rostra_client::ClientRef;
 use rostra_client_db::IdSocialProfileRecord;
 use rostra_client_db::social::SocialPostRecord;
-use rostra_core::event::{PersonaTag, SocialPost};
-use rostra_core::id::{RostraId, ToShort as _};
+use rostra_core::event::{EventExt as _, PersonaTag, SocialPost};
+use rostra_core::id::{RostraId, ShortRostraId, ToShort as _};
 use rostra_core::{ExternalEventId, ShortEventId, Timestamp};
 use serde::Deserialize;
 use snafu::ResultExt as _;
@@ -18,12 +18,17 @@ use url::Url;
 
 use super::unlock::session::{RoMode, UserSession};
 use super::{Maud, fragment};
-use crate::error::{EventContentStorageSnafu, ReadOnlyModeSnafu, RequestResult};
+use crate::error::{
+    EventContentStorageSnafu, ReadOnlyModeSnafu, RequestError, RequestResult, UserRequestError,
+};
 use crate::html_utils::re_typeset;
 use crate::layout::{OpenGraphMeta, truncate_at_word_boundary};
 use crate::util::extractors::AjaxRequest;
 use crate::util::time::{format_timestamp, format_timestamp_iso};
 use crate::{SharedState, UiState};
+
+#[cfg(test)]
+mod tests;
 
 /// Generate HTML ID for post content element.
 ///
@@ -94,18 +99,86 @@ pub struct EditPostPreviewInput {
     event_id: ShortEventId,
 }
 
+/// Return the canonical relative URL for a post.
+pub(crate) fn canonical_post_url(author: RostraId, event_id: ShortEventId) -> String {
+    format!("/post/{}/{event_id}", author.to_short())
+}
+
+fn post_not_found() -> RequestError {
+    RequestError::User {
+        source: UserRequestError::SomethingNotFound,
+    }
+}
+
+fn requested_author_matches_event(author: RostraId, event_author: Option<RostraId>) -> bool {
+    event_author.is_none_or(|event_author| event_author == author)
+}
+
+/// A post-route author identifier in either canonical or legacy form.
+pub(super) enum PostAuthorId {
+    Full(RostraId),
+    Short(ShortRostraId),
+}
+
+impl std::str::FromStr for PostAuthorId {
+    type Err = rostra_core::id::RostraIdParseError;
+
+    fn from_str(author: &str) -> Result<Self, Self::Err> {
+        match author.parse() {
+            Ok(author) => Ok(Self::Full(author)),
+            Err(_) => author.parse().map(Self::Short),
+        }
+    }
+}
+
+impl<'de> Deserialize<'de> for PostAuthorId {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        String::deserialize(deserializer)?
+            .parse()
+            .map_err(serde::de::Error::custom)
+    }
+}
+
 pub async fn get_single_post(
     state: State<SharedState>,
     session: UserSession,
     _cookies: Cookies,
     AjaxRequest(is_ajax): AjaxRequest,
     Query(query): Query<SinglePostQuery>,
-    Path((author, event_id)): Path<(RostraId, ShortEventId)>,
+    Path((author, event_id)): Path<(PostAuthorId, ShortEventId)>,
 ) -> RequestResult<impl IntoResponse> {
     let client_handle = state.client(session.id()).await?;
     let client_ref = client_handle.client_ref()?;
 
+    let author = match author {
+        PostAuthorId::Full(author) => {
+            let mut location = canonical_post_url(author, event_id);
+            if query.raw {
+                location.push_str("?raw=true");
+            }
+            return Ok(Redirect::permanent(&location).into_response());
+        }
+        PostAuthorId::Short(author) => client_ref
+            .db()
+            .get_known_identity(author)
+            .await
+            .ok_or_else(post_not_found)?,
+    };
+
     let post_record = client_ref.db().get_social_post(event_id).await;
+    let event = client_ref.db().get_event(event_id).await;
+    if !requested_author_matches_event(author, event.as_ref().map(|event| event.author())) {
+        return Err(post_not_found());
+    }
+    if post_record
+        .as_ref()
+        .is_some_and(|post| post.author != author)
+    {
+        return Err(post_not_found());
+    }
 
     // Render raw post if it's an AJAX request or raw=true query parameter
     if is_ajax || query.raw {
@@ -123,7 +196,8 @@ pub async fn get_single_post(
                 .ro(state.ro_mode(session.session_token()))
                 .call()
                 .await?,
-        ));
+        )
+        .into_response());
     }
 
     // Full page: if we have the post record with content, render post + replies
@@ -170,7 +244,7 @@ pub async fn get_single_post(
                 .map(|p| truncate_at_word_boundary(p, 200))
                 .unwrap_or_default();
 
-            let post_url = state.absolute_url(&format!("/post/{author}/{event_id}"));
+            let post_url = state.absolute_url(&canonical_post_url(author, event_id));
             let avatar_url = state.absolute_url(&state.avatar_url(author, og_event_id));
             let profile_url = state.absolute_url(&format!("/profile/{author}"));
 
@@ -294,7 +368,8 @@ pub async fn get_single_post(
                     false,
                 )
                 .await?,
-        ));
+        )
+        .into_response());
     }
 
     // Full page: event or content missing — render with Fetch button
@@ -311,9 +386,7 @@ pub async fn get_single_post(
         }
     };
 
-    Ok(Maud(
-        state.render_nojs_full_page(&session, "Post", body).await?,
-    ))
+    Ok(Maud(state.render_nojs_full_page(&session, "Post", body).await?).into_response())
 }
 
 pub async fn delete_post(
@@ -681,11 +754,11 @@ pub async fn post_edit_post(
             (maud::DOCTYPE)
             html {
                 head {
-                    meta http-equiv="refresh" content=(format!("0;url=/post/{author_id}/{new_event_id}")) {}
+                    meta http-equiv="refresh" content=(format!("0;url={}", canonical_post_url(author_id, new_event_id))) {}
                 }
                 body {
                     p { "Post edited. Redirecting..." }
-                    a href=(format!("/post/{author_id}/{new_event_id}")) { "Click here if not redirected." }
+                    a href=(canonical_post_url(author_id, new_event_id)) { "Click here if not redirected." }
                 }
             }
         }));
@@ -1011,7 +1084,7 @@ impl UiState {
 
         let post_main = html! {
             div ."m-postView__main"
-                data-href=[event_id.map(|eid| format!("/post/{}/{}", author, eid))]
+                data-href=[event_id.map(|event_id| canonical_post_url(author, event_id))]
                 "@click"="if ($el.dataset.href && !event.target.closest('a, button, details, form, textarea, input, select') && !event.target.closest('.m-postContext__postParent:not(.-expanded)')) window.location = $el.dataset.href"
             {
                 div ."m-postView__topRow" {
@@ -1058,7 +1131,7 @@ impl UiState {
                         details ."m-postView__actionMenu" {
                             summary ."m-postView__actionMenuTrigger" { "\u{22EE}" }
                             div ."m-postView__actionMenuDropdown" {
-                                a ."m-postView__actionMenuItem" href=(format!("/post/{}/{}", author, event_id)) {
+                                a ."m-postView__actionMenuItem" href=(canonical_post_url(author, event_id)) {
                                     "Share..."
                                 }
                                 @if author == client.rostra_id() {

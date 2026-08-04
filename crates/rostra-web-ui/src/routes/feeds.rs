@@ -76,7 +76,7 @@ pub async fn get_profile_feed_atom(
                 ..Default::default()
             }],
             links: vec![Link {
-                href: format!("/post/{}/{}", post.author, post.event_id),
+                href: super::post::canonical_post_url(post.author, post.event_id),
                 rel: Some("alternate".to_string()),
                 ..Default::default()
             }],

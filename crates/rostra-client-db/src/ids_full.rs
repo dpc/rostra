@@ -58,7 +58,6 @@ pub(crate) fn read_all(tx: &ReadTransaction) -> DbResult<Vec<RostraId>> {
         .collect::<Result<_, _>>()?)
 }
 
-#[cfg(test)]
 pub(crate) fn get(tx: &ReadTransaction, prefix: ShortRostraId) -> DbResult<Option<RestRostraId>> {
     Ok(tx
         .open_table(&TABLE)?

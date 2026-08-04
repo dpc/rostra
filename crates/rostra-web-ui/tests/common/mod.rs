@@ -11,6 +11,7 @@ use tempfile::TempDir;
 /// A test web UI server running on a random port with ephemeral storage.
 pub struct TestServer {
     server: UiServer,
+    clients: MultiClient,
     _temp_dir: TempDir,
     base_url: String,
 }
@@ -69,7 +70,7 @@ impl TestServer {
             None, // welcome_redirect
         );
 
-        let server = rostra_web_ui::start_ui(opts, clients)
+        let server = rostra_web_ui::start_ui(opts, clients.clone())
             .await
             .expect("Failed to start test server");
 
@@ -83,6 +84,7 @@ impl TestServer {
 
         Self {
             server,
+            clients,
             _temp_dir: temp_dir,
             base_url,
         }
@@ -91,6 +93,11 @@ impl TestServer {
     /// Create a new `UiDriver` with its own cookie jar (independent session).
     pub fn driver(&self) -> UiDriver {
         UiDriver::new(self.base_url.clone())
+    }
+
+    /// Return an in-process handle to a test identity's client.
+    pub async fn client(&self, id: RostraId) -> std::sync::Arc<Client> {
+        self.clients.load(id).await.expect("load test client")
     }
 
     /// Shut down the server cleanly.

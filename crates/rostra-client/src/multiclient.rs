@@ -30,11 +30,12 @@ struct ClientInfo {
     last_used: Instant,
 }
 
+#[derive(Clone)]
 pub struct MultiClient {
     data_dir: PathBuf,
-    inner: tokio::sync::RwLock<HashMap<RostraId, ClientInfo>>,
+    inner: Arc<tokio::sync::RwLock<HashMap<RostraId, ClientInfo>>>,
     max_clients: usize,
-    usage_queue: tokio::sync::RwLock<VecDeque<RostraId>>,
+    usage_queue: Arc<tokio::sync::RwLock<VecDeque<RostraId>>>,
     /// When true, allows direct IP connections (exposes IP address).
     /// When false (default), uses relay-only mode for privacy.
     public_mode: bool,
@@ -51,9 +52,9 @@ impl MultiClient {
     ) -> Self {
         Self {
             data_dir,
-            inner: RwLock::new(Default::default()),
+            inner: Arc::new(RwLock::new(Default::default())),
             max_clients: max_clients.max(1), // Ensure at least 1 client
-            usage_queue: RwLock::new(VecDeque::new()),
+            usage_queue: Arc::new(RwLock::new(VecDeque::new())),
             public_mode,
             pkarr_client,
         }

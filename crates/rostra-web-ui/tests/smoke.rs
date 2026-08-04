@@ -2,7 +2,9 @@ mod common;
 
 use common::TestServer;
 use reqwest::header;
-use rostra_core::id::RostraIdSecretKey;
+use rostra_core::EventId;
+use rostra_core::event::{Event, EventKind, VerifiedEvent};
+use rostra_core::id::{RostraId, RostraIdSecretKey, ToShort as _};
 use scraper::{ElementRef, Html, Selector};
 use serde_json::json;
 
@@ -130,6 +132,117 @@ async fn explicit_news_url_remains_available() {
         following < news,
         "sitemap should list Following before News: {body}"
     );
+}
+
+#[test_log::test(tokio::test(flavor = "multi_thread"))]
+async fn post_urls_use_short_author_ids_and_redirect_long_urls() {
+    let server = TestServer::start().await;
+    let driver = server.driver();
+    let (author, _) = driver.login_new_identity().await;
+
+    let response = driver
+        .ajax_post_form("/post", &[("content", "A canonical post URL")])
+        .await;
+    assert_eq!(response.status(), 200);
+    let document = Html::parse_document(&response.text().await.unwrap());
+    let post_url = document
+        .select(&Selector::parse("[data-href]").unwrap())
+        .filter_map(|element| element.value().attr("data-href"))
+        .find(|href| href.starts_with("/post/"))
+        .expect("new post should include a post URL")
+        .to_owned();
+    let event_id = post_url
+        .rsplit('/')
+        .next()
+        .expect("post URL has event ID")
+        .to_owned();
+
+    let expected_post_url = format!("/post/{}/{event_id}", author.to_short());
+    assert_eq!(post_url, expected_post_url);
+
+    let response = driver.get(&expected_post_url).await;
+    assert_eq!(response.status(), 200);
+    let body = response.text().await.unwrap();
+    let document = Html::parse_document(&body);
+    let canonical_url = document
+        .select(&Selector::parse(r#"link[rel="canonical"]"#).unwrap())
+        .next()
+        .and_then(|element| element.value().attr("href"))
+        .expect("post page should include a canonical URL");
+    assert!(
+        canonical_url.ends_with(&expected_post_url),
+        "canonical URL should use the short author ID: {canonical_url}"
+    );
+    assert!(
+        body.contains(&format!(r#""url":"{canonical_url}""#)),
+        "JSON-LD should use the canonical URL: {body}"
+    );
+
+    for legacy_author in [
+        author.to_string(),
+        author.to_unprefixed_z32_string(),
+        author.to_bech32_string(),
+    ] {
+        let response = driver
+            .get(&format!("/post/{legacy_author}/{event_id}?raw=true"))
+            .await;
+        assert_eq!(response.status(), 308);
+        assert_eq!(
+            response.headers().get(header::LOCATION).unwrap(),
+            &format!("{expected_post_url}?raw=true")
+        );
+    }
+
+    let response = driver.get(&format!("/profile/{author}/atom.xml")).await;
+    assert_eq!(response.status(), 200);
+    assert!(
+        response.text().await.unwrap().contains(&expected_post_url),
+        "Atom feed should use the canonical short post URL"
+    );
+
+    let unknown_author = RostraIdSecretKey::generate().id().to_short();
+    let response = driver
+        .get(&format!("/post/{unknown_author}/{event_id}"))
+        .await;
+    assert_eq!(response.status(), 404);
+
+    let full_event_id = EventId::from_bytes([0; 32]);
+    let response = driver
+        .get(&format!("/post/{}/{full_event_id}", author.to_short()))
+        .await;
+    assert_eq!(response.status(), 400);
+}
+
+#[test_log::test(tokio::test(flavor = "multi_thread"))]
+async fn post_url_rejects_another_author_retained_envelope_without_content() {
+    let server = TestServer::start().await;
+    let driver = server.driver();
+    let (requested_author, _) = driver.login_new_identity().await;
+
+    let actual_author_secret = RostraIdSecretKey::generate();
+    let event = Event::builder_raw_content()
+        .author(actual_author_secret.id())
+        .kind(EventKind::RAW)
+        .build();
+    let event = VerifiedEvent::verify_received_as_is(event.signed_by(actual_author_secret))
+        .expect("fixture event verifies");
+    server
+        .client(requested_author)
+        .await
+        .db()
+        .try_process_event(&event)
+        .await
+        .expect("store retained envelope without content");
+
+    let response = driver
+        .get(&format!(
+            "/post/{}/{}",
+            requested_author.to_short(),
+            event.event_id.to_short()
+        ))
+        .await;
+
+    assert_eq!(response.status(), 404);
 }
 
 #[test_log::test(tokio::test(flavor = "multi_thread"))]
@@ -647,7 +760,10 @@ async fn post_page_og_meta_resolves_rostra_mentions() {
     // (each identity has its own DB, so only A can see A's post content)
     driver.login_with_secret(&a_id, &a_secret).await;
 
-    let resp = driver.get(&format!("/post/{a_id}/{event_id}")).await;
+    let author = a_id.parse::<RostraId>().expect("API returned RostraId");
+    let resp = driver
+        .get(&format!("/post/{}/{event_id}", author.to_short()))
+        .await;
     assert_eq!(resp.status(), 200);
 
     let body = resp.text().await.unwrap();
