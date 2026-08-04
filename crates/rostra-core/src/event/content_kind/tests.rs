@@ -1,5 +1,7 @@
+#[cfg(feature = "serde")]
 use std::{cmp, fmt};
 
+#[cfg(feature = "serde")]
 use super::{IrohNodeId, NodeAnnouncement};
 
 #[cfg(feature = "serde")]
@@ -21,6 +23,7 @@ where
     assert_eq!(v, ret);
 }
 
+#[cfg(feature = "serde")]
 #[test]
 fn sanity_check_node_annocment() {
     let node_id = IrohNodeId::MAX;
