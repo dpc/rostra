@@ -255,13 +255,13 @@ pub async fn get_shoutbox(
                         // Mention results
                         template x-if="autocompleteType === 'mention'" {
                             div {
-                                template x-for="(result, index) in results" ":key"="result.rostra_id" {
+                                template x-for="(result, index) in results" ":key"="result.rostra_id_reference" {
                                     div ."m-textAutocomplete__item"
                                         ":class"="{ '-selected': index === selectedIndex }"
                                         "@click"="selectResult(result)"
                                     {
                                         span ."m-textAutocomplete__displayName" x-text="result.display_name" {}
-                                        span ."m-textAutocomplete__id" x-text="'@' + result.rostra_id.substring(0, 8)" {}
+                                        span ."m-textAutocomplete__id" x-text="'@' + result.rostra_id_reference.substring(0, 8)" {}
                                     }
                                 }
                             }

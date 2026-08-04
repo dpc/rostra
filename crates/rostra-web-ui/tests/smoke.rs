@@ -738,17 +738,98 @@ async fn post_page_og_meta_resolves_rostra_mentions() {
     // Get current heads (profile update created events)
     let resp = driver.api_get(&format!("/api/{a_id}/heads")).await;
     let heads: serde_json::Value = resp.json().await.unwrap();
-    let head = heads["heads"][0].as_str().unwrap();
+    let mut head = heads["heads"][0].as_str().unwrap().to_owned();
 
-    // Use identity A to publish a post mentioning itself (simplest: A's DB
-    // already has A's profile, so the mention will resolve to "Alice")
+    // Log in as identity A (the author) via the web UI to view the post page
+    // (each identity has its own DB, so only A can see A's post content)
+    driver.login_with_secret(&a_id, &a_secret).await;
+
+    let author = a_id.parse::<RostraId>().expect("API returned RostraId");
+    let social_title = "Alice's post on Rostra";
+
+    for (form, mention_id) in [
+        ("full", a_id.clone()),
+        ("short", author.to_short().to_string()),
+    ] {
+        let resp = driver
+            .api_post_json(
+                &format!("/api/{a_id}/publish-social-post-managed"),
+                Some(&a_secret),
+                &json!({
+                    "parent_head_id": head,
+                    "content": format!("Hello <rostra:{mention_id}>, welcome!"),
+                }),
+            )
+            .await;
+        assert_eq!(resp.status(), 200);
+        let post: serde_json::Value = resp.json().await.unwrap();
+        let event_id = post["event_id"].as_str().unwrap().to_owned();
+        head = event_id.clone();
+
+        let resp = driver
+            .get(&format!("/post/{}/{event_id}", author.to_short()))
+            .await;
+        assert_eq!(resp.status(), 200);
+
+        let body = resp.text().await.unwrap();
+        let document = Html::parse_document(&body);
+
+        assert_eq!(
+            document
+                .select(&Selector::parse("title").unwrap())
+                .next()
+                .map(|title| title.text().collect::<String>()),
+            Some(social_title.to_owned()),
+            "{form} mention should use the shared social title"
+        );
+        for selector in [
+            r#"meta[property="og:title"]"#,
+            r#"meta[name="twitter:title"]"#,
+        ] {
+            assert_eq!(
+                document
+                    .select(&Selector::parse(selector).unwrap())
+                    .next()
+                    .and_then(|meta| meta.value().attr("content")),
+                Some(social_title),
+                "{form} mention {selector} should use the shared social title"
+            );
+        }
+
+        assert!(
+            body.contains("@Alice"),
+            "{form} mention should normalize in post social metadata, body:\n{body}"
+        );
+        assert!(
+            !body.contains(&format!("rostra:{mention_id}")),
+            "{form} mention should not retain its raw Rostra link, body:\n{body}"
+        );
+        assert!(
+            body.contains(&format!("href=\"/profile/{author}\"")),
+            "{form} mention should resolve to the existing full profile route, body:\n{body}"
+        );
+    }
+}
+
+#[test_log::test(tokio::test(flavor = "multi_thread"))]
+async fn post_page_keeps_unknown_short_rostra_mentions_unresolved() {
+    let server = TestServer::start().await;
+    let driver = server.driver();
+
+    let (author, secret) = driver.login_new_identity().await;
+    let unknown_id = RostraIdSecretKey::generate().id();
+    let resp = driver.api_get(&format!("/api/{author}/heads")).await;
+    let heads: serde_json::Value = resp.json().await.unwrap();
+    let head = heads["heads"][0].as_str().unwrap();
+    let unknown_short_id = unknown_id.to_short();
+
     let resp = driver
         .api_post_json(
-            &format!("/api/{a_id}/publish-social-post-managed"),
-            Some(&a_secret),
+            &format!("/api/{author}/publish-social-post-managed"),
+            Some(&secret.to_string()),
             &json!({
                 "parent_head_id": head,
-                "content": format!("Hello <rostra:{a_id}>, welcome!"),
+                "content": format!("Hello <rostra:{unknown_short_id}>"),
             }),
         )
         .await;
@@ -756,53 +837,149 @@ async fn post_page_og_meta_resolves_rostra_mentions() {
     let post: serde_json::Value = resp.json().await.unwrap();
     let event_id = post["event_id"].as_str().unwrap();
 
-    // Log in as identity A (the author) via the web UI to view the post page
-    // (each identity has its own DB, so only A can see A's post content)
-    driver.login_with_secret(&a_id, &a_secret).await;
-
-    let author = a_id.parse::<RostraId>().expect("API returned RostraId");
     let resp = driver
         .get(&format!("/post/{}/{event_id}", author.to_short()))
         .await;
     assert_eq!(resp.status(), 200);
-
     let body = resp.text().await.unwrap();
-    let document = Html::parse_document(&body);
-    let social_title = "Alice's post on Rostra";
 
     assert!(
-        body.contains(social_title),
-        "shared HTML/Open Graph/Twitter title should use the authored fallback: {body}"
+        body.contains(&format!("rostra:{unknown_short_id}")),
+        "unknown short mentions should retain safe fallback text, body:\n{body}"
     );
+    assert!(
+        !body.contains(&format!("href=\"/profile/{unknown_id}\"")),
+        "unknown short mentions must not select a full identity, body:\n{body}"
+    );
+    assert!(
+        body.contains(&format!("href=\"rostra:{unknown_short_id}\"")),
+        "unknown short mentions should preserve the established sanitized fallback, body:\n{body}"
+    );
+}
+
+#[test_log::test(tokio::test(flavor = "multi_thread"))]
+async fn profile_search_emits_short_ids_for_shared_mention_autocomplete() {
+    let server = TestServer::start().await;
+    let driver = server.driver();
+    let (author, secret) = driver.login_new_identity().await;
+
+    let resp = driver.api_get(&format!("/api/{author}/heads")).await;
+    let heads: serde_json::Value = resp.json().await.unwrap();
+    let head = heads["heads"][0].as_str().unwrap();
+    let resp = driver
+        .api_post_json(
+            &format!("/api/{author}/publish-social-post-managed"),
+            Some(&secret.to_string()),
+            &json!({
+                "parent_head_id": head,
+                "content": "index this identity",
+            }),
+        )
+        .await;
+    assert_eq!(resp.status(), 200);
+
+    let resp = driver.get("/search/profiles?q=rs").await;
+    assert_eq!(resp.status(), 200);
+    let results: serde_json::Value = resp.json().await.unwrap();
+    let author_short = author.to_short().to_string();
+    let author_full = author.to_string();
     assert_eq!(
-        document
-            .select(&Selector::parse("title").unwrap())
-            .next()
-            .map(|title| title.text().collect::<String>()),
-        Some(social_title.to_owned()),
-        "document title should use the shared social title"
+        results[0]["rostra_id_reference"].as_str(),
+        Some(author_short.as_str())
     );
-    for selector in [
-        r#"meta[property="og:title"]"#,
-        r#"meta[name="twitter:title"]"#,
+    assert_ne!(
+        results[0]["rostra_id_reference"].as_str(),
+        Some(author_full.as_str())
+    );
+
+    let unretained_followee = RostraIdSecretKey::generate().id();
+    let unretained_followee_full = unretained_followee.to_string();
+    let resp = driver
+        .post_form("/followee", &[("rostra_id", &unretained_followee_full)])
+        .await;
+    assert_eq!(resp.status(), 200);
+
+    let resp = driver
+        .get(&format!("/search/profiles?q={unretained_followee_full}"))
+        .await;
+    assert_eq!(resp.status(), 200);
+    let results: serde_json::Value = resp.json().await.unwrap();
+    assert_eq!(
+        results[0]["rostra_id_reference"].as_str(),
+        Some(unretained_followee_full.as_str()),
+        "a followed identity without retained authored events must retain a full mention ID"
+    );
+
+    for path in ["/following", "/shoutbox"] {
+        let resp = driver.get(path).await;
+        assert_eq!(resp.status(), 200);
+        let body = resp.text().await.unwrap();
+        assert!(
+            body.contains("x-data=\"textAutocomplete\""),
+            "{path} should emit shared autocomplete markup, body:\n{body}"
+        );
+    }
+}
+
+#[test]
+fn all_mention_composers_use_the_shared_short_id_selection_contract() {
+    let app = include_str!("../assets/app.js");
+    assert!(
+        app.contains("insertText = `<rostra:${result.rostra_id_reference}>`;"),
+        "the shared selection handler must insert the server-provided identity ID"
+    );
+
+    let new_post = include_str!("../src/routes/new_post.rs");
+    let bindings = new_post
+        .match_indices("x-data=\"textAutocomplete\"")
+        .map(|(index, _)| index)
+        .collect::<Vec<_>>();
+    assert_eq!(
+        bindings.len(),
+        3,
+        "new post has three autocomplete composers"
+    );
+    for (binding, marker, composer) in [
+        (
+            bindings[0],
+            "@let textarea_id = format!(\"inline-reply-content",
+            "inline reply",
+        ),
+        (
+            bindings[1],
+            "placeholder=\"Discussion text (optional)\"",
+            "news post",
+        ),
+        (bindings[2], "\"What's on your mind?\"", "new post"),
     ] {
-        assert_eq!(
-            document
-                .select(&Selector::parse(selector).unwrap())
-                .next()
-                .and_then(|meta| meta.value().attr("content")),
-            Some(social_title),
-            "{selector} should use the shared social title"
+        let marker = new_post.find(marker).expect("composer marker");
+        assert!(
+            binding < marker,
+            "{composer} autocomplete binding must wrap its textarea"
         );
     }
 
-    // The og:description meta tag should contain @Alice, not the raw rostra: link
-    assert!(
-        body.contains("@Alice"),
-        "OG meta should contain resolved @Alice mention, body:\n{body}"
-    );
-    assert!(
-        !body.contains(&format!("rostra:{a_id}")),
-        "OG meta should NOT contain raw rostra: link, body:\n{body}"
-    );
+    for (surface, markup, marker) in [
+        (
+            "post edit",
+            include_str!("../src/routes/post.rs"),
+            "placeholder=\"Edit post...\"",
+        ),
+        (
+            "shoutbox",
+            include_str!("../src/routes/shoutbox.rs"),
+            "placeholder=\"Shout something...\"",
+        ),
+    ] {
+        let bindings = markup
+            .match_indices("x-data=\"textAutocomplete\"")
+            .map(|(index, _)| index)
+            .collect::<Vec<_>>();
+        assert_eq!(bindings.len(), 1, "{surface} has one autocomplete composer");
+        let marker = markup.find(marker).expect("composer marker");
+        assert!(
+            bindings[0] < marker,
+            "{surface} autocomplete binding must wrap its textarea"
+        );
+    }
 }

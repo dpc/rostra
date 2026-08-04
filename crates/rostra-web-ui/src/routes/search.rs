@@ -1,8 +1,8 @@
 use axum::Json;
 use axum::extract::{Query, State};
 use axum::response::IntoResponse;
-use rostra_core::id::RostraId;
-use serde::{Deserialize, Serialize};
+use rostra_core::id::{RostraId, ShortRostraId, ToShort as _};
+use serde::{Deserialize, Serialize, Serializer};
 
 use super::unlock::session::UserSession;
 use crate::SharedState;
@@ -54,8 +54,36 @@ pub struct SearchQuery {
 
 #[derive(Serialize)]
 pub struct ProfileSearchResult {
-    rostra_id: String,
+    rostra_id_reference: ProfileSearchIdReference,
     display_name: String,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ProfileSearchIdReference {
+    Full(RostraId),
+    Short(ShortRostraId),
+}
+
+impl ProfileSearchIdReference {
+    fn for_known_identity(id: RostraId, known_identity: Option<RostraId>) -> Self {
+        if known_identity == Some(id) {
+            Self::Short(id.to_short())
+        } else {
+            Self::Full(id)
+        }
+    }
+}
+
+impl Serialize for ProfileSearchIdReference {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        match self {
+            Self::Full(id) => serializer.collect_str(id),
+            Self::Short(id) => serializer.collect_str(id),
+        }
+    }
 }
 
 fn order_and_limit_results(
@@ -107,11 +135,15 @@ pub async fn search_profiles(
         let score = name_score.max(id_score);
 
         if 0 < score {
+            let rostra_id_reference = ProfileSearchIdReference::for_known_identity(
+                id,
+                db.get_known_identity(id.to_short()).await,
+            );
             scored.push((
                 score,
                 id,
                 ProfileSearchResult {
-                    rostra_id: id_str,
+                    rostra_id_reference,
                     display_name,
                 },
             ));

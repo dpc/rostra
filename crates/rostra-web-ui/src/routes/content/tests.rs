@@ -1,23 +1,12 @@
 use std::str::FromStr;
 
 use jotup::r#async::AsyncRenderOutputExt;
-use rostra_core::id::RostraId;
 
 use super::{RostraRenderExt, make_base_renderer};
 use crate::UiState;
 
 mod url_sanitization;
 mod xss_sanitization;
-
-#[test]
-fn test_extract_rostra_id_link() {
-    assert_eq!(
-        UiState::extract_rostra_id_link(
-            "rostra:rse1okfyp4yj75i6riwbz86mpmbgna3f7qr66aj1njceqoigjabegy"
-        ),
-        Some(RostraId::from_str("rse1okfyp4yj75i6riwbz86mpmbgna3f7qr66aj1njceqoigjabegy").unwrap())
-    );
-}
 
 /// Valid base32 test event ID (16 bytes = 26 base32 characters)
 const TEST_EVENT_ID: &str = "AAAAAAAAAAAAAAAAAAAAAAAAAA";

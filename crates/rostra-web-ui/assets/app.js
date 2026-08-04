@@ -1346,7 +1346,7 @@ document.addEventListener("alpine:init", () => {
 
       if (this.autocompleteType === "mention") {
         triggerPos = textBeforeCursor.lastIndexOf("@");
-        insertText = `<rostra:${result.rostra_id}>`;
+        insertText = `<rostra:${result.rostra_id_reference}>`;
       } else if (this.autocompleteType === "emoji") {
         triggerPos = textBeforeCursor.lastIndexOf(":");
         insertText = result.emoji;

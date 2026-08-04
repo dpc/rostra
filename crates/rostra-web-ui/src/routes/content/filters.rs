@@ -6,6 +6,7 @@ use rostra_client::ClientRef;
 use rostra_core::ShortEventId;
 use rostra_core::event::content_kind;
 use rostra_core::id::RostraId;
+use rostra_djot::links::{RostraIdLink, extract_rostra_id_link_reference};
 
 use crate::UiState;
 
@@ -59,7 +60,14 @@ where
     async fn emit(&mut self, event: Event<'s>) -> Result<(), Self::Error> {
         match event {
             Event::Start(Container::Link(s, jotup::LinkType::AutoLink), attr) => {
-                if let Some(rostra_id) = UiState::extract_rostra_id_link(&s) {
+                let rostra_id = match extract_rostra_id_link_reference(&s) {
+                    Some(RostraIdLink::Full(rostra_id)) => Some(rostra_id),
+                    Some(RostraIdLink::Short(short_id)) => {
+                        self.client.db().get_known_identity(short_id).await
+                    }
+                    None => None,
+                };
+                if let Some(rostra_id) = rostra_id {
                     let display_name = self
                         .client
                         .db()

@@ -4192,8 +4192,8 @@ async fn test_self_mention_detection() -> BoxedErrorResult<()> {
         (verified, content_raw)
     };
 
-    // Post 1: User B posts mentioning user A
-    let mention_content = format!("Hello <rostra:{user_a}>!");
+    // Post 1: User B posts mentioning user A by its canonical short ID.
+    let mention_content = format!("Hello <rostra:{}>!", user_a.to_short());
     let (post_mention, post_mention_content) =
         build_social_post_event(user_b_secret, None, &mention_content, None);
     let post_mention_id = post_mention.event_id;

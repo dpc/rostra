@@ -486,7 +486,8 @@ djot gives you formatting, links, images, etc.
 ### Mentioning Other Identities
 
 Use the djot autolink syntax with the `rostra:` scheme to mention another
-identity:
+identity. A full Rostra ID works in its accepted canonical and legacy
+encodings. A canonical `ShortRostraId` also works:
 
 ```
 <rostra:{rostra_id}>
@@ -498,8 +499,10 @@ For example:
 Hey <rostra:rse1okfyp4yj75i6riwbz86mpmbgna3f7qr66aj1njceqoigjabegy>, check this out!
 ```
 
-This renders as a clickable `@username` link in the web UI. The mentioned
-identity will see the post in their notifications.
+The web UI resolves a short ID only when its local collision-protected identity
+index knows that prefix. Unknown short IDs retain the safe `rostra:` link
+fallback instead of selecting an identity. Both forms notify the mentioned
+identity when the target's full ID or short prefix matches.
 
 ## Important Rules
 

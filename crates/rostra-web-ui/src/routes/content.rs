@@ -117,11 +117,6 @@ impl UiState {
         PreEscaped(String::from_utf8(out.into_inner()).expect("djot output is always valid utf8"))
     }
 
-    /// Extract rostra id from a link `s`
-    pub(crate) fn extract_rostra_id_link(s: &str) -> Option<RostraId> {
-        rostra_djot::links::extract_rostra_id_link(s)
-    }
-
     /// Extract rostra media id from a link `s`
     pub(crate) fn extract_rostra_media_link(s: &str) -> Option<ShortEventId> {
         rostra_djot::links::extract_rostra_media_link(s)
