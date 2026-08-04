@@ -4,6 +4,10 @@ use jotup::r#async::{AsyncRender, AsyncRenderOutput};
 use jotup::html::filters::SanitizeExt as _;
 use jotup::{Container, Event, Render, RenderOutput, RenderOutputExt as _};
 
+mod social;
+
+pub use social::{SocialExcerpt, SocialExcerptRenderer, extract_social_excerpt};
+
 /// Extracted text excerpts from a djot document.
 #[derive(Debug, Default, PartialEq, Eq)]
 pub struct DjotExcerpt {

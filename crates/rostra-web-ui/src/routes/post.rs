@@ -22,11 +22,12 @@ use crate::error::{
     EventContentStorageSnafu, ReadOnlyModeSnafu, RequestError, RequestResult, UserRequestError,
 };
 use crate::html_utils::re_typeset;
-use crate::layout::{OpenGraphMeta, truncate_at_word_boundary};
+use crate::layout::OpenGraphMeta;
 use crate::util::extractors::AjaxRequest;
 use crate::util::time::{format_timestamp, format_timestamp_iso};
 use crate::{SharedState, UiState};
 
+mod metadata;
 #[cfg(test)]
 mod tests;
 
@@ -213,46 +214,59 @@ pub async fn get_single_post(
 
             use super::content::RostraRenderExt as _;
 
-            let excerpt = rostra_djot::extract::ExcerptRenderer::default()
+            let excerpt = rostra_djot::extract::SocialExcerptRenderer::default()
                 .rostra_profile_links(client_ref.clone())
                 .sanitize()
                 .render_into_document(djot_content)
                 .await
                 .expect("infallible");
 
-            let og_profile = state.get_social_profile_opt(author, &client_ref).await;
-            let display_name = og_profile
-                .as_ref()
-                .map(|p| p.display_name.clone())
-                .unwrap_or_else(|| author.to_short().to_string());
+            let metadata_author = post_record.author;
+            let og_profile = state
+                .get_social_profile_opt(metadata_author, &client_ref)
+                .await;
+            let display_name = metadata::display_name_or_short_id(
+                og_profile
+                    .as_ref()
+                    .map(|profile| profile.display_name.as_str()),
+                &metadata_author.to_short().to_string(),
+            );
             let og_event_id = og_profile
                 .as_ref()
                 .map(|p| p.event_id)
                 .unwrap_or(ShortEventId::ZERO);
 
-            let title = excerpt.first_heading.unwrap_or_else(|| {
-                excerpt
-                    .first_paragraph
-                    .as_deref()
-                    .map(|p| truncate_at_word_boundary(p, 80))
-                    .unwrap_or_else(|| format!("Post by {display_name}"))
-            });
+            let reply_target_name = match post_record.reply_to {
+                Some(reply_to) => {
+                    let target_id = reply_to.rostra_id();
+                    state
+                        .get_social_profile_opt(target_id, &client_ref)
+                        .await
+                        .map(|profile| {
+                            metadata::display_name_or_short_id(
+                                Some(&profile.display_name),
+                                &target_id.to_short().to_string(),
+                            )
+                        })
+                }
+                None => None,
+            };
+            let metadata = metadata::social_metadata(
+                &excerpt,
+                &display_name,
+                post_record.reply_to.is_some(),
+                reply_target_name.as_deref(),
+            );
 
-            let description = excerpt
-                .first_paragraph
-                .as_deref()
-                .map(|p| truncate_at_word_boundary(p, 200))
-                .unwrap_or_default();
-
-            let post_url = state.absolute_url(&canonical_post_url(author, event_id));
-            let avatar_url = state.absolute_url(&state.avatar_url(author, og_event_id));
-            let profile_url = state.absolute_url(&format!("/profile/{author}"));
+            let post_url = state.absolute_url(&canonical_post_url(metadata_author, event_id));
+            let avatar_url = state.absolute_url(&state.avatar_url(metadata_author, og_event_id));
+            let profile_url = state.absolute_url(&format!("/profile/{metadata_author}"));
 
             let ld = serde_json::json!({
                 "@context": "https://schema.org",
                 "@type": "SocialMediaPosting",
-                "headline": title,
-                "articleBody": description,
+                "headline": metadata.title.clone(),
+                "articleBody": metadata.description.clone(),
                 "url": post_url,
                 "datePublished": format_timestamp_iso(post_record.ts),
                 "author": {
@@ -265,8 +279,8 @@ pub async fn get_single_post(
 
             (
                 Some(OpenGraphMeta {
-                    title,
-                    description,
+                    title: metadata.title,
+                    description: metadata.description,
                     url: post_url,
                     image: Some(avatar_url),
                 }),
@@ -357,10 +371,11 @@ pub async fn get_single_post(
 
             script type="module" src="/assets/emoji-init.js" {}
         };
+        let page_title = og.as_ref().map(|og| og.title.as_str()).unwrap_or("Post");
         return Ok(Maud(
             state
                 .render_html_page(
-                    "Post",
+                    page_title,
                     content,
                     None,
                     og.as_ref(),

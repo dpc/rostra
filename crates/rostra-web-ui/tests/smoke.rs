@@ -767,6 +767,34 @@ async fn post_page_og_meta_resolves_rostra_mentions() {
     assert_eq!(resp.status(), 200);
 
     let body = resp.text().await.unwrap();
+    let document = Html::parse_document(&body);
+    let social_title = "Alice's post on Rostra";
+
+    assert!(
+        body.contains(social_title),
+        "shared HTML/Open Graph/Twitter title should use the authored fallback: {body}"
+    );
+    assert_eq!(
+        document
+            .select(&Selector::parse("title").unwrap())
+            .next()
+            .map(|title| title.text().collect::<String>()),
+        Some(social_title.to_owned()),
+        "document title should use the shared social title"
+    );
+    for selector in [
+        r#"meta[property="og:title"]"#,
+        r#"meta[name="twitter:title"]"#,
+    ] {
+        assert_eq!(
+            document
+                .select(&Selector::parse(selector).unwrap())
+                .next()
+                .and_then(|meta| meta.value().attr("content")),
+            Some(social_title),
+            "{selector} should use the shared social title"
+        );
+    }
 
     // The og:description meta tag should contain @Alice, not the raw rostra: link
     assert!(
