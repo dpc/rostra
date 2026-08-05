@@ -66,6 +66,23 @@ where
     }
 }
 
+/// Build headers that isolate bytes supplied by an event's author.
+fn untrusted_media_response_headers(content_type: HeaderValue) -> header::HeaderMap {
+    header::HeaderMap::from_iter([
+        (header::CONTENT_TYPE, content_type),
+        (
+            header::X_CONTENT_TYPE_OPTIONS,
+            HeaderValue::from_static("nosniff"),
+        ),
+        (
+            header::CONTENT_SECURITY_POLICY,
+            HeaderValue::from_static(
+                "sandbox; default-src 'none'; base-uri 'none'; form-action 'none'",
+            ),
+        ),
+    ])
+}
+
 pub async fn cache_control(request: Request, next: Next) -> Response {
     let path = request.uri().path().to_owned();
 

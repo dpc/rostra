@@ -1,6 +1,6 @@
 use axum::body::Body;
 use axum::extract::{Multipart, OriginalUri, Path, Query, State};
-use axum::http::{HeaderMap, HeaderValue, StatusCode, header};
+use axum::http::{HeaderMap, HeaderValue, StatusCode};
 use axum::response::{IntoResponse, Response};
 use axum_dpc_static_assets::handle_etag;
 use maud::{PreEscaped, html};
@@ -11,7 +11,7 @@ use serde::Deserialize;
 use snafu::ResultExt as _;
 
 use super::unlock::session::UserSession;
-use super::{Maud, fragment};
+use super::{Maud, fragment, untrusted_media_response_headers};
 use crate::SharedState;
 use crate::error::{OtherSnafu, ReadOnlyModeSnafu, RequestResult};
 use crate::routes::url::{
@@ -54,19 +54,16 @@ pub async fn get(
         Err(_) => return Ok(StatusCode::BAD_REQUEST.into_response()),
     };
 
-    let mut resp_headers = HeaderMap::new();
+    let Ok(mime) = HeaderValue::from_str(&media_content.mime) else {
+        return Ok(StatusCode::BAD_REQUEST.into_response());
+    };
+    let mut resp_headers = untrusted_media_response_headers(mime);
     let etag = event_id.to_string();
 
     // Handle ETag and conditional request
     if let Some(response) = handle_etag(&req_headers, &etag, &mut resp_headers) {
         return Ok(response.into_response());
     }
-
-    // Set content type from the media's MIME type
-    let Ok(mime) = HeaderValue::from_str(&media_content.mime) else {
-        return Ok(StatusCode::BAD_REQUEST.into_response());
-    };
-    resp_headers.insert(header::CONTENT_TYPE, mime);
 
     // Return the media data
     Ok((resp_headers, media_content.data).into_response())

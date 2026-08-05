@@ -2,7 +2,7 @@ mod common;
 
 use common::TestServer;
 use reqwest::header;
-use rostra_core::event::{Event, EventKind, VerifiedEvent};
+use rostra_core::event::{Event, EventKind, VerifiedEvent, content_kind};
 use rostra_core::id::{RostraId, RostraIdSecretKey, ToShort as _};
 use rostra_core::{EventId, ShortEventId};
 use scraper::{ElementRef, Html, Selector};
@@ -40,6 +40,27 @@ fn assert_link_precedes(document: &Html, first: &str, second: &str) {
     assert!(
         first_index < second_index,
         "expected {first} to precede {second}, found {hrefs:?}"
+    );
+}
+
+fn assert_untrusted_media_headers(response: &reqwest::Response, content_type: &str) {
+    assert_eq!(
+        response.headers().get(header::CONTENT_TYPE).unwrap(),
+        content_type
+    );
+    assert_eq!(
+        response
+            .headers()
+            .get(header::X_CONTENT_TYPE_OPTIONS)
+            .unwrap(),
+        "nosniff"
+    );
+    assert_eq!(
+        response
+            .headers()
+            .get(header::CONTENT_SECURITY_POLICY)
+            .unwrap(),
+        "sandbox; default-src 'none'; base-uri 'none'; form-action 'none'"
     );
 }
 
@@ -933,6 +954,76 @@ async fn default_avatar_etag_returns_304() {
         .get_if_none_match(&format!("/profile/{}/avatar", id.to_short()), &etag)
         .await;
     assert_eq!(resp.status(), 304);
+}
+
+#[test_log::test(tokio::test(flavor = "multi_thread"))]
+async fn user_avatar_isolated_on_success_and_not_modified() {
+    let server = TestServer::start().await;
+    let driver = server.driver();
+    let (id, secret) = driver.login_new_identity().await;
+    let avatar = b"<svg><script>alert('xss')</script></svg>".to_vec();
+
+    server
+        .client(id)
+        .await
+        .post_social_profile_update(
+            secret,
+            "Test avatar".to_owned(),
+            String::new(),
+            Some(("image/svg+xml".to_owned(), avatar)),
+        )
+        .await
+        .expect("publish test avatar");
+
+    let path = format!("/profile/{}/avatar", id.to_short());
+    let response = driver.get(&path).await;
+    assert_eq!(response.status(), 200);
+    assert_untrusted_media_headers(&response, "image/svg+xml");
+    let etag = response
+        .headers()
+        .get(header::ETAG)
+        .unwrap()
+        .to_str()
+        .unwrap();
+
+    let response = driver.get_if_none_match(&path, etag).await;
+    assert_eq!(response.status(), 304);
+    assert_untrusted_media_headers(&response, "image/svg+xml");
+}
+
+#[test_log::test(tokio::test(flavor = "multi_thread"))]
+async fn user_media_isolated_on_success_and_not_modified() {
+    let server = TestServer::start().await;
+    let driver = server.driver();
+    let (id, secret) = driver.login_new_identity().await;
+    let event = server
+        .client(id)
+        .await
+        .publish_event(
+            secret,
+            content_kind::SocialMedia {
+                mime: "text/html".to_owned(),
+                data: b"<script>alert('xss')</script>".to_vec(),
+            },
+        )
+        .call()
+        .await
+        .expect("publish test media");
+
+    let path = format!("/media/{}/{}", id.to_short(), event.event_id.to_short());
+    let response = driver.get(&path).await;
+    assert_eq!(response.status(), 200);
+    assert_untrusted_media_headers(&response, "text/html");
+    let etag = response
+        .headers()
+        .get(header::ETAG)
+        .unwrap()
+        .to_str()
+        .unwrap();
+
+    let response = driver.get_if_none_match(&path, etag).await;
+    assert_eq!(response.status(), 304);
+    assert_untrusted_media_headers(&response, "text/html");
 }
 
 #[test_log::test(tokio::test(flavor = "multi_thread"))]

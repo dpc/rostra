@@ -8,6 +8,7 @@ use rostra_core::id::RostraId;
 use super::unlock::session::UserSession;
 use crate::SharedState;
 use crate::error::RequestResult;
+use crate::routes::untrusted_media_response_headers;
 use crate::routes::url::{RostraPathId, avatar_path, redirect_to_canonical};
 
 const DEFAULT_AVATAR_SVG: &[u8] = include_bytes!("../../assets/icons/circle-user.svg");
@@ -48,17 +49,16 @@ async fn serve_avatar(
         return Ok(serve_default_avatar(req_headers));
     };
 
-    let mut resp_headers = HeaderMap::new();
+    let Ok(mime) = HeaderValue::from_str(&avatar.0) else {
+        return Ok(serve_default_avatar(req_headers));
+    };
+    let mut resp_headers = untrusted_media_response_headers(mime);
     let etag = profile.event_id.to_string();
 
     if let Some(response) = handle_etag(req_headers, &etag, &mut resp_headers) {
         return Ok(response.into_response());
     }
 
-    let Ok(mime) = HeaderValue::from_str(&avatar.0) else {
-        return Ok(serve_default_avatar(req_headers));
-    };
-    resp_headers.insert(header::CONTENT_TYPE, mime);
     Ok((resp_headers, avatar.1).into_response())
 }
 

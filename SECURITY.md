@@ -19,6 +19,15 @@ record. GET and HEAD requests that use a legacy form return a 308 canonical URL
 without discarding the query string. Mutation POST routes resolve either form
 in place; they must not rely on a redirect to preserve the request body.
 
+## User-controlled media responses
+
+Social-media event bytes and profile avatar bytes are untrusted even when their
+event signatures verify. Serve them with their declared `Content-Type` only
+alongside `X-Content-Type-Options: nosniff` and a sandboxing Content Security
+Policy that denies default sources, base URLs, and form submission. Set these
+headers before conditional ETag handling so `304 Not Modified` preserves the
+security policy as well as the representation metadata.
+
 The skill wrapper loads a known-empty configuration and clears environment
 settings that could silently select persistent profiles or state, remote CDP or
 cloud providers, proxies, extensions, init scripts, plugins, and browser
