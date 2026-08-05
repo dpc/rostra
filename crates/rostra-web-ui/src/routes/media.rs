@@ -11,9 +11,10 @@ use serde::Deserialize;
 use snafu::ResultExt as _;
 
 use super::unlock::session::UserSession;
-use super::{Maud, fragment, untrusted_media_response_headers};
+use super::{Maud, fragment, untrusted_media_attachment_headers, untrusted_media_response_headers};
 use crate::SharedState;
 use crate::error::{OtherSnafu, ReadOnlyModeSnafu, RequestResult};
+use crate::routes::media_type::{VerifiedMedia, verify_browser_media};
 use crate::routes::url::{
     EventPathId, RostraPathId, media_list_url, media_url, redirect_to_canonical,
 };
@@ -54,10 +55,12 @@ pub async fn get(
         Err(_) => return Ok(StatusCode::BAD_REQUEST.into_response()),
     };
 
-    let Ok(mime) = HeaderValue::from_str(&media_content.mime) else {
-        return Ok(StatusCode::BAD_REQUEST.into_response());
-    };
-    let mut resp_headers = untrusted_media_response_headers(mime);
+    let mut resp_headers =
+        if let Some(media) = verify_browser_media(&media_content.mime, &media_content.data) {
+            untrusted_media_response_headers(HeaderValue::from_static(media.content_type()))
+        } else {
+            untrusted_media_attachment_headers()
+        };
     let etag = event_id.to_string();
 
     // Handle ETag and conditional request
@@ -191,8 +194,9 @@ pub async fn list(
         if let Some(event_content) = client_ref.db().get_event_content(event_id).await {
             if let Ok(media_content) = event_content.deserialize_cbor::<content_kind::SocialMedia>()
             {
-                let is_image = media_content.mime.starts_with("image/");
-                let is_video = media_content.mime.starts_with("video/");
+                let media_type = verify_browser_media(&media_content.mime, &media_content.data);
+                let is_image = matches!(media_type, Some(VerifiedMedia::Image(_)));
+                let is_video = matches!(media_type, Some(VerifiedMedia::Video(_)));
                 media_items.push(MediaInfo {
                     event_id,
                     mime: media_content.mime,

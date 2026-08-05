@@ -24,9 +24,12 @@ brotli = { workspace = true }
 data-encoding = { workspace = true }
 futures = { workspace = true }
 futures-util = { workspace = true }
+infer = { workspace = true }
 jotup = { workspace = true }
 maud = { workspace = true }
 listenfd = { workspace = true }
+mime = { workspace = true }
+quick-xml = { workspace = true }
 redb = { workspace = true }
 redb-bincode = { workspace = true }
 snafu = { workspace = true }

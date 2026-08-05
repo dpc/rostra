@@ -3,6 +3,8 @@ use axum::extract::{FromRequest, Multipart, Request};
 use axum::http::StatusCode;
 use axum::http::header::CONTENT_TYPE;
 
+use crate::routes::media_type::verify_avatar;
+
 pub struct InputForm {
     pub name: String,
     pub bio: String,
@@ -89,6 +91,12 @@ where
                         let Some(mime) = mime else {
                             return Err((StatusCode::BAD_REQUEST, "Missing avatar mime type"));
                         };
+                        if verify_avatar(&mime, &v).is_none() {
+                            return Err((
+                                StatusCode::BAD_REQUEST,
+                                "Avatar bytes must match a supported image MIME type",
+                            ));
+                        }
 
                         if parts.avatar.replace((mime, v.to_vec())).is_some() {
                             return Err((

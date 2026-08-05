@@ -22,11 +22,25 @@ in place; they must not rely on a redirect to preserve the request body.
 ## User-controlled media responses
 
 Social-media event bytes and profile avatar bytes are untrusted even when their
-event signatures verify. Serve them with their declared `Content-Type` only
-alongside `X-Content-Type-Options: nosniff` and a sandboxing Content Security
-Policy that denies default sources, base URLs, and form submission. Set these
-headers before conditional ETag handling so `304 Not Modified` preserves the
-security policy as well as the representation metadata.
+event signatures verify. An avatar must declare and contain one of AVIF, BMP,
+GIF, ICO, JPEG, PNG, SVG, TIFF, or WebP. SVG is fully parsed without a document
+type and is limited to the existing 1 MB avatar limit. Validate locally
+submitted avatars and repeat validation when serving retained data; signed
+event compatibility still permits historical malformed declarations.
+
+The content renderer and `/media/...` route only embed and serve inline a
+declared type when its detected bytes match the intentional passive set: those
+image formats, plus MP4 and WebM video. Every other generic media response,
+including a MIME mismatch, unknown binary data, and active content, uses
+`application/octet-stream` and `Content-Disposition: attachment` with the
+fixed `rostra-media.bin` filename. Never derive a download filename from an
+author declaration or post text.
+
+All avatar and generic-media responses use `X-Content-Type-Options: nosniff`
+and a sandboxing Content Security Policy that denies default sources, base
+URLs, and form submission. Set these headers before conditional ETag handling
+so `304 Not Modified` preserves the security policy and representation
+metadata, including attachment disposition.
 
 The skill wrapper loads a known-empty configuration and clears environment
 settings that could silently select persistent profiles or state, remote CDP or

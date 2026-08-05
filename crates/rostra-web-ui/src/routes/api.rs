@@ -15,6 +15,7 @@ use rostra_core::id::{ExternalEventId, RostraId, RostraIdSecretKey};
 use rostra_core::{ShortEventId, Timestamp};
 use serde::{Deserialize, Serialize};
 
+use crate::routes::media_type::verify_avatar;
 use crate::{SharedState, UiState};
 
 const API_VERSION_HEADER: &str = "x-rostra-api-version";
@@ -394,6 +395,12 @@ async fn update_social_profile_managed(
                 .decode(avatar_data.base64.as_bytes())
                 .or_else(|_| data_encoding::BASE64_NOPAD.decode(avatar_data.base64.as_bytes()))
                 .map_err(|_| api_error(StatusCode::BAD_REQUEST, "Invalid base64 in avatar data"))?;
+            if verify_avatar(&avatar_data.mime_type, &bytes).is_none() {
+                return Err(api_error(
+                    StatusCode::BAD_REQUEST,
+                    "Avatar bytes must match a supported image MIME type",
+                ));
+            }
             Some((avatar_data.mime_type, bytes))
         }
         None => {

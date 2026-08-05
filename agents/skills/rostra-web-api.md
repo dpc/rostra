@@ -221,8 +221,11 @@ Content-Type: application/json
 - `display_name`: your name (max 100 characters).
 - `bio`: short description (max 1000 characters, plain text).
 - `avatar`: optional. Omit the field entirely to keep the existing avatar.
-  When provided, `mime_type` must start with `image/` and the decoded data
-  must be at most 1 MB.
+  When provided, its bytes must match AVIF, BMP, GIF, ICO, JPEG, PNG, SVG,
+  TIFF, or WebP and the decoded data must be at most 1 MB. `image/x-icon` is
+  accepted as an ICO alias. SVG must be well-formed, use `svg` as its document
+  root, and not contain a document type; mismatched or unsupported input
+  returns `400 Bad Request`.
 
 Response:
 

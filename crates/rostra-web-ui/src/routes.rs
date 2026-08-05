@@ -7,6 +7,7 @@ mod debug;
 mod feeds;
 pub mod fragment;
 mod media;
+mod media_type;
 mod new_post;
 mod post;
 mod profile;
@@ -81,6 +82,17 @@ fn untrusted_media_response_headers(content_type: HeaderValue) -> header::Header
             ),
         ),
     ])
+}
+
+/// Build headers that force an unverified media attachment to download.
+fn untrusted_media_attachment_headers() -> header::HeaderMap {
+    let mut headers =
+        untrusted_media_response_headers(HeaderValue::from_static("application/octet-stream"));
+    headers.insert(
+        header::CONTENT_DISPOSITION,
+        HeaderValue::from_static(r#"attachment; filename="rostra-media.bin""#),
+    );
+    headers
 }
 
 pub async fn cache_control(request: Request, next: Next) -> Response {

@@ -9,6 +9,7 @@ use rostra_core::id::RostraId;
 use rostra_djot::links::{RostraIdLink, extract_rostra_id_link_reference};
 
 use crate::UiState;
+use crate::routes::media_type::{VerifiedMedia, verify_browser_media};
 use crate::routes::url::{media_url, profile_url};
 
 /// Escape HTML special characters for use in attributes and text
@@ -364,21 +365,8 @@ where
                             let alt = alt.trim();
                             let display_name = if alt.is_empty() { "media" } else { alt };
 
-                            // Sanitize filename from alt text
-                            let filename: String = display_name
-                                .chars()
-                                .map(|c| {
-                                    if c.is_ascii_alphanumeric() || c == '.' || c == '_' {
-                                        c
-                                    } else {
-                                        '-'
-                                    }
-                                })
-                                .collect();
-
                             let url_escaped = escape_html(&url);
                             let alt_escaped = escape_html(alt);
-                            let filename_escaped = escape_html(&filename);
                             let display_escaped = escape_html(display_name);
 
                             // Look up content from database
@@ -388,28 +376,14 @@ where
                                 if let Ok(media) =
                                     content.deserialize_cbor::<content_kind::SocialMedia>()
                                 {
-                                    if media.mime.starts_with("image/") {
-                                        // Render as image
-                                        format!(
-                                            r#"<span class="m-rostraMedia"><img src="{url_escaped}" alt="{alt_escaped}"/></span>"#
-                                        )
-                                    } else if media.mime.starts_with("video/") {
-                                        // Render as video player - plays when visible via
-                                        // IntersectionObserver
-                                        format!(
-                                            r#"<span class="m-rostraMedia"><video src="{url_escaped}" controls muted playsinline class="m-rostraMedia__video"></video></span>"#
-                                        )
-                                    } else {
-                                        // Render as download link
-                                        format!(
-                                            r#"<span class="m-rostraMedia"><a href="{url_escaped}" download="{filename_escaped}" class="m-rostraMedia__download"><span class="m-rostraMedia__downloadIcon"></span>{display_escaped}</a></span>"#
-                                        )
-                                    }
-                                } else {
-                                    // Failed to deserialize - show as download
-                                    format!(
-                                        r#"<span class="m-rostraMedia"><a href="{url_escaped}" download="{filename_escaped}" class="m-rostraMedia__download"><span class="m-rostraMedia__downloadIcon"></span>{display_escaped}</a></span>"#
+                                    media_html(
+                                        verify_browser_media(&media.mime, &media.data),
+                                        &url_escaped,
+                                        &alt_escaped,
+                                        &display_escaped,
                                     )
+                                } else {
+                                    media_html(None, &url_escaped, &alt_escaped, &display_escaped)
                                 }
                             } else {
                                 // Content not available yet
@@ -530,6 +504,25 @@ where
             }
             event => self.inner.emit(event).await,
         }
+    }
+}
+
+fn media_html(
+    media: Option<VerifiedMedia>,
+    url_escaped: &str,
+    alt_escaped: &str,
+    display_escaped: &str,
+) -> String {
+    match media {
+        Some(VerifiedMedia::Image(_)) => format!(
+            r#"<span class="m-rostraMedia"><img src="{url_escaped}" alt="{alt_escaped}"/></span>"#
+        ),
+        Some(VerifiedMedia::Video(_)) => format!(
+            r#"<span class="m-rostraMedia"><video src="{url_escaped}" controls muted playsinline class="m-rostraMedia__video"></video></span>"#
+        ),
+        None => format!(
+            r#"<span class="m-rostraMedia"><a href="{url_escaped}" class="m-rostraMedia__download"><span class="m-rostraMedia__downloadIcon"></span>{display_escaped}</a></span>"#
+        ),
     }
 }
 
@@ -680,3 +673,6 @@ where
         self.inner.into_output()
     }
 }
+
+#[cfg(test)]
+mod tests;

@@ -65,6 +65,8 @@ duct = "*"
 ed25519-dalek = "3.0.0"
 futures = "0.3.31"
 futures-lite = "2.6.1"
+infer = "0.19.0"
+mime = "0.3.17"
 bytes = "*"
 listenfd = "1.0.2"
 futures-util = "*"
@@ -120,6 +122,7 @@ reqwest = { version = "0.12", default-features = false, features = [
   "rustls-tls",
   "cookies",
 ] }
+quick-xml = "0.38.4"
 scraper = "0.20"
 cssparser = "0.31"
 

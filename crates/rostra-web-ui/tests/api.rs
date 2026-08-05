@@ -453,8 +453,7 @@ async fn update_profile_with_avatar() {
     let rostra_id = id_info["rostra_id"].as_str().unwrap();
     let secret = id_info["rostra_id_secret"].as_str().unwrap();
 
-    // A few bytes of fake image data, base64-encoded
-    let tiny_png_base64 = data_encoding::BASE64.encode(b"\x89PNG fake image data");
+    let tiny_png_base64 = data_encoding::BASE64.encode(b"\x89PNG\r\n\x1a\n");
 
     let resp = driver
         .api_post_json(
@@ -476,6 +475,62 @@ async fn update_profile_with_avatar() {
         "Profile update with avatar should succeed: {}",
         resp.text().await.unwrap()
     );
+}
+
+#[test_log::test(tokio::test(flavor = "multi_thread"))]
+async fn update_profile_rejects_mismatched_avatar() {
+    let server = TestServer::start().await;
+    let driver = server.driver();
+
+    let resp = driver.api_get("/api/generate-id").await;
+    let id_info: serde_json::Value = resp.json().await.unwrap();
+    let rostra_id = id_info["rostra_id"].as_str().unwrap();
+    let secret = id_info["rostra_id_secret"].as_str().unwrap();
+
+    let resp = driver
+        .api_post_json(
+            &format!("/api/{rostra_id}/update-social-profile-managed"),
+            Some(secret),
+            &serde_json::json!({
+                "display_name": "Avatar Bot",
+                "bio": "I have a face!",
+                "avatar": {
+                    "mime_type": "image/png",
+                    "base64": data_encoding::BASE64.encode(b"<script>alert(1)</script>"),
+                },
+            }),
+        )
+        .await;
+    assert_eq!(resp.status(), 400);
+}
+
+#[test_log::test(tokio::test(flavor = "multi_thread"))]
+async fn update_profile_rejects_oversized_avatar() {
+    let server = TestServer::start().await;
+    let driver = server.driver();
+
+    let resp = driver.api_get("/api/generate-id").await;
+    let id_info: serde_json::Value = resp.json().await.unwrap();
+    let rostra_id = id_info["rostra_id"].as_str().unwrap();
+    let secret = id_info["rostra_id_secret"].as_str().unwrap();
+    let mut oversized_png = vec![0; 1_000_001];
+    oversized_png[..8].copy_from_slice(b"\x89PNG\r\n\x1a\n");
+
+    let resp = driver
+        .api_post_json(
+            &format!("/api/{rostra_id}/update-social-profile-managed"),
+            Some(secret),
+            &serde_json::json!({
+                "display_name": "Avatar Bot",
+                "bio": "I have a face!",
+                "avatar": {
+                    "mime_type": "image/png",
+                    "base64": data_encoding::BASE64.encode(&oversized_png),
+                },
+            }),
+        )
+        .await;
+    assert_eq!(resp.status(), 400);
 }
 
 #[test_log::test(tokio::test(flavor = "multi_thread"))]

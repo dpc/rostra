@@ -64,6 +64,14 @@ fn assert_untrusted_media_headers(response: &reqwest::Response, content_type: &s
     );
 }
 
+fn assert_attachment_headers(response: &reqwest::Response) {
+    assert_untrusted_media_headers(response, "application/octet-stream");
+    assert_eq!(
+        response.headers().get(header::CONTENT_DISPOSITION).unwrap(),
+        r#"attachment; filename="rostra-media.bin""#
+    );
+}
+
 #[test_log::test(tokio::test(flavor = "multi_thread"))]
 async fn unauthenticated_landing_page_returns_200() {
     let server = TestServer::start().await;
@@ -917,6 +925,7 @@ async fn default_avatar_returns_svg_directly() {
         .to_str()
         .unwrap();
     assert_eq!(content_type, "image/svg+xml");
+    assert_untrusted_media_headers(&resp, "image/svg+xml");
 
     assert!(
         resp.headers().get(header::ETAG).is_some(),
@@ -954,6 +963,7 @@ async fn default_avatar_etag_returns_304() {
         .get_if_none_match(&format!("/profile/{}/avatar", id.to_short()), &etag)
         .await;
     assert_eq!(resp.status(), 304);
+    assert_untrusted_media_headers(&resp, "image/svg+xml");
 }
 
 #[test_log::test(tokio::test(flavor = "multi_thread"))]
@@ -992,7 +1002,7 @@ async fn user_avatar_isolated_on_success_and_not_modified() {
 }
 
 #[test_log::test(tokio::test(flavor = "multi_thread"))]
-async fn user_media_isolated_on_success_and_not_modified() {
+async fn hostile_media_downloads_on_success_and_not_modified() {
     let server = TestServer::start().await;
     let driver = server.driver();
     let (id, secret) = driver.login_new_identity().await;
@@ -1013,7 +1023,7 @@ async fn user_media_isolated_on_success_and_not_modified() {
     let path = format!("/media/{}/{}", id.to_short(), event.event_id.to_short());
     let response = driver.get(&path).await;
     assert_eq!(response.status(), 200);
-    assert_untrusted_media_headers(&response, "text/html");
+    assert_attachment_headers(&response);
     let etag = response
         .headers()
         .get(header::ETAG)
@@ -1023,7 +1033,84 @@ async fn user_media_isolated_on_success_and_not_modified() {
 
     let response = driver.get_if_none_match(&path, etag).await;
     assert_eq!(response.status(), 304);
-    assert_untrusted_media_headers(&response, "text/html");
+    assert_attachment_headers(&response);
+}
+
+#[test_log::test(tokio::test(flavor = "multi_thread"))]
+async fn validated_media_stays_inline_on_success_and_not_modified() {
+    let server = TestServer::start().await;
+    let driver = server.driver();
+    let (id, secret) = driver.login_new_identity().await;
+    let event = server
+        .client(id)
+        .await
+        .publish_event(
+            secret,
+            content_kind::SocialMedia {
+                mime: "image/png".to_owned(),
+                data: b"\x89PNG\r\n\x1a\n".to_vec(),
+            },
+        )
+        .call()
+        .await
+        .expect("publish test media");
+
+    let path = format!("/media/{}/{}", id.to_short(), event.event_id.to_short());
+    let response = driver.get(&path).await;
+    assert_eq!(response.status(), 200);
+    assert_untrusted_media_headers(&response, "image/png");
+    assert!(
+        response
+            .headers()
+            .get(header::CONTENT_DISPOSITION)
+            .is_none()
+    );
+    let etag = response
+        .headers()
+        .get(header::ETAG)
+        .unwrap()
+        .to_str()
+        .unwrap();
+
+    let response = driver.get_if_none_match(&path, etag).await;
+    assert_eq!(response.status(), 304);
+    assert_untrusted_media_headers(&response, "image/png");
+    assert!(
+        response
+            .headers()
+            .get(header::CONTENT_DISPOSITION)
+            .is_none()
+    );
+}
+
+#[test_log::test(tokio::test(flavor = "multi_thread"))]
+async fn mismatched_media_downloads_instead_of_rendering_inline() {
+    let server = TestServer::start().await;
+    let driver = server.driver();
+    let (id, secret) = driver.login_new_identity().await;
+    let event = server
+        .client(id)
+        .await
+        .publish_event(
+            secret,
+            content_kind::SocialMedia {
+                mime: "image/png".to_owned(),
+                data: b"<script>alert('xss')</script>".to_vec(),
+            },
+        )
+        .call()
+        .await
+        .expect("publish test media");
+
+    let response = driver
+        .get(&format!(
+            "/media/{}/{}",
+            id.to_short(),
+            event.event_id.to_short()
+        ))
+        .await;
+    assert_eq!(response.status(), 200);
+    assert_attachment_headers(&response);
 }
 
 #[test_log::test(tokio::test(flavor = "multi_thread"))]
