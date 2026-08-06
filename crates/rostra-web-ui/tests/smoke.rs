@@ -72,6 +72,35 @@ fn assert_attachment_headers(response: &reqwest::Response) {
     );
 }
 
+async fn publish_social_post(
+    driver: &common::UiDriver,
+    author: RostraId,
+    secret: &RostraIdSecretKey,
+    parent_head_id: &str,
+    content: &str,
+    reply_to: Option<String>,
+) -> String {
+    let mut body = json!({
+        "parent_head_id": parent_head_id,
+        "content": content,
+    });
+    if let Some(reply_to) = reply_to {
+        body["reply_to"] = reply_to.into();
+    }
+    let response = driver
+        .api_post_json(
+            &format!("/api/{author}/publish-social-post-managed"),
+            Some(&secret.to_string()),
+            &body,
+        )
+        .await;
+    assert_eq!(response.status(), 200);
+    response.json::<serde_json::Value>().await.unwrap()["event_id"]
+        .as_str()
+        .unwrap()
+        .to_owned()
+}
+
 #[test_log::test(tokio::test(flavor = "multi_thread"))]
 async fn unauthenticated_landing_page_returns_200() {
     let server = TestServer::start().await;
@@ -161,6 +190,71 @@ async fn explicit_news_url_remains_available() {
         following < news,
         "sitemap should list Following before News: {body}"
     );
+}
+
+#[test_log::test(tokio::test(flavor = "multi_thread"))]
+async fn focused_post_page_does_not_link_the_focused_post() {
+    let server = TestServer::start().await;
+    let driver = server.driver();
+    let (author, secret) = driver.login_new_identity().await;
+    let author_short = author.to_short();
+
+    let response = driver.api_get(&format!("/api/{author}/heads")).await;
+    let parent_head = response.json::<serde_json::Value>().await.unwrap()["heads"][0]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    let parent_id =
+        publish_social_post(&driver, author, &secret, &parent_head, "parent post", None).await;
+    let focused_id = publish_social_post(
+        &driver,
+        author,
+        &secret,
+        &parent_id,
+        "focused post",
+        Some(format!("{author}-{parent_id}")),
+    )
+    .await;
+    let reply_id = publish_social_post(
+        &driver,
+        author,
+        &secret,
+        &focused_id,
+        "reply post",
+        Some(format!("{author}-{focused_id}")),
+    )
+    .await;
+
+    let response = driver
+        .get(&format!("/post/{author_short}/{focused_id}"))
+        .await;
+    assert_eq!(response.status(), 200);
+    let document = Html::parse_document(&response.text().await.unwrap());
+    let post_main = |event_id: &str| {
+        let selector =
+            Selector::parse(&format!("#post-{focused_id}-{event_id} .m-postView__main")).unwrap();
+        document
+            .select(&selector)
+            .next()
+            .unwrap_or_else(|| panic!("missing post {event_id}"))
+    };
+
+    let focused_post = post_main(&focused_id);
+    assert_eq!(
+        focused_post.value().attr("data-href"),
+        None,
+        "the focused post must not link to itself"
+    );
+    assert_eq!(focused_post.value().attr("@click"), None);
+    for event_id in [parent_id, reply_id] {
+        let post = post_main(&event_id);
+        assert!(
+            post.value().attr("data-href")
+                == Some(format!("/post/{author_short}/{event_id}").as_str()),
+            "contextual post {event_id} must retain its link"
+        );
+        assert!(post.value().attr("@click").is_some());
+    }
 }
 
 #[test_log::test(tokio::test(flavor = "multi_thread"))]

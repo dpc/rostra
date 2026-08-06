@@ -307,6 +307,7 @@ pub async fn get_single_post(
                                 parent_post.as_ref(),
                             ))
                     )
+                    .link_to_post(false)
                     .timestamp(post_record.ts)
                     .ro(ro)
                     .call().await?)
@@ -968,6 +969,7 @@ impl UiState {
         reply_count: Option<u64>,
         timestamp: Option<Timestamp>,
         extra_buttons: Option<Markup>,
+        link_to_post: Option<bool>,
         ro: RoMode,
     ) -> RequestResult<Markup> {
         // Note: we are actually not doing pagination, and just ignore
@@ -1022,6 +1024,7 @@ impl UiState {
             .maybe_reply_count(reply_count)
             .maybe_timestamp(timestamp)
             .maybe_extra_buttons(extra_buttons)
+            .maybe_link_to_post(link_to_post)
             .ro(ro)
             .call()
             .await?;
@@ -1080,6 +1083,7 @@ impl UiState {
         timestamp: Option<Timestamp>,
         extra_buttons: Option<Markup>,
         post_target_id: Option<String>,
+        link_to_post: Option<bool>,
         ro: RoMode,
     ) -> RequestResult<Markup> {
         let external_event_id = event_id.map(|e| ExternalEventId::new(author, e));
@@ -1177,10 +1181,15 @@ impl UiState {
                 .map(|(ctx, id)| post_html_id(ctx, id))
         });
 
+        let clickable_post_url = if link_to_post.unwrap_or(true) {
+            event_id.map(|event_id| post_url(author, event_id))
+        } else {
+            None
+        };
         let post_main = html! {
             div ."m-postView__main"
-                data-href=[event_id.map(|event_id| post_url(author, event_id))]
-                "@click"="if ($el.dataset.href && !event.target.closest('a, button, details, form, textarea, input, select') && !event.target.closest('.m-postContext__postParent:not(.-expanded)')) window.location = $el.dataset.href"
+                data-href=[clickable_post_url.as_deref()]
+                "@click"=[clickable_post_url.as_ref().map(|_| "if ($el.dataset.href && !event.target.closest('a, button, details, form, textarea, input, select') && !event.target.closest('.m-postContext__postParent:not(.-expanded)')) window.location = $el.dataset.href")]
             {
                 div ."m-postView__topRow" {
                     (fragment::avatar("m-postView__userImage", self.avatar_url(author, user_profile.as_ref().map(|p| p.event_id).unwrap_or(ShortEventId::ZERO)), &format!("{display_name}'s avatar")))
