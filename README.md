@@ -119,6 +119,7 @@ to use a script to do so. See [`flake.nix`](./flake.nix) to investigate how it w
 
 Contact and feedback:
 
+* **Preferred:** [Tau Zulip chat](https://tauofunix.zulipchat.com)
 * [GitHub Discussions](https://github.com/dpc/rostra/discussions)
 * [Matrix `#support:dpc.pw`](https://matrix.to/#/#support:dpc.pw)
 * [Discord](https://discord.gg/zens2jjA3U)
