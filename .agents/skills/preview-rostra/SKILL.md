@@ -115,9 +115,11 @@ The browser starts without signing authority. Obtain explicit user approval
 before unlocking the existing development identity. Unlocking can start
 network-visible activity and permits signed actions.
 
-Never generate or recover another account, expose the mnemonic, open
-`/settings/identity`, or put the mnemonic in a command argument, environment
-variable, prompt, log, snapshot, screenshot, or retained artifact.
+Never generate or recover another account, activate Create Account, expose the
+mnemonic, open or inspect `/settings/identity`, or put the mnemonic in a command
+argument, environment variable, prompt, log, snapshot, screenshot, or retained
+artifact. Every secure non-AJAX `/unlock` render embeds a fresh unused credential,
+so never snapshot, screenshot, capture page source, or inspect its DOM.
 
 Agent-browser has no transient password-stdin fill action. For an explicitly
 approved authenticated task, create a uniquely named, task-scoped encrypted
@@ -152,8 +154,8 @@ it under `~/.agent-browser/auth/`; agent-browser's generated encryption key live
 under `~/.agent-browser/`. Replace `FULL_ROSTRA_ID` with the account's public,
 full-length Rostra ID. Do not inspect or print the vault or encryption key.
 
-For an approved authenticated task, start the constrained session at `/unlock`,
-then log in through the vault:
+For an approved authenticated task, start the constrained session at `/unlock`
+and immediately log in through the vault without inspecting the page:
 
 ```bash
 .agents/skills/preview-rostra/rostra-agent-browser --session rostra-preview-UNIQUE \
@@ -181,12 +183,13 @@ snapshot: delete the vault entry, close the session, report the failure, and use
 the restart fallback when logout cannot be established.
 
 The `[::1]` allowlist covers every port on that host because agent-browser
-0.27.0 cannot express an exact-port allowlist. Before authenticated activation,
-use a task-session `snapshot -i -u`, then verify targets such as
+0.27.0 cannot express an exact-port allowlist. Before authenticated activation
+outside `/unlock`, use a task-session `snapshot -i -u`, then verify targets such as
 `.agents/skills/preview-rostra/rostra-agent-browser --session
 rostra-preview-UNIQUE get attr @eN href` or `get attr @eN action`. When finished,
-activate Rostra's Logout control, verify the exact `/unlock` URL in that same
-session, and close the browser session.
+activate Rostra's Logout control, verify only the exact `/unlock` URL in that
+same session, and close the browser session without a snapshot, screenshot,
+source capture, or DOM inspection.
 
 If the process is interrupted between vault creation and deletion, report that
 the encrypted credential copy may remain and delete it before any later browser

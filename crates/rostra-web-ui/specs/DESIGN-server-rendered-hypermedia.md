@@ -9,6 +9,14 @@ JavaScript: an ordinary request returns a complete usable page or a redirect.
 Alpine-ajax may progressively enhance the same workflow with identified,
 server-rendered fragments.
 
+`/unlock` Create Account is an explicit exception: its non-submitting control
+uses a server-generated credential only to fill the existing login form in the
+browser. An ordinary HTTP request cannot fill fields in place without
+submitting or navigating, so this browser-local convenience has no
+no-JavaScript equivalent. The startup page and generation route are deliberately
+absent; users without JavaScript provide an existing credential to the ordinary
+HTTP login form. The page treats the generated credential as sensitive.
+
 Alpine and alpine-ajax are the approved enhancement mechanism. Client code is
 reserved for small browser-local behavior that HTML and HTTP cannot reasonably
 provide, such as clipboard access, focus and keyboard conveniences, or upload

@@ -271,7 +271,6 @@ pub fn route_handler(state: SharedState) -> Router<Arc<UiState>> {
         .route("/shoutbox/preview", post(shoutbox::post_shoutbox_preview))
         .route("/unlock", get(unlock::get).post(unlock::post_unlock))
         .route("/unlock/logout", get(unlock::get).post(unlock::logout))
-        .route("/unlock/generate", post(unlock::post_generate))
         .route(
             "/replies/{post_thread_id}/{event_id}",
             get(timeline::get_post_replies),

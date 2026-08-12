@@ -2297,23 +2297,10 @@ h4.o-settingsContent__sectionHeader {
   background-image: url('/assets/icons/circle-check.svg');
 }
 
-.m-identityRecovery__insecureWarning,
-.m-recoveryPhrase__warning {
+.m-identityRecovery__insecureWarning {
   padding: 0.75rem;
   border: 2px solid var(--color-notification-error-bg, #b91c1c);
   border-radius: var(--border-radius-std);
-}
-
-.m-recoveryPhrase {
-  margin-top: 1rem;
-  padding: 1rem;
-  border: 2px solid var(--color-notification-error-bg, #b91c1c);
-  border-radius: var(--border-radius-std);
-  background: var(--color-timeline-bg);
-}
-
-.m-recoveryPhrase__title {
-  margin-top: 0;
 }
 
 .m-recoveryPhrase__label {
@@ -2369,13 +2356,6 @@ h4.o-settingsContent__sectionHeader {
 
 .m-recoveryPhrase__copyButton.-active .m-recoveryPhrase__copyButtonIcon {
   background-image: url('/assets/icons/circle-check.svg');
-}
-
-.m-recoveryPhrase__actions {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.5rem;
-  margin-top: 0.75rem;
 }
 
 .m-recoveryPhrase__status {

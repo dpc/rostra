@@ -53,7 +53,7 @@ const recoveryPhraseCopyStates = new WeakMap();
 
 async function copyRecoveryPhrase(button) {
   const container = button.closest(
-    ".m-recoveryPhrase, .m-recoveryPhrase__settingsControl",
+    ".m-recoveryPhrase__settingsControl",
   );
   const field = container?.querySelector("#recovery-phrase");
   const status = container?.querySelector(".m-recoveryPhrase__status");

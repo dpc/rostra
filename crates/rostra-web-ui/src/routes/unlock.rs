@@ -52,52 +52,17 @@ pub async fn get(
     let existing_id = existing_session.map(|s| s.id());
 
     let redirect = query.redirect.as_deref().and_then(LocalRedirect::parse);
-    Ok(Maud(
+    let page = Maud(
         state
             .unlock_page(existing_id, None, None, redirect.as_ref())
             .await?,
     )
-    .into_response())
-}
-
-/// Generate an account credential and return its protected backup controls.
-pub async fn post_generate(
-    state: State<SharedState>,
-    AjaxRequest(is_ajax): AjaxRequest,
-    Form(form): Form<RedirectQuery>,
-) -> RequestResult<Response> {
-    if !state.recovery_transport_secure() {
-        return Ok(StatusCode::FORBIDDEN.into_response());
-    }
-    let redirect = form.redirect.as_deref().and_then(LocalRedirect::parse);
-    let panel = recovery::account_creation_panel(
-        rostra_core::id::RostraIdSecretKey::generate(),
-        redirect.as_ref(),
-    );
-    let body = if is_ajax {
-        Maud(panel).into_response()
+    .into_response();
+    Ok(if state.recovery_transport_secure() {
+        recovery::sensitive_response(page)
     } else {
-        Maud(
-            state
-                .render_html_page(
-                    "Save recovery phrase",
-                    html! {
-                        main ."o-unlockScreen" {
-                            h1 { "Create account" }
-                            (panel)
-                        }
-                    },
-                    None,
-                    None,
-                    None,
-                    true,
-                )
-                .await?,
-        )
-        .into_response()
-    };
-
-    Ok(recovery::sensitive_response(body))
+        page
+    })
 }
 
 #[derive(Deserialize)]
@@ -192,6 +157,28 @@ impl UiState {
         redirect: Option<&LocalRedirect>,
     ) -> RequestResult<Markup> {
         let notification = notification.into();
+        let create_account_button = if self.recovery_transport_secure() {
+            let random_secret_key = RostraIdSecretKey::generate();
+            let random_mnemonic = random_secret_key.to_string();
+            let random_rostra_id = random_secret_key.id().to_string();
+            let fill_credentials_onclick = format!(
+                "document.querySelector('.o-unlockScreen__id').value = '{random_rostra_id}'; \
+                 document.querySelector('.o-unlockScreen__mnemonic').value = '{random_mnemonic}';"
+            );
+
+            fragment::button("o-unlockScreen__generateButton", "Create Account")
+                .button_type("button")
+                .onclick(&fill_credentials_onclick)
+                .title("Fill the login fields with a new Rostra account credential.")
+                .requires_js(true)
+                .call()
+        } else {
+            fragment::button("o-unlockScreen__generateButton", "Create Account")
+                .button_type("button")
+                .disabled(true)
+                .title("Account creation requires HTTPS or loopback-only access.")
+                .call()
+        };
         let content = html! {
             div id="unlock-screen" ."o-unlockScreen" {
 
@@ -242,20 +229,7 @@ impl UiState {
                             .call())
                     }
                     div ."o-unlockScreen__unlockLine" {
-                        (fragment::button("o-unlockScreen__generateButton", "Create Account")
-                            .form("generate-account-form")
-                            .disabled(!self.recovery_transport_secure())
-                            .title("Generate a new account and show its 24-word recovery phrase.")
-                            .call())
-                    }
-                }
-                form id="generate-account-form"
-                    action="/unlock/generate"
-                    method="post"
-                    x-target=(recovery::ACCOUNT_RECOVERY_TARGET)
-                {
-                    @if let Some(redirect_path) = redirect {
-                        input type="hidden" name="redirect" value=(redirect_path) {}
+                        (create_account_button)
                     }
                 }
                 @if !self.recovery_transport_secure() {
@@ -263,7 +237,6 @@ impl UiState {
                         "Account creation is disabled because this server is not configured for HTTPS or loopback-only access."
                     }
                 }
-                div id=(recovery::ACCOUNT_RECOVERY_TARGET) {}
             }
         };
         self.render_html_page("Sign in", content, None, None, None, false)

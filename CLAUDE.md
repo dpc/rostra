@@ -121,9 +121,14 @@ Key web UI files:
 - Follow
   [`DESIGN-server-rendered-hypermedia`](crates/rostra-web-ui/specs/DESIGN-server-rendered-hypermedia.md):
   changed workflows must work through ordinary HTTP without JavaScript. Alpine
-  is progressive enhancement; justify any new custom JavaScript in review.
+  is progressive enhancement; `/unlock` Create Account is the documented
+  browser-local exception that fills the login form without submitting.
 - For keyboard shortcuts that trigger `requestSubmit()`, always use `keyup` (not `keydown`). `keydown` fires repeatedly with key auto-repeat, which can cause duplicate form submissions and race conditions in alpine-ajax.
-- Keep credential-bearing pages server-rendered, session-scoped, unavailable to
-  read-only sessions, and protected by the sensitive response headers in
-  `routes/recovery.rs`. Recovery phrases use a masked read-only field and a
-  conventional copy control; do not add reveal dialogs or confirmation steps.
+- Keep authenticated Settings recovery export server-rendered, session-scoped,
+  unavailable to read-only sessions, and protected by the sensitive response
+  headers in `routes/recovery.rs`. Its recovery phrase uses a masked read-only
+  field and a conventional copy control; do not add reveal dialogs or
+  confirmation steps.
+- `/unlock` Create Account may expose a generated credential only in a secure
+  response with those sensitive headers. It fills editable login fields without
+  submitting or navigating.

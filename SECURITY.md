@@ -71,6 +71,17 @@ profiles by default. Create approved artifacts with owner-only permissions under
 a task-unique directory, inspect only what is needed, and remove artifacts on
 success and handled failure.
 
+Every secure non-AJAX `/unlock` render embeds a freshly generated, unused
+credential so Create Account can fill the login fields without a request. This
+makes merely opening that page credential-bearing: browser processes, same-origin
+scripts, proxies, extensions, snapshots, screenshots, page source, and DOM
+inspection can receive the mnemonic. Sensitive response headers reduce caching
+and framing risks but do not prevent that exposure. Use `/unlock` only on the
+trusted local single-user host, do not inspect or capture it, and authenticate
+immediately when it is unavoidable. This accepted risk is inherent in the chosen
+in-place interaction; revisit it if `/unlock` gains third-party scripts, if the
+browser isolation model changes, or if another account-creation flow is added.
+
 An authenticated browser grants signing authority and can start network-visible
 activity. Rostra's masked identity page still contains the recovery phrase in
 the DOM. Never open or inspect `/settings/identity`. Log out and verify

@@ -5,23 +5,8 @@ use reqwest::header;
 use rostra_core::event::{Event, EventKind, VerifiedEvent, content_kind};
 use rostra_core::id::{RostraId, RostraIdSecretKey, ToShort as _};
 use rostra_core::{EventId, ShortEventId};
-use scraper::{ElementRef, Html, Selector};
+use scraper::{Html, Selector};
 use serde_json::json;
-
-fn owning_form<'a>(document: &'a Html, control: ElementRef<'a>) -> Option<ElementRef<'a>> {
-    if let Some(form_id) = control.value().attr("form") {
-        let any_element = Selector::parse("*").unwrap();
-        return document
-            .select(&any_element)
-            .find(|element| element.value().id() == Some(form_id))
-            .filter(|element| element.value().name() == "form");
-    }
-
-    control
-        .ancestors()
-        .filter_map(ElementRef::wrap)
-        .find(|element| element.value().name() == "form")
-}
 
 fn assert_link_precedes(document: &Html, first: &str, second: &str) {
     let links = Selector::parse("a[href]").unwrap();
@@ -703,16 +688,11 @@ async fn identity_recovery_phrase_is_masked_protected_and_session_scoped() {
 }
 
 #[test_log::test(tokio::test(flavor = "multi_thread"))]
-async fn account_creation_generates_selectable_24_word_phrase_by_post() {
+async fn secure_unlock_page_offers_in_place_account_creation() {
     let server = TestServer::start().await;
     let driver = server.driver();
 
-    let resp = driver.get("/unlock/random").await;
-    assert_eq!(resp.status(), 404);
-
-    let resp = driver
-        .same_origin_post_form_accept_br("/unlock/generate", &[("redirect", "/following")])
-        .await;
+    let resp = driver.get("/unlock?redirect=%2Ffollowing").await;
     assert_eq!(resp.status(), 200);
     assert_eq!(
         resp.headers().get(header::CACHE_CONTROL).unwrap(),
@@ -730,82 +710,36 @@ async fn account_creation_generates_selectable_24_word_phrase_by_post() {
     );
     let body = resp.text().await.unwrap();
     assert!(body.starts_with("<!DOCTYPE html>"));
-    assert!(body.contains("<html lang=\"en\"><head>"));
-    assert!(body.contains("<title>Save recovery phrase</title>"));
-    assert!(body.contains("<h1>Create account</h1>"));
-    assert!(!body.contains("I saved this recovery phrase"));
-    assert!(body.contains(">Continue with new account</button>"));
-    assert!(body.contains("name=\"redirect\" value=\"/following\""));
-    assert!(body.contains("readonly"));
-    assert!(!body.contains("12 words"));
-
-    let phrase = body
-        .split_once("id=\"recovery-phrase\"")
-        .unwrap()
-        .1
-        .split_once('>')
-        .unwrap()
-        .1
-        .split_once("</textarea>")
-        .unwrap()
-        .0;
-    assert_eq!(phrase.split_whitespace().count(), 24);
-    let generated_id = body
-        .split_once("name=\"username\" value=\"")
-        .unwrap()
-        .1
-        .split_once('"')
-        .unwrap()
-        .0;
-    let resp = driver
-        .post_form(
-            "/unlock",
-            &[
-                ("username", generated_id),
-                ("password", phrase),
-                ("redirect", "/following"),
-            ],
-        )
-        .await;
-    assert_eq!(resp.status(), 303);
-    assert_eq!(resp.headers().get(header::LOCATION).unwrap(), "/following");
-
-    let resp = driver
-        .ajax_post_form("/unlock/generate", &[("redirect", "/following")])
-        .await;
-    assert_eq!(resp.status(), 200);
-    assert_eq!(
-        resp.headers().get(header::CACHE_CONTROL).unwrap(),
-        "no-store, private"
-    );
-    let body = resp.text().await.unwrap();
-    assert!(!body.contains("<!DOCTYPE html>"));
-    let document = Html::parse_fragment(&body);
-    let recovery_target_selector = Selector::parse("#account-recovery-target").unwrap();
-    assert_eq!(
-        document.select(&recovery_target_selector).count(),
-        1,
-        "AJAX credential response must include the requested replacement target"
-    );
-    assert!(body.contains("<form id=\"create-account-form\""));
+    assert!(!body.contains("Save recovery phrase"));
+    assert!(!body.contains("account-recovery-target"));
+    assert!(!body.contains("/unlock/generate"));
+    assert!(!body.contains("recovery-phrase"));
     assert!(body.contains("name=\"redirect\" value=\"/following\""));
 
-    for invalid in [
-        "//attacker.example",
-        r#"/\attacker.example"#,
-        "https://attacker.example/",
-        "/bad\r\nlocation",
-    ] {
-        let resp = driver
-            .post_form("/unlock/generate", &[("redirect", invalid)])
-            .await;
-        let body = resp.text().await.unwrap();
-        assert!(
-            !body.contains("attacker.example") && !body.contains("bad"),
-            "unsafe redirect was reflected: {invalid:?}"
-        );
-    }
+    let document = Html::parse_document(&body);
+    let create_account_selector = Selector::parse("button[type='button']").unwrap();
+    let create_account = document
+        .select(&create_account_selector)
+        .find(|button| button.text().collect::<String>().contains("Create Account"))
+        .expect("Create Account button");
+    assert_eq!(create_account.value().attr("type"), Some("button"));
+    assert_eq!(create_account.value().attr("form"), None);
+    assert!(create_account.value().attr("onclick").is_some());
 
+    let login_form_selector = Selector::parse("form[action='/unlock'][method='post']").unwrap();
+    let login_form = document
+        .select(&login_form_selector)
+        .next()
+        .expect("ordinary login form");
+    let credential_selector =
+        Selector::parse("input[name='username'], input[name='password']").unwrap();
+    assert_eq!(login_form.select(&credential_selector).count(), 2);
+}
+
+#[test_log::test(tokio::test(flavor = "multi_thread"))]
+async fn normal_login_validates_local_redirects() {
+    let server = TestServer::start().await;
+    let driver = server.driver();
     let secret = RostraIdSecretKey::generate();
     let id = secret.id().to_string();
     let phrase = secret.to_string();
@@ -840,104 +774,14 @@ async fn account_creation_generates_selectable_24_word_phrase_by_post() {
 }
 
 #[test_log::test(tokio::test(flavor = "multi_thread"))]
-async fn create_account_control_is_contained_by_login_card_and_targets_generate_form() {
+async fn account_generation_route_and_recovery_page_are_absent() {
     let server = TestServer::start().await;
-    let body = server
-        .driver()
-        .get("/unlock?redirect=%2Ffollowing")
-        .await
-        .text()
-        .await
-        .unwrap();
-    let document = Html::parse_document(&body);
+    let driver = server.driver();
 
-    let login_form_selector = Selector::parse("form.o-unlockScreen__form").unwrap();
-    let generate_form_selector = Selector::parse("form#generate-account-form").unwrap();
-    let generate_id_selector = Selector::parse("#generate-account-form").unwrap();
-    let generate_button_selector = Selector::parse("button[form='generate-account-form']").unwrap();
-    let recovery_target_selector = Selector::parse("#account-recovery-target").unwrap();
-    let controls_selector = Selector::parse("input, textarea, select, button").unwrap();
-    let username_selector = Selector::parse("[name='username']").unwrap();
-    let password_selector = Selector::parse("[name='password']").unwrap();
-
-    let login_forms = document.select(&login_form_selector).collect::<Vec<_>>();
-    assert_eq!(login_forms.len(), 1, "login form must be unique");
-    let login_form = login_forms[0];
+    assert_eq!(driver.get("/unlock/generate").await.status(), 404);
     assert_eq!(
-        login_form.select(&generate_button_selector).count(),
-        1,
-        "Create Account control must be uniquely contained by the login card"
-    );
-    assert!(
-        login_form.select(&generate_form_selector).next().is_none(),
-        "generation form must not be nested in the login form"
-    );
-    for credential_selector in [&username_selector, &password_selector] {
-        let credentials = document.select(credential_selector).collect::<Vec<_>>();
-        assert_eq!(credentials.len(), 1, "login credential must be unique");
-        assert_eq!(
-            owning_form(&document, credentials[0]),
-            Some(login_form),
-            "login credential must remain owned by the login form"
-        );
-    }
-
-    let generate_id_matches = document.select(&generate_id_selector).collect::<Vec<_>>();
-    assert_eq!(
-        generate_id_matches.len(),
-        1,
-        "generation form ID must be unique document-wide"
-    );
-    let generate_forms = document.select(&generate_form_selector).collect::<Vec<_>>();
-    assert_eq!(generate_forms.len(), 1, "generation form ID must be unique");
-    let generate_form = generate_forms[0];
-    assert_eq!(generate_id_matches[0], generate_form);
-    let recovery_targets = document
-        .select(&recovery_target_selector)
-        .collect::<Vec<_>>();
-    assert_eq!(
-        recovery_targets.len(),
-        1,
-        "generation target must be unique document-wide"
-    );
-    assert_eq!(
-        recovery_targets[0].select(&generate_form_selector).count(),
-        0,
-        "generation form must survive its Alpine target replacement"
-    );
-    assert_eq!(
-        generate_form.value().attr("action"),
-        Some("/unlock/generate")
-    );
-    assert_eq!(generate_form.value().attr("method"), Some("post"));
-    assert_eq!(
-        generate_form.value().attr("x-target"),
-        Some("account-recovery-target"),
-        "generation form must request its replacement target"
-    );
-    let generation_controls = document
-        .select(&controls_selector)
-        .filter(|control| owning_form(&document, *control) == Some(generate_form))
-        .collect::<Vec<_>>();
-    assert_eq!(
-        generation_controls.len(),
-        2,
-        "generation form owns only its submitter and redirect"
-    );
-    assert_eq!(
-        generation_controls
-            .iter()
-            .filter_map(|control| control.value().attr("name"))
-            .collect::<Vec<_>>(),
-        ["redirect"]
-    );
-    assert_eq!(
-        generation_controls
-            .iter()
-            .filter(|control| control.value().name() == "button")
-            .count(),
-        1,
-        "generation form must own exactly one submitter"
+        driver.post_form("/unlock/generate", &[]).await.status(),
+        404
     );
 }
 
@@ -946,8 +790,16 @@ async fn credential_export_requires_https_off_loopback() {
     let server = TestServer::start_non_loopback_http().await;
     let driver = server.driver();
 
-    let resp = driver.post_form("/unlock/generate", &[]).await;
-    assert_eq!(resp.status(), 403);
+    let page = driver.get("/unlock").await.text().await.unwrap();
+    assert!(page.contains("Account creation is disabled"));
+    let document = Html::parse_document(&page);
+    let create_account_selector = Selector::parse("button[type='button']").unwrap();
+    let create_account = document
+        .select(&create_account_selector)
+        .find(|button| button.text().collect::<String>().contains("Create Account"))
+        .expect("Create Account button");
+    assert!(create_account.value().attr("disabled").is_some());
+    assert_eq!(create_account.value().attr("onclick"), None);
 
     let secret = RostraIdSecretKey::generate();
     let id = secret.id().to_string();
@@ -981,9 +833,6 @@ async fn credential_export_requires_https_off_loopback() {
 async fn public_http_origin_overrides_loopback_bind_security() {
     let server = TestServer::start_public_http_origin().await;
     let driver = server.driver();
-
-    let resp = driver.post_form("/unlock/generate", &[]).await;
-    assert_eq!(resp.status(), 403);
 
     let secret = RostraIdSecretKey::generate();
     let id = secret.id().to_string();
@@ -1021,8 +870,12 @@ async fn loopback_https_origin_uses_secure_cookie() {
         .unwrap();
     assert!(cookie.contains("Secure"));
 
-    let resp = driver.post_form("/unlock/generate", &[]).await;
+    let resp = driver.get("/unlock").await;
     assert_eq!(resp.status(), 200);
+    assert_eq!(
+        resp.headers().get(header::CACHE_CONTROL).unwrap(),
+        "no-store, private"
+    );
 }
 
 #[test_log::test(tokio::test(flavor = "multi_thread"))]

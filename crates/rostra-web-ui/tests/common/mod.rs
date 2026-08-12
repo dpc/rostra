@@ -274,23 +274,6 @@ impl UiDriver {
             .expect("POST request failed")
     }
 
-    /// Send a same-origin form POST while advertising Brotli support.
-    pub async fn same_origin_post_form_accept_br(
-        &self,
-        path: &str,
-        form: &[(&str, &str)],
-    ) -> reqwest::Response {
-        self.client
-            .post(self.url(path))
-            .header("Origin", &self.base_url)
-            .header("Sec-Fetch-Site", "same-origin")
-            .header("Accept-Encoding", "br")
-            .form(form)
-            .send()
-            .await
-            .expect("POST request failed")
-    }
-
     /// Create a new post.
     pub async fn post_new(&self, content: &str) -> reqwest::Response {
         self.post_form("/post", &[("content", content)]).await
