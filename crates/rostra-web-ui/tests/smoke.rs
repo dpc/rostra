@@ -780,6 +780,13 @@ async fn account_creation_generates_selectable_24_word_phrase_by_post() {
     );
     let body = resp.text().await.unwrap();
     assert!(!body.contains("<!DOCTYPE html>"));
+    let document = Html::parse_fragment(&body);
+    let recovery_target_selector = Selector::parse("#account-recovery-target").unwrap();
+    assert_eq!(
+        document.select(&recovery_target_selector).count(),
+        1,
+        "AJAX credential response must include the requested replacement target"
+    );
     assert!(body.contains("<form id=\"create-account-form\""));
     assert!(body.contains("name=\"redirect\" value=\"/following\""));
 
@@ -848,6 +855,7 @@ async fn create_account_control_is_contained_by_login_card_and_targets_generate_
     let generate_form_selector = Selector::parse("form#generate-account-form").unwrap();
     let generate_id_selector = Selector::parse("#generate-account-form").unwrap();
     let generate_button_selector = Selector::parse("button[form='generate-account-form']").unwrap();
+    let recovery_target_selector = Selector::parse("#account-recovery-target").unwrap();
     let controls_selector = Selector::parse("input, textarea, select, button").unwrap();
     let username_selector = Selector::parse("[name='username']").unwrap();
     let password_selector = Selector::parse("[name='password']").unwrap();
@@ -884,11 +892,29 @@ async fn create_account_control_is_contained_by_login_card_and_targets_generate_
     assert_eq!(generate_forms.len(), 1, "generation form ID must be unique");
     let generate_form = generate_forms[0];
     assert_eq!(generate_id_matches[0], generate_form);
+    let recovery_targets = document
+        .select(&recovery_target_selector)
+        .collect::<Vec<_>>();
+    assert_eq!(
+        recovery_targets.len(),
+        1,
+        "generation target must be unique document-wide"
+    );
+    assert_eq!(
+        recovery_targets[0].select(&generate_form_selector).count(),
+        0,
+        "generation form must survive its Alpine target replacement"
+    );
     assert_eq!(
         generate_form.value().attr("action"),
         Some("/unlock/generate")
     );
     assert_eq!(generate_form.value().attr("method"), Some("post"));
+    assert_eq!(
+        generate_form.value().attr("x-target"),
+        Some("account-recovery-target"),
+        "generation form must request its replacement target"
+    );
     let generation_controls = document
         .select(&controls_selector)
         .filter(|control| owning_form(&document, *control) == Some(generate_form))

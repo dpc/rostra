@@ -6,6 +6,9 @@ use rostra_core::id::RostraIdSecretKey;
 use super::fragment;
 use super::unlock::local_redirect::LocalRedirect;
 
+/// ID of the fragment that Alpine replaces after account credential generation.
+pub(crate) const ACCOUNT_RECOVERY_TARGET: &str = "account-recovery-target";
+
 /// Semantic presentation of a recovery phrase field.
 #[derive(Clone, Copy)]
 enum PhraseFieldMode {
@@ -24,7 +27,7 @@ pub(crate) fn account_creation_panel(
     let phrase = secret.to_string();
 
     html! {
-        div ."m-recoveryPhrase" {
+        div id=(ACCOUNT_RECOVERY_TARGET) ."m-recoveryPhrase" {
             h2 ."m-recoveryPhrase__title" { "Recovery phrase" }
             p ."m-recoveryPhrase__warning" {
                 strong { "Keep this secret." }

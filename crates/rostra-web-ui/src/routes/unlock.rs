@@ -252,7 +252,7 @@ impl UiState {
                 form id="generate-account-form"
                     action="/unlock/generate"
                     method="post"
-                    x-target="account-recovery-target"
+                    x-target=(recovery::ACCOUNT_RECOVERY_TARGET)
                 {
                     @if let Some(redirect_path) = redirect {
                         input type="hidden" name="redirect" value=(redirect_path) {}
@@ -263,7 +263,7 @@ impl UiState {
                         "Account creation is disabled because this server is not configured for HTTPS or loopback-only access."
                     }
                 }
-                div id="account-recovery-target" {}
+                div id=(recovery::ACCOUNT_RECOVERY_TARGET) {}
             }
         };
         self.render_html_page("Sign in", content, None, None, None, false)
