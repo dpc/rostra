@@ -1,8 +1,13 @@
 mod common;
 
+use std::collections::BTreeSet;
+use std::time::Duration;
+
 use common::TestServer;
 use reqwest::header;
-use rostra_core::event::{Event, EventKind, VerifiedEvent, content_kind};
+use rostra_core::event::{
+    Event, EventKind, PersonasTagsSelector, VerifiedEvent, VerifiedEventContent, content_kind,
+};
 use rostra_core::id::{RostraId, RostraIdSecretKey, ToShort as _};
 use rostra_core::{EventId, ShortEventId};
 use scraper::{Html, Selector};
@@ -99,6 +104,46 @@ async fn unauthenticated_landing_page_returns_200() {
         body.contains("Rostra"),
         "Landing page should mention Rostra"
     );
+    let document = Html::parse_document(&body);
+    assert!(
+        document
+            .select(&Selector::parse(r#"a[href="/following"]"#).unwrap())
+            .next()
+            .is_some(),
+        "landing actions should link directly to the canonical timeline"
+    );
+    assert!(
+        document
+            .select(&Selector::parse(r#"a[href="/home"]"#).unwrap())
+            .next()
+            .is_none(),
+        "landing actions should not link to the legacy home redirect"
+    );
+}
+
+#[test_log::test(tokio::test(flavor = "multi_thread"))]
+async fn landing_with_default_profile_links_to_following() {
+    let server = TestServer::start_with_default_profile(RostraIdSecretKey::generate().id()).await;
+    let driver = server.driver();
+
+    let response = driver.get("/").await;
+    assert_eq!(response.status(), 200);
+
+    let document = Html::parse_document(&response.text().await.unwrap());
+    assert!(
+        document
+            .select(&Selector::parse(r#"a[href="/following"]"#).unwrap())
+            .next()
+            .is_some(),
+        "Explore should link directly to the canonical timeline"
+    );
+    assert!(
+        document
+            .select(&Selector::parse(r#"a[href="/home"]"#).unwrap())
+            .next()
+            .is_none(),
+        "Explore should not link to the legacy home redirect"
+    );
 }
 
 #[test_log::test(tokio::test(flavor = "multi_thread"))]
@@ -125,10 +170,10 @@ async fn login_then_access_followees() {
 
     let resp = driver.get("/").await;
     assert_eq!(resp.status(), 307);
-    assert_eq!(resp.headers().get(header::LOCATION).unwrap(), "/home");
+    assert_eq!(resp.headers().get(header::LOCATION).unwrap(), "/following");
 
     let resp = driver.get("/home").await;
-    assert_eq!(resp.status(), 307);
+    assert_eq!(resp.status(), 308);
     assert_eq!(resp.headers().get(header::LOCATION).unwrap(), "/following");
 
     let resp = driver.get("/following").await;
@@ -136,6 +181,129 @@ async fn login_then_access_followees() {
 
     let document = Html::parse_document(&resp.text().await.unwrap());
     assert_link_precedes(&document, "/following", "/news");
+    assert!(
+        document
+            .select(&Selector::parse(r#"a[href="/settings/profile"]"#).unwrap())
+            .next()
+            .is_some(),
+        "timeline navigation should link directly to the canonical settings page"
+    );
+    assert!(
+        document
+            .select(&Selector::parse(r#"a[href="/settings"]"#).unwrap())
+            .next()
+            .is_none(),
+        "timeline navigation should not link to the settings redirect"
+    );
+
+    let response = driver.get("/settings/profile").await;
+    assert_eq!(response.status(), 200);
+    let document = Html::parse_document(&response.text().await.unwrap());
+    assert!(
+        document
+            .select(&Selector::parse(r#"a[href="/following"]"#).unwrap())
+            .next()
+            .is_some(),
+        "Settings Back should link directly to the canonical timeline"
+    );
+    assert!(
+        document
+            .select(&Selector::parse(r#"a[href="/home"]"#).unwrap())
+            .next()
+            .is_none(),
+        "Settings Back should not link to the legacy home redirect"
+    );
+}
+
+#[test_log::test(tokio::test(flavor = "multi_thread"))]
+async fn timelines_support_head_and_followees_query_pagination() {
+    let server = TestServer::start().await;
+    let driver = server.driver();
+
+    let (viewer_id, viewer_secret) = driver.login_new_identity().await;
+    let author_secret = RostraIdSecretKey::generate();
+    let author_id = author_secret.id();
+    let author = server.client(author_id).await;
+    let older = author
+        .social_post(
+            author_secret,
+            "older timeline post".to_string(),
+            None,
+            BTreeSet::new(),
+        )
+        .await
+        .expect("publish older post");
+    tokio::time::sleep(Duration::from_secs(1)).await;
+    let newer = author
+        .social_post(
+            author_secret,
+            "newer timeline post".to_string(),
+            None,
+            BTreeSet::new(),
+        )
+        .await
+        .expect("publish newer post");
+    tokio::time::sleep(Duration::from_secs(1)).await;
+    let latest = author
+        .social_post(
+            author_secret,
+            "latest timeline post".to_string(),
+            None,
+            BTreeSet::new(),
+        )
+        .await
+        .expect("publish latest post");
+    let viewer = server.client(viewer_id).await;
+    viewer
+        .follow(
+            viewer_secret,
+            author_id,
+            PersonasTagsSelector::Except {
+                ids: BTreeSet::new(),
+            },
+        )
+        .await
+        .expect("follow post author");
+    for post in [older, newer, latest] {
+        let content = author
+            .db()
+            .get_event_content(post.event_id)
+            .await
+            .expect("get post content");
+        let content = VerifiedEventContent::verify(post, content).expect("verify post content");
+        viewer
+            .store_event_with_content(content.event_id(), &content)
+            .await
+            .expect("store followed post");
+    }
+
+    for path in ["/following", "/network", "/news", "/notifications"] {
+        let response = driver.head(path).await;
+        assert_eq!(response.status(), 200, "HEAD {path} should be successful");
+    }
+
+    let newer = viewer
+        .db()
+        .get_social_post(newer.event_id.into())
+        .await
+        .expect("newer post exists");
+    let response = driver
+        .get(&format!(
+            "/following?ts={}&event_id={}",
+            newer.ts,
+            newer.event_id.to_short()
+        ))
+        .await;
+    assert_eq!(response.status(), 200);
+    let body = response.text().await.unwrap();
+    assert!(
+        body.contains("older timeline post"),
+        "a complete query cursor should retain posts before the cursor"
+    );
+    assert!(
+        !body.contains("latest timeline post"),
+        "a complete query cursor should exclude posts after the cursor"
+    );
 }
 
 #[test_log::test(tokio::test(flavor = "multi_thread"))]
@@ -165,6 +333,10 @@ async fn explicit_news_url_remains_available() {
     let resp = driver.get("/sitemap.xml").await;
     assert_eq!(resp.status(), 200);
     let body = resp.text().await.unwrap();
+    assert!(
+        !body.contains("/home</loc>"),
+        "sitemap should omit legacy /home"
+    );
     let following = body
         .find("/following</loc>")
         .expect("sitemap should include Following");

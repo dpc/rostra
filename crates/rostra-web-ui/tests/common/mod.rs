@@ -18,12 +18,22 @@ pub struct TestServer {
 
 impl TestServer {
     pub async fn start() -> Self {
-        Self::start_on(SocketAddr::from(([127, 0, 0, 1], 0)), None).await
+        Self::start_on(SocketAddr::from(([127, 0, 0, 1], 0)), None, None).await
+    }
+
+    /// Start a test server that renders its default-profile landing actions.
+    pub async fn start_with_default_profile(default_profile: RostraId) -> Self {
+        Self::start_on(
+            SocketAddr::from(([127, 0, 0, 1], 0)),
+            None,
+            Some(default_profile),
+        )
+        .await
     }
 
     /// Start an HTTP server on a non-loopback bind address.
     pub async fn start_non_loopback_http() -> Self {
-        Self::start_on(SocketAddr::from(([0, 0, 0, 0], 0)), None).await
+        Self::start_on(SocketAddr::from(([0, 0, 0, 0], 0)), None, None).await
     }
 
     /// Start a loopback server configured with a public plaintext origin.
@@ -31,6 +41,7 @@ impl TestServer {
         Self::start_on(
             SocketAddr::from(([127, 0, 0, 1], 0)),
             Some("http://public.example".to_string()),
+            None,
         )
         .await
     }
@@ -40,11 +51,16 @@ impl TestServer {
         Self::start_on(
             SocketAddr::from(([127, 0, 0, 1], 0)),
             Some("https://localhost".to_string()),
+            None,
         )
         .await
     }
 
-    async fn start_on(listen: SocketAddr, origin: Option<String>) -> Self {
+    async fn start_on(
+        listen: SocketAddr,
+        origin: Option<String>,
+        default_profile: Option<RostraId>,
+    ) -> Self {
         // Use dev mode so assets are served from the source tree
         // (avoids needing compiled/bundled assets).
         // SAFETY: Integration tests run as separate binaries, so no other
@@ -65,7 +81,7 @@ impl TestServer {
             None,  // assets_dir (uses default)
             false, // reuseport
             data_dir,
-            None, // default_profile
+            default_profile,
             10,   // max_clients
             None, // welcome_redirect
         );

@@ -208,7 +208,7 @@ impl UiState {
                     span ."o-topNav__icon -support" {}
                     "Support"
                 }
-                a ."o-topNav__item" href="/settings" {
+                a ."o-topNav__item" href="/settings/profile" {
                     span ."o-topNav__icon -settings" {}
                     "Settings"
                 }

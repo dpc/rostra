@@ -175,14 +175,7 @@ async fn robots_txt(state: State<SharedState>) -> impl IntoResponse {
 }
 
 async fn sitemap_xml(state: State<SharedState>) -> impl IntoResponse {
-    const PATHS: &[&str] = &[
-        "/",
-        "/home",
-        "/following",
-        "/network",
-        "/news",
-        "/notifications",
-    ];
+    const PATHS: &[&str] = &["/", "/following", "/network", "/news", "/notifications"];
 
     let urls: String = PATHS
         .iter()

@@ -410,7 +410,7 @@ impl UiState {
         Ok(html! {
             nav ."o-navBar" {
                 div ."o-topNav" {
-                    a ."o-topNav__item" href="/home" {
+                    a ."o-topNav__item" href="/following" {
                         span ."o-topNav__icon -back" {}
                         "Back"
                     }

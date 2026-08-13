@@ -10,16 +10,16 @@ use crate::SharedState;
 use crate::error::RequestResult;
 
 /// Landing page at "/".
-/// - Authenticated users: redirect to /home
+/// - Authenticated users: redirect to /following
 /// - Unauthenticated + welcome_redirect configured: redirect to that URL
 /// - Unauthenticated: show welcome page
 pub async fn get_landing(
     state: State<SharedState>,
     session: OptionalUserSession,
 ) -> RequestResult<impl IntoResponse> {
-    // If authenticated, go to home
+    // If authenticated, go to the default timeline.
     if session.0.is_some() {
-        return Ok(Redirect::temporary("/home").into_response());
+        return Ok(Redirect::temporary("/following").into_response());
     }
 
     // If welcome_redirect is configured, use it
@@ -32,9 +32,9 @@ pub async fn get_landing(
     Ok(Maud(render_welcome_page(has_default_profile)).into_response())
 }
 
-/// Home page - redirects to /following.
+/// Redirect the legacy home URL to the default timeline.
 pub async fn get_home() -> impl IntoResponse {
-    Redirect::temporary("/following")
+    Redirect::permanent("/following")
 }
 
 fn render_welcome_page(has_default_profile: bool) -> Markup {
@@ -84,10 +84,10 @@ fn render_welcome_page(has_default_profile: bool) -> Markup {
 
                         div ."o-welcomePage__actions" {
                             @if has_default_profile {
-                                a ."o-welcomePage__button" ."-primary" href="/home" { "Explore" }
+                                a ."o-welcomePage__button" ."-primary" href="/following" { "Explore" }
                                 a ."o-welcomePage__button" ."-secondary" href="/unlock" { "Sign in" }
                             } @else {
-                                a ."o-welcomePage__button" ."-primary" href="/home" { "Sign in" }
+                                a ."o-welcomePage__button" ."-primary" href="/following" { "Sign in" }
                             }
                         }
 

@@ -3,7 +3,7 @@ use std::time::Duration;
 
 use axum::Form;
 use axum::extract::ws::WebSocket;
-use axum::extract::{OriginalUri, Path, State, WebSocketUpgrade};
+use axum::extract::{OriginalUri, Path, Query, State, WebSocketUpgrade};
 use axum::response::IntoResponse;
 use maud::{Markup, html};
 use rostra_client::ClientRef;
@@ -64,7 +64,7 @@ pub async fn get_followees(
     session: UserSession,
     mut cookies: Cookies,
     AjaxRequest(is_ajax): AjaxRequest,
-    Form(form): Form<TimelinePaginationInput>,
+    Query(form): Query<TimelinePaginationInput>,
 ) -> RequestResult<impl IntoResponse> {
     let pagination = form.ts.and_then(|ts| {
         form.event_id
@@ -96,7 +96,7 @@ pub async fn get_network(
     session: UserSession,
     mut cookies: Cookies,
     AjaxRequest(is_ajax): AjaxRequest,
-    Form(form): Form<TimelinePaginationInput>,
+    Query(form): Query<TimelinePaginationInput>,
 ) -> RequestResult<impl IntoResponse> {
     let pagination = form.ts.and_then(|ts| {
         form.event_id
@@ -128,7 +128,7 @@ pub async fn get_news(
     session: UserSession,
     mut cookies: Cookies,
     AjaxRequest(is_ajax): AjaxRequest,
-    Form(form): Form<TimelinePaginationInput>,
+    Query(form): Query<TimelinePaginationInput>,
 ) -> RequestResult<impl IntoResponse> {
     let pagination = form.score.and_then(|score| {
         form.post_id
@@ -208,7 +208,7 @@ pub async fn get_notifications(
     session: UserSession,
     mut cookies: Cookies,
     AjaxRequest(is_ajax): AjaxRequest,
-    Form(form): Form<TimelinePaginationInput>,
+    Query(form): Query<TimelinePaginationInput>,
 ) -> RequestResult<impl IntoResponse> {
     let pagination = form.ts.and_then(|ts| {
         form.seq
