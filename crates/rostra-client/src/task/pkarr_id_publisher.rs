@@ -1,3 +1,4 @@
+use std::future::Future;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
@@ -82,10 +83,11 @@ impl PkarrIdPublisher {
     }
 
     /// Run the thread
-    #[instrument(name = "pkarr-id-publisher", skip(self), fields(self_id = %self.self_id().fmt_short()), ret)]
+    #[instrument(target = LOG_TARGET, name = "pkarr-id-publisher", skip(self), fields(self_id = %self.self_id().fmt_short()), ret)]
     pub async fn run(mut self) {
         info!(target: LOG_TARGET, "Starting pkarr id publisher");
         let mut interval = tokio::time::interval(publishing_interval());
+        let mut attempt = 0u64;
         loop {
             tokio::select! {
                 // either periodically
@@ -100,8 +102,9 @@ impl PkarrIdPublisher {
             }
             trace!(target: LOG_TARGET, "Woke up");
 
+            let leader_wait_started_at = Instant::now();
             self.wait_for_your_turn().await;
-            debug!(target: LOG_TARGET, "Detect no other peer alive, assuming the role of Pkarr ID publisher");
+            log_publisher_transition(leader_wait_started_at.elapsed());
 
             let (addr, head) = {
                 let Some(app) = self.client.app_ref_opt() else {
@@ -112,7 +115,7 @@ impl PkarrIdPublisher {
                     app.iroh_address()
                         .await
                         .inspect_err(|err| {
-                            warn!(%err, "No iroh addresses to publish yet");
+                            warn!(target: LOG_TARGET, %err, "No iroh addresses to publish yet");
                         })
                         .ok(),
                     app.events_head().await,
@@ -122,15 +125,19 @@ impl PkarrIdPublisher {
             let ticket = addr.map(CompactTicket::from);
 
             let id_data = IdPublishedData { ticket, head };
+            attempt = attempt.saturating_add(1);
 
-            if let Err(err) = self
-                .publish(
+            if let Err(err) = publish_attempt(
+                attempt,
+                head,
+                self.publish(
                     id_data,
                     u32::try_from(interval.period().as_secs() * 3 + 1).unwrap_or(u32::MAX),
-                )
-                .await
+                ),
+            )
+            .await
             {
-                warn!(%err, "Failed to publish to pkarr");
+                warn!(target: LOG_TARGET, %err, "Failed to publish to pkarr");
             }
         }
     }
@@ -195,3 +202,49 @@ impl PkarrIdPublisher {
         Ok(())
     }
 }
+
+async fn publish_attempt<F>(attempt: u64, head: Option<ShortEventId>, publish: F) -> F::Output
+where
+    F: Future,
+    F::Output: PublishAttemptResult,
+{
+    let started_at = Instant::now();
+    let result = publish.await;
+    let outcome = if result.is_success() {
+        "success"
+    } else {
+        "failure"
+    };
+    debug!(
+        target: LOG_TARGET,
+        parent: None,
+        attempt,
+        head = %head.fmt_option(),
+        elapsed_ms = started_at.elapsed().as_millis(),
+        outcome,
+        "Pkarr publish attempt completed"
+    );
+    result
+}
+
+trait PublishAttemptResult {
+    fn is_success(&self) -> bool;
+}
+
+impl<T, E> PublishAttemptResult for Result<T, E> {
+    fn is_success(&self) -> bool {
+        self.is_ok()
+    }
+}
+
+fn log_publisher_transition(elapsed: Duration) {
+    debug!(
+        target: LOG_TARGET,
+        parent: None,
+        elapsed_ms = elapsed.as_millis(),
+        "Leader wait completed; assuming Pkarr publisher role"
+    );
+}
+
+#[cfg(test)]
+mod tests;

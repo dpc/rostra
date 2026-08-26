@@ -45,6 +45,14 @@ enum BroadcastHeadOutcome {
     Stop,
 }
 
+#[derive(Debug, Clone, Copy)]
+struct BroadcastHeadReport {
+    outcome: BroadcastHeadOutcome,
+    delivered: usize,
+    errors: usize,
+    timeouts: usize,
+}
+
 pub struct HeadUpdateBroadcaster {
     client: crate::client::ClientHandle,
     networking: Arc<crate::net::ClientNetworking>,
@@ -87,7 +95,11 @@ impl HeadUpdateBroadcaster {
             if let Some((head, event, event_content)) =
                 take_one_ready_head(&self.db, &mut pending_heads, &retry_at).await
             {
-                match self
+                let attempt = retry_at
+                    .get(&head)
+                    .map_or(1, |retry| retry.retry_count.saturating_add(1));
+                let started_at = Instant::now();
+                let report = self
                     .broadcast_head(
                         head,
                         &event,
@@ -95,25 +107,53 @@ impl HeadUpdateBroadcaster {
                         &followers,
                         policy.peer_deadline,
                     )
-                    .await
-                {
+                    .await;
+                let elapsed = started_at.elapsed();
+                match report.outcome {
                     BroadcastHeadOutcome::Delivered => {
                         pending_heads.remove(&head);
                         retry_at.remove(&head);
+                        log_broadcast_pass(
+                            head,
+                            followers.len() + 1,
+                            attempt,
+                            report,
+                            elapsed,
+                            None,
+                        );
                     }
                     BroadcastHeadOutcome::Retry => {
                         let retry_count = retry_at
                             .get(&head)
                             .map_or(0, |retry_at| retry_at.retry_count);
+                        let retry_delay = broadcast_retry_delay(retry_count, policy);
                         retry_at.insert(
                             head,
                             BroadcastRetry {
                                 retry_count: retry_count.saturating_add(1),
-                                at: Instant::now() + broadcast_retry_delay(retry_count, policy),
+                                at: Instant::now() + retry_delay,
                             },
                         );
+                        log_broadcast_pass(
+                            head,
+                            followers.len() + 1,
+                            attempt,
+                            report,
+                            elapsed,
+                            Some(retry_delay),
+                        );
                     }
-                    BroadcastHeadOutcome::Stop => return,
+                    BroadcastHeadOutcome::Stop => {
+                        log_broadcast_pass(
+                            head,
+                            followers.len() + 1,
+                            attempt,
+                            report,
+                            elapsed,
+                            None,
+                        );
+                        return;
+                    }
                 }
                 continue;
             }
@@ -196,7 +236,7 @@ impl HeadUpdateBroadcaster {
         event_content: &EventContentRaw,
         followers: &FollowersMap,
         deadline: Duration,
-    ) -> BroadcastHeadOutcome {
+    ) -> BroadcastHeadReport {
         debug!(
             target: LOG_TARGET,
             event_id = %head.to_short(),
@@ -204,13 +244,20 @@ impl HeadUpdateBroadcaster {
             "Broadcasting new head event to followers"
         );
 
-        let mut retry = false;
+        let mut delivered = 0;
+        let mut errors = 0;
+        let mut timeouts = 0;
 
         // Send to ourselves first, in case we have redundant nodes.
         for id in [self.self_id].into_iter().chain(followers.keys().copied()) {
             if self.client.app_ref_opt().is_none() {
                 debug!(target: LOG_TARGET, "Client gone, quitting");
-                return BroadcastHeadOutcome::Stop;
+                return BroadcastHeadReport {
+                    outcome: BroadcastHeadOutcome::Stop,
+                    delivered,
+                    errors,
+                    timeouts,
+                };
             }
 
             match within(
@@ -219,9 +266,9 @@ impl HeadUpdateBroadcaster {
             )
             .await
             {
-                Ok(Ok(())) => {}
+                Ok(Ok(())) => delivered += 1,
                 Ok(Err(err)) => {
-                    retry = true;
+                    errors += 1;
                     debug!(
                         target: LOG_TARGET,
                         err = %err.fmt_compact(),
@@ -230,7 +277,7 @@ impl HeadUpdateBroadcaster {
                     );
                 }
                 Err(_) => {
-                    retry = true;
+                    timeouts += 1;
                     warn!(
                         target: LOG_TARGET,
                         id = %id.to_short(),
@@ -240,10 +287,16 @@ impl HeadUpdateBroadcaster {
                 }
             }
         }
-        if retry {
+        let outcome = if errors != 0 || timeouts != 0 {
             BroadcastHeadOutcome::Retry
         } else {
             BroadcastHeadOutcome::Delivered
+        };
+        BroadcastHeadReport {
+            outcome,
+            delivered,
+            errors,
+            timeouts,
         }
     }
 
@@ -265,6 +318,35 @@ impl HeadUpdateBroadcaster {
 
         Ok(())
     }
+}
+
+fn log_broadcast_pass(
+    head: ShortEventId,
+    recipients: usize,
+    attempt: u32,
+    report: BroadcastHeadReport,
+    elapsed: Duration,
+    retry_delay: Option<Duration>,
+) {
+    let outcome = match report.outcome {
+        BroadcastHeadOutcome::Delivered => "delivered",
+        BroadcastHeadOutcome::Retry => "retry",
+        BroadcastHeadOutcome::Stop => "stop",
+    };
+    debug!(
+        target: LOG_TARGET,
+        parent: None,
+        head = %head.to_short(),
+        recipients,
+        delivered = report.delivered,
+        errors = report.errors,
+        timeouts = report.timeouts,
+        attempt,
+        elapsed_ms = elapsed.as_millis(),
+        outcome,
+        retry_delay_ms = retry_delay.map_or(0, |delay| delay.as_millis()),
+        "Head broadcast pass completed"
+    );
 }
 
 async fn reconcile_current_heads(db: &Database, pending_heads: &mut BTreeSet<ShortEventId>) {

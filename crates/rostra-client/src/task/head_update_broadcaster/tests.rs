@@ -15,12 +15,16 @@ use rostra_p2p::connection::{
 };
 use rostra_p2p_api::ROSTRA_P2P_V0_ALPN;
 use tokio::sync::{mpsc, oneshot};
+use tracing::Instrument as _;
+use tracing::instrument::WithSubscriber as _;
 
 use super::{
-    BROADCAST_POLICY, BroadcastPolicy, HeadUpdateBroadcaster, broadcast_retry_delay,
-    content_completes_pending, content_is_terminal, reconcile_current_heads, take_one_ready_head,
+    BROADCAST_POLICY, BroadcastHeadOutcome, BroadcastHeadReport, BroadcastPolicy,
+    HeadUpdateBroadcaster, broadcast_retry_delay, content_completes_pending, content_is_terminal,
+    log_broadcast_pass, reconcile_current_heads, take_one_ready_head,
 };
 use crate::Client;
+use crate::task::diagnostic_test::{EventCapture, assert_no_forbidden_fields};
 
 fn build_event(
     id_secret: RostraIdSecretKey,
@@ -249,7 +253,18 @@ async fn hanging_follower_does_not_block_later_follower_and_head_retries() {
         retry_initial_delay: Duration::from_millis(100),
         retry_max_delay: Duration::from_millis(100),
     };
-    let worker = tokio::spawn(HeadUpdateBroadcaster::new(&broadcaster).run_with_policy(policy));
+    let capture = EventCapture::default();
+    let broadcaster_task = HeadUpdateBroadcaster::new(&broadcaster);
+    let worker = tokio::spawn(
+        async move {
+            let identity_span = tracing::info_span!("test-identity", self_id = %hang_id.to_short());
+            broadcaster_task
+                .run_with_policy(policy)
+                .instrument(identity_span)
+                .await;
+        }
+        .with_subscriber(capture.subscriber()),
+    );
 
     tokio::time::timeout(Duration::from_secs(3), attempts_rx.recv())
         .await
@@ -287,6 +302,57 @@ async fn hanging_follower_does_not_block_later_follower_and_head_retries() {
         ),
         "successful retry removes the pending head"
     );
+    let passes = capture.events("Head broadcast pass completed");
+    assert_eq!(passes.len(), 2);
+    assert_eq!(passes[0].target, "rostra::head_broadcaster");
+    assert_eq!(passes[0].fields.get("head"), Some(&head.to_string()));
+    assert_eq!(
+        passes[0].fields.get("recipients").map(String::as_str),
+        Some("2")
+    );
+    assert_eq!(
+        passes[0].fields.get("delivered").map(String::as_str),
+        Some("1")
+    );
+    assert_eq!(
+        passes[0].fields.get("errors").map(String::as_str),
+        Some("0")
+    );
+    assert_eq!(
+        passes[0].fields.get("timeouts").map(String::as_str),
+        Some("1")
+    );
+    assert_eq!(
+        passes[0].fields.get("attempt").map(String::as_str),
+        Some("1")
+    );
+    assert_eq!(
+        passes[0].fields.get("outcome").map(String::as_str),
+        Some("retry")
+    );
+    assert_eq!(
+        passes[0].fields.get("retry_delay_ms").map(String::as_str),
+        Some("100")
+    );
+    assert!(passes[0].fields.contains_key("elapsed_ms"));
+    assert_eq!(
+        passes[1].fields.get("attempt").map(String::as_str),
+        Some("2")
+    );
+    assert_eq!(
+        passes[1].fields.get("outcome").map(String::as_str),
+        Some("delivered")
+    );
+    assert_eq!(
+        passes[1].fields.get("retry_delay_ms").map(String::as_str),
+        Some("0")
+    );
+    for pass in &passes {
+        assert_no_forbidden_fields(pass);
+    }
+    let identity_spans = capture.spans("test-identity");
+    assert_eq!(identity_spans.len(), 1);
+    assert!(identity_spans[0].fields.contains_key("self_id"));
 
     worker.abort();
     assert!(
@@ -337,6 +403,99 @@ async fn complete_reconciliation_recovers_startup_siblings_and_deduplicates() {
     }
     assert_eq!(ready, expected);
     assert!(pending.is_empty());
+
+    let lookup = iroh::address_lookup::memory::MemoryLookup::new();
+    let receiver_endpoint = iroh::Endpoint::builder(iroh::endpoint::presets::Minimal)
+        .relay_mode(iroh::RelayMode::Disabled)
+        .alpns(vec![ROSTRA_P2P_V0_ALPN.to_vec()])
+        .address_lookup(lookup.clone())
+        .bind()
+        .await
+        .expect("self endpoint");
+    let receiver_node_id = receiver_endpoint.id();
+    lookup.add_endpoint_info(receiver_endpoint.addr());
+    let receiver = Client::builder(id_secret.id())
+        .db(Database::new_in_memory(id_secret.id())
+            .await
+            .expect("receiver database"))
+        .iroh_endpoint(receiver_endpoint)
+        .start_background_tasks(false)
+        .build()
+        .await
+        .expect("receiver client");
+    let broadcaster_endpoint = iroh::Endpoint::builder(iroh::endpoint::presets::Minimal)
+        .relay_mode(iroh::RelayMode::Disabled)
+        .alpns(vec![ROSTRA_P2P_V0_ALPN.to_vec()])
+        .address_lookup(lookup)
+        .bind()
+        .await
+        .expect("broadcaster endpoint");
+    let client = Client::builder(id_secret.id())
+        .db(db)
+        .iroh_endpoint(broadcaster_endpoint)
+        .start_request_handler(false)
+        .start_background_tasks(false)
+        .build()
+        .await
+        .expect("self client");
+    client
+        .db()
+        .insert_id_node(
+            id_secret.id(),
+            IrohNodeId::from_bytes(*receiver_node_id.as_bytes()),
+            rostra_core::Timestamp::now(),
+        )
+        .await;
+    let capture = EventCapture::default();
+    let broadcaster_task = HeadUpdateBroadcaster::new(&client);
+    let worker = tokio::spawn(
+        async move {
+            let identity_span =
+                tracing::info_span!("test-identity", self_id = %id_secret.id().to_short());
+            broadcaster_task
+                .run_with_policy(BROADCAST_POLICY)
+                .instrument(identity_span)
+                .await;
+        }
+        .with_subscriber(capture.subscriber()),
+    );
+    tokio::time::timeout(Duration::from_secs(5), async {
+        while capture.events("Head broadcast pass completed").len() < expected.len() {
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .expect("all reconciled sibling passes");
+    let passes = capture.events("Head broadcast pass completed");
+    assert_eq!(passes.len(), expected.len());
+    assert_eq!(
+        passes
+            .iter()
+            .filter_map(|pass| pass.fields.get("head").cloned())
+            .collect::<BTreeSet<_>>(),
+        expected.iter().map(ToString::to_string).collect()
+    );
+    assert!(passes.iter().all(|pass| {
+        pass.fields.get("outcome").map(String::as_str) == Some("delivered")
+            && pass.fields.get("recipients").map(String::as_str) == Some("1")
+            && pass.fields.get("attempt").map(String::as_str) == Some("1")
+    }));
+    for pass in &passes {
+        assert_no_forbidden_fields(pass);
+    }
+    let identity_spans = capture.spans("test-identity");
+    assert_eq!(identity_spans.len(), 1);
+    assert!(identity_spans[0].fields.contains_key("self_id"));
+    for head in expected {
+        assert!(receiver.db().has_event(head).await);
+    }
+    worker.abort();
+    assert!(
+        worker
+            .await
+            .expect_err("worker is cancelled")
+            .is_cancelled()
+    );
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -411,4 +570,35 @@ fn broadcast_retry_delay_is_capped() {
         broadcast_retry_delay(u32::MAX, BROADCAST_POLICY),
         Duration::from_secs(60)
     );
+
+    let capture = EventCapture::default();
+    tracing::subscriber::with_default(capture.subscriber(), || {
+        let span = tracing::info_span!("test-identity", self_id = "forbidden");
+        span.in_scope(|| {
+            log_broadcast_pass(
+                ShortEventId::ZERO,
+                3,
+                u32::MAX,
+                BroadcastHeadReport {
+                    outcome: BroadcastHeadOutcome::Retry,
+                    delivered: 1,
+                    errors: 1,
+                    timeouts: 1,
+                },
+                Duration::from_secs(2),
+                Some(broadcast_retry_delay(u32::MAX, BROADCAST_POLICY)),
+            );
+        });
+    });
+    let passes = capture.events("Head broadcast pass completed");
+    assert_eq!(passes.len(), 1);
+    assert_eq!(
+        passes[0].fields.get("retry_delay_ms").map(String::as_str),
+        Some("60000")
+    );
+    assert_eq!(
+        passes[0].fields.get("outcome").map(String::as_str),
+        Some("retry")
+    );
+    assert_no_forbidden_fields(&passes[0]);
 }

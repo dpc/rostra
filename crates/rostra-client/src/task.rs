@@ -11,3 +11,6 @@ pub(crate) mod poll_followee_head_updates;
 pub(crate) mod poll_follower_head_updates;
 pub(crate) mod request_handler;
 pub(crate) mod wot_head_sync;
+
+#[cfg(test)]
+mod diagnostic_test;
