@@ -70,12 +70,12 @@ mime = "0.3.17"
 bytes = "*"
 listenfd = "1.0.2"
 futures-util = "*"
-iroh = { version = "1.0.3", default-features = false, features = ["tls-ring"] }
-iroh-base = { version = "1.0.3", default-features = false }
+iroh = { version = "1.1.0", default-features = false, features = ["tls-ring"] }
+iroh-base = { version = "1.1.0", default-features = false }
 iroh-io = "0.6.2"
 itertools = "0.13.0"
 jotup = { version = "0.10.0", features = ["async"] }
-pkarr = "5.0.2"
+pkarr = "8.0.1"
 proptest = "1.6.0"
 maud = "*"
 n0-future = "0.3.2"
@@ -122,9 +122,13 @@ reqwest = { version = "0.12", default-features = false, features = [
   "rustls-tls",
   "cookies",
 ] }
+reqwest-13 = { package = "reqwest", version = "0.13", default-features = false, features = [
+  "rustls",
+] }
 quick-xml = "0.38.4"
 scraper = "0.20"
 cssparser = "0.31"
+webpki-root-certs = "1.0"
 
 
 [profile.dev]

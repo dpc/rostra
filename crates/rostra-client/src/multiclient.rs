@@ -12,7 +12,7 @@ use tokio::sync::RwLock;
 use tracing::{debug, info, warn};
 
 use crate::error::InitError;
-use crate::{Client, ClientHandle, LOG_TARGET};
+use crate::{Client, ClientHandle, LOG_TARGET, PkarrClient};
 
 #[derive(Debug, Snafu)]
 pub enum MultiClientError {
@@ -40,7 +40,7 @@ pub struct MultiClient {
     /// When false (default), uses relay-only mode for privacy.
     public_mode: bool,
     /// Shared pkarr client reused across all Rostra client instances.
-    pkarr_client: Arc<pkarr::Client>,
+    pkarr_client: Arc<PkarrClient>,
 }
 
 impl MultiClient {
@@ -48,7 +48,7 @@ impl MultiClient {
         data_dir: PathBuf,
         max_clients: usize,
         public_mode: bool,
-        pkarr_client: Arc<pkarr::Client>,
+        pkarr_client: Arc<PkarrClient>,
     ) -> Self {
         Self {
             data_dir,

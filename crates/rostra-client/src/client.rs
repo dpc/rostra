@@ -2,6 +2,7 @@ use std::collections::{BTreeSet, HashMap};
 use std::future::Future;
 use std::marker::PhantomData;
 use std::net::Ipv4Addr;
+use std::num::NonZeroUsize;
 use std::ops;
 use std::option::Option;
 use std::path::Path;
@@ -35,11 +36,12 @@ use tracing::{debug, info, trace, warn};
 use crate::LOG_TARGET;
 use crate::error::{
     ActivateResult, ActivateSnafu, ConnectResult, IdResolveError, IdResolveResult,
-    IdSecretReadResult, InitIrohClientSnafu, InitPkarrClientSnafu, InitResult, IoSnafu,
-    LocalAnnouncementStorageSnafu, ParsingSnafu, PostResult, SecretMismatchSnafu, StorageSnafu,
-    StoreEventError, StoreEventResult,
+    IdSecretReadResult, InitIrohClientSnafu, InitPkarrClientSnafu, InitPkarrRelayHttpClientSnafu,
+    InitResult, IoSnafu, LocalAnnouncementStorageSnafu, ParsingSnafu, PostResult,
+    SecretMismatchSnafu, StorageSnafu, StoreEventError, StoreEventResult,
 };
 use crate::id::{CompactTicket, IdResolvedData};
+use crate::pkarr_client::{PkarrClient, mozilla_root_http_client};
 use crate::task::head_merger::HeadMerger;
 use crate::task::missing_event_content_fetcher::MissingEventContentFetcher;
 use crate::task::missing_event_fetcher::MissingEventFetcher;
@@ -370,7 +372,7 @@ impl Client {
         /// creating a new one. Since the pkarr client is identity-agnostic,
         /// a single instance can be shared across all Rostra clients.
         /// Use [`Client::make_pkarr_client`] to create one.
-        pkarr_client: Option<Arc<pkarr::Client>>,
+        pkarr_client: Option<Arc<PkarrClient>>,
     ) -> InitResult<Arc<Self>> {
         debug!(target: LOG_TARGET, id = %id, "Starting Rostra client");
         let client_start = Instant::now();
@@ -515,13 +517,24 @@ impl Client {
     /// The pkarr client is identity-agnostic, so a single instance can
     /// be reused across all Rostra clients via the `pkarr_client`
     /// parameter on [`Client::builder`].
-    pub fn make_pkarr_client() -> InitResult<Arc<pkarr::Client>> {
+    pub fn make_pkarr_client() -> InitResult<Arc<PkarrClient>> {
+        let relay_http_client =
+            mozilla_root_http_client().context(InitPkarrRelayHttpClientSnafu)?;
+
+        let mut builder = pkarr::Client::builder();
+        builder
+            .relays(&["https://dns.iroh.link/pkarr"])
+            .expect("Can't fail")
+            .reqwest_client(relay_http_client);
+
         Ok(Arc::new(
-            pkarr::Client::builder()
-                .relays(&["https://dns.iroh.link/pkarr"])
-                .expect("Can't fail")
-                .build()
-                .context(InitPkarrClientSnafu)?,
+            PkarrClient::build(
+                builder,
+                NonZeroUsize::new(pkarr::DEFAULT_CACHE_SIZE).expect("non-zero Pkarr cache size"),
+                pkarr::DEFAULT_MINIMUM_TTL,
+                pkarr::DEFAULT_MAXIMUM_TTL,
+            )
+            .context(InitPkarrClientSnafu)?,
         ))
     }
 
@@ -805,7 +818,7 @@ impl Client {
         .await
     }
 
-    pub(crate) fn pkarr_client(&self) -> Arc<pkarr::Client> {
+    pub(crate) fn pkarr_client(&self) -> Arc<PkarrClient> {
         self.networking.pkarr_client.clone()
     }
 

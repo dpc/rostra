@@ -25,6 +25,7 @@ use crate::error::{
 };
 // ConnectIrohSnafu is used for .context() in connect_ticket
 use crate::id::{CompactTicket, IdPublishedData, IdResolvedData};
+use crate::pkarr_client::PkarrClient;
 
 const LOG_TARGET: &str = "rostra::client-net";
 
@@ -70,7 +71,7 @@ pub enum EndpointConnectResult {
 /// - Connection caching
 pub struct ClientNetworking {
     pub(crate) endpoint: iroh::Endpoint,
-    pub(crate) pkarr_client: Arc<pkarr::Client>,
+    pub(crate) pkarr_client: Arc<PkarrClient>,
     pub(crate) p2p_state: P2PState,
     pub(crate) connection_cache: ConnectionCache,
     id_endpoint_lookup: Arc<dyn IdEndpointLookup>,
@@ -79,7 +80,7 @@ pub struct ClientNetworking {
 impl ClientNetworking {
     pub fn new(
         endpoint: iroh::Endpoint,
-        pkarr_client: Arc<pkarr::Client>,
+        pkarr_client: Arc<PkarrClient>,
         id_endpoint_lookup: Arc<dyn IdEndpointLookup>,
     ) -> Self {
         Self {
@@ -423,7 +424,7 @@ impl ClientNetworking {
             .pkarr_client
             .resolve(&public_key)
             .await
-            .context(PkarrResolveSnafu)?;
+            .map_err(|_| PkarrResolveSnafu.build())?;
 
         let timestamp = packet.timestamp();
         let ticket = get_rrecord_typed(&packet, &domain, RRECORD_P2P_KEY).context(RRecordSnafu)?;

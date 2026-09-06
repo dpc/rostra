@@ -16,6 +16,7 @@ use tracing::{debug, info, instrument, trace, warn};
 use crate::client::Client;
 use crate::error::{DnsSnafu, IdPublishResult, PkarrPublishSnafu, PkarrSignedPacketSnafu};
 use crate::id::{CompactTicket, IdPublishedData};
+use crate::pkarr_client::PkarrClient;
 use crate::{RRECORD_HEAD_KEY, RRECORD_P2P_KEY};
 const LOG_TARGET: &str = "rostra::id-publish";
 
@@ -25,7 +26,7 @@ pub fn publishing_interval() -> Duration {
 
 pub struct PkarrIdPublisher {
     client: crate::client::ClientHandle,
-    pkarr_client: Arc<pkarr::Client>,
+    pkarr_client: Arc<PkarrClient>,
     keypair: pkarr::Keypair,
     self_head: CurrentState<Option<ShortEventId>>,
 }
@@ -156,7 +157,7 @@ impl PkarrIdPublisher {
         let packet = data.to_signed_packet(&self.keypair, ttl_secs)?;
 
         self.pkarr_client
-            .publish(&packet, None)
+            .publish(&packet)
             .await
             .context(PkarrPublishSnafu)?;
 

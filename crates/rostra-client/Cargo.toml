@@ -42,6 +42,7 @@ itertools = { workspace = true }
 n0-future = { workspace = true }
 pkarr = { workspace = true, features = ["dht", "relays"] }
 redb = { workspace = true }
+reqwest-13 = { workspace = true }
 rostra-client-db = { workspace = true }
 rostra-p2p = { workspace = true }
 rostra-p2p-api = { workspace = true }
@@ -64,6 +65,7 @@ z32 = { workspace = true }
 tokio = { workspace = true }
 tracing = { workspace = true }
 tracing-subscriber = { workspace = true }
+webpki-root-certs = { workspace = true }
 
 [dev-dependencies]
 tempfile = { workspace = true }

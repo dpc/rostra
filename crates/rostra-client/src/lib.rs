@@ -54,6 +54,8 @@ const LOG_TARGET: &str = "rostra";
 
 mod client;
 mod net;
+mod pkarr_client;
+pub use pkarr_client::PkarrClient;
 pub use rostra_client_db::{
     Database, DbError, SOCIAL_POST_MATERIALIZATION_SCAN_MAX, SelfFollowee,
     SocialPostMaterialization, SocialPostMaterializationCursor, SocialPostMaterializationPage,

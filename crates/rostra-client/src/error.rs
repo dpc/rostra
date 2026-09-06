@@ -17,6 +17,8 @@ pub type IrohResult<T> = anyhow::Result<T>;
 pub enum InitError {
     #[snafu(display("Pkarr Client initialization error"))]
     InitPkarrClient { source: pkarr::errors::BuildError },
+    #[snafu(display("Pkarr relay HTTP client initialization error"))]
+    InitPkarrRelayHttpClient { source: reqwest_13::Error },
     #[snafu(display("Iroh Client initialization error"))]
     InitIrohClient { source: iroh::endpoint::BindError },
     #[snafu(display("Failed to activate"))]
