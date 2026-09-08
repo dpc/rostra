@@ -232,6 +232,14 @@ pub fn route_handler(state: SharedState) -> Router<Arc<UiState>> {
         )
         .route("/post/{author}/{event}/delete", post(post::delete_post))
         .route(
+            "/post/{author}/{event}/react/heart",
+            get(post::get_heart_reaction_confirmation).post(post::post_heart_reaction),
+        )
+        .route(
+            "/post/{author}/{event}/reaction/{reaction}/delete",
+            get(post::get_reaction_delete_confirmation).post(post::delete_reaction),
+        )
+        .route(
             "/post/{author}/{event}/edit",
             get(post::get_edit_post).post(post::post_edit_post),
         )

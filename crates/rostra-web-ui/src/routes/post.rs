@@ -26,7 +26,8 @@ use crate::html_utils::re_typeset;
 use crate::layout::OpenGraphMeta;
 use crate::routes::url::{
     EventPathId, RostraPathId, post_delete_url, post_edit_cancel_url, post_edit_url,
-    post_fetch_url, post_url, profile_url, redirect_to_canonical,
+    post_fetch_url, post_heart_reaction_url, post_reaction_delete_url, post_url, profile_url,
+    redirect_to_canonical,
 };
 use crate::util::extractors::AjaxRequest;
 use crate::util::time::{format_timestamp, format_timestamp_iso};
@@ -48,6 +49,11 @@ pub fn post_content_html_id(post_thread_id: ShortEventId, event_id: ShortEventId
 /// Generate HTML ID for post replies container.
 pub fn post_replies_html_id(post_thread_id: ShortEventId, event_id: ShortEventId) -> String {
     format!("post-replies-{post_thread_id}-{event_id}")
+}
+
+/// Generate the HTML ID for a post's reaction bar.
+pub fn post_reactions_html_id(post_thread_id: ShortEventId, event_id: ShortEventId) -> String {
+    format!("post-reactions-{post_thread_id}-{event_id}")
 }
 
 /// Generate HTML ID for the whole post element (used for delete target).
@@ -103,6 +109,13 @@ pub struct EditPostPreviewInput {
     content: String,
     post_thread_id: ShortEventId,
     event_id: ShortEventId,
+}
+
+/// Rendering context retained while a reaction dialog updates its source post.
+#[derive(Deserialize)]
+pub struct ReactionContextInput {
+    /// Thread instance containing the displayed post and reaction bar.
+    post_thread_id: Option<ShortEventId>,
 }
 
 fn post_not_found() -> RequestError {
@@ -438,6 +451,382 @@ pub async fn delete_post(
             }
         }
     }))
+}
+
+async fn resolve_reaction_target(
+    client: &ClientRef<'_>,
+    author_id: PostAuthorId,
+    event_id: EventPathId,
+) -> RequestResult<ExternalEventId> {
+    let author_id = author_id
+        .resolve(client.db())
+        .await
+        .ok_or_else(post_not_found)?;
+    let event_id = event_id
+        .resolve(client.db())
+        .await
+        .ok_or_else(post_not_found)?;
+    let event = client
+        .db()
+        .get_event(event_id)
+        .await
+        .ok_or_else(post_not_found)?;
+    if event.author() != author_id {
+        return Err(post_not_found());
+    }
+
+    Ok(ExternalEventId::new(author_id, event_id))
+}
+
+fn is_own_reaction(
+    reaction: &SocialPostRecord<SocialPost>,
+    current_user: RostraId,
+    reaction_event_id: ShortEventId,
+) -> bool {
+    reaction.author == current_user
+        && reaction.event_id == reaction_event_id
+        && reaction.content.get_reaction().is_some()
+}
+
+fn find_own_reaction(
+    reactions: &[SocialPostRecord<SocialPost>],
+    current_user: RostraId,
+    reaction_event_id: ShortEventId,
+) -> Option<&SocialPostRecord<SocialPost>> {
+    reactions
+        .iter()
+        .find(|reaction| is_own_reaction(reaction, current_user, reaction_event_id))
+}
+
+enum ReactionConfirmationAction {
+    Publish,
+    Remove,
+}
+
+impl ReactionConfirmationAction {
+    fn button_class(&self) -> &'static str {
+        match self {
+            Self::Publish => "o-reactionConfirmation__publishButton",
+            Self::Remove => "o-reactionConfirmation__removeButton",
+        }
+    }
+
+    fn label(&self) -> &'static str {
+        match self {
+            Self::Publish => "Publish",
+            Self::Remove => "Remove",
+        }
+    }
+}
+
+fn reaction_confirmation_submit_form(
+    confirmation_action: ReactionConfirmationAction,
+    action: &str,
+    post_thread_id: ShortEventId,
+    x_target: Option<&str>,
+    disabled: bool,
+) -> Markup {
+    let ajax_attrs = fragment::AjaxLoadingAttrs::for_button();
+    html! {
+        form ."o-reactionConfirmation__form"
+            action=(action)
+            method="post"
+            x-target=[x_target]
+            "@ajax:before"=[x_target.map(|_| ajax_attrs.before.as_str())]
+            "@ajax:after"=[x_target.map(|_| ajax_attrs.after.as_str())]
+        {
+            input type="hidden" name="post_thread_id" value=(post_thread_id) {}
+            (fragment::button(
+                confirmation_action.button_class(),
+                confirmation_action.label(),
+            )
+                .disabled(disabled)
+                .call())
+        }
+    }
+}
+
+fn ajax_reaction_confirmation(
+    confirmation_action: ReactionConfirmationAction,
+    reaction: &str,
+    action: &str,
+    post_thread_id: ShortEventId,
+    reactions_target: &str,
+    disabled: bool,
+) -> Markup {
+    let title = match confirmation_action {
+        ReactionConfirmationAction::Publish => "Like this post?",
+        ReactionConfirmationAction::Remove => "Remove reaction?",
+    };
+    let prompt = match confirmation_action {
+        ReactionConfirmationAction::Publish => "Publish this heart reaction to the post?",
+        ReactionConfirmationAction::Remove => "Remove your reaction from this post?",
+    };
+    let x_target = format!("post-preview-dialog {reactions_target}");
+    html! {
+        div id="post-preview-dialog" ."o-previewDialog -active" {
+            (fragment::dialog_escape_handler("post-preview-dialog"))
+            div ."o-previewDialog__content" {
+                h4 ."o-previewDialog__title" { (title) }
+                p ."o-reactionConfirmation__prompt" { (prompt) }
+                div ."o-reactionConfirmation__reaction" aria-hidden="true" { (reaction) }
+                div ."o-previewDialog__actionButtons" {
+                    (fragment::button("o-previewDialog__cancelButton", "Back")
+                        .button_type("button")
+                        .onclick("document.querySelector('#post-preview-dialog').classList.remove('-active')")
+                        .call())
+                    (reaction_confirmation_submit_form(
+                        confirmation_action,
+                        action,
+                        post_thread_id,
+                        Some(&x_target),
+                        disabled,
+                    ))
+                }
+            }
+        }
+    }
+}
+
+fn nojs_reaction_confirmation(
+    confirmation_action: ReactionConfirmationAction,
+    reaction: &str,
+    action: &str,
+    post_thread_id: ShortEventId,
+    cancel_url: &str,
+    disabled: bool,
+) -> Markup {
+    let (title, prompt) = match confirmation_action {
+        ReactionConfirmationAction::Publish => (
+            "Like this post?",
+            "Publish this heart reaction to the post?",
+        ),
+        ReactionConfirmationAction::Remove => {
+            ("Remove reaction?", "Remove your reaction from this post?")
+        }
+    };
+    html! {
+        section ."o-reactionConfirmation" {
+            h1 { (title) }
+            p ."o-reactionConfirmation__prompt" { (prompt) }
+            div ."o-reactionConfirmation__reaction" aria-hidden="true" { (reaction) }
+            div ."o-reactionConfirmation__actions" {
+                a ."o-reactionConfirmation__cancel" href=(cancel_url) { "Cancel" }
+                (reaction_confirmation_submit_form(
+                    confirmation_action,
+                    action,
+                    post_thread_id,
+                    None,
+                    disabled,
+                ))
+            }
+        }
+    }
+}
+
+/// Render the ordinary HTTP confirmation page for publishing a heart reaction.
+pub async fn get_heart_reaction_confirmation(
+    state: State<SharedState>,
+    session: UserSession,
+    AjaxRequest(is_ajax): AjaxRequest,
+    Query(input): Query<ReactionContextInput>,
+    Path((author_id, event_id)): Path<(PostAuthorId, EventPathId)>,
+) -> RequestResult<axum::response::Response> {
+    let client_handle = state.client(session.id()).await?;
+    let client = client_handle.client_ref()?;
+    let target = resolve_reaction_target(&client, author_id, event_id).await?;
+    let post_thread_id = input
+        .post_thread_id
+        .unwrap_or_else(|| target.event_id().to_short());
+    let cancel_url = post_url(target.rostra_id(), target.event_id().to_short());
+    let action = post_heart_reaction_url(target.rostra_id(), target.event_id().to_short());
+    let disabled = state.ro_mode(session.session_token()).to_disabled();
+    if is_ajax {
+        return Ok(Maud(ajax_reaction_confirmation(
+            ReactionConfirmationAction::Publish,
+            "❤️",
+            &action,
+            post_thread_id,
+            &post_reactions_html_id(post_thread_id, target.event_id().to_short()),
+            disabled,
+        ))
+        .into_response());
+    }
+
+    let body = nojs_reaction_confirmation(
+        ReactionConfirmationAction::Publish,
+        "❤️",
+        &action,
+        post_thread_id,
+        &cancel_url,
+        disabled,
+    );
+    Ok(Maud(
+        state
+            .render_nojs_full_page(&session, "Publish Reaction", body)
+            .await?,
+    )
+    .into_response())
+}
+
+/// Publish a heart reaction after the user submits the confirmation form.
+pub async fn post_heart_reaction(
+    state: State<SharedState>,
+    session: UserSession,
+    AjaxRequest(is_ajax): AjaxRequest,
+    Path((author_id, event_id)): Path<(PostAuthorId, EventPathId)>,
+    Form(input): Form<ReactionContextInput>,
+) -> RequestResult<axum::response::Response> {
+    let id_secret = state
+        .id_secret(session.session_token())
+        .ok_or_else(|| ReadOnlyModeSnafu.build())?;
+    let client_handle = state.client(session.id()).await?;
+    let client = client_handle.client_ref()?;
+    let target = resolve_reaction_target(&client, author_id, event_id).await?;
+
+    client
+        .social_post(id_secret, "❤️".to_owned(), Some(target), Default::default())
+        .await?;
+
+    if is_ajax {
+        let post_thread_id = input
+            .post_thread_id
+            .unwrap_or_else(|| target.event_id().to_short());
+        return Ok(Maud(html! {
+            (state.render_post_reactions(
+                &client,
+                target,
+                post_thread_id,
+                state.ro_mode(session.session_token()),
+            ).await)
+            div id="post-preview-dialog" ."o-previewDialog" {}
+        })
+        .into_response());
+    }
+
+    Ok(
+        axum::response::Redirect::to(&post_url(target.rostra_id(), target.event_id().to_short()))
+            .into_response(),
+    )
+}
+
+/// Render the ordinary HTTP confirmation page for removing one own reaction.
+pub async fn get_reaction_delete_confirmation(
+    state: State<SharedState>,
+    session: UserSession,
+    AjaxRequest(is_ajax): AjaxRequest,
+    Query(input): Query<ReactionContextInput>,
+    Path((author_id, event_id, reaction_event_id)): Path<(PostAuthorId, EventPathId, EventPathId)>,
+) -> RequestResult<axum::response::Response> {
+    let client_handle = state.client(session.id()).await?;
+    let client = client_handle.client_ref()?;
+    let target = resolve_reaction_target(&client, author_id, event_id).await?;
+    let reaction_event_id = reaction_event_id
+        .resolve(client.db())
+        .await
+        .ok_or_else(post_not_found)?;
+    let (reactions, _) = client
+        .db()
+        .paginate_social_post_reactions_rev(target.event_id().to_short(), None, 1000)
+        .await;
+    let reaction = find_own_reaction(&reactions, client.rostra_id(), reaction_event_id)
+        .ok_or_else(post_not_found)?;
+    let reaction_text = reaction
+        .content
+        .get_reaction()
+        .expect("validated reaction must have reaction text");
+    let post_thread_id = input
+        .post_thread_id
+        .unwrap_or_else(|| target.event_id().to_short());
+    let cancel_url = post_url(target.rostra_id(), target.event_id().to_short());
+    let action = post_reaction_delete_url(
+        target.rostra_id(),
+        target.event_id().to_short(),
+        reaction_event_id,
+    );
+    let disabled = state.ro_mode(session.session_token()).to_disabled();
+    if is_ajax {
+        return Ok(Maud(ajax_reaction_confirmation(
+            ReactionConfirmationAction::Remove,
+            reaction_text,
+            &action,
+            post_thread_id,
+            &post_reactions_html_id(post_thread_id, target.event_id().to_short()),
+            disabled,
+        ))
+        .into_response());
+    }
+
+    let body = nojs_reaction_confirmation(
+        ReactionConfirmationAction::Remove,
+        reaction_text,
+        &action,
+        post_thread_id,
+        &cancel_url,
+        disabled,
+    );
+    Ok(Maud(
+        state
+            .render_nojs_full_page(&session, "Remove Reaction", body)
+            .await?,
+    )
+    .into_response())
+}
+
+/// Delete the precise own reaction selected by the user.
+pub async fn delete_reaction(
+    state: State<SharedState>,
+    session: UserSession,
+    AjaxRequest(is_ajax): AjaxRequest,
+    Path((author_id, event_id, reaction_event_id)): Path<(PostAuthorId, EventPathId, EventPathId)>,
+    Form(input): Form<ReactionContextInput>,
+) -> RequestResult<axum::response::Response> {
+    let id_secret = state
+        .id_secret(session.session_token())
+        .ok_or_else(|| ReadOnlyModeSnafu.build())?;
+    let client_handle = state.client(session.id()).await?;
+    let client = client_handle.client_ref()?;
+    let target = resolve_reaction_target(&client, author_id, event_id).await?;
+    let reaction_event_id = reaction_event_id
+        .resolve(client.db())
+        .await
+        .ok_or_else(post_not_found)?;
+    let (reactions, _) = client
+        .db()
+        .paginate_social_post_reactions_rev(target.event_id().to_short(), None, 1000)
+        .await;
+    let reaction = find_own_reaction(&reactions, client.rostra_id(), reaction_event_id)
+        .ok_or_else(post_not_found)?;
+
+    client
+        .publish_event(
+            id_secret,
+            SocialPost::new(String::new(), None, Default::default()),
+        )
+        .replace(reaction.event_id)
+        .call()
+        .await?;
+
+    if is_ajax {
+        let post_thread_id = input
+            .post_thread_id
+            .unwrap_or_else(|| target.event_id().to_short());
+        return Ok(Maud(html! {
+            (state.render_post_reactions(
+                &client,
+                target,
+                post_thread_id,
+                state.ro_mode(session.session_token()),
+            ).await)
+            div id="post-preview-dialog" ."o-previewDialog" {}
+        })
+        .into_response());
+    }
+
+    Ok(
+        axum::response::Redirect::to(&post_url(target.rostra_id(), target.event_id().to_short()))
+            .into_response(),
+    )
 }
 
 fn render_post_error_id(post_target_id: &str, message: &str) -> Markup {
@@ -945,6 +1334,85 @@ pub async fn fetch_missing_post(
 
 #[bon::bon]
 impl UiState {
+    async fn render_post_reactions(
+        &self,
+        client: &ClientRef<'_>,
+        target: ExternalEventId,
+        post_thread_id: ShortEventId,
+        ro: RoMode,
+    ) -> Markup {
+        let (reactions, _) = client
+            .db()
+            .paginate_social_post_reactions_rev(target.event_id().to_short(), None, 1000)
+            .await;
+        let mut reaction_social_profiles: HashMap<RostraId, IdSocialProfileRecord> = HashMap::new();
+
+        for reaction_author in reactions
+            .iter()
+            .map(|reaction| reaction.author)
+            .collect::<HashSet<_>>()
+        {
+            if let Some(reaction_user_profile) =
+                self.get_social_profile_opt(reaction_author, client).await
+            {
+                assert!(
+                    reaction_social_profiles
+                        .insert(reaction_author, reaction_user_profile)
+                        .is_none()
+                );
+            }
+        }
+
+        html! {
+            div
+                id=(post_reactions_html_id(post_thread_id, target.event_id().to_short()))
+                .m-postView__reactions
+            {
+                @for reaction in reactions {
+                    @if let Some(reaction_text) = reaction.content.get_reaction() {
+                        @let reaction_author = reaction_social_profiles.get(&reaction.author)
+                            .map(|r| r.display_name.clone())
+                            .unwrap_or_else(|| reaction.author.to_string());
+                        @if reaction.author == client.rostra_id() {
+                            @if ro.is_ro() {
+                                span .m-postView__reaction ."-own" ."-disabled"
+                                    title="Your reaction (read-only mode)"
+                                {
+                                    (reaction_text)
+                                }
+                            } @else {
+                                form
+                                    ."m-postView__reactionForm"
+                                    action=(post_reaction_delete_url(
+                                        target.rostra_id(),
+                                        target.event_id().to_short(),
+                                        reaction.event_id,
+                                    ))
+                                    method="get"
+                                    x-target="post-preview-dialog"
+                                {
+                                    input type="hidden" name="post_thread_id" value=(post_thread_id) {}
+                                    button
+                                        .m-postView__reaction ."-own"
+                                        type="submit"
+                                        title=(format!("Your reaction; click to remove ({reaction_author})"))
+                                        aria-label=(format!("Remove your {reaction_text} reaction"))
+                                    {
+                                        (reaction_text)
+                                    }
+                                }
+                            }
+                        } @else {
+                            span .m-postView__reaction title=(format!("by {reaction_author}")) {
+                                (reaction_text)
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
     /// Render a whole post with all its context (parent, children buttons,
     /// etc.)
     #[allow(clippy::too_many_arguments)]
@@ -972,38 +1440,6 @@ impl UiState {
         link_to_post: Option<bool>,
         ro: RoMode,
     ) -> RequestResult<Markup> {
-        // Note: we are actually not doing pagination, and just ignore
-        // everything after first page
-        let (reactions, _) = if let Some(event_id) = event_id {
-            client
-                .db()
-                .paginate_social_post_reactions_rev(event_id, None, 1000)
-                .await
-        } else {
-            (vec![], None)
-        };
-
-        let mut reaction_social_profiles: HashMap<RostraId, IdSocialProfileRecord> = HashMap::new();
-
-        for reaction_author in reactions
-            .iter()
-            .map(|reaction| reaction.author)
-            // collect to deduplicate
-            .collect::<HashSet<_>>()
-        {
-            // TODO: make a batched request for all profiles in one go
-            if let Some(reaction_user_profile) =
-                self.get_social_profile_opt(reaction_author, client).await
-            {
-                // HashSet above must have deduped it
-                assert!(
-                    reaction_social_profiles
-                        .insert(reaction_author, reaction_user_profile)
-                        .is_none()
-                );
-            }
-        }
-
         // Use post_thread_id if provided, otherwise default to event_id
         let post_thread_id = post_thread_id.or(event_id);
 
@@ -1090,57 +1526,6 @@ impl UiState {
         // Use post_thread_id if provided, otherwise default to event_id
         let post_thread_id = post_thread_id.or(event_id);
         let user_profile = self.get_social_profile_opt(author, client).await;
-
-        // Note: we are actually not doing pagination, and just ignore
-        // everything after first page
-        let (reactions, _) = if let Some(event_id) = event_id {
-            client
-                .db()
-                .paginate_social_post_reactions_rev(event_id, None, 1000)
-                .await
-        } else {
-            (vec![], None)
-        };
-
-        let mut reaction_social_profiles: HashMap<RostraId, IdSocialProfileRecord> = HashMap::new();
-
-        for reaction_author in reactions
-            .iter()
-            .map(|reaction| reaction.author)
-            // collect to deduplicate
-            .collect::<HashSet<_>>()
-        {
-            // TODO: make a batched request for all profiles in one go
-            if let Some(reaction_user_profile) =
-                self.get_social_profile_opt(reaction_author, client).await
-            {
-                // HashSet above must have deduped it
-                assert!(
-                    reaction_social_profiles
-                        .insert(reaction_author, reaction_user_profile)
-                        .is_none()
-                );
-            }
-        }
-
-        let reactions_html = html! {
-            @for reaction in reactions {
-                @if let Some(reaction_text) = reaction.content.get_reaction() {
-
-                    span .m-postView__reaction
-                        title=(
-                            format!("by {}",
-                                reaction_social_profiles.get(&reaction.author)
-                                    .map(|r| r.display_name.clone())
-                                    .unwrap_or_else(|| reaction.author.to_string())
-                            )
-                        )
-                    {
-                        (reaction_text)
-                    }
-                }
-            }
-        };
 
         let fetched_post = if url.is_none() || title.is_none() {
             if let Some(event_id) = event_id {
@@ -1296,8 +1681,8 @@ impl UiState {
         let button_bar = html! {
             @if let Some(ext_event_id) = external_event_id {
                 div ."m-postView__buttonBar" {
-                    div .m-postView__reactions {
-                        (reactions_html)
+                    @if let Some(ctx) = post_thread_id {
+                        (self.render_post_reactions(client, ext_event_id, ctx, ro).await)
                     }
                     div ."m-postView__buttons" {
                         @if let Some(extra_buttons) = extra_buttons {
@@ -1334,6 +1719,32 @@ impl UiState {
                                 ).call())
                             }
                         }
+                        (fragment::ajax_form(
+                            &post_heart_reaction_url(
+                                ext_event_id.rostra_id(),
+                                ext_event_id.event_id().to_short(),
+                            ),
+                            "get",
+                            "post-preview-dialog",
+                            html! {
+                                button
+                                    ."m-postView__heartReactionButton"
+                                    ."-disabled"[ro.is_ro()]
+                                    type="submit"
+                                    disabled[ro.to_disabled()]
+                                    aria-label="Like this post"
+                                    title="Like this post"
+                                {
+                                    "❤️"
+                                }
+                            },
+                        )
+                        .button_selector("$el.querySelector('.m-postView__heartReactionButton')")
+                        .hidden_inputs(html! {
+                            input type="hidden" name="post_thread_id" value=(post_thread_id.unwrap_or_else(|| ext_event_id.event_id().to_short())) {}
+                        })
+                        .form_class("m-postView__heartReactionForm")
+                        .call())
                         // Reply button only available when we have a thread context
                         @if let Some(ctx) = post_thread_id {
                             // Target the replies container (placeholders are rendered inside when expanded)

@@ -917,8 +917,44 @@ emoji-picker {
 }
 
 .m-postView__reactions {
+  align-items: center;
   display: flex;
-  gap: .5rem;
+  flex-wrap: wrap;
+  gap: .35rem;
+}
+
+.m-postView__reaction {
+  align-items: center;
+  background: var(--color-button-bg);
+  border: 1px solid transparent;
+  border-radius: 999px;
+  display: inline-flex;
+  justify-content: center;
+  min-height: 1.8rem;
+  min-width: 1.8rem;
+  padding: .1rem .4rem;
+  color: var(--color-text-default);
+  font: inherit;
+  line-height: normal;
+  text-decoration: none;
+}
+
+.m-postView__reactionForm {
+  margin: 0;
+}
+
+.m-postView__reaction.-own {
+  border-color: var(--color-link);
+  cursor: pointer;
+}
+
+.m-postView__reaction.-own:hover {
+  background: var(--color-button-bg-hover);
+}
+
+.m-postView__reaction.-disabled {
+  cursor: not-allowed;
+  opacity: .6;
 }
 
 .m-postView__buttons {
@@ -937,6 +973,34 @@ emoji-picker {
 
 .m-postView__replyToButtonIcon {
   background: url('/assets/icons/reply.svg') center/contain no-repeat;
+}
+
+.m-postView__heartReactionForm {
+  margin: 0;
+}
+
+.m-postView__heartReactionButton {
+  align-items: center;
+  background: var(--color-button-bg);
+  border: 1px solid var(--color-button-border);
+  border-radius: var(--border-radius-std);
+  cursor: pointer;
+  display: inline-flex;
+  font: inherit;
+  height: 1.9rem;
+  justify-content: center;
+  line-height: 1;
+  padding: 0;
+  width: 2.25rem;
+}
+
+.m-postView__heartReactionButton:hover {
+  background: var(--color-button-bg-hover);
+}
+
+.m-postView__heartReactionButton.-disabled {
+  cursor: not-allowed;
+  opacity: .6;
 }
 
 .m-postView__deleteButtonIcon {
@@ -1033,6 +1097,48 @@ emoji-picker {
 
 .m-postView__actionMenuDropdown .u-button--danger:hover {
   background: rgba(220, 38, 38, 0.1);
+}
+
+.o-reactionConfirmation {
+  background: var(--color-post-bg);
+  border: 1px solid var(--color-border);
+  border-radius: var(--border-radius-std);
+  margin: 2rem auto;
+  max-width: 30rem;
+  padding: 1.5rem;
+  text-align: center;
+}
+
+.o-reactionConfirmation__prompt {
+  margin-bottom: .75rem;
+}
+
+.o-reactionConfirmation__reaction {
+  font-size: 2.5rem;
+  margin: .75rem;
+}
+
+.o-reactionConfirmation__actions {
+  align-items: center;
+  display: flex;
+  gap: .75rem;
+  justify-content: center;
+}
+
+.o-reactionConfirmation__form {
+  margin: 0;
+}
+
+.o-reactionConfirmation__cancel {
+  color: var(--color-text-default);
+}
+
+.o-reactionConfirmation__publishButtonIcon {
+  background: url('/assets/icons/heart.svg') center/contain no-repeat;
+}
+
+.o-reactionConfirmation__removeButtonIcon {
+  background: url('/assets/icons/xmark.svg') center/contain no-repeat;
 }
 
 .m-profileSummary {

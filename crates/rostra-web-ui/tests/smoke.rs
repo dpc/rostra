@@ -9,7 +9,7 @@ use rostra_core::event::{
     Event, EventKind, PersonasTagsSelector, VerifiedEvent, VerifiedEventContent, content_kind,
 };
 use rostra_core::id::{RostraId, RostraIdSecretKey, ToShort as _};
-use rostra_core::{EventId, ShortEventId};
+use rostra_core::{EventId, ExternalEventId, ShortEventId};
 use scraper::{Html, Selector};
 use serde_json::json;
 
@@ -347,6 +347,150 @@ async fn explicit_news_url_remains_available() {
         following < news,
         "sitemap should list Following before News: {body}"
     );
+}
+
+#[test_log::test(tokio::test(flavor = "multi_thread"))]
+async fn reaction_confirmations_update_the_current_post_through_hypermedia() {
+    let server = TestServer::start().await;
+    let driver = server.driver();
+    let (author, secret) = driver.login_new_identity().await;
+    let client = server.client(author).await;
+    let original = client
+        .social_post(secret, "original post".to_owned(), None, BTreeSet::new())
+        .await
+        .expect("publish original post");
+    let original_target = ExternalEventId::new(author, original.event_id.to_short());
+    let old_reaction = client
+        .social_post(
+            secret,
+            "👍".to_owned(),
+            Some(original_target),
+            BTreeSet::new(),
+        )
+        .await
+        .expect("publish reaction to original post");
+    let edited = client
+        .publish_event(
+            secret,
+            content_kind::SocialPost::new_text("edited post".to_owned(), None, BTreeSet::new()),
+        )
+        .replace(original.event_id.to_short())
+        .call()
+        .await
+        .expect("replace original post");
+    let edited_id = edited.event_id.to_short();
+    let post_path = format!("/post/{}/{edited_id}", author.to_short());
+
+    let response = driver.get(&post_path).await;
+    assert_eq!(response.status(), 200);
+    let document = Html::parse_document(&response.text().await.unwrap());
+    let like_button = Selector::parse(r#"button[aria-label="Like this post"]"#).unwrap();
+    assert!(
+        document.select(&like_button).next().is_some(),
+        "rendered post should expose the labeled heart action"
+    );
+    let remove_reaction_button =
+        Selector::parse(r#"button[aria-label="Remove your 👍 reaction"]"#).unwrap();
+    assert!(
+        document.select(&remove_reaction_button).next().is_some(),
+        "a reaction to an older post version should remain removable"
+    );
+
+    let thread_query = format!("post_thread_id={edited_id}");
+    let heart_path = format!("{post_path}/react/heart?{thread_query}");
+    let response = driver.ajax_get(&heart_path).await;
+    assert_eq!(response.status(), 200);
+    let document = Html::parse_fragment(&response.text().await.unwrap());
+    assert!(
+        document
+            .select(&Selector::parse("div#post-preview-dialog.-active").unwrap())
+            .next()
+            .is_some(),
+        "enhanced heart action should return an in-page confirmation dialog"
+    );
+    let publish_form = Selector::parse(&format!(
+        r#"form[action="{post_path}/react/heart"][method="post"][x-target~="post-preview-dialog"]"#
+    ))
+    .unwrap();
+    assert!(
+        document.select(&publish_form).next().is_some(),
+        "dialog confirmation should submit through hypermedia"
+    );
+
+    let response = driver.get(&heart_path).await;
+    assert_eq!(response.status(), 200);
+    let document = Html::parse_document(&response.text().await.unwrap());
+    let ordinary_form = Selector::parse(&format!(
+        r#"form[action="{post_path}/react/heart"][method="post"]"#
+    ))
+    .unwrap();
+    let ordinary_form = document
+        .select(&ordinary_form)
+        .next()
+        .expect("ordinary confirmation form");
+    assert!(
+        ordinary_form.value().attr("x-target").is_none(),
+        "ordinary confirmation must not require JavaScript"
+    );
+
+    let response = driver
+        .ajax_post_form(
+            &format!("{post_path}/react/heart"),
+            &[("post_thread_id", &edited_id.to_string())],
+        )
+        .await;
+    assert_eq!(response.status(), 200);
+    let response_body = response.text().await.unwrap();
+    assert!(response_body.contains(&format!(r#"id="post-reactions-{edited_id}-{edited_id}""#)));
+    let document = Html::parse_fragment(&response_body);
+    assert!(
+        document
+            .select(&Selector::parse("div#post-preview-dialog:not(.-active)").unwrap())
+            .next()
+            .is_some(),
+        "successful hypermedia action should close the confirmation dialog"
+    );
+
+    let delete_path = format!(
+        "{post_path}/reaction/{}/delete?{thread_query}",
+        old_reaction.event_id.to_short()
+    );
+    let response = driver.ajax_get(&delete_path).await;
+    assert_eq!(
+        response.status(),
+        200,
+        "reaction to the replaced post version should have a working confirmation"
+    );
+    let document = Html::parse_fragment(&response.text().await.unwrap());
+    let remove_form = Selector::parse(&format!(
+        r#"form[action="{post_path}/reaction/{}/delete"][method="post"][x-target~="post-preview-dialog"]"#,
+        old_reaction.event_id.to_short()
+    ))
+    .unwrap();
+    assert!(document.select(&remove_form).next().is_some());
+
+    let response = driver
+        .ajax_post_form(
+            &format!(
+                "{post_path}/reaction/{}/delete",
+                old_reaction.event_id.to_short()
+            ),
+            &[("post_thread_id", &edited_id.to_string())],
+        )
+        .await;
+    assert_eq!(response.status(), 200);
+    let (reactions, _) = client
+        .db()
+        .paginate_social_post_reactions_rev(edited_id, None, 1000)
+        .await;
+    assert!(
+        reactions
+            .iter()
+            .all(|reaction| reaction.event_id != old_reaction.event_id.to_short()),
+        "confirmed deletion should remove the precise selected reaction"
+    );
+
+    server.shutdown().await;
 }
 
 #[test_log::test(tokio::test(flavor = "multi_thread"))]

@@ -161,6 +161,23 @@ pub(crate) fn post_delete_url(author: RostraId, event_id: ShortEventId) -> Strin
     format!("{}/delete", post_url(author, event_id))
 }
 
+/// Return the relative URL for adding a heart reaction to a post.
+pub(crate) fn post_heart_reaction_url(author: RostraId, event_id: ShortEventId) -> String {
+    format!("{}/react/heart", post_url(author, event_id))
+}
+
+/// Return the relative URL for deleting one of the current user's reactions.
+pub(crate) fn post_reaction_delete_url(
+    author: RostraId,
+    event_id: ShortEventId,
+    reaction_event_id: ShortEventId,
+) -> String {
+    format!(
+        "{}/reaction/{reaction_event_id}/delete",
+        post_url(author, event_id)
+    )
+}
+
 /// Return the canonical relative URL for cancelling a post edit.
 pub(crate) fn post_edit_cancel_url(author: RostraId, event_id: ShortEventId) -> String {
     format!("{}/edit_cancel", post_url(author, event_id))
