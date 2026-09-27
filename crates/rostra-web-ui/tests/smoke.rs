@@ -1174,7 +1174,7 @@ async fn reaction_confirmations_update_the_current_post_through_hypermedia() {
     let document = Html::parse_fragment(&response.text().await.unwrap());
     assert!(
         document
-            .select(&Selector::parse("div#post-preview-dialog.-active").unwrap())
+            .select(&Selector::parse("dialog#post-preview-dialog.-active").unwrap())
             .next()
             .is_some(),
         "enhanced heart action should return an in-page confirmation dialog"

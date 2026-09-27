@@ -4005,6 +4005,45 @@ body.-keyboard-nav * {
   background: url('/assets/icons/arrow-right.svg') center/contain no-repeat;
 }
 
+dialog.o-mediaList,
+dialog.o-previewDialog,
+dialog.o-shortcutsDialog {
+  border: 0;
+  padding: 0;
+  margin: auto;
+  max-width: none;
+  max-height: none;
+  background: transparent;
+  color: inherit;
+}
+
+dialog.o-mediaList:not([open]),
+dialog.o-previewDialog:not([open]),
+dialog.o-shortcutsDialog:not([open]) {
+  display: none;
+}
+
+dialog.o-mediaList::backdrop,
+dialog.o-previewDialog::backdrop,
+dialog.o-shortcutsDialog::backdrop {
+  background: rgba(0, 0, 0, 0.5);
+}
+
+dialog.o-mediaList,
+dialog.o-previewDialog,
+dialog.o-shortcutsDialog {
+  background-color: transparent;
+}
+
+.o-shortcutsDialog__closeButton {
+  margin-top: 1rem;
+}
+
+.o-shortcutsDialog__closeButton:focus-visible {
+  outline: 2px solid var(--color-link);
+  outline-offset: 2px;
+}
+
 @media (prefers-reduced-motion: reduce) {
   .o-unlockScreen__content,
   .o-welcomePage__content,

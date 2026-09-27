@@ -35,9 +35,7 @@ fn media_target_remains_data_only() {
     let media_list_selector = Selector::parse("#media-list").unwrap();
     let item_selector = Selector::parse(".o-mediaList__item").unwrap();
     let event_id = ShortEventId::from_bytes([43; 16]);
-    let expected_handler = format!(
-        "insertMediaSyntax('{event_id}'); document.getElementById('media-list').classList.remove('-active')"
-    );
+    let expected_handler = format!("insertMediaSyntax('{event_id}')");
 
     for target in targets {
         let document = Html::parse_fragment(&render(target));

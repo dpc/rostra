@@ -20,6 +20,10 @@ function harness(targetSelector, initialValue = "") {
     },
     dataset: { target: targetSelector },
     style: {},
+    open: true,
+    close() {
+      this.open = false;
+    },
   };
   const textarea = {
     value: initialValue,
@@ -32,6 +36,7 @@ function harness(targetSelector, initialValue = "") {
       this.selectionEnd = end;
     },
     focus() {
+      assert.equal(picker.open, false, "modal closes before composer regains focus");
       this.focused = true;
     },
     dispatchEvent() {
@@ -71,15 +76,14 @@ test("hostile target data never becomes click handler program text", () => {
   const hostile =
     "');globalThis.executionSentinel++;function insertMediaSyntax(){}//";
   const app = harness(hostile);
-  const handler =
-    "insertMediaSyntax('EVENT'); document.getElementById('media-list').classList.remove('-active')";
+  const handler = "insertMediaSyntax('EVENT')";
 
   vm.runInContext(handler, app.context);
 
   assert.equal(app.context.executionSentinel, 0);
   assert.equal(app.textarea.value, "![media](rostra-media:EVENT)");
   assert.deepEqual(app.picker.classList.removed, ["-active"]);
-  assert.equal(app.picker.style.display, "none");
+  assert.equal(app.picker.open, false);
 });
 
 test("omitted targets preserve composer and upload insertion behavior", () => {
@@ -99,6 +103,7 @@ test("omitted targets preserve composer and upload insertion behavior", () => {
     );
     assert.equal(app.textarea.focused, true, target);
     assert.equal(app.textarea.inputEvents, 1, target);
-    assert.equal(app.picker.style.display, "none", target);
+    assert.equal(app.picker.open, false, target);
+    assert.deepEqual(app.picker.classList.removed, ["-active"], target);
   }
 });

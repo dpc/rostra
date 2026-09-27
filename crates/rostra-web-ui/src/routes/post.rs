@@ -696,16 +696,16 @@ fn ajax_reaction_confirmation(
     };
     let x_target = format!("post-preview-dialog {reactions_target}");
     html! {
-        div id="post-preview-dialog" ."o-previewDialog -active" {
-            (fragment::dialog_escape_handler("post-preview-dialog"))
+        dialog id="post-preview-dialog" ."o-previewDialog -active"
+            aria-labelledby="post-preview-title" {
             div ."o-previewDialog__content" {
-                h4 ."o-previewDialog__title" { (title) }
+                h4 id="post-preview-title" tabindex="-1" ."o-previewDialog__title" { (title) }
                 p ."o-reactionConfirmation__prompt" { (prompt) }
                 div ."o-reactionConfirmation__reaction" aria-hidden="true" { (reaction) }
                 div ."o-previewDialog__actionButtons" {
                     (fragment::button("o-previewDialog__cancelButton", "Back")
                         .button_type("button")
-                        .onclick("document.querySelector('#post-preview-dialog').classList.remove('-active')")
+                        .onclick("closeRostraDialog(document.getElementById('post-preview-dialog'))")
                         .call())
                     (reaction_confirmation_submit_form(
                         confirmation_action,

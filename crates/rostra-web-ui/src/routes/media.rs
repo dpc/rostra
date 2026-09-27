@@ -213,10 +213,10 @@ pub async fn list(
 
 fn render_media_list(author: RostraId, target_selector: &str, media_items: &[MediaInfo]) -> Maud {
     Maud(html! {
-        div id="media-list" ."o-mediaList -active" data-target=(target_selector) {
-            (fragment::dialog_escape_handler("media-list"))
+        dialog id="media-list" ."o-mediaList -active" data-target=(target_selector)
+            aria-labelledby="media-list-title" {
             div ."o-mediaList__content" {
-                h4 ."o-mediaList__title" { "Select media to attach" }
+                h4 id="media-list-title" tabindex="-1" ."o-mediaList__title" { "Select media to attach" }
                 div ."o-mediaList__items" {
                     @if media_items.is_empty() {
                         div ."o-mediaList__empty" {
@@ -226,7 +226,7 @@ fn render_media_list(author: RostraId, target_selector: &str, media_items: &[Med
                         @for media in media_items {
                             button type="button" ."o-mediaList__item"
                                 aria-label=(format!("Attach {} ({})", media.mime, rostra_util_fmt::format_bytes(media.size as u64)))
-                                onclick=(format!("insertMediaSyntax('{}'); document.getElementById('media-list').classList.remove('-active')", media.event_id))
+                                onclick=(format!("insertMediaSyntax('{}')", media.event_id))
                             {
                                 @if media.is_image {
                                     img
@@ -275,7 +275,7 @@ fn render_media_list(author: RostraId, target_selector: &str, media_items: &[Med
                         .call())
                     (fragment::button("o-mediaList__closeButton", "Close")
                         .button_type("button")
-                        .onclick("document.getElementById('media-list').classList.remove('-active')")
+                        .onclick("closeRostraDialog(document.getElementById('media-list'))")
                         .call())
                 }
                 input name="media_file"

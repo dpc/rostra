@@ -362,10 +362,10 @@ pub async fn post_post_preview_dialog(
     // AJAX path: return the dialog overlay fragment
     if is_ajax {
         return Ok(Maud(html! {
-            div id="post-preview-dialog" ."o-previewDialog -active" {
-                (fragment::dialog_escape_handler("post-preview-dialog"))
+            dialog id="post-preview-dialog" ."o-previewDialog -active"
+                aria-labelledby="post-preview-title" {
                 div ."o-previewDialog__content" {
-                    h4 ."o-previewDialog__title" { "Post Preview" }
+                    h4 id="post-preview-title" tabindex="-1" ."o-previewDialog__title" { "Post Preview" }
                     div ."o-previewDialog__post" {
                         (preview_content)
                     }
@@ -422,7 +422,7 @@ pub async fn post_post_preview_dialog(
                                 div ."o-previewDialog__actionButtons" {
                                     (fragment::button("o-previewDialog__cancelButton", "Back")
                                         .button_type("button")
-                                        .onclick("document.querySelector('.o-previewDialog').classList.remove('-active')")
+                                        .onclick("closeRostraDialog(document.getElementById('post-preview-dialog'))")
                                         .call())
 
                                     (fragment::button("o-previewDialog__submitButton", "Post").call())

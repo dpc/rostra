@@ -152,13 +152,14 @@ window.toggleEmojiPicker = function (pickerId, event) {
 };
 
 window.insertMediaSyntax = function (eventId, targetSelector) {
+  const mediaList = document.getElementById("media-list");
   // Fall back to the target stored on the media list dialog (set when it was opened)
   if (!targetSelector) {
-    const mediaList = document.getElementById("media-list");
     targetSelector = mediaList?.dataset.target;
   }
   const textarea = document.querySelector(targetSelector);
   const syntax = "![media](rostra-media:" + eventId + ")";
+  closeRostraDialog(mediaList);
 
   if (textarea) {
     const start = textarea.selectionStart;
@@ -174,12 +175,60 @@ window.insertMediaSyntax = function (eventId, targetSelector) {
 
     textarea.dispatchEvent(new Event("input", { bubbles: true }));
   }
-
-  const mediaList = document.querySelector(".o-mediaList");
-  if (mediaList) {
-    mediaList.style.display = "none";
-  }
 };
+
+const rostraDialogFocus = new WeakMap();
+let activeRostraDialog = null;
+
+window.closeRostraDialog = function (dialog) {
+  if (!dialog) return;
+  dialog.classList.remove("-active");
+  if (dialog.open) dialog.close();
+  if (activeRostraDialog === dialog) restoreRostraDialogFocus(dialog);
+};
+
+function restoreRostraDialogFocus(dialog) {
+  activeRostraDialog = null;
+  const trigger = rostraDialogFocus.get(dialog);
+  if (trigger?.isConnected && (document.activeElement === document.body ||
+      dialog.contains(document.activeElement))) {
+    trigger.focus();
+  }
+}
+
+function syncRostraDialogs() {
+  if (activeRostraDialog && (!activeRostraDialog.isConnected ||
+      !activeRostraDialog.classList.contains("-active"))) {
+    if (activeRostraDialog.open) activeRostraDialog.close();
+    restoreRostraDialogFocus(activeRostraDialog);
+  }
+
+  const dialog = document.querySelector(
+    "dialog.o-mediaList.-active, dialog.o-previewDialog.-active",
+  );
+  if (!dialog || dialog.open) return;
+  rostraDialogFocus.set(dialog, document.activeElement);
+  activeRostraDialog = dialog;
+  dialog.showModal();
+  dialog.querySelector("[tabindex='-1']")?.focus();
+}
+
+document.addEventListener("DOMContentLoaded", () => {
+  new MutationObserver(syncRostraDialogs).observe(document.body, {
+    childList: true,
+    subtree: true,
+    attributes: true,
+    attributeFilter: ["class"],
+  });
+  syncRostraDialogs();
+});
+
+document.addEventListener("cancel", (event) => {
+  if (event.target.matches("dialog.o-mediaList, dialog.o-previewDialog")) {
+    event.preventDefault();
+    closeRostraDialog(event.target);
+  }
+}, true);
 
 window.uploadMediaFile = function (inputEl) {
   const file = inputEl.files[0];
@@ -367,7 +416,7 @@ function initPersonaTagSelects() {
       updatePersonaTagSelectLabel(el);
       // Focus the toggle if it has tabindex (keyboard-navigable)
       const toggle = el.querySelector(".m-personaTagSelect__toggle[tabindex]");
-      if (toggle) toggle.focus();
+      if (toggle && !el.closest("dialog.o-previewDialog")) toggle.focus();
     });
 }
 
@@ -532,10 +581,12 @@ document.addEventListener(
   ];
 
   let dialog = null;
+  let previousFocus = null;
 
   function createDialog() {
-    dialog = document.createElement("div");
+    dialog = document.createElement("dialog");
     dialog.className = "o-shortcutsDialog";
+    dialog.setAttribute("aria-labelledby", "shortcuts-dialog-title");
 
     const rows = shortcuts
       .map(
@@ -548,36 +599,47 @@ document.addEventListener(
       .join("");
 
     dialog.innerHTML =
-      `<div class="o-shortcutsDialog__backdrop"></div>` +
-      `<div class="o-shortcutsDialog__content" role="dialog" aria-label="Keyboard shortcuts">` +
-      `<h4 class="o-shortcutsDialog__title">Keyboard Shortcuts</h4>` +
+      `<div class="o-shortcutsDialog__content">` +
+      `<h4 id="shortcuts-dialog-title" class="o-shortcutsDialog__title" tabindex="-1">Keyboard Shortcuts</h4>` +
       rows +
+      `<button type="button" class="o-shortcutsDialog__closeButton">Close</button>` +
       `</div>`;
 
-    dialog.querySelector(".o-shortcutsDialog__backdrop").addEventListener(
-      "click",
-      () => {
-        dialog.classList.remove("-active");
-      },
-    );
+    dialog.querySelector(".o-shortcutsDialog__closeButton").addEventListener("click", close);
+    dialog.addEventListener("close", () => {
+      dialog.classList.remove("-active");
+      if (previousFocus?.isConnected) previousFocus.focus();
+    });
 
     document.body.appendChild(dialog);
   }
 
+  function close() {
+    if (dialog?.open) dialog.close();
+  }
+
   function toggle() {
     if (!dialog) createDialog();
-    dialog.classList.toggle("-active");
+    if (dialog.open) {
+      close();
+    } else {
+      previousFocus = document.activeElement;
+      dialog.classList.add("-active");
+      dialog.showModal();
+      dialog.querySelector(".o-shortcutsDialog__title").focus();
+    }
   }
 
   document.addEventListener("keydown", (e) => {
     // Close on Escape regardless of focus
-    if (e.key === "Escape" && dialog && dialog.classList.contains("-active")) {
+    if (e.key === "Escape" && dialog?.open) {
       e.preventDefault();
-      dialog.classList.remove("-active");
+      close();
       return;
     }
 
-    if (e.key === "?" && !isTextInputFocused()) {
+    if (e.key === "?" && !isTextInputFocused() &&
+        !document.querySelector("dialog.o-mediaList[open], dialog.o-previewDialog[open]")) {
       e.preventDefault();
       toggle();
     }
@@ -736,7 +798,7 @@ document.addEventListener("keydown", (e) => {
 
   document.addEventListener("keydown", (e) => {
     if (isTextInputFocused()) return;
-    if (document.querySelector(".o-previewDialog.-active")) return;
+    if (document.querySelector("dialog.o-previewDialog[open], dialog.o-mediaList[open], dialog.o-shortcutsDialog[open]")) return;
 
     // Page-global shortcuts (work on any page)
     if (e.key >= "1" && e.key <= "9") {
