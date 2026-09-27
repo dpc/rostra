@@ -48,6 +48,12 @@ fn media_target_remains_data_only() {
         assert_eq!(media_list.value().attr("data-target"), Some(target));
 
         let item = document.select(&item_selector).next().expect("media item");
+        assert_eq!(item.value().name(), "button");
+        assert_eq!(item.value().attr("type"), Some("button"));
+        assert_eq!(
+            item.value().attr("aria-label"),
+            Some("Attach application/octet-stream (3 B)")
+        );
         let handler = item.value().attr("onclick").expect("media item handler");
         assert_eq!(handler, expected_handler);
         assert!(

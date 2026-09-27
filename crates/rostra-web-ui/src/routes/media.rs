@@ -224,7 +224,8 @@ fn render_media_list(author: RostraId, target_selector: &str, media_items: &[Med
                         }
                     } @else {
                         @for media in media_items {
-                            div ."o-mediaList__item"
+                            button type="button" ."o-mediaList__item"
+                                aria-label=(format!("Attach {} ({})", media.mime, rostra_util_fmt::format_bytes(media.size as u64)))
                                 onclick=(format!("insertMediaSyntax('{}'); document.getElementById('media-list').classList.remove('-active')", media.event_id))
                             {
                                 @if media.is_image {
@@ -232,14 +233,13 @@ fn render_media_list(author: RostraId, target_selector: &str, media_items: &[Med
                                         src=(media_url(author, media.event_id))
                                         ."o-mediaList__thumbnail"
                                         loading="lazy"
+                                        alt=""
                                         {}
                                 } @else if media.is_video {
                                     video
                                         src=(media_url(author, media.event_id))
                                         ."o-mediaList__videoThumbnail"
-                                        autoplay
                                         muted
-                                        loop
                                         playsinline
                                         {}
                                 } @else {

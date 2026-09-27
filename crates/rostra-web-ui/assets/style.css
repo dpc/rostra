@@ -2019,6 +2019,11 @@ emoji-picker {
   outline: none;
 }
 
+.m-personaTagSelect__addInput:focus-visible {
+  outline: 2px solid var(--color-link);
+  outline-offset: -2px;
+}
+
 /* TOGGLE SWITCH CHECKBOXES */
 .switch {
   position: relative;
@@ -2063,6 +2068,11 @@ input:checked+.slider {
 
 input:focus+.slider {
   box-shadow: 0 0 1px #2196F3;
+}
+
+.switch input:focus-visible+.slider {
+  outline: 2px solid var(--color-link);
+  outline-offset: 3px;
 }
 
 input:checked+.slider:before {
@@ -2122,12 +2132,20 @@ input:checked+.slider:before {
 }
 
 .o-mediaList__item {
+  border: 1px solid var(--color-border);
+  padding: 0;
+  background: var(--color-bg-default);
   cursor: pointer;
   aspect-ratio: 1;
   min-height: 120px;
   overflow: hidden;
   border-radius: var(--border-radius-std);
   transition: opacity 0.2s;
+}
+
+.o-mediaList__item:focus-visible {
+  outline: 3px solid var(--color-link);
+  outline-offset: 2px;
 }
 
 .o-mediaList__item:hover {
@@ -3567,6 +3585,11 @@ h4.o-settingsContent__sectionHeader {
   border-color: var(--color-link);
 }
 
+.o-shoutbox__input:focus-visible {
+  outline: 2px solid var(--color-link);
+  outline-offset: 2px;
+}
+
 .o-shoutbox__preview {
   opacity: 0.5;
 }
@@ -3980,4 +4003,18 @@ body.-keyboard-nav * {
 
 .o-shoutbox__submitButtonIcon {
   background: url('/assets/icons/arrow-right.svg') center/contain no-repeat;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .o-unlockScreen__content,
+  .o-welcomePage__content,
+  .o-notification,
+  .o-shoutbox__post.-new,
+  .o-shortcutsDialog__content,
+  .o-mediaList__item,
+  .slider,
+  .slider:before {
+    animation: none;
+    transition: none;
+  }
 }
