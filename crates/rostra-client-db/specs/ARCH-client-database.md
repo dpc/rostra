@@ -78,7 +78,7 @@ must consume the complete stored byte slice; a trailing byte is corruption, not
 another representation of the same key or value. Range iteration validates keys
 before yielding entries, even when the caller does not otherwise inspect a key.
 
-Notifications are registered on `WriteTransactionCtx` and run only after a
+Projection notifications are registered on `WriteTransactionCtx` and run only after a
 successful commit. A per-`Database` write mutex spans transaction creation,
 durable commit, and all post-commit hooks. Its primary purpose is to preserve
 redb writer order through hook publication order: without this full span, hooks
@@ -93,6 +93,12 @@ creates an independent change cursor over the same retained state. Broadcast or
 deduplicating channels remain lossy or incremental signals for new content and
 work queues. The database remains authoritative; these watch payloads are
 retained current-state projections.
+
+The separate `dm_progress` watch is a content-free invalidation signal published
+after a serviced background trial batch returns from its committed write,
+independent of decryption outcome. It carries no retained state snapshot and
+does not promise transaction-hook publication order. Coalesced wakeups tell
+trusted consumers to re-read durable, independently authorized views.
 
 Materialization cursors identify the next sequence a consumer is waiting for.
 They belong to one database lineage and have no cross-lineage meaning. Consumers

@@ -28,6 +28,63 @@ pub struct LocalInstallation {
 }
 
 impl Database {
+    /// Subscribe to coalesced, content-free background trial-progress wakeups.
+    /// These reveal neither the outcome nor the sender/recipient of a trial.
+    pub fn dm_progress_subscribe(&self) -> tokio::sync::watch::Receiver<()> {
+        self.dm_progress_tx.subscribe()
+    }
+
+    /// Snapshot the latest local arrival sequence for one peer, independently
+    /// of signed timestamps and session read markers.
+    pub async fn dm_latest_incoming_sequence(&self, peer: RostraId) -> DbResult<u64> {
+        self.read_with(|tx| {
+            tx.open_table(&crate::events_dm_incoming_by_peer::TABLE)?
+                .range((peer, 0)..=(peer, u64::MAX))?
+                .next_back()
+                .map(|row| {
+                    let (key, _) = row?;
+                    Ok(key.value_try()?.1)
+                })
+                .transpose()
+                .map(|sequence| sequence.unwrap_or(0))
+        })
+        .await
+    }
+
+    /// Read a bounded oldest-arrival-first page after a local incoming cursor.
+    /// Trusted callers must enforce full unlocked-session access.
+    pub async fn dm_incoming_after(
+        &self,
+        peer: RostraId,
+        after: u64,
+        limit: usize,
+    ) -> DbResult<Vec<SequencedHistoryEntry>> {
+        self.read_with(|tx| {
+            let index = tx.open_table(&crate::events_dm_incoming_by_peer::TABLE)?;
+            let history = tx.open_table(&crate::events_dm_history::TABLE)?;
+            let mut entries = Vec::new();
+            for row in index
+                .range((
+                    Bound::Excluded((peer, after)),
+                    Bound::Included((peer, u64::MAX)),
+                ))?
+                .take(limit.min(100))
+            {
+                let (key, value) = row?;
+                let entry = history
+                    .get(&value.value_try()?)?
+                    .ok_or(rostra_dm::Error::Invalid)
+                    .context(DirectMessageSnafu)?;
+                entries.push(SequencedHistoryEntry {
+                    entry: entry.value_try()?,
+                    incoming_sequence: Some(key.value_try()?.1),
+                });
+            }
+            Ok(entries)
+        })
+        .await
+    }
+
     /// Read a bounded newest-first history page with local incoming sequences.
     pub async fn dm_history_with_sequences(
         &self,

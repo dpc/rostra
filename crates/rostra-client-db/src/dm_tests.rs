@@ -344,6 +344,53 @@ async fn dm_read_markers_merge_concurrently_beyond_sparse_range_limits() -> anyh
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn dm_live_pages_follow_arrivals_not_timestamps_or_read_markers() -> anyhow::Result<()> {
+    let owner = RostraIdSecretKey::generate().id();
+    let peer = RostraIdSecretKey::generate().id();
+    let other = RostraIdSecretKey::generate().id();
+    let db = Database::new_in_memory(owner).await?;
+    assert_eq!(db.dm_latest_incoming_sequence(peer).await?, 0);
+    db.write_with(|tx| {
+        for n in 0..205 {
+            let sender = if n == 1 { other } else { peer };
+            let body = rostra_dm::MessageBody::new(sender, owner, format!("arrival {n}")).unwrap();
+            Database::dm_store_history_tx(tx, &body, ShortEventId::random(), 1000 - n)?;
+        }
+        let outgoing = rostra_dm::MessageBody::new(owner, peer, "outgoing".to_owned()).unwrap();
+        Database::dm_store_history_tx(tx, &outgoing, ShortEventId::random(), 2000)?;
+        Ok(())
+    })
+    .await?;
+    assert_eq!(db.dm_latest_incoming_sequence(peer).await?, 205);
+    assert_eq!(db.dm_latest_incoming_sequence(other).await?, 2);
+    let mut cursor = 0;
+    let mut texts = Vec::new();
+    for expected in [100, 100, 4, 0] {
+        let entries = db.dm_incoming_after(peer, cursor, usize::MAX).await?;
+        assert_eq!(entries.len(), expected);
+        let sequences = entries
+            .iter()
+            .map(|entry| entry.incoming_sequence.unwrap())
+            .collect::<Vec<_>>();
+        db.dm_mark_read([1; 16], &sequences).await?;
+        // Another tab's read markers must not suppress this cursor's page.
+        assert_eq!(
+            db.dm_incoming_after(peer, cursor, usize::MAX).await?.len(),
+            expected
+        );
+        if let Some(sequence) = sequences.last() {
+            cursor = *sequence;
+        }
+        texts.extend(entries.into_iter().map(|entry| entry.entry.text));
+    }
+    assert_eq!(texts.len(), 204);
+    assert_eq!(texts.first().unwrap(), "arrival 0");
+    assert_eq!(texts.last().unwrap(), "arrival 204");
+    assert!(db.dm_incoming_after(peer, u64::MAX, 100).await?.is_empty());
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn dm_pending_notification_follows_commit_and_retains_early_wakeup() -> anyhow::Result<()> {
     let recipient = RostraIdSecretKey::generate().id();
     let sender = RostraIdSecretKey::generate();
@@ -395,7 +442,10 @@ async fn dm_receive_resumes_all_live_keys_and_retains_history_after_erasure() ->
     )?;
     let event = dm_event(sender, frame);
     db.try_process_event_with_content(&event).await?;
+    let mut progress = db.dm_progress_subscribe();
     assert!(db.dm_process_pending(1000).await?);
+    assert!(progress.has_changed()?);
+    progress.borrow_and_update();
     db.read_with(|tx| {
         assert!(
             tx.open_table(&crate::events_dm_history::TABLE)?
@@ -411,7 +461,16 @@ async fn dm_receive_resumes_all_live_keys_and_retains_history_after_erasure() ->
     })
     .await?;
     assert!(db.dm_process_pending(1000).await?);
+    assert!(
+        progress.has_changed()?,
+        "success and misses both notify progress"
+    );
+    progress.borrow_and_update();
     assert!(!db.dm_process_pending(1000).await?);
+    assert!(
+        !progress.has_changed()?,
+        "idle work must not cause a refresh loop"
+    );
     db.dm_process_pending(target.decrypt_until).await?;
     db.write_with(|tx| Database::prepare_total_migration(tx, 32))
         .await?;

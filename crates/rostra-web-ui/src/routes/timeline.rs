@@ -410,6 +410,21 @@ impl UiState {
         let self_id = client_ref.rostra_id();
         let mut new_posts = client_ref.new_posts_subscribe();
         let mut new_shoutbox = client_ref.new_shoutbox_subscribe();
+        let mut dm_progress = client_ref.db().dm_progress_subscribe();
+
+        // Register before the initial catch-up wakeup so arrivals during page
+        // rendering or websocket setup cannot fall between the two.
+        let message_wakeup = html! { div x-init="$dispatch('messages:changed')" {} };
+        if self
+            .id_secret(user.session_token())
+            .is_some_and(|secret| client_ref.require_dm_authority(secret).is_ok())
+            && ws
+                .send(message_wakeup.clone().into_string().into())
+                .await
+                .is_err()
+        {
+            return Ok(());
+        }
 
         let followees: HashMap<RostraId, PersonasTagsSelector> = client_ref
             .db()
@@ -427,7 +442,12 @@ impl UiState {
         message_badge_refresh.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
 
         loop {
+            let mut messages_changed = false;
             tokio::select! {
+                result = dm_progress.changed() => {
+                    if result.is_err() { break; }
+                    messages_changed = true;
+                }
                 result = new_posts.recv() => {
                     let (event_content, social_post) = match result {
                         Ok(event_content) => event_content,
@@ -502,6 +522,18 @@ impl UiState {
                 _ = message_badge_refresh.tick() => {
                     messages_count = super::messages::unread_count(self, user).await as u64;
                 }
+            }
+
+            if messages_changed
+                && self
+                    .id_secret(user.session_token())
+                    .is_some_and(|secret| client_ref.require_dm_authority(secret).is_ok())
+                && ws
+                    .send(message_wakeup.clone().into_string().into())
+                    .await
+                    .is_err()
+            {
+                break;
             }
 
             let badge_html = self

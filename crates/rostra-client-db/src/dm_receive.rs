@@ -159,10 +159,13 @@ impl Database {
     /// Perform one bounded background-only trial batch and commit its progress.
     ///
     /// Never invoke this on externally observable request paths. No decrypted
-    /// content triggers network fetches, callbacks, or receipts. Expired live
-    /// secrets are durably removed in a separate preceding transaction. All
-    /// identities and trial plaintext stay inside the synchronous transaction
-    /// closure and drop before this operation yields.
+    /// content triggers network fetches, callbacks, or receipts to peers.
+    /// Local trusted UI subscribers receive content-free progress wakeups for
+    /// every serviced batch, independently of its decryption outcome. Expired
+    /// live secrets are durably removed in a separate preceding
+    /// transaction. All identities and trial plaintext stay inside the
+    /// synchronous transaction closure and drop before this operation
+    /// yields.
     ///
     /// Returns whether a queued row was serviced, not its decryption result.
     pub async fn dm_process_pending_now(&self) -> DbResult<bool> {
@@ -181,95 +184,102 @@ impl Database {
     ) -> DbResult<bool> {
         self.write_with(|tx| Self::dm_expire_keys_tx(tx, clock()))
             .await?;
-        self.write_with(|tx| {
-            let now = clock();
-            // A lock wait or clock jump after the purge commit can expire more
-            // keys. Yield to another durable purge rather than trying them or
-            // combining deletion and decryption in one transaction.
-            for row in tx.open_table(&crate::ids_dm_epochs::TABLE)?.range(..)? {
-                if row?.1.value_try()?.public().decrypt_until <= now {
+        let worked = self
+            .write_with(|tx| {
+                let now = clock();
+                // A lock wait or clock jump after the purge commit can expire more
+                // keys. Yield to another durable purge rather than trying them or
+                // combining deletion and decryption in one transaction.
+                for row in tx.open_table(&crate::ids_dm_epochs::TABLE)?.range(..)? {
+                    if row?.1.value_try()?.public().decrypt_until <= now {
+                        return Ok(true);
+                    }
+                }
+                let mut pending = tx.open_table(&crate::events_dm_pending::TABLE)?;
+                let first = pending
+                    .first()?
+                    .map(|(key, value)| {
+                        Ok::<_, crate::DbError>((key.value_try()?, value.value_try()?))
+                    })
+                    .transpose()?;
+                let Some((event_id, cursor)) = first else {
+                    return Ok(false);
+                };
+                let event = tx
+                    .open_table(&crate::events::TABLE)?
+                    .get(&event_id)?
+                    .map(|row| row.value_try())
+                    .transpose()?;
+                let Some(event) = event else {
+                    pending.remove(&event_id)?;
+                    return Ok(true);
+                };
+                if event.kind() != EventKind::DIRECT_MESSAGE
+                    || event.aux_key() != EventAuxKey::ZERO
+                    || event.signed.is_singleton()
+                    || event.content_len() as usize > rostra_dm::MAX_FRAME_BYTES
+                    || tx
+                        .open_table(&crate::events_content_state::TABLE)?
+                        .get(&event_id)?
+                        .is_some()
+                {
+                    pending.remove(&event_id)?;
                     return Ok(true);
                 }
-            }
-            let mut pending = tx.open_table(&crate::events_dm_pending::TABLE)?;
-            let first = pending
-                .first()?
-                .map(|(key, value)| Ok::<_, crate::DbError>((key.value_try()?, value.value_try()?)))
-                .transpose()?;
-            let Some((event_id, cursor)) = first else {
-                return Ok(false);
-            };
-            let event = tx
-                .open_table(&crate::events::TABLE)?
-                .get(&event_id)?
-                .map(|row| row.value_try())
-                .transpose()?;
-            let Some(event) = event else {
-                pending.remove(&event_id)?;
-                return Ok(true);
-            };
-            if event.kind() != EventKind::DIRECT_MESSAGE
-                || event.aux_key() != EventAuxKey::ZERO
-                || event.signed.is_singleton()
-                || event.content_len() as usize > rostra_dm::MAX_FRAME_BYTES
-                || tx
-                    .open_table(&crate::events_content_state::TABLE)?
-                    .get(&event_id)?
-                    .is_some()
-            {
-                pending.remove(&event_id)?;
-                return Ok(true);
-            }
-            // Reauthenticate the stored envelope at the crypto boundary. No
-            // content lookup or trial can bypass the admitted event's lifecycle.
-            if VerifiedEvent::verify_signed(event.author(), event.signed).is_err() {
-                pending.remove(&event_id)?;
-                return Ok(true);
-            }
-            let content = tx
-                .open_table(&crate::content_store::TABLE)?
-                .get(&event.content_hash())?
-                .map(|row| row.value_try())
-                .transpose()?;
-            let Some(content) = content else {
-                pending.remove(&event_id)?;
-                return Ok(true);
-            };
-            let content = content.0.into_owned();
-            if content.len() != event.content_len() as usize
-                || content.compute_content_hash() != event.content_hash()
-            {
-                return Err(rostra_dm::Error::Invalid).context(DirectMessageSnafu);
-            }
-            let epochs = tx.open_table(&crate::ids_dm_epochs::TABLE)?;
-            let mut identities = Vec::with_capacity(MAX_TRIAL_KEYS);
-            let mut last = cursor;
-            let start = cursor.map_or(Bound::Unbounded, Bound::Excluded);
-            let mut remaining = epochs.range((start, Bound::Unbounded))?;
-            for row in remaining.by_ref().take(MAX_TRIAL_KEYS) {
-                let (key, value) = row?;
-                let epoch = value.value_try()?;
-                identities.push(epoch.identity(now).context(DirectMessageSnafu)?);
-                last = Some(key.value_try()?);
-            }
-            let exhausted = remaining.next().transpose()?.is_none();
-            if !identities.is_empty()
-                && let Ok(body) = rostra_dm::decrypt(
-                    content.as_slice(),
-                    &identities,
-                    event.author(),
-                    self.self_id,
-                )
-            {
-                Self::dm_store_history_tx(tx, &body, event_id, event.timestamp().as_u64())?;
-                pending.remove(&event_id)?;
-            } else if exhausted {
-                pending.remove(&event_id)?;
-            } else {
-                pending.insert(&event_id, &last)?;
-            }
-            Ok(true)
-        })
-        .await
+                // Reauthenticate the stored envelope at the crypto boundary. No
+                // content lookup or trial can bypass the admitted event's lifecycle.
+                if VerifiedEvent::verify_signed(event.author(), event.signed).is_err() {
+                    pending.remove(&event_id)?;
+                    return Ok(true);
+                }
+                let content = tx
+                    .open_table(&crate::content_store::TABLE)?
+                    .get(&event.content_hash())?
+                    .map(|row| row.value_try())
+                    .transpose()?;
+                let Some(content) = content else {
+                    pending.remove(&event_id)?;
+                    return Ok(true);
+                };
+                let content = content.0.into_owned();
+                if content.len() != event.content_len() as usize
+                    || content.compute_content_hash() != event.content_hash()
+                {
+                    return Err(rostra_dm::Error::Invalid).context(DirectMessageSnafu);
+                }
+                let epochs = tx.open_table(&crate::ids_dm_epochs::TABLE)?;
+                let mut identities = Vec::with_capacity(MAX_TRIAL_KEYS);
+                let mut last = cursor;
+                let start = cursor.map_or(Bound::Unbounded, Bound::Excluded);
+                let mut remaining = epochs.range((start, Bound::Unbounded))?;
+                for row in remaining.by_ref().take(MAX_TRIAL_KEYS) {
+                    let (key, value) = row?;
+                    let epoch = value.value_try()?;
+                    identities.push(epoch.identity(now).context(DirectMessageSnafu)?);
+                    last = Some(key.value_try()?);
+                }
+                let exhausted = remaining.next().transpose()?.is_none();
+                if !identities.is_empty()
+                    && let Ok(body) = rostra_dm::decrypt(
+                        content.as_slice(),
+                        &identities,
+                        event.author(),
+                        self.self_id,
+                    )
+                {
+                    Self::dm_store_history_tx(tx, &body, event_id, event.timestamp().as_u64())?;
+                    pending.remove(&event_id)?;
+                } else if exhausted {
+                    pending.remove(&event_id)?;
+                } else {
+                    pending.insert(&event_id, &last)?;
+                }
+                Ok(true)
+            })
+            .await?;
+        if worked {
+            self.dm_progress_tx.send_replace(());
+        }
+        Ok(worked)
     }
 }

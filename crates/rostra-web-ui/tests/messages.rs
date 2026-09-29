@@ -6,6 +6,7 @@ mod common;
 use std::time::Duration;
 
 use common::{TestServer, UiDriver};
+use futures_util::StreamExt as _;
 use reqwest::{Response, StatusCode, header};
 use rostra_core::event::{VerifiedEvent, VerifiedEventContent};
 use rostra_core::id::{RostraId, ToShort as _};
@@ -1284,7 +1285,10 @@ async fn plain_http_send_receive_retirement_and_reenrollment() {
         .select(&Selector::parse("#direct-message-history").unwrap())
         .next()
         .expect("older-history row fragment");
-    assert_eq!(history.value().attr("x-merge"), Some("prepend"));
+    assert_eq!(
+        history.value().attr("x-merge:dynamic"),
+        Some("loadingNew ? 'append' : 'prepend'")
+    );
     assert_eq!(
         history
             .select(&Selector::parse(".m-directMessages__message").unwrap())
@@ -1403,6 +1407,152 @@ async fn plain_http_send_receive_retirement_and_reenrollment() {
                 .contains("both cursor fields")
         );
     }
+    drop(alice_client);
+    drop(bob_client);
+    server.shutdown().await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn live_conversation_fragments_append_incoming_and_keep_session_authority() {
+    let server = TestServer::start().await;
+    let alice = server.driver();
+    let bob = server.driver();
+    let (alice_id, _) = alice.login_new_identity().await;
+    let (bob_id, bob_secret) = bob.login_new_identity().await;
+    replicate_device(&server, alice_id, bob_id).await;
+    replicate_device(&server, bob_id, alice_id).await;
+    let path = format!("/messages/{}", bob_id.to_short());
+    let initial = alice.get(&path).await;
+    private_headers(&initial);
+    let initial = Html::parse_document(&initial.text().await.unwrap());
+    assert_eq!(
+        initial
+            .select(&Selector::parse("[x-data=\"websocket('/updates')\"]").unwrap())
+            .count(),
+        1,
+        "the open conversation owns one existing UI update connection"
+    );
+    let cursor_selector = Selector::parse("#direct-message-live-cursor").unwrap();
+    let initial_cursor = initial
+        .select(&cursor_selector)
+        .next()
+        .unwrap()
+        .value()
+        .attr("data-after-sequence")
+        .unwrap();
+    assert_eq!(initial_cursor, "0");
+    let mut updates = alice.updates_websocket().await;
+    let initial_wakeup = tokio::time::timeout(Duration::from_secs(10), updates.next())
+        .await
+        .unwrap()
+        .unwrap()
+        .unwrap()
+        .into_text()
+        .unwrap();
+    assert!(initial_wakeup.contains("$dispatch('messages:changed')"));
+    let bob_client = server.client(bob_id).await;
+    let alice_client = server.client(alice_id).await;
+    for text in ["first incoming", "second incoming"] {
+        let event = bob_client
+            .send_direct_message(bob_secret, alice_id, text.to_owned())
+            .await
+            .unwrap();
+        replicate_event(&server, bob_id, alice_id, event.event_id.to_short()).await;
+    }
+    tokio::time::timeout(Duration::from_secs(10), async {
+        while alice_client
+            .db()
+            .dm_latest_incoming_sequence(bob_id)
+            .await
+            .unwrap()
+            != 2
+        {
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .unwrap();
+    tokio::time::timeout(Duration::from_secs(10), async {
+        loop {
+            let frame = updates.next().await.unwrap().unwrap().into_text().unwrap();
+            assert!(
+                !frame.contains("incoming"),
+                "websocket wakeups carry no plaintext"
+            );
+            if frame.contains("$dispatch('messages:changed')") {
+                break;
+            }
+        }
+    })
+    .await
+    .unwrap();
+    let live_url = format!("{path}?after_sequence={initial_cursor}");
+    let response = alice.ajax_get(&live_url).await;
+    assert_eq!(response.status(), StatusCode::OK);
+    private_headers(&response);
+    let fragment = Html::parse_fragment(&response.text().await.unwrap());
+    let messages = Selector::parse(".m-directMessages__message").unwrap();
+    assert_eq!(fragment.select(&messages).count(), 2);
+    assert_eq!(
+        fragment
+            .select(&cursor_selector)
+            .next()
+            .unwrap()
+            .value()
+            .attr("data-after-sequence"),
+        Some("2")
+    );
+    assert!(
+        fragment
+            .select(&Selector::parse("form, textarea, #direct-message-history-pagination").unwrap())
+            .next()
+            .is_none()
+    );
+    let response = alice.ajax_get(&live_url).await;
+    private_headers(&response);
+    let repeated = Html::parse_fragment(&response.text().await.unwrap());
+    assert_eq!(
+        repeated.select(&messages).count(),
+        2,
+        "read markers do not replace the arrival cursor"
+    );
+    let response = alice.ajax_get(&format!("{path}?after_sequence=2")).await;
+    private_headers(&response);
+    let empty = Html::parse_fragment(&response.text().await.unwrap());
+    assert_eq!(empty.select(&messages).count(), 0);
+    let response = alice.get(&live_url).await;
+    private_headers(&response);
+    let ordinary = Html::parse_document(&response.text().await.unwrap());
+    assert!(
+        ordinary
+            .select(&Selector::parse("form[method=post] textarea").unwrap())
+            .next()
+            .is_some()
+    );
+    let observer = server.driver();
+    observer.login_readonly(alice_id).await;
+    let mut observer_updates = observer.updates_websocket().await;
+    let frame = tokio::time::timeout(Duration::from_secs(10), observer_updates.next())
+        .await
+        .unwrap()
+        .unwrap()
+        .unwrap()
+        .into_text()
+        .unwrap();
+    assert!(
+        !frame.contains("messages:changed"),
+        "read-only sessions do not receive DM wakeups"
+    );
+    let response = observer.ajax_get(&live_url).await;
+    assert_eq!(response.status(), StatusCode::FORBIDDEN);
+    private_headers(&response);
+    assert!(!response.text().await.unwrap().contains("first incoming"));
+    alice.post_form("/unlock/logout", &[]).await;
+    let response = alice.ajax_get(&live_url).await;
+    assert_eq!(response.status(), StatusCode::SEE_OTHER);
+    private_headers(&response);
+    drop(updates);
+    drop(observer_updates);
     drop(alice_client);
     drop(bob_client);
     server.shutdown().await;

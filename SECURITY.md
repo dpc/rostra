@@ -51,6 +51,24 @@ remain user-controlled navigation targets. Local plaintext, including
 browser-persisted drafts, persists independently of ciphertext and epoch-key
 deletion; this is not endpoint or forensic-storage confidentiality.
 
+Open conversations refresh through the existing authenticated UI websocket and
+ordinary authorized HTML requests, not a new periodic polling loop. The local
+background DM worker publishes coalesced, content-free progress wakeups after
+every committed serviced trial batch, whether it succeeds, misses, or discards
+an invalid queued item. These wakeups contain no identities, plaintext,
+arrival sequences, or decryption results, and never reach the p2p transport.
+The websocket rechecks the exact session's in-memory secret and full-client
+authority before forwarding a wakeup. Each resulting history request enforces
+the usual private-message authorization and response protections independently.
+Arrival cursors are independent of signed timestamps and session read markers;
+bounded pages catch up without losing delayed messages or arrivals another tab
+already read. Hidden conversations defer work until visible, overlapping
+notifications coalesce, and navigation stops further requests. A lost websocket
+or failed request can leave the view stale until a new wakeup, visibility change,
+or ordinary reload; live updates are an enhancement, not delivery receipts.
+Changes to notification payloads, their destination, or their relationship to
+decryption outcomes must recheck this boundary and the receive-security proof.
+
 The named script, CSP, and browser-storage details describe the current
 implementation, not immutable stakeholder choices. Changes may use other
 mechanisms only while preserving the governing requirement and the

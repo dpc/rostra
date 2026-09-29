@@ -172,6 +172,28 @@ pub struct UiDriver {
 }
 
 impl UiDriver {
+    /// Upgrade the current cookie-authenticated session to the UI update
+    /// stream.
+    pub async fn updates_websocket(&self) -> tokio_tungstenite::WebSocketStream<reqwest::Upgraded> {
+        let response = self
+            .client
+            .get(self.url("/updates"))
+            .header("Connection", "Upgrade")
+            .header("Upgrade", "websocket")
+            .header("Sec-WebSocket-Version", "13")
+            .header("Sec-WebSocket-Key", "dGhlIHNhbXBsZSBub25jZQ==")
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(response.status(), reqwest::StatusCode::SWITCHING_PROTOCOLS);
+        tokio_tungstenite::WebSocketStream::from_raw_socket(
+            response.upgrade().await.unwrap(),
+            tokio_tungstenite::tungstenite::protocol::Role::Client,
+            None,
+        )
+        .await
+    }
+
     fn new(base_url: String) -> Self {
         let client = reqwest::Client::builder()
             .cookie_store(true)

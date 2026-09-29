@@ -75,6 +75,7 @@ mime = "0.3.17"
 bytes = "*"
 listenfd = "1.0.2"
 futures-util = "*"
+tokio-tungstenite = { version = "0.29", default-features = false }
 iroh = { version = "1.1.0", default-features = false, features = ["tls-ring"] }
 iroh-base = { version = "1.1.0", default-features = false }
 iroh-io = "0.6.2"

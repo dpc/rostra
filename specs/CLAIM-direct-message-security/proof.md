@@ -153,7 +153,13 @@ the sending installation.
    serialized successful full activation starts one owned worker. Tests cover
    pending work before activation, repeated/concurrent unlock, non-full clients,
    failed activation, idle wakeup, and joined shutdown. This is not a
-   constant-time whole-host or traffic-analysis guarantee.
+   constant-time whole-host or traffic-analysis guarantee. Local trusted UI
+   subscribers receive coalesced content-free wakeups after every serviced
+   trial batch, independent of decryption outcome, including misses and invalid
+   queue entries. These carry no result or identity to peers; the existing
+   authenticated UI websocket rechecks exact-session full authority before
+   forwarding them, and history reads independently enforce private HTTP access.
+   Tests cover wakeups on both failed and successful trials and silence at idle.
 
 8. **`code`, `test` — HTTP authorization belongs to the requesting session.**
    `MessageSession` retrieves the current session token, looks up only that

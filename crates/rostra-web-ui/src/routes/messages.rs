@@ -125,7 +125,9 @@ fn page(conversation_panel: Markup, content: Markup, thread_open: bool, unread: 
                 }
             }
             main ."o-mainBar" {
-              div ."o-mainBarTimeline m-directMessages" {
+              div ."o-mainBarTimeline m-directMessages"
+                  x-data=[thread_open.then_some("websocket('/updates')")]
+              {
                     (fragment::timeline_tab_bar(
                         Some("direct-message-tabs"),
                         None,
@@ -464,6 +466,9 @@ pub(super) struct ThreadQuery {
     before_time: Option<u64>,
     /// Event-ID tie breaker.
     before_event: Option<ShortEventId>,
+    /// Exclusive local incoming-arrival cursor for progressively enhanced live
+    /// updates; ordinary requests still return a complete latest-history page.
+    after_sequence: Option<u64>,
     /// Browser convenience applied only when entering the latest conversation
     /// view.
     #[serde(skip)]
@@ -504,6 +509,16 @@ pub(super) async fn get_thread(
             ));
         }
     };
+    if before.is_some() && query.after_sequence.is_some() {
+        return Err(error_page(
+            StatusCode::BAD_REQUEST,
+            "Conversation history and live-update cursors cannot be combined.",
+        ));
+    }
+    let history_fragment = is_ajax && (before.is_some() || query.after_sequence.is_some());
+    if !is_ajax {
+        query.after_sequence = None;
+    }
     query.focus_composer_on_open = query.before_time.is_none() && query.before_event.is_none();
     render_thread(
         &state,
@@ -512,7 +527,7 @@ pub(super) async fn get_thread(
         ThreadRender {
             query,
             before,
-            history_fragment: is_ajax && before.is_some(),
+            history_fragment,
             draft: "",
             error: None,
             sent_draft_token: None,
@@ -537,10 +552,29 @@ async fn render_thread(
     } = render;
     let client = session.client().ok_or_else(access_error)?;
     let db = client.db();
-    let entries = db
-        .dm_history_with_sequences(peer, before, THREAD_PAGE_SIZE + 1)
-        .await
-        .map_err(storage_error)?;
+    // Snapshot before reading history so an arrival during rendering is also
+    // returned by the next update, rather than skipped by its initial cursor.
+    let mut after_sequence = match query.after_sequence {
+        Some(sequence) => sequence,
+        None => db
+            .dm_latest_incoming_sequence(peer)
+            .await
+            .map_err(storage_error)?,
+    };
+    let entries = if query.after_sequence.is_some() {
+        db.dm_incoming_after(peer, after_sequence, THREAD_PAGE_SIZE)
+            .await
+    } else {
+        db.dm_history_with_sequences(peer, before, THREAD_PAGE_SIZE + 1)
+            .await
+    }
+    .map_err(storage_error)?;
+    if query.after_sequence.is_some() {
+        after_sequence = entries
+            .last()
+            .and_then(|entry| entry.incoming_sequence)
+            .unwrap_or(after_sequence);
+    }
     let has_more = entries.len() > THREAD_PAGE_SIZE;
     let mut entries = entries;
     entries.truncate(THREAD_PAGE_SIZE);
@@ -582,7 +616,12 @@ async fn render_thread(
             .map_err(storage_error)?;
     }
     let mut rendered_entries = Vec::with_capacity(entries.len());
-    for entry in entries.iter().rev() {
+    let ordered_entries = if query.after_sequence.is_some() {
+        entries.iter().collect::<Vec<_>>()
+    } else {
+        entries.iter().rev().collect::<Vec<_>>()
+    };
+    for entry in ordered_entries {
         rendered_entries.push((
             entry,
             state
@@ -591,7 +630,8 @@ async fn render_thread(
         ));
     }
     let history = html! {
-        div id="direct-message-history-pagination" x-merge="replace" {
+        @if query.after_sequence.is_none() {
+          div id="direct-message-history-pagination" x-merge="replace" {
             @if let Some(next) = next {
                 a ."m-directMessages__older"
                     href=(next)
@@ -600,9 +640,14 @@ async fn render_thread(
                     x-init="$nextTick(() => requestAnimationFrame(() => { const start = () => { if (loadingOlder) { requestAnimationFrame(start); return; } const root = document.body; const margin = Math.round(root.clientHeight * 2.5); new IntersectionObserver((entries, observer) => { if (entries[0].isIntersecting) { observer.disconnect(); loadOlder($el, $ajax); } }, { root, rootMargin: `${margin}px 0px 0px 0px` }).observe($el); }; start(); }))"
                 { "Older messages" }
             }
+          }
         }
-        @if entries.is_empty() { p { "No messages on this installation yet." } }
-        ol id="direct-message-history" ."m-directMessages__history" x-merge="prepend" {
+        @if entries.is_empty() && query.after_sequence.is_none() {
+            p id="direct-message-empty" { "No messages on this installation yet." }
+        }
+        ol id="direct-message-history" ."m-directMessages__history"
+            x-merge:dynamic="loadingNew ? 'append' : 'prepend'"
+        {
             @for (entry, rendered_text) in rendered_entries {
                 li id=(format!("direct-message-{}", entry.entry.event_id))
                     ."m-directMessages__message"
@@ -627,8 +672,16 @@ async fn render_thread(
             }
         }
     };
+    let live_cursor = html! {
+        span id="direct-message-live-cursor" hidden data-after-sequence=(after_sequence)
+            data-more=(query.after_sequence.is_some() && entries.len() == THREAD_PAGE_SIZE) {}
+    };
     if history_fragment {
-        return Ok(Maud(history).into_response());
+        return Ok(Maud(html! {
+            (history)
+            @if query.after_sequence.is_some() { (live_cursor) }
+        })
+        .into_response());
     }
     let csrf = session.csrf().await?;
     let draft_key = format!("direct-message-draft-{}-{peer}", session.user.id());
@@ -679,11 +732,15 @@ async fn render_thread(
             }
             div
                 x-data="directMessageHistory"
+                data-refresh-url=(thread_url(peer))
+                "@messages:changed.window"="queueRefresh()"
+                "@visibilitychange.document"="queueRefresh()"
                 "@ajax:merge"="beforeOlderMerge($event)"
                 x-init=[before.is_some().then_some(
                     "$nextTick(() => Promise.resolve(typeof MathJax !== 'undefined' ? MathJax.typesetPromise() : undefined).then(() => { if (typeof Prism !== 'undefined') { Prism.highlightAll(); } requestAnimationFrame(() => document.body.scrollTo(0, document.body.scrollHeight)); }))"
                 )]
             {
+                (live_cursor)
                 (history)
             }
             form method="post" action=(thread_url(peer))

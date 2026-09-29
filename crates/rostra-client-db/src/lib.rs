@@ -572,6 +572,9 @@ pub struct Database {
     content_missing_notify: Arc<Notify>,
     /// Wake the owned DM worker after durable queue insertion.
     dm_pending_notify: Arc<Notify>,
+    /// Content-free wakeups after background DM trial progress, regardless of
+    /// whether a message decrypted.
+    dm_progress_tx: watch::Sender<()>,
 }
 
 impl Database {
@@ -681,6 +684,7 @@ impl Database {
         let (new_posts_tx, _) = broadcast::channel(100);
         let (new_shoutbox_tx, _) = broadcast::channel(100);
         let (new_heads_tx, _) = broadcast::channel(100);
+        let (dm_progress_tx, _) = watch::channel(());
 
         let db = Self {
             inner,
@@ -704,6 +708,7 @@ impl Database {
             news_score_updates_tx: dedup_chan::Sender::new(),
             content_missing_notify: Arc::new(Notify::new()),
             dm_pending_notify: Arc::new(Notify::new()),
+            dm_progress_tx,
         };
 
         // If total migration stashed events, reprocess them now using the real

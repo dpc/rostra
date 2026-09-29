@@ -4945,6 +4945,7 @@ dependencies = [
  "time",
  "tokio",
  "tokio-stream",
+ "tokio-tungstenite",
  "tower",
  "tower-cookies",
  "tower-http 0.5.2",

@@ -61,6 +61,7 @@ urlencoding = { workspace = true }
 rand = { workspace = true }
 
 [dev-dependencies]
+tokio-tungstenite = { workspace = true }
 cssparser = { workspace = true }
 data-encoding = { workspace = true }
 reqwest = { workspace = true, features = ["cookies", "json"] }

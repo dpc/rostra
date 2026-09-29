@@ -1047,12 +1047,92 @@ window.addEventListener("ajax:missing", (event) => {
 document.addEventListener("alpine:init", () => {
   Alpine.data("directMessageHistory", () => ({
     loadingOlder: false,
+    loadingNew: false,
+    receivedNew: false,
+    refreshPending: false,
+    liveRequest: null,
+    destroyed: false,
     anchor: null,
     anchorDocumentTop: 0,
     previousOverflowAnchor: "",
 
+    init() {
+      return this.queueRefresh();
+    },
+
+    destroy() {
+      this.destroyed = true;
+    },
+
+    queueRefresh() {
+      this.refreshPending = true;
+      if (
+        this.destroyed ||
+        document.hidden ||
+        this.loadingOlder ||
+        this.loadingNew
+      ) return this.liveRequest;
+      this.liveRequest = this.refreshNew();
+      return this.liveRequest;
+    },
+
+    async refreshNew() {
+      this.loadingNew = true;
+      try {
+        while (this.refreshPending && !this.destroyed && !document.hidden) {
+          this.refreshPending = false;
+          await this.appendNew();
+          this.refreshPending ||= this.$el.querySelector(
+            "#direct-message-live-cursor",
+          ).dataset.more === "true";
+        }
+      } catch (_) {
+        // Keep the cursor for retry on another wakeup or visibility change.
+        // The shared AJAX handler reports the failure.
+        this.refreshPending = true;
+      } finally {
+        this.loadingNew = false;
+      }
+    },
+
+    async appendNew() {
+      const body = document.body;
+      const atBottom =
+        body.scrollHeight - body.scrollTop - body.clientHeight < 100;
+      const cursor = this.$el.querySelector("#direct-message-live-cursor");
+      this.receivedNew = false;
+        await this.$nextTick();
+        await this.$ajax(
+          `${this.$el.dataset.refreshUrl}?after_sequence=${cursor.dataset.afterSequence}`,
+          {
+            targets: ["direct-message-history", "direct-message-live-cursor"],
+            focus: false,
+          },
+        );
+        if (!this.destroyed && this.$el.isConnected && this.receivedNew) {
+          if (this.$el.querySelector("#direct-message-history").children.length) {
+            this.$el.querySelector("#direct-message-empty")?.remove();
+          }
+          if (typeof MathJax !== "undefined") await MathJax.typesetPromise();
+          if (typeof Prism !== "undefined") Prism.highlightAll();
+          if (atBottom) {
+            await new Promise((resolve) => requestAnimationFrame(resolve));
+            if (!this.destroyed) body.scrollTo(0, body.scrollHeight);
+          }
+        }
+    },
+
     beforeOlderMerge(event) {
       if (event.target.id !== "direct-message-history") return;
+      // History reads and the initial arrival snapshot can overlap. Keep the
+      // already-rendered message rather than appending/prepending a duplicate.
+      for (const message of Array.from(event.detail.content.children)) {
+        if (document.getElementById(message.id)) message.remove();
+      }
+      if (this.loadingNew) {
+        this.receivedNew = event.detail.content.children.length > 0;
+        return;
+      }
 
       this.anchor =
         Array.from(
@@ -1066,7 +1146,8 @@ document.addEventListener("alpine:init", () => {
     },
 
     async loadOlder(link, request) {
-      if (this.loadingOlder) return;
+      if (this.loadingNew) await this.liveRequest;
+      if (this.loadingOlder || this.destroyed || !link.isConnected) return;
 
       this.loadingOlder = true;
       this.previousOverflowAnchor = document.body.style.overflowAnchor;
@@ -1102,6 +1183,7 @@ document.addEventListener("alpine:init", () => {
         document.body.style.overflowAnchor = this.previousOverflowAnchor;
         this.loadingOlder = false;
         this.anchor = null;
+        if (this.refreshPending) this.queueRefresh();
       }
     },
   }));
