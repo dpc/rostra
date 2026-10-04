@@ -183,7 +183,9 @@ let activeRostraDialog = null;
 window.insertExternalLink = function (syntax) {
   const textarea = document.getElementById("new-post-content");
   if (!textarea) return;
-  textarea.setRangeText(syntax, textarea.selectionStart, textarea.selectionEnd, "end");
+  const prefix = textarea.value.slice(0, textarea.selectionStart);
+  const separator = prefix && !/\p{White_Space}$/u.test(prefix) ? " " : "";
+  textarea.setRangeText(separator + syntax, textarea.selectionStart, textarea.selectionEnd, "end");
   textarea.dispatchEvent(new Event("input", { bubbles: true }));
   closeRostraDialog(document.getElementById("post-preview-dialog"));
   textarea.focus();

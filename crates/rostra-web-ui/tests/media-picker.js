@@ -89,6 +89,34 @@ test("external link insertion replaces selected text and updates draft listeners
   assert.equal(app.textarea.focused, true);
 });
 
+test("external link spacing depends on text before the insertion, not the draft suffix", () => {
+  const syntax = "[title](https://example.com/)";
+  for (const [value, start, end, expected] of [
+    ["", 0, 0, syntax],
+    ["text", 4, 4, "text " + syntax],
+    ["text ", 5, 5, "text " + syntax],
+    ["text\n", 5, 5, "text\n" + syntax],
+    ["text\t", 5, 5, "text\t" + syntax],
+    ["text\u00a0", 5, 5, "text\u00a0" + syntax],
+    ["text\u0085", 5, 5, "text\u0085" + syntax],
+    ["text\ufeff", 5, 5, "text\ufeff " + syntax],
+    ["textSUFFIX ", 4, 10, "text " + syntax + " "],
+    ["text SUFFIX", 5, 11, "text " + syntax],
+    ["replace", 0, 7, syntax],
+    ["suffix", 0, 0, syntax + "suffix"],
+  ]) {
+    const app = harness("#new-post-content", value);
+    app.textarea.selectionStart = start;
+    app.textarea.selectionEnd = end;
+    app.window.insertExternalLink(syntax);
+    assert.equal(app.textarea.value, expected);
+    assert.equal(app.textarea.selectionStart, expected.indexOf(syntax) + syntax.length);
+    assert.equal(app.textarea.inputEvents, 1);
+    assert.equal(app.picker.open, false);
+    assert.equal(app.textarea.focused, true);
+  }
+});
+
 test("hostile target data never becomes click handler program text", () => {
   const hostile =
     "');globalThis.executionSentinel++;function insertMediaSyntax(){}//";

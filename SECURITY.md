@@ -84,7 +84,10 @@ does not use environment proxies. Only ports 80 and 443 and conservatively
 validated public addresses are fetched. Every redirect repeats validation;
 validated DNS answers are pinned for the actual connection to prevent DNS
 rebinding. Retrieval is limited to three redirects, eight seconds overall,
-256 KiB of HTML, and four concurrent requests. Metadata is plain, bounded,
+256 KiB per response, and four concurrent requests. Recognized YouTube videos
+use the fixed YouTube oEmbed JSON endpoint with a canonical video URL; only its
+plain title is used, never its HTML, thumbnails, or other media fields. Other
+links retain HTML title extraction. Metadata is plain, bounded,
 editable text, never markup or executable code. Retrieval failure leaves manual
 insertion available. The request intentionally discloses the chosen URL to its
 website from the Rostra server.

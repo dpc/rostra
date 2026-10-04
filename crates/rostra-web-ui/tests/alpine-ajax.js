@@ -134,6 +134,15 @@ for (const [label, responseScope] of [["Add link", "opening-two"], ["Preview", n
   });
 }
 
+test("server-rendered form errors merge through the same hypermedia target", async () => {
+  const app = harness(async () => ({ ok: false, status: 422, url: "http://localhost/messages/test",
+    redirected: false, text: async () => "<dialog><p role='alert'>Retry or insert manually</p></dialog>" }), true);
+  await app.request("POST");
+  assert.equal(app.merges(), 1);
+  assert.ok(app.events.some((event) => event.type === "ajax:error"));
+  assert.ok(app.events.some((event) => event.type === "ajax:after"));
+});
+
 for (const method of ["GET", "POST"]) {
   for (const failure of ["fetch", "response-body"]) {
     test(`${method} ${failure} rejection releases state and permits an explicit retry`, async () => {

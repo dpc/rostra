@@ -149,6 +149,13 @@ pub(super) fn is_external_embed(url: &Url) -> bool {
     extract_media(url).is_some()
 }
 
+/// Extract the video ID using the existing YouTube embed recognition.
+pub(super) fn youtube_video_id(url: &Url) -> Option<Cow<'_, str>> {
+    match extract_media(url)? {
+        ExternalMedia::YT(id) => Some(id),
+    }
+}
+
 fn maybe_embed_media_html(s: &str) -> Option<String> {
     let Ok(url) = Url::parse(s) else {
         return None;

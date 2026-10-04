@@ -4,6 +4,7 @@ use std::net::{IpAddr, SocketAddr};
 use std::time::Duration;
 
 use axum::extract::State;
+use axum::http::StatusCode;
 use axum::response::IntoResponse;
 use axum_extra::extract::Form;
 use maud::html;
@@ -63,9 +64,15 @@ fn public_ip(ip: IpAddr) -> bool {
             let segments = ip.segments();
             // Conservatively exclude special-use/tunnel ranges as well as all
             // addresses outside global unicast. Manual insertion still works.
-            (segments[0] & 0xe000) == 0x2000 && !matches!(segments[0], 0x2001 | 0x2002 | 0x3fff)
+            (segments[0] & 0xe000) == 0x2000
+                && !matches!(segments[0], 0x2002 | 0x3fff)
+                && !(segments[0] == 0x2001 && (segments[1] < 0x0200 || segments[1] == 0x0db8))
         }
     }
+}
+
+fn public_addrs(addrs: &[SocketAddr]) -> bool {
+    !addrs.is_empty() && addrs.iter().all(|addr| public_ip(addr.ip()))
 }
 
 async fn fetch_title(url: &Url) -> Option<String> {
@@ -78,6 +85,39 @@ async fn fetch_title(url: &Url) -> Option<String> {
 }
 
 async fn fetch_title_inner(original: &Url) -> Option<String> {
+    if let Some(url) = youtube_oembed_url(original) {
+        return oembed_title(&fetch_metadata(&url, "application/json").await?);
+    }
+    metadata_title(&String::from_utf8_lossy(
+        &fetch_metadata(original, "text/html").await?,
+    ))
+}
+
+fn youtube_oembed_url(original: &Url) -> Option<Url> {
+    let id = super::content::youtube_video_id(original)?;
+    if id.len() != 11
+        || !id
+            .bytes()
+            .all(|ch| ch.is_ascii_alphanumeric() || matches!(ch, b'-' | b'_'))
+    {
+        return None;
+    }
+    let mut canonical = Url::parse("https://www.youtube.com/watch").ok()?;
+    canonical.query_pairs_mut().append_pair("v", &id);
+    let mut endpoint = Url::parse("https://www.youtube.com/oembed").ok()?;
+    endpoint
+        .query_pairs_mut()
+        .append_pair("url", canonical.as_str())
+        .append_pair("format", "json");
+    Some(endpoint)
+}
+
+fn oembed_title(body: &[u8]) -> Option<String> {
+    let response: serde_json::Value = serde_json::from_slice(body).ok()?;
+    normalized_title(response.get("title")?.as_str()?)
+}
+
+async fn fetch_metadata(original: &Url, content_type: &'static str) -> Option<Vec<u8>> {
     let mut url = original.clone();
     for _ in 0..=3 {
         let host = url.host_str()?;
@@ -90,7 +130,7 @@ async fn fetch_title_inner(original: &Url) -> Option<String> {
             url::Host::Ipv6(ip) => vec![SocketAddr::new(ip.into(), port)],
             url::Host::Domain(_) => tokio::net::lookup_host((host, port)).await.ok()?.collect(),
         };
-        if addrs.is_empty() || addrs.iter().any(|addr| !public_ip(addr.ip())) {
+        if !public_addrs(&addrs) {
             return None;
         }
         // Pin the validated DNS answers, disable ambient proxies and redirects,
@@ -105,10 +145,17 @@ async fn fetch_title_inner(original: &Url) -> Option<String> {
             .ok()?;
         let mut response = client
             .get(url.clone())
-            .header(reqwest::header::ACCEPT, "text/html")
+            .header(reqwest::header::ACCEPT, content_type)
             .send()
             .await
+            .map_err(|error| {
+                tracing::debug!(target: "rostra::link_metadata", error = %error.without_url(),
+                    "Metadata request failed");
+            })
             .ok()?;
+        tracing::debug!(target: "rostra::link_metadata", status = %response.status(),
+            content_type = ?response.headers().get(reqwest::header::CONTENT_TYPE),
+            "Metadata response received");
         if response.status().is_redirection() {
             let target = response
                 .headers()
@@ -127,7 +174,7 @@ async fn fetch_title_inner(original: &Url) -> Option<String> {
                 .split(';')
                 .next()?
                 .trim()
-                .eq_ignore_ascii_case("text/html")
+                .eq_ignore_ascii_case(content_type)
         {
             return None;
         }
@@ -138,7 +185,7 @@ async fn fetch_title_inner(original: &Url) -> Option<String> {
             }
             body.extend_from_slice(&chunk);
         }
-        return metadata_title(&String::from_utf8_lossy(&body));
+        return Some(body);
     }
     None
 }
@@ -161,8 +208,24 @@ fn metadata_title(source: &str) -> Option<String> {
                 .next()
                 .map(|node| node.text().collect())
         })?;
+    normalized_title(&value)
+}
+
+fn normalized_title(value: &str) -> Option<String> {
     let value = value.split_whitespace().collect::<Vec<_>>().join(" ");
     (!value.is_empty()).then(|| value.chars().take(300).collect())
+}
+
+fn link_separator(prefix: &str) -> &'static str {
+    if prefix
+        .chars()
+        .next_back()
+        .is_some_and(|ch| !ch.is_whitespace())
+    {
+        " "
+    } else {
+        ""
+    }
 }
 
 fn link_syntax(url: &Url, title: &str) -> String {
@@ -218,6 +281,7 @@ pub(super) async fn post_link_dialog(
         form.link_request = format!("{:032x}", rand::random::<u128>());
     }
     let mut notice = None;
+    let mut status = StatusCode::OK;
     let mut syntax = None;
     if matches!(form.action.as_str(), "title" | "insert") {
         if let Some(url) = parse_url(&form.url) {
@@ -225,12 +289,14 @@ pub(super) async fn post_link_dialog(
                 if let Some(title) = fetch_title(&url).await {
                     form.title = title;
                 } else {
+                    status = StatusCode::UNPROCESSABLE_ENTITY;
                     notice = Some("Could not fetch a title. Enter one yourself, or use the URL.");
                 }
             } else {
                 syntax = Some(link_syntax(&url, &form.title));
             }
         } else {
+            status = StatusCode::UNPROCESSABLE_ENTITY;
             notice = Some("Enter an HTTP or HTTPS URL without credentials.");
         }
     }
@@ -249,13 +315,16 @@ pub(super) async fn post_link_dialog(
             main { (link_form(&form, notice, inserted, false)) }
         }
     };
-    Ok(Maud(if is_ajax {
-        markup
-    } else {
-        state
-            .render_nojs_full_page(&session, "Add link", markup)
-            .await?
-    }))
+    Ok((
+        status,
+        Maud(if is_ajax {
+            markup
+        } else {
+            state
+                .render_nojs_full_page(&session, "Add link", markup)
+                .await?
+        }),
+    ))
 }
 
 fn link_form(
@@ -278,7 +347,7 @@ fn link_form(
                 label for="link-result" { "Post draft" }
                 textarea id="link-result" name="content" {
                     (&form.content)
-                    @if let Some(syntax) = syntax { ("\n") (syntax) }
+                    @if let Some(syntax) = syntax { (link_separator(&form.content)) (syntax) }
                 }
                 div ."o-mediaList__actionButtons" {
                     (fragment::button("o-previewDialog__submitButton", "Preview post").call())
@@ -290,6 +359,7 @@ fn link_form(
             }
         } @else {
             form ."m-linkForm" action="/post/link_dialog" method="post" x-target=[enhanced.then_some("post-preview-dialog")]
+                "x-target.error"=[enhanced.then_some("post-preview-dialog")]
                 x-data="{ loading: false }"
                 "@ajax:before"="loading = true"
                 "@ajax:after"="loading = false" {
@@ -298,6 +368,8 @@ fn link_form(
                 div ."m-linkForm__urlRow" {
                     input id="link-url" name="url" type="url" required maxlength="4096"
                         aria-label="Link"
+                        aria-describedby=[notice.map(|_| "link-form-error")]
+                        aria-invalid=[(notice.is_some() && parse_url(&form.url).is_none()).then_some("true")]
                         value=(&form.url) placeholder="https://…" autofocus
                         ":readonly"="loading"
                         "@change"=[enhanced.then_some("if (!$el.form.elements.title.value.trim() && $el.validity.valid) $el.form.requestSubmit($el.form.querySelector('[value=title]'))")] {}
@@ -313,9 +385,9 @@ fn link_form(
                 input id="link-title" name="title" value=(&form.title) maxlength="300"
                     aria-label="Title (optional)" placeholder="Title (optional)"
                     ":readonly"="loading" {}
-                @if let Some(notice) = notice { p role="status" { (notice) } }
+                @if let Some(notice) = notice { p id="link-form-error" role="alert" { (notice) } }
                 div ."o-mediaList__actionButtons" {
-                    (fragment::button("m-linkForm__linkButton", "Ok")
+                    (fragment::button("m-linkForm__linkButton", "Insert")
                         .icon_class("m-newPostForm__linkButtonIcon")
                         .name("action")
                         .value("insert")

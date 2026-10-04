@@ -24,13 +24,42 @@ fn remote_fetch_policy_rejects_special_use_addresses() {
         "fe80::1",
         "ff02::1",
         "2001:db8::1",
+        "2001::1",
+        "2001:1ff:ffff::1",
+        "2001:2::1",
+        "2001:20::1",
         "2002:7f00:1::",
         "3fff::1",
     ] {
         assert!(!public_ip(ip.parse().unwrap()), "{ip}");
     }
-    for ip in ["8.8.8.8", "1.1.1.1", "2606:4700:4700::1111"] {
+    for ip in [
+        "8.8.8.8",
+        "1.1.1.1",
+        "2606:4700:4700::1111",
+        "2001:4860:4802:32::77",
+    ] {
         assert!(public_ip(ip.parse().unwrap()), "{ip}");
+    }
+}
+
+#[test]
+fn every_dns_answer_must_be_public_before_any_connection() {
+    let public = [
+        "216.239.38.119:443".parse().unwrap(),
+        "[2001:4860:4802:32::77]:443".parse().unwrap(),
+    ];
+    assert!(public_addrs(&public));
+    assert!(!public_addrs(&[]));
+    for special in [
+        "127.0.0.1:443",
+        "169.254.169.254:443",
+        "[::1]:443",
+        "[::ffff:216.239.38.119]:443",
+        "[2001:db8::1]:443",
+    ] {
+        assert!(!public_addrs(&[public[0], special.parse().unwrap()]));
+        assert!(!public_addrs(&[special.parse().unwrap(), public[1]]));
     }
 }
 
@@ -134,6 +163,95 @@ async fn hostile_titles_roundtrip_as_nonexecutable_link_text() {
 }
 
 #[test]
+fn youtube_metadata_uses_fixed_endpoint_and_canonical_renderer_video_id() {
+    for input in [
+        "https://youtube.com/watch?v=M7lc1UVf-VE&list=playlist&t=20",
+        "https://www.youtube.com/watch?v=M7lc1UVf-VE",
+        "https://youtu.be/M7lc1UVf-VE?t=20",
+    ] {
+        let url = youtube_oembed_url(&Url::parse(input).unwrap()).unwrap();
+        assert_eq!(url.scheme(), "https");
+        assert_eq!(url.host_str(), Some("www.youtube.com"));
+        assert_eq!(url.path(), "/oembed");
+        assert_eq!(
+            url.query_pairs().collect::<Vec<_>>(),
+            vec![
+                (
+                    "url".into(),
+                    "https://www.youtube.com/watch?v=M7lc1UVf-VE".into()
+                ),
+                ("format".into(), "json".into()),
+            ]
+        );
+    }
+    for input in [
+        "https://example.com/watch?v=M7lc1UVf-VE",
+        "https://youtube.com.evil.test/watch?v=M7lc1UVf-VE",
+        "https://youtube.com/",
+        "https://youtube.com/watch?v=invalid",
+        "https://youtube.com/watch?v=M7lc1UVf-V%26",
+    ] {
+        assert!(youtube_oembed_url(&Url::parse(input).unwrap()).is_none());
+    }
+}
+
+#[test]
+fn oembed_uses_only_a_plain_bounded_title_and_rejects_unusable_responses() {
+    let source = serde_json::json!({
+        "title": " A\nvideo & <script>not markup</script> ",
+        "html": "<script>bad()</script>",
+        "thumbnail_url": "http://127.0.0.1/secret",
+    });
+    assert_eq!(
+        oembed_title(&serde_json::to_vec(&source).unwrap()),
+        Some("A video & <script>not markup</script>".into())
+    );
+    assert_eq!(
+        oembed_title(&serde_json::to_vec(&serde_json::json!({"title": "a".repeat(400)})).unwrap())
+            .unwrap()
+            .len(),
+        300
+    );
+    for body in [
+        b"not JSON".as_slice(),
+        b"{}",
+        br#"{"title":null}"#,
+        br#"{"title":42}"#,
+        br#"{"title":"  "}"#,
+        br#"{"html":"<title>wrong</title>"}"#,
+    ] {
+        assert!(oembed_title(body).is_none());
+    }
+}
+
+#[test_log::test(tokio::test)]
+#[ignore = "Requires access to the public YouTube oEmbed endpoint"]
+async fn youtube_title_live_uses_the_production_safe_transport() {
+    let title = fetch_title(&Url::parse("https://youtu.be/M7lc1UVf-VE").unwrap())
+        .await
+        .unwrap();
+    assert!(!title.is_empty());
+    assert!(title.len() <= 1200);
+}
+
+#[test]
+fn ordinary_append_separator_uses_only_the_end_of_the_draft() {
+    for (prefix, expected) in [
+        ("", ""),
+        ("text", " "),
+        ("text ", ""),
+        ("text\n", ""),
+        ("text\t", ""),
+        ("text\u{a0}", ""),
+        ("text\u{85}", ""),
+        ("text\u{feff}", " "),
+        ("text\nmore", " "),
+    ] {
+        assert_eq!(link_separator(prefix), expected);
+    }
+}
+
+#[test]
 fn dialog_fields_use_placeholders_accessible_names_and_shared_buttons() {
     let form = LinkInput {
         content: "Draft".into(),
@@ -168,6 +286,11 @@ fn dialog_fields_use_placeholders_accessible_names_and_shared_buttons() {
         assert_eq!(fetch.text().collect::<String>(), "Fetch");
         assert_eq!(fetch.value().attr("name"), Some("action"));
         assert_eq!(fetch.value().attr("value"), Some("title"));
+        let insert = document
+            .select(&Selector::parse("button[name=action][value=insert]").unwrap())
+            .next()
+            .unwrap();
+        assert_eq!(insert.text().collect::<String>(), "Insert");
         for button in document.select(&Selector::parse("button").unwrap()) {
             assert!(button.value().classes().any(|class| class == "u-button"));
             assert!(
