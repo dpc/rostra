@@ -87,7 +87,7 @@ rebinding. Retrieval is limited to three redirects, eight seconds overall,
 256 KiB of HTML, and four concurrent requests. Metadata is plain, bounded,
 editable text, never markup or executable code. Retrieval failure leaves manual
 insertion available. The request intentionally discloses the chosen URL to its
-website from the Rostra server; the form explains this before retrieval.
+website from the Rostra server.
 
 Social-media event bytes and profile avatar bytes are untrusted even when their
 event signatures verify. An avatar must declare and contain one of AVIF, BMP,

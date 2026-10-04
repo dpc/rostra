@@ -11,8 +11,8 @@ use scraper::{Html, Selector};
 use serde::Deserialize;
 use url::Url;
 
-use super::Maud;
 use super::unlock::session::UserSession;
+use super::{Maud, fragment};
 use crate::SharedState;
 use crate::error::{BadRequestSnafu, ReadOnlyModeSnafu, RequestError, RequestResult};
 use crate::util::extractors::ajax_request::AjaxRequest;
@@ -265,7 +265,7 @@ fn link_form(
     enhanced: bool,
 ) -> maud::Markup {
     html! {
-        h4 id="link-dialog-title" tabindex="-1" { "Add link" }
+        h4 id="link-dialog-title" ."o-mediaList__title" tabindex="-1" { "Add link" }
         @if syntax.is_some() || form.action == "cancel" {
             @if enhanced {
                 @if let Some(syntax) = syntax {
@@ -280,8 +280,13 @@ fn link_form(
                     (&form.content)
                     @if let Some(syntax) = syntax { ("\n") (syntax) }
                 }
-                button type="submit" { "Preview post" }
-                button type="submit" formaction="/post/link_dialog" { "Add another link" }
+                div ."o-mediaList__actionButtons" {
+                    (fragment::button("o-previewDialog__submitButton", "Preview post").call())
+                    (fragment::button("m-linkForm__linkButton", "Add another link")
+                        .icon_class("m-newPostForm__linkButtonIcon")
+                        .formaction("/post/link_dialog")
+                        .call())
+                }
             }
         } @else {
             form ."m-linkForm" action="/post/link_dialog" method="post" x-target=[enhanced.then_some("post-preview-dialog")]
@@ -290,30 +295,46 @@ fn link_form(
                 "@ajax:after"="loading = false" {
                 input type="hidden" name="content" value=(&form.content) {}
                 input type="hidden" name="link_request" value=(&form.link_request) {}
-                label for="link-url" { "Link" }
-                input id="link-url" name="url" type="url" required maxlength="4096"
-                    value=(&form.url) placeholder="https://…" autofocus
-                    ":readonly"="loading"
-                    "@change"=[enhanced.then_some("if (!$el.form.elements.title.value.trim() && $el.validity.valid) $el.form.requestSubmit($el.form.querySelector('[value=title]'))")] {}
-                p { "Get title contacts this website from the Rostra server." }
-                button type="submit" name="action" value="title" ":disabled"="loading" { "Get title" }
+                div ."m-linkForm__urlRow" {
+                    input id="link-url" name="url" type="url" required maxlength="4096"
+                        aria-label="Link"
+                        value=(&form.url) placeholder="https://…" autofocus
+                        ":readonly"="loading"
+                        "@change"=[enhanced.then_some("if (!$el.form.elements.title.value.trim() && $el.validity.valid) $el.form.requestSubmit($el.form.querySelector('[value=title]'))")] {}
+                    (fragment::button("m-postView__fetchButton", "Fetch")
+                        .name("action")
+                        .value("title")
+                        .disabled_expression("loading")
+                        .call())
+                }
                 @if enhanced {
                     p role="status" x-show="loading" x-cloak { "Working…" }
                 }
-                label for="link-title" { "Title (optional)" }
                 input id="link-title" name="title" value=(&form.title) maxlength="300"
+                    aria-label="Title (optional)" placeholder="Title (optional)"
                     ":readonly"="loading" {}
                 @if let Some(notice) = notice { p role="status" { (notice) } }
-                p { "YouTube links use the existing embedded-player syntax." }
-                button type="submit" name="action" value="insert" ":disabled"="loading" { "Ok" }
-                @if !enhanced {
-                    button type="submit" name="action" value="cancel" formnovalidate { "Cancel" }
+                div ."o-mediaList__actionButtons" {
+                    (fragment::button("m-linkForm__linkButton", "Ok")
+                        .icon_class("m-newPostForm__linkButtonIcon")
+                        .name("action")
+                        .value("insert")
+                        .disabled_expression("loading")
+                        .call())
+                    @if enhanced {
+                        (fragment::button("o-mediaList__closeButton", "Cancel")
+                            .button_type("button")
+                            .onclick("closeRostraDialog(document.getElementById('post-preview-dialog'))")
+                            .call())
+                    } @else {
+                        (fragment::button("o-mediaList__closeButton", "Cancel")
+                            .name("action")
+                            .value("cancel")
+                            .formnovalidate(true)
+                            .call())
+                    }
                 }
             }
-        }
-        @if enhanced {
-            button type="button"
-                onclick="closeRostraDialog(document.getElementById('post-preview-dialog'))" { "Cancel" }
         }
     }
 }

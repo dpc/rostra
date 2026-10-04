@@ -809,7 +809,7 @@ body:not(.-keyboard-nav) .m-postView__body:has(.m-postView__main[data-href]):hov
 }
 
 .m-newPostForm__textareaWrapper:hover .m-newPostForm__helpButton--inset,
-.m-newPostForm__textareaWrapper:focus-within .m-newPostForm__helpButton--inset {
+.m-newPostForm__helpButton--inset:focus-visible {
   opacity: 1;
   pointer-events: auto;
 }
@@ -839,6 +839,16 @@ body:not(.-keyboard-nav) .m-postView__body:has(.m-postView__main[data-href]):hov
 
 .m-linkForm textarea {
   min-height: 10rem;
+}
+
+.m-linkForm__urlRow {
+  display: flex;
+  gap: 0.75rem;
+}
+
+.m-linkForm__urlRow input {
+  flex: 1;
+  min-width: 0;
 }
 
 @media (prefers-reduced-motion: reduce) {

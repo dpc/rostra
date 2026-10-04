@@ -216,6 +216,24 @@ fn shortcut_submit(document: &Html, button_selector: &str, title: &str, textarea
 }
 
 #[test]
+fn formatting_help_visibility_does_not_follow_textarea_focus() {
+    let stylesheet = include_str!("../../../assets/style.css");
+    let visibility_rule = stylesheet
+        .split_once(".m-newPostForm__textareaWrapper:hover")
+        .unwrap()
+        .1
+        .split_once('}')
+        .unwrap()
+        .0;
+    let selectors = visibility_rule.split_once('{').unwrap().0;
+    assert!(selectors.contains(".m-newPostForm__helpButton--inset:focus-visible"));
+    assert!(!selectors.contains(":focus-within"));
+    assert!(visibility_rule.contains("opacity: 1"));
+    assert!(stylesheet.contains("@media (hover: none)"));
+    assert!(stylesheet.contains("@media (prefers-reduced-motion: reduce)"));
+}
+
+#[test]
 fn post_composer_icon_controls_have_tooltips_and_accessible_names() {
     let self_id = RostraId::from_bytes([42; 32]);
     let inline_reply = Html::parse_fragment(

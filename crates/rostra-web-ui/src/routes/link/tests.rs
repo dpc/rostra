@@ -134,6 +134,64 @@ async fn hostile_titles_roundtrip_as_nonexecutable_link_text() {
 }
 
 #[test]
+fn dialog_fields_use_placeholders_accessible_names_and_shared_buttons() {
+    let form = LinkInput {
+        content: "Draft".into(),
+        url: "".into(),
+        title: "".into(),
+        action: "".into(),
+        link_request: "test".into(),
+    };
+    for enhanced in [false, true] {
+        let document = Html::parse_fragment(&link_form(&form, None, None, enhanced).into_string());
+        assert!(
+            document
+                .select(&Selector::parse("label").unwrap())
+                .next()
+                .is_none()
+        );
+        for (id, name, placeholder) in [
+            ("link-url", "Link", "https://…"),
+            ("link-title", "Title (optional)", "Title (optional)"),
+        ] {
+            let input = document
+                .select(&Selector::parse(&format!("#{id}")).unwrap())
+                .next()
+                .unwrap();
+            assert_eq!(input.value().attr("aria-label"), Some(name));
+            assert_eq!(input.value().attr("placeholder"), Some(placeholder));
+        }
+        let fetch = document
+            .select(&Selector::parse(".m-linkForm__urlRow button").unwrap())
+            .next()
+            .unwrap();
+        assert_eq!(fetch.text().collect::<String>(), "Fetch");
+        assert_eq!(fetch.value().attr("name"), Some("action"));
+        assert_eq!(fetch.value().attr("value"), Some("title"));
+        for button in document.select(&Selector::parse("button").unwrap()) {
+            assert!(button.value().classes().any(|class| class == "u-button"));
+            assert!(
+                button
+                    .select(&Selector::parse(".u-buttonIcon").unwrap())
+                    .next()
+                    .is_some()
+            );
+        }
+        let cancel = document
+            .select(&Selector::parse(".o-mediaList__closeButton").unwrap())
+            .next()
+            .unwrap();
+        if enhanced {
+            assert_eq!(cancel.value().attr("type"), Some("button"));
+            assert!(cancel.value().attr("onclick").is_some());
+        } else {
+            assert_eq!(cancel.value().attr("value"), Some("cancel"));
+            assert!(cancel.value().attr("formnovalidate").is_some());
+        }
+    }
+}
+
+#[test]
 fn form_keeps_remote_values_in_escaped_data_and_preserves_the_draft() {
     let form = LinkInput {
         content: "Draft <script>x</script>".into(),

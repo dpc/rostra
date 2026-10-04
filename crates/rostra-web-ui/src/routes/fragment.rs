@@ -175,12 +175,26 @@ pub fn button(
     aria_label: Option<&str>,
     /// Hide the button when JavaScript is disabled.
     requires_js: Option<bool>,
+    /// Form field name contributed by the submit button.
+    name: Option<&str>,
+    /// Form field value contributed by the submit button.
+    value: Option<&str>,
+    /// Override the owning form's submission destination.
+    formaction: Option<&str>,
+    /// Skip field validation for a cancellation or navigation action.
+    formnovalidate: Option<bool>,
+    /// Alpine expression that disables the button while a request is running.
+    disabled_expression: Option<&str>,
+    /// Use an existing icon class instead of deriving one from the button
+    /// class.
+    icon_class: Option<&str>,
 ) -> Markup {
     let disabled = disabled.unwrap_or(false);
     let disabled_class = disabled_class.unwrap_or(false);
     let requires_js = requires_js.unwrap_or(false);
     let button_type = button_type.unwrap_or("submit");
-    let icon_class = format!("{class}Icon");
+    let default_icon_class = format!("{class}Icon");
+    let icon_class = icon_class.unwrap_or(&default_icon_class);
 
     let variant_class = variant.map(|v| format!("u-button{v}")).unwrap_or_default();
 
@@ -198,6 +212,11 @@ pub fn button(
             data-value=[data_value]
             title=[title]
             aria-label=[aria_label]
+            name=[name]
+            value=[value]
+            formaction=[formaction]
+            formnovalidate[formnovalidate.unwrap_or(false)]
+            ":disabled"=[disabled_expression]
         {
             span .(icon_class) ."u-buttonIcon" {}
             (label)

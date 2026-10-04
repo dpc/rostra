@@ -30,6 +30,25 @@ fn shared_button_preserves_established_sizing_contract() {
 }
 
 #[test]
+fn shared_button_supports_ordinary_form_actions_and_existing_icons() {
+    let markup = button("m-example__submitButton", "Submit")
+        .name("action")
+        .value("cancel")
+        .formaction("/post/link_dialog")
+        .formnovalidate(true)
+        .disabled_expression("loading")
+        .icon_class("o-mediaList__closeButtonIcon")
+        .call()
+        .into_string();
+    assert!(markup.contains("name=\"action\""));
+    assert!(markup.contains("value=\"cancel\""));
+    assert!(markup.contains("formaction=\"/post/link_dialog\""));
+    assert!(markup.contains("formnovalidate"));
+    assert!(markup.contains(":disabled=\"loading\""));
+    assert!(markup.contains("class=\"o-mediaList__closeButtonIcon u-buttonIcon\""));
+}
+
+#[test]
 fn javascript_requirement_preserves_button_icon_hook() {
     let markup = button("m-example__copyButton", "Copy")
         .button_type("button")
