@@ -79,7 +79,7 @@ pub async fn get_profile(
     Ok(Maud(
         state
             .render_timeline_page(
-                state.render_navbar(profile_id, &session).await?,
+                state.render_navbar(profile_id, &session, true).await?,
                 pagination,
                 &session,
                 &mut cookies,
@@ -343,7 +343,7 @@ pub async fn post_follow(
     Ok(Maud(html! {
         // Update the profile summary (for profile page)
         (state
-            .render_profile_summary(profile_id, &session, state.ro_mode(session.session_token()))
+            .render_profile_summary(profile_id, &session, state.ro_mode(session.session_token()), true)
             .await?)
 
         // Update the followee list (for settings/following page)
@@ -371,27 +371,31 @@ fn follow_form_selector(follow_type: &str, personas: &[String]) -> PersonasTagsS
 }
 
 impl UiState {
+    /// Render the viewed user's navbar, with actions only on profile pages.
     pub async fn render_navbar(
         &self,
         profile_id: RostraId,
         session: &UserSession,
+        show_profile_actions: bool,
     ) -> RequestResult<Markup> {
         let ro_mode = self.ro_mode(session.session_token());
         Ok(crate::layout::render_app_navbar(
             None,
             html! {
                 div ."o-navBar__userAccount" {
-                    (self.render_profile_summary(profile_id, session, ro_mode).await?)
+                    (self.render_profile_summary(profile_id, session, ro_mode, show_profile_actions).await?)
                 }
             },
         ))
     }
 
+    /// Render profile content and optionally its profile-page actions.
     pub async fn render_profile_summary(
         &self,
         profile_id: RostraId,
         session: &UserSession,
         ro: RoMode,
+        show_profile_actions: bool,
     ) -> RequestResult<Markup> {
         let client = self.client(session.id()).await?;
         let client_ref = client.client_ref()?;
@@ -413,34 +417,36 @@ impl UiState {
                     {
                         (profile.display_name)
                     }
-                    div ."m-profileSummary__buttons" {
-                        (fragment::button("m-profileSummary__copyButton", "RostraId")
-                            .button_type("button")
-                            .data_value(&profile_id.to_string())
-                            .onclick("copyIdToClipboard(event)")
-                            .aria_label("Copy RostraId")
-                            .title("Copy RostraId")
-                            .call())
-                        @if session.id() != profile_id {
-                            a ."m-profileSummary__messageButton u-button"
-                                href=(super::messages::thread_url(profile_id))
-                            {
-                                span ."m-profileSummary__messageButtonIcon u-buttonIcon" {}
-                                "Message"
+                    @if show_profile_actions {
+                        div ."m-profileSummary__buttons" {
+                            (fragment::button("m-profileSummary__copyButton", "RostraId")
+                                .button_type("button")
+                                .data_value(&profile_id.to_string())
+                                .onclick("copyIdToClipboard(event)")
+                                .aria_label("Copy RostraId")
+                                .title("Copy RostraId")
+                                .call())
+                            @if session.id() != profile_id {
+                                a ."m-profileSummary__messageButton u-button"
+                                    href=(super::messages::thread_url(profile_id))
+                                {
+                                    span ."m-profileSummary__messageButtonIcon u-buttonIcon" {}
+                                    "Message"
+                                }
+                                @let label = if following { "Following..." } else { "Follow..." };
+                                (fragment::ajax_button(
+                                    &profile_follow_url(profile_id),
+                                    "get",
+                                    "follow-dialog-content",
+                                    "m-profileSummary__followButton",
+                                    label,
+                                )
+                                .disabled(ro.to_disabled())
+                                .hidden_inputs(html! {
+                                    input type="hidden" name="following" value=(following);
+                                })
+                                .call())
                             }
-                            @let label = if following { "Following..." } else { "Follow..." };
-                            (fragment::ajax_button(
-                                &profile_follow_url(profile_id),
-                                "get",
-                                "follow-dialog-content",
-                                "m-profileSummary__followButton",
-                                label,
-                            )
-                            .disabled(ro.to_disabled())
-                            .hidden_inputs(html! {
-                                input type="hidden" name="following" value=(following);
-                            })
-                            .call())
                         }
                     }
                 }

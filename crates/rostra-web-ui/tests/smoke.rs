@@ -35,6 +35,54 @@ fn assert_link_precedes(document: &Html, first: &str, second: &str) {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn profile_summary_actions_are_only_rendered_on_profile_pages() {
+    let server = TestServer::start().await;
+    let driver = server.driver();
+    let (viewer, _) = driver.login_new_identity().await;
+    let target = retain_test_identity(&server, viewer).await;
+
+    for path in ["/following", "/network", "/news", "/shoutbox"] {
+        let response = driver.get(path).await;
+        assert_eq!(response.status(), 200, "{path}");
+        let document = Html::parse_document(&response.text().await.unwrap());
+        assert!(
+            document
+                .select(&Selector::parse("#self-profile-summary a[href]").unwrap())
+                .next()
+                .is_some(),
+            "{path} must preserve the self-profile link"
+        );
+        assert!(
+            document
+                .select(&Selector::parse(".m-profileSummary__buttons").unwrap())
+                .next()
+                .is_none(),
+            "{path} must omit the action container"
+        );
+    }
+
+    for id in [viewer, target] {
+        let response = driver.get(&format!("/profile/{}", id.to_short())).await;
+        assert_eq!(response.status(), 200);
+        let document = Html::parse_document(&response.text().await.unwrap());
+        assert!(
+            document
+                .select(
+                    &Selector::parse("#profile-summary button[aria-label='Copy RostraId']")
+                        .unwrap()
+                )
+                .next()
+                .is_some()
+        );
+        let message =
+            Selector::parse("#profile-summary a.m-profileSummary__messageButton").unwrap();
+        let follow = Selector::parse("#profile-summary form[method='get']").unwrap();
+        assert_eq!(document.select(&message).next().is_some(), id != viewer);
+        assert_eq!(document.select(&follow).next().is_some(), id != viewer);
+    }
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn navigation_tabs_have_icons_and_accessible_labels_without_javascript() {
     let server = TestServer::start().await;
     let driver = server.driver();
@@ -467,6 +515,20 @@ async fn profile_and_post_json_ld_keep_hostile_profile_text_as_data() {
     let response = driver.get(&post_path).await;
     assert_eq!(response.status(), 200);
     let post_page = Html::parse_document(&response.text().await.unwrap());
+    assert!(
+        post_page
+            .select(&Selector::parse("#profile-summary a[href]").unwrap())
+            .next()
+            .is_some(),
+        "post pages must preserve the author profile link"
+    );
+    assert!(
+        post_page
+            .select(&Selector::parse(".m-profileSummary__buttons").unwrap())
+            .next()
+            .is_none(),
+        "post pages must omit profile actions"
+    );
     let post_json_ld = json_ld(&post_page);
     assert_eq!(post_json_ld["headline"], "Structured heading");
     assert_eq!(post_json_ld["author"]["name"], display_name);

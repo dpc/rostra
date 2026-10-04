@@ -479,7 +479,7 @@ pub async fn get_single_post(
             (re_typeset())
         };
 
-        let navbar = state.render_navbar(author, &session).await?;
+        let navbar = state.render_navbar(author, &session, false).await?;
         let main_content = html! {
             div ."o-mainBarTimeline" {
                 (crate::UiState::render_page_tab_bar("Post"))

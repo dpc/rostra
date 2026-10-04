@@ -90,15 +90,6 @@ impl UiState {
                     {
                         (self_profile.display_name)
                     }
-                    div ."m-profileSummary__buttons" {
-                        (fragment::button("m-profileSummary__copyButton", "RostraId")
-                            .button_type("button")
-                            .data_value(&self_id.to_string())
-                            .onclick("copyIdToClipboard(event)")
-                            .aria_label("Copy RostraId")
-                            .title("Copy RostraId")
-                            .call())
-                    }
                 }
             }
         })
