@@ -59,6 +59,8 @@ serde = { workspace = true }
 url = { workspace = true }
 urlencoding = { workspace = true }
 rand = { workspace = true }
+reqwest = { workspace = true }
+scraper = { workspace = true }
 
 [dev-dependencies]
 tokio-tungstenite = { workspace = true }

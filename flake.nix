@@ -94,6 +94,7 @@
                     }
                     ''
                       ROSTRA_ALPINE_AJAX_BUNDLE=${buildSrc}/crates/rostra-web-ui/assets/libs/alpine-ajax@0.12.6.js \
+                        ROSTRA_LINK_ROUTE_SOURCE=${buildSrc}/crates/rostra-web-ui/src/routes/link.rs \
                         node --test ${./crates/rostra-web-ui/tests/alpine-ajax.js}
                       ROSTRA_APP_JS=${buildSrc}/crates/rostra-web-ui/assets/app.js \
                         node --test ${./crates/rostra-web-ui/tests/shoutbox-keyboard.js}

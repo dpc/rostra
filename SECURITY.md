@@ -76,6 +76,19 @@ authorization, escaping, response-protection, and leakage boundaries above.
 
 ## User-controlled media responses
 
+The new-post Add link helper accepts credential-free HTTP(S) URLs and produces
+escaped Djot, using the existing renderer's embed recognition rather than adding
+providers. Optional title retrieval requires the requesting session's in-memory
+identity secret. It sends no incoming cookies, authorization, or referrer, and
+does not use environment proxies. Only ports 80 and 443 and conservatively
+validated public addresses are fetched. Every redirect repeats validation;
+validated DNS answers are pinned for the actual connection to prevent DNS
+rebinding. Retrieval is limited to three redirects, eight seconds overall,
+256 KiB of HTML, and four concurrent requests. Metadata is plain, bounded,
+editable text, never markup or executable code. Retrieval failure leaves manual
+insertion available. The request intentionally discloses the chosen URL to its
+website from the Rostra server; the form explains this before retrieval.
+
 Social-media event bytes and profile avatar bytes are untrusted even when their
 event signatures verify. An avatar must declare and contain one of AVIF, BMP,
 GIF, ICO, JPEG, PNG, SVG, TIFF, or WebP. SVG is fully parsed without a document

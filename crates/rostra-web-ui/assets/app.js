@@ -180,6 +180,15 @@ window.insertMediaSyntax = function (eventId, targetSelector) {
 const rostraDialogFocus = new WeakMap();
 let activeRostraDialog = null;
 
+window.insertExternalLink = function (syntax) {
+  const textarea = document.getElementById("new-post-content");
+  if (!textarea) return;
+  textarea.setRangeText(syntax, textarea.selectionStart, textarea.selectionEnd, "end");
+  textarea.dispatchEvent(new Event("input", { bubbles: true }));
+  closeRostraDialog(document.getElementById("post-preview-dialog"));
+  textarea.focus();
+};
+
 window.closeRostraDialog = function (dialog) {
   if (!dialog) return;
   dialog.classList.remove("-active");

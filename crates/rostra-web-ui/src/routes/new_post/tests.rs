@@ -265,6 +265,7 @@ fn post_composer_icon_controls_have_tooltips_and_accessible_names() {
         (".m-newPostForm__helpButton", "Formatting help"),
         (".m-newPostForm__emojiButton", "Insert emoji"),
         (".m-newPostForm__attachButton", "Attach media"),
+        (".m-newPostForm__linkButton", "Add link"),
     ] {
         control(&new_post, selector, label);
     }

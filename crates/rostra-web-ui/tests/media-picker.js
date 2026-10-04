@@ -42,11 +42,16 @@ function harness(targetSelector, initialValue = "") {
     dispatchEvent() {
       this.inputEvents++;
     },
+    setRangeText(text, start, end) {
+      this.value = this.value.slice(0, start) + text + this.value.slice(end);
+      this.selectionStart = this.selectionEnd = start + text.length;
+    },
   };
   const document = {
     addEventListener() {},
     getElementById(id) {
-      return id === "media-list" ? picker : null;
+      if (id === "new-post-content") return textarea;
+      return id === "media-list" || id === "post-preview-dialog" ? picker : null;
     },
     querySelector(selector) {
       if (selector === targetSelector) return textarea;
@@ -71,6 +76,18 @@ function harness(targetSelector, initialValue = "") {
 
   return { context, picker, textarea, window: context };
 }
+
+test("external link insertion replaces selected text and updates draft listeners", () => {
+  const app = harness("#new-post-content", "before replace after");
+  app.textarea.selectionStart = 7;
+  app.textarea.selectionEnd = 14;
+  const syntax = "[title](https://example.com/)";
+  app.window.insertExternalLink(syntax);
+  assert.equal(app.textarea.value, "before " + syntax + " after");
+  assert.equal(app.textarea.inputEvents, 1);
+  assert.equal(app.picker.open, false);
+  assert.equal(app.textarea.focused, true);
+});
 
 test("hostile target data never becomes click handler program text", () => {
   const hostile =

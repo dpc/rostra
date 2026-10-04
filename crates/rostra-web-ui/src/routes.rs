@@ -6,6 +6,7 @@ mod cookies;
 mod debug;
 mod feeds;
 pub mod fragment;
+mod link;
 mod media;
 mod media_type;
 mod messages;
@@ -309,6 +310,7 @@ pub fn route_handler(state: SharedState) -> Router<Arc<UiState>> {
             "/post/preview_dialog",
             post(new_post::post_post_preview_dialog),
         )
+        .route("/post/link_dialog", post(link::post_link_dialog))
         .route("/post/inline_reply", get(new_post::get_inline_reply))
         .route(
             "/post/inline_reply_cancel",

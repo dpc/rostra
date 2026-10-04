@@ -144,6 +144,11 @@ fn extract_media(url: &Url) -> Option<ExternalMedia<'_>> {
     }
 }
 
+/// Whether an external URL uses the renderer's image-style embed syntax.
+pub(super) fn is_external_embed(url: &Url) -> bool {
+    extract_media(url).is_some()
+}
+
 fn maybe_embed_media_html(s: &str) -> Option<String> {
     let Ok(url) = Url::parse(s) else {
         return None;

@@ -1192,6 +1192,15 @@ impl UiState {
                         "@paste"=[user_id.is_some().then_some("handleMediaPaste($event, 'media-attach-form')")]
                         {}
 
+                    a ."m-newPostForm__helpButton m-newPostForm__helpButton--inset"
+                        href="https://htmlpreview.github.io/?https://github.com/jgm/djot/blob/master/doc/syntax.html"
+                        target="_blank"
+                        title="Formatting help"
+                        aria-label="Formatting help"
+                    {
+                        span ."m-newPostForm__helpButtonIcon" {}
+                    }
+
                     // Autocomplete dropdown (mentions and emojis)
                     div ."m-textAutocomplete"
                         x-show="showDropdown"
@@ -1234,14 +1243,6 @@ impl UiState {
 
                 div ."m-newPostForm__footer" {
                     div ."m-newPostForm__footerRow m-newPostForm__footerRow--main" {
-                        a ."m-newPostForm__helpButton"
-                            href="https://htmlpreview.github.io/?https://github.com/jgm/djot/blob/master/doc/syntax.html"
-                            target="_blank"
-                            title="Formatting help"
-                            aria-label="Formatting help"
-                        {
-                            span ."m-newPostForm__helpButtonIcon" {}
-                        }
                         a
                             ."m-newPostForm__emojiButton u-requiresJs"
                             href="#"
@@ -1270,6 +1271,13 @@ impl UiState {
                             {
                                 span ."m-newPostForm__attachButtonIcon" {}
                             }
+                        }
+                        button ."m-newPostForm__linkButton"
+                            type="submit" formaction="/post/link_dialog"
+                            title="Add link" aria-label="Add link"
+                            disabled[ro.to_disabled()]
+                        {
+                            span ."m-newPostForm__linkButtonIcon" {}
                         }
                         @if ro.is_ro() {
                             (fragment::button("m-newPostForm__logoutButton", "Logout")

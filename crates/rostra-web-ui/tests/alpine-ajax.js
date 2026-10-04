@@ -10,19 +10,38 @@ const bundle = readFileSync(
     new URL("../assets/libs/alpine-ajax@0.12.6.js", import.meta.url),
   "utf8",
 );
+const linkMergeGuard = readFileSync(
+  process.env.ROSTRA_LINK_ROUTE_SOURCE ?? new URL("../src/routes/link.rs", import.meta.url), "utf8")
+  .match(/"@ajax:merge"="([^"]+)"/)[1];
 
-function harness(fetch) {
+function harness(fetch, dialogTarget = false, responseScope = "opening-one") {
   const attributes = new Map();
   const events = [];
   let initialize;
   let ajax;
   let loadingTimer;
   let loading = false;
+  let merges = 0;
+  const incoming = {
+    dataset: responseScope ? { linkRequest: responseScope } : {},
+    removeAttribute() {},
+    dispatchEvent: () => true,
+  };
   const target = {
     isConnected: true,
+    open: true,
+    dataset: { linkRequest: "opening-one" },
+    replaceWith() { merges++; },
     querySelectorAll: () => [],
     setAttribute: (key, value) => attributes.set(key, value),
     removeAttribute: (key) => attributes.delete(key),
+    dispatchEvent(event) {
+      events.push(event);
+      if (event.type === "ajax:merge") {
+        vm.runInNewContext(linkMergeGuard, { $el: this, $event: event });
+      }
+      return !event.defaultPrevented;
+    },
   };
   const element = {
     getAttribute: () => null,
@@ -48,10 +67,13 @@ function harness(fetch) {
   };
   const document = {
     baseURI: "http://localhost/messages",
-    documentElement: target,
+    documentElement: dialogTarget ? {} : target,
+    getElementById: () => target,
     querySelectorAll: () => [],
     createRange: () => ({
-      createContextualFragment: () => ({ firstElementChild: { content: {} } }),
+      createContextualFragment: () => ({
+        firstElementChild: { content: { getElementById: () => incoming } },
+      }),
     }),
     addEventListener(name, callback) {
       if (name === "alpine:initializing") initialize = callback;
@@ -70,15 +92,46 @@ function harness(fetch) {
         this.type = type;
         this.detail = options.detail;
       }
+      preventDefault() {
+        this.defaultPrevented = true;
+      }
     },
   });
   initialize();
   return {
-    request: (method) => ajax("/messages/test", { method, targets: ["_none"] }),
+    request: (method) => ajax("/messages/test", { method, focus: false, targets: [dialogTarget ? "dialog" : "_none"] }),
+    closeDialog: () => { target.open = false; },
+    merges: () => merges,
     events,
     attributes,
     isLoading: () => loading,
   };
+}
+
+test("closed dialog cancels a late response at the actual target merge event", async () => {
+  let respond;
+  const app = harness(() => new Promise((resolve) => { respond = resolve; }), true);
+  const request = app.request("POST");
+  app.closeDialog();
+  respond({ ok: true, status: 200, url: "http://localhost/messages/test",
+    redirected: false, text: async () => "<dialog></dialog>" });
+  await request;
+  const merge = app.events.find((event) => event.type === "ajax:merge");
+  assert.ok(merge, "merge is dispatched on the target dialog, not requesting form");
+  assert.equal(merge.defaultPrevented, true);
+  assert.equal(app.merges(), 0);
+  assert.ok(app.events.some((event) => event.type === "ajax:after"));
+});
+
+for (const [label, responseScope] of [["Add link", "opening-two"], ["Preview", null]]) {
+  test(`closed link dialog still accepts a later ${label} opening`, async () => {
+    const app = harness(async () => ({ ok: true, status: 200, url: "http://localhost/messages/test",
+      redirected: false, text: async () => "<dialog></dialog>" }), true, responseScope);
+    app.closeDialog();
+    await app.request("POST");
+    assert.equal(app.merges(), 1);
+    assert.ok(!app.events.find((event) => event.type === "ajax:merge").defaultPrevented);
+  });
 }
 
 for (const method of ["GET", "POST"]) {

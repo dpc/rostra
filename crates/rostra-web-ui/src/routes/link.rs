@@ -1,0 +1,322 @@
+//! Server-owned external-link composition; remote metadata is optional.
+
+use std::net::{IpAddr, SocketAddr};
+use std::time::Duration;
+
+use axum::extract::State;
+use axum::response::IntoResponse;
+use axum_extra::extract::Form;
+use maud::html;
+use scraper::{Html, Selector};
+use serde::Deserialize;
+use url::Url;
+
+use super::Maud;
+use super::unlock::session::UserSession;
+use crate::SharedState;
+use crate::error::{BadRequestSnafu, ReadOnlyModeSnafu, RequestError, RequestResult};
+use crate::util::extractors::ajax_request::AjaxRequest;
+
+/// Form state carried through ordinary HTTP and enhanced dialog requests.
+#[derive(Deserialize)]
+pub(super) struct LinkInput {
+    /// Existing composer draft.
+    #[serde(default)]
+    content: String,
+    /// User-supplied destination.
+    #[serde(default)]
+    url: String,
+    /// Editable display title.
+    #[serde(default)]
+    title: String,
+    /// Requested form action.
+    #[serde(default)]
+    action: String,
+    /// Browser-local request scope, not an authorization credential.
+    #[serde(default)]
+    link_request: String,
+}
+
+fn parse_url(value: &str) -> Option<Url> {
+    let url = Url::parse(value.trim()).ok()?;
+    (matches!(url.scheme(), "http" | "https")
+        && url.host().is_some()
+        && url.username().is_empty()
+        && url.password().is_none()
+        && value.len() <= 4096)
+        .then_some(url)
+}
+
+fn public_ip(ip: IpAddr) -> bool {
+    match ip {
+        IpAddr::V4(ip) => {
+            let [a, b, c, _] = ip.octets();
+            !matches!(a, 0 | 10 | 127 | 224..=255)
+                && !(a == 100 && (64..=127).contains(&b))
+                && !(a == 169 && b == 254)
+                && !(a == 172 && (16..=31).contains(&b))
+                && !(a == 192 && (b == 0 || b == 168 || (b == 88 && c == 99) || (b == 2)))
+                && !(a == 198 && (b == 18 || b == 19 || (b == 51 && c == 100)))
+                && !(a == 203 && b == 0 && c == 113)
+        }
+        IpAddr::V6(ip) => {
+            let segments = ip.segments();
+            // Conservatively exclude special-use/tunnel ranges as well as all
+            // addresses outside global unicast. Manual insertion still works.
+            (segments[0] & 0xe000) == 0x2000 && !matches!(segments[0], 0x2001 | 0x2002 | 0x3fff)
+        }
+    }
+}
+
+async fn fetch_title(url: &Url) -> Option<String> {
+    static FETCH_SLOTS: tokio::sync::Semaphore = tokio::sync::Semaphore::const_new(4);
+    let _permit = FETCH_SLOTS.try_acquire().ok()?;
+    tokio::time::timeout(Duration::from_secs(8), fetch_title_inner(url))
+        .await
+        .ok()
+        .flatten()
+}
+
+async fn fetch_title_inner(original: &Url) -> Option<String> {
+    let mut url = original.clone();
+    for _ in 0..=3 {
+        let host = url.host_str()?;
+        let port = url.port_or_known_default()?;
+        if !matches!(port, 80 | 443) {
+            return None;
+        }
+        let addrs: Vec<SocketAddr> = match url.host()? {
+            url::Host::Ipv4(ip) => vec![SocketAddr::new(ip.into(), port)],
+            url::Host::Ipv6(ip) => vec![SocketAddr::new(ip.into(), port)],
+            url::Host::Domain(_) => tokio::net::lookup_host((host, port)).await.ok()?.collect(),
+        };
+        if addrs.is_empty() || addrs.iter().any(|addr| !public_ip(addr.ip())) {
+            return None;
+        }
+        // Pin the validated DNS answers, disable ambient proxies and redirects,
+        // and use a fresh cookie-free client without any incoming credentials.
+        let client = reqwest::Client::builder()
+            .no_proxy()
+            .redirect(reqwest::redirect::Policy::none())
+            .referer(false)
+            .timeout(Duration::from_secs(5))
+            .resolve_to_addrs(host, &addrs)
+            .build()
+            .ok()?;
+        let mut response = client
+            .get(url.clone())
+            .header(reqwest::header::ACCEPT, "text/html")
+            .send()
+            .await
+            .ok()?;
+        if response.status().is_redirection() {
+            let target = response
+                .headers()
+                .get(reqwest::header::LOCATION)?
+                .to_str()
+                .ok()?;
+            url = parse_url(url.join(target).ok()?.as_str())?;
+            continue;
+        }
+        if !response.status().is_success()
+            || !response
+                .headers()
+                .get(reqwest::header::CONTENT_TYPE)?
+                .to_str()
+                .ok()?
+                .split(';')
+                .next()?
+                .trim()
+                .eq_ignore_ascii_case("text/html")
+        {
+            return None;
+        }
+        let mut body = Vec::new();
+        while let Some(chunk) = response.chunk().await.ok()? {
+            if body.len() + chunk.len() > 256 * 1024 {
+                return None;
+            }
+            body.extend_from_slice(&chunk);
+        }
+        return metadata_title(&String::from_utf8_lossy(&body));
+    }
+    None
+}
+
+fn metadata_title(source: &str) -> Option<String> {
+    let document = Html::parse_document(source);
+    let og = Selector::parse("meta[property='og:title'], meta[name='twitter:title']").ok()?;
+    let title = Selector::parse("title").ok()?;
+    let value = document
+        .select(&og)
+        .find_map(|node| {
+            node.value()
+                .attr("content")
+                .filter(|value| !value.trim().is_empty())
+        })
+        .map(str::to_owned)
+        .or_else(|| {
+            document
+                .select(&title)
+                .next()
+                .map(|node| node.text().collect())
+        })?;
+    let value = value.split_whitespace().collect::<Vec<_>>().join(" ");
+    (!value.is_empty()).then(|| value.chars().take(300).collect())
+}
+
+fn link_syntax(url: &Url, title: &str) -> String {
+    let title = if title.trim().is_empty() {
+        url.as_str()
+    } else {
+        title.trim()
+    };
+    let title: String = title
+        .chars()
+        .take(300)
+        .flat_map(|ch| {
+            let ch = if ch.is_control() { ' ' } else { ch };
+            if ch.is_ascii_punctuation() {
+                vec!['\\', ch]
+            } else {
+                vec![ch]
+            }
+        })
+        .collect();
+    let target = url
+        .as_str()
+        .replace('(', "%28")
+        .replace(')', "%29")
+        .replace('\\', "%5C");
+    let prefix = if super::content::is_external_embed(url) {
+        "!"
+    } else {
+        ""
+    };
+    format!("{prefix}[{title}]({target})")
+}
+
+/// Suggest metadata or insert an external link without publishing a post.
+pub(super) async fn post_link_dialog(
+    State(state): State<SharedState>,
+    session: UserSession,
+    AjaxRequest(is_ajax): AjaxRequest,
+    Form(mut form): Form<LinkInput>,
+) -> RequestResult<impl IntoResponse> {
+    state
+        .id_secret(session.session_token())
+        .ok_or_else(|| ReadOnlyModeSnafu.build())?;
+    if form.content.len() > 1024 * 1024 || form.title.len() > 4096 || form.url.len() > 4096 {
+        return Err(RequestError::User {
+            source: BadRequestSnafu {
+                message: "Link form is too large".to_owned(),
+            }
+            .build(),
+        });
+    }
+    if !matches!(form.action.as_str(), "title" | "insert") || form.link_request.len() != 32 {
+        form.link_request = format!("{:032x}", rand::random::<u128>());
+    }
+    let mut notice = None;
+    let mut syntax = None;
+    if matches!(form.action.as_str(), "title" | "insert") {
+        if let Some(url) = parse_url(&form.url) {
+            if form.action == "title" {
+                if let Some(title) = fetch_title(&url).await {
+                    form.title = title;
+                } else {
+                    notice = Some("Could not fetch a title. Enter one yourself, or use the URL.");
+                }
+            } else {
+                syntax = Some(link_syntax(&url, &form.title));
+            }
+        } else {
+            notice = Some("Enter an HTTP or HTTPS URL without credentials.");
+        }
+    }
+    let inserted = syntax.as_ref();
+    let markup = html! {
+        @if is_ajax {
+            dialog id="post-preview-dialog" ."o-previewDialog -active"
+                aria-labelledby="link-dialog-title"
+                data-link-request=(&form.link_request)
+                "@ajax:merge"="if (!$el.open && $event.detail.content.dataset.linkRequest === $el.dataset.linkRequest) $event.preventDefault()" {
+                div ."o-previewDialog__content" {
+                    (link_form(&form, notice, inserted, true))
+                }
+            }
+        } @else {
+            main { (link_form(&form, notice, inserted, false)) }
+        }
+    };
+    Ok(Maud(if is_ajax {
+        markup
+    } else {
+        state
+            .render_nojs_full_page(&session, "Add link", markup)
+            .await?
+    }))
+}
+
+fn link_form(
+    form: &LinkInput,
+    notice: Option<&str>,
+    syntax: Option<&String>,
+    enhanced: bool,
+) -> maud::Markup {
+    html! {
+        h4 id="link-dialog-title" tabindex="-1" { "Add link" }
+        @if syntax.is_some() || form.action == "cancel" {
+            @if enhanced {
+                @if let Some(syntax) = syntax {
+                    div data-link-syntax=(syntax)
+                        x-init="insertExternalLink($el.dataset.linkSyntax)" {}
+                }
+            }
+            p { "Continue editing your draft below." }
+            form ."m-linkForm" action="/post/preview_dialog" method="post" {
+                label for="link-result" { "Post draft" }
+                textarea id="link-result" name="content" {
+                    (&form.content)
+                    @if let Some(syntax) = syntax { ("\n") (syntax) }
+                }
+                button type="submit" { "Preview post" }
+                button type="submit" formaction="/post/link_dialog" { "Add another link" }
+            }
+        } @else {
+            form ."m-linkForm" action="/post/link_dialog" method="post" x-target=[enhanced.then_some("post-preview-dialog")]
+                x-data="{ loading: false }"
+                "@ajax:before"="loading = true"
+                "@ajax:after"="loading = false" {
+                input type="hidden" name="content" value=(&form.content) {}
+                input type="hidden" name="link_request" value=(&form.link_request) {}
+                label for="link-url" { "Link" }
+                input id="link-url" name="url" type="url" required maxlength="4096"
+                    value=(&form.url) placeholder="https://…" autofocus
+                    ":readonly"="loading"
+                    "@change"=[enhanced.then_some("if (!$el.form.elements.title.value.trim() && $el.validity.valid) $el.form.requestSubmit($el.form.querySelector('[value=title]'))")] {}
+                p { "Get title contacts this website from the Rostra server." }
+                button type="submit" name="action" value="title" ":disabled"="loading" { "Get title" }
+                @if enhanced {
+                    p role="status" x-show="loading" x-cloak { "Working…" }
+                }
+                label for="link-title" { "Title (optional)" }
+                input id="link-title" name="title" value=(&form.title) maxlength="300"
+                    ":readonly"="loading" {}
+                @if let Some(notice) = notice { p role="status" { (notice) } }
+                p { "YouTube links use the existing embedded-player syntax." }
+                button type="submit" name="action" value="insert" ":disabled"="loading" { "Ok" }
+                @if !enhanced {
+                    button type="submit" name="action" value="cancel" formnovalidate { "Cancel" }
+                }
+            }
+        }
+        @if enhanced {
+            button type="button"
+                onclick="closeRostraDialog(document.getElementById('post-preview-dialog'))" { "Cancel" }
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests;
