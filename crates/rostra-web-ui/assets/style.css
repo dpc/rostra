@@ -757,7 +757,8 @@ body:not(.-keyboard-nav) .m-postView__body:has(.m-postView__main[data-href]):hov
 .m-newPostForm__emojiButton,
 .m-newPostForm__attachButton,
 .m-newPostForm__linkButton,
-.m-newPostForm__helpButton {
+.m-newPostForm__helpButton,
+.m-profileSummary__copyButton {
   padding-left: 0.5rem;
   padding-right: 0.5rem;
   background: none;
@@ -771,7 +772,8 @@ body:not(.-keyboard-nav) .m-postView__body:has(.m-postView__main[data-href]):hov
 .m-newPostForm__emojiButton:hover:not(:disabled),
 .m-newPostForm__attachButton:hover:not(:disabled),
 .m-newPostForm__linkButton:hover:not(:disabled),
-.m-newPostForm__helpButton:hover {
+.m-newPostForm__helpButton:hover,
+.m-profileSummary__copyButton:hover {
   background: var(--color-button-bg-hover);
   border-radius: var(--border-radius-std);
 }
@@ -804,10 +806,14 @@ body:not(.-keyboard-nav) .m-postView__body:has(.m-postView__main[data-href]):hov
   position: absolute;
   right: 0.5rem;
   bottom: 0.5rem;
-  padding: 0.5rem;
   opacity: 0;
   pointer-events: none;
   transition: opacity 180ms ease-in-out;
+}
+
+.m-newPostForm__helpButton--inset,
+.m-profileSummary__copyButton {
+  padding: 0.5rem;
 }
 
 .m-newPostForm__textareaWrapper:hover .m-newPostForm__helpButton--inset,
@@ -1328,7 +1334,7 @@ emoji-picker {
   height: auto;
   line-height: 1.25;
   overflow-wrap: anywhere;
-  max-width: calc(100% - 2rem);
+  max-width: calc(100% - 2.25rem);
 }
 
 .m-profileSummary__displayName {
@@ -1372,31 +1378,19 @@ emoji-picker {
   flex-basis: 100%;
 }
 
-.m-profileSummary__buttons .u-button {
-  box-sizing: border-box;
-  min-height: 1.75rem;
-  justify-content: center;
+.m-profileSummary__messageButton {
   border: 1px solid var(--color-button-border);
   border-radius: var(--border-radius-std);
   background-color: var(--color-button-bg);
   color: var(--color-text-default);
-  font: inherit;
-  line-height: 1.25;
   background-image: none;
 }
 
-.m-profileSummary__buttons .u-button:hover {
+.m-profileSummary__messageButton:hover {
   border-color: var(--color-button-border-hover);
   background-color: var(--color-button-bg-hover);
   color: var(--color-text-default);
   background-image: none;
-}
-
-.m-profileSummary__buttons .u-button:disabled,
-.m-profileSummary__buttons .u-button[disabled] {
-  border-color: var(--color-button-border);
-  background-color: var(--color-button-bg);
-  color: var(--color-button-border);
 }
 
 .m-profileSummary__buttons .m-profileSummary__followButton:not(:disabled) {
@@ -1420,14 +1414,7 @@ emoji-picker {
 }
 
 .m-profileSummary__copyButton {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  min-width: 1.75rem;
-  min-height: 1.75rem;
-  padding: 0;
-  border-color: transparent;
-  background-color: transparent;
+  min-width: 0;
 }
 
 .m-profileSummary__copyButtonIcon {
