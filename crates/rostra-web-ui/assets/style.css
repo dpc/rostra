@@ -1267,11 +1267,23 @@ emoji-picker {
 }
 
 .o-reactionPicker__choice.u-button {
+  justify-content: center;
   min-width: 0;
+  max-width: none;
   height: auto;
   padding: .5rem;
+  border: none;
   font-size: 2rem;
   line-height: 1.5;
+}
+
+.o-reactionPicker__choice:focus-visible {
+  outline: 2px solid var(--color-link);
+  outline-offset: 2px;
+}
+
+.o-reactionPicker__choice:disabled {
+  opacity: 0.5;
 }
 
 .o-reactionConfirmation__removeButtonIcon {
