@@ -1185,7 +1185,7 @@ async fn explicit_news_url_remains_available() {
 }
 
 #[test_log::test(tokio::test(flavor = "multi_thread"))]
-async fn reaction_confirmations_update_the_current_post_through_hypermedia() {
+async fn reaction_picker_updates_the_current_post_through_hypermedia() {
     let server = TestServer::start().await;
     let driver = server.driver();
     let (author, secret) = driver.login_new_identity().await;
@@ -1219,7 +1219,7 @@ async fn reaction_confirmations_update_the_current_post_through_hypermedia() {
     let response = driver.get(&post_path).await;
     assert_eq!(response.status(), 200);
     let document = Html::parse_document(&response.text().await.unwrap());
-    let like_button = Selector::parse(r#"button[aria-label="Like this post"]"#).unwrap();
+    let like_button = Selector::parse(r#"button[aria-label="React to this post"]"#).unwrap();
     assert!(
         document.select(&like_button).next().is_some(),
         "rendered post should expose the labeled heart action"
@@ -1241,7 +1241,7 @@ async fn reaction_confirmations_update_the_current_post_through_hypermedia() {
             .select(&Selector::parse("dialog#post-preview-dialog.-active").unwrap())
             .next()
             .is_some(),
-        "enhanced heart action should return an in-page confirmation dialog"
+        "enhanced reaction action should return an in-page picker"
     );
     let publish_form = Selector::parse(&format!(
         r#"form[action="{post_path}/react/heart"][method="post"][x-target~="post-preview-dialog"]"#
@@ -1249,7 +1249,23 @@ async fn reaction_confirmations_update_the_current_post_through_hypermedia() {
     .unwrap();
     assert!(
         document.select(&publish_form).next().is_some(),
-        "dialog confirmation should submit through hypermedia"
+        "picker should submit through hypermedia"
+    );
+    let choices = Selector::parse(r#"button[type="submit"][name="reaction"]"#).unwrap();
+    let expected = ["❤️", "🚀", "🤣", "😢", "👀", "👍", "🎉", "🤔"];
+    assert_eq!(
+        document
+            .select(&choices)
+            .map(|button| {
+                assert!(button.value().attr("aria-label").is_some());
+                assert_eq!(
+                    button.text().collect::<String>(),
+                    button.value().attr("value").unwrap()
+                );
+                button.value().attr("value").unwrap()
+            })
+            .collect::<Vec<_>>(),
+        expected
     );
 
     let response = driver.get(&heart_path).await;
@@ -1262,16 +1278,35 @@ async fn reaction_confirmations_update_the_current_post_through_hypermedia() {
     let ordinary_form = document
         .select(&ordinary_form)
         .next()
-        .expect("ordinary confirmation form");
+        .expect("ordinary picker form");
     assert!(
         ordinary_form.value().attr("x-target").is_none(),
-        "ordinary confirmation must not require JavaScript"
+        "ordinary picker must not require JavaScript"
+    );
+    assert_eq!(ordinary_form.select(&choices).count(), 8);
+
+    let response = driver
+        .ajax_post_form(
+            &format!("{post_path}/react/heart"),
+            &[
+                ("post_thread_id", &edited_id.to_string()),
+                ("reaction", "not an emoji"),
+            ],
+        )
+        .await;
+    assert_eq!(
+        response.status(),
+        400,
+        "only offered reactions may be posted"
     );
 
     let response = driver
         .ajax_post_form(
             &format!("{post_path}/react/heart"),
-            &[("post_thread_id", &edited_id.to_string())],
+            &[
+                ("post_thread_id", &edited_id.to_string()),
+                ("reaction", "🚀"),
+            ],
         )
         .await;
     assert_eq!(response.status(), 200);
@@ -1283,8 +1318,70 @@ async fn reaction_confirmations_update_the_current_post_through_hypermedia() {
             .select(&Selector::parse("div#post-preview-dialog:not(.-active)").unwrap())
             .next()
             .is_some(),
-        "successful hypermedia action should close the confirmation dialog"
+        "successful hypermedia action should close the picker"
     );
+    let (reactions, _) = client
+        .db()
+        .paginate_social_post_reactions_rev(edited_id, None, 1000)
+        .await;
+    assert_eq!(reactions.len(), 2, "one click should publish one reaction");
+    assert!(
+        reactions
+            .iter()
+            .any(|reaction| reaction.content.get_reaction() == Some("🚀"))
+    );
+
+    for emoji in expected {
+        let response = driver
+            .post_form(
+                &format!("{post_path}/react/heart"),
+                &[
+                    ("post_thread_id", &edited_id.to_string()),
+                    ("reaction", emoji),
+                ],
+            )
+            .await;
+        assert_eq!(response.status(), 303, "ordinary emoji action redirects");
+    }
+    let (reactions, _) = client
+        .db()
+        .paginate_social_post_reactions_rev(edited_id, None, 1000)
+        .await;
+    for emoji in expected {
+        assert!(
+            reactions
+                .iter()
+                .any(|reaction| reaction.content.get_reaction() == Some(emoji))
+        );
+    }
+    let readonly = server.driver();
+    readonly.login_readonly(author).await;
+    for ajax in [false, true] {
+        let response = if ajax {
+            readonly.ajax_get(&heart_path).await
+        } else {
+            readonly.get(&heart_path).await
+        };
+        assert_eq!(response.status(), 200);
+        let document = Html::parse_document(&response.text().await.unwrap());
+        assert_eq!(
+            document
+                .select(&Selector::parse(r#"button[name="reaction"][disabled]"#).unwrap())
+                .count(),
+            8,
+            "a read-only session must not offer enabled reaction actions"
+        );
+    }
+    let before_readonly_post = reactions.len();
+    let response = readonly
+        .ajax_post_form(&format!("{post_path}/react/heart"), &[("reaction", "🚀")])
+        .await;
+    assert!(!response.status().is_success());
+    let (reactions, _) = client
+        .db()
+        .paginate_social_post_reactions_rev(edited_id, None, 1000)
+        .await;
+    assert_eq!(reactions.len(), before_readonly_post);
 
     let delete_path = format!(
         "{post_path}/reaction/{}/delete?{thread_query}",

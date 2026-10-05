@@ -1254,8 +1254,22 @@ emoji-picker {
   color: var(--color-text-default);
 }
 
-.o-reactionConfirmation__publishButtonIcon {
-  background: url('/assets/icons/heart.svg') center/contain no-repeat;
+.o-reactionPicker__form {
+  margin: 1rem 0;
+}
+
+.o-reactionPicker__choices {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: .5rem;
+}
+
+.o-reactionPicker__choice.u-button {
+  min-width: 0;
+  height: auto;
+  padding: .5rem;
+  font-size: 2rem;
+  line-height: 1.5;
 }
 
 .o-reactionConfirmation__removeButtonIcon {

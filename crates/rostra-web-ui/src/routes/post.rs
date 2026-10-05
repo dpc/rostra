@@ -117,6 +117,26 @@ pub struct ReactionContextInput {
     post_thread_id: Option<ShortEventId>,
 }
 
+/// Selected reaction and rendering context for a reaction submission.
+#[derive(Deserialize)]
+pub struct ReactionInput {
+    /// Thread instance containing the displayed post and reaction bar.
+    post_thread_id: Option<ShortEventId>,
+    /// Chosen emoji; older heart-only forms may omit it.
+    reaction: Option<String>,
+}
+
+const REACTION_CHOICES: [(&str, &str); 8] = [
+    ("❤️", "Love"),
+    ("🚀", "Rocket"),
+    ("🤣", "Rolling on the floor laughing"),
+    ("😢", "Sad"),
+    ("👀", "Eyes"),
+    ("👍", "Thumbs up"),
+    ("🎉", "Celebrate"),
+    ("🤔", "Thinking"),
+];
+
 fn post_not_found() -> RequestError {
     RequestError::User {
         source: UserRequestError::SomethingNotFound,
@@ -631,21 +651,18 @@ fn find_own_reaction(
 }
 
 enum ReactionConfirmationAction {
-    Publish,
     Remove,
 }
 
 impl ReactionConfirmationAction {
     fn button_class(&self) -> &'static str {
         match self {
-            Self::Publish => "o-reactionConfirmation__publishButton",
             Self::Remove => "o-reactionConfirmation__removeButton",
         }
     }
 
     fn label(&self) -> &'static str {
         match self {
-            Self::Publish => "Publish",
             Self::Remove => "Remove",
         }
     }
@@ -687,11 +704,9 @@ fn ajax_reaction_confirmation(
     disabled: bool,
 ) -> Markup {
     let title = match confirmation_action {
-        ReactionConfirmationAction::Publish => "Like this post?",
         ReactionConfirmationAction::Remove => "Remove reaction?",
     };
     let prompt = match confirmation_action {
-        ReactionConfirmationAction::Publish => "Publish this heart reaction to the post?",
         ReactionConfirmationAction::Remove => "Remove your reaction from this post?",
     };
     let x_target = format!("post-preview-dialog {reactions_target}");
@@ -729,10 +744,6 @@ fn nojs_reaction_confirmation(
     disabled: bool,
 ) -> Markup {
     let (title, prompt) = match confirmation_action {
-        ReactionConfirmationAction::Publish => (
-            "Like this post?",
-            "Publish this heart reaction to the post?",
-        ),
         ReactionConfirmationAction::Remove => {
             ("Remove reaction?", "Remove your reaction from this post?")
         }
@@ -756,7 +767,75 @@ fn nojs_reaction_confirmation(
     }
 }
 
-/// Render the ordinary HTTP confirmation page for publishing a heart reaction.
+fn reaction_picker_form(
+    action: &str,
+    post_thread_id: ShortEventId,
+    x_target: Option<&str>,
+    disabled: bool,
+) -> Markup {
+    html! {
+        form ."o-reactionPicker__form"
+            action=(action) method="post" x-target=[x_target]
+            x-data=[x_target.map(|_| "{ busy: false }")]
+            "@ajax:before"=[x_target.map(|_| "if (busy) { $event.preventDefault(); return; } busy = true")]
+            "@ajax:after"=[x_target.map(|_| "busy = false")]
+            aria-busy="false"
+            ":aria-busy"=[x_target.map(|_| "busy")]
+        {
+            input type="hidden" name="post_thread_id" value=(post_thread_id);
+            div ."o-reactionPicker__choices" {
+                @for (emoji, label) in REACTION_CHOICES {
+                    button ."o-reactionPicker__choice" ."u-button"
+                        type="submit" name="reaction" value=(emoji)
+                        aria-label=(format!("React with {label}")) title=(label)
+                        disabled[disabled] ":disabled"=[x_target.map(|_| if disabled { "true" } else { "busy" })]
+                    {
+                        span aria-hidden="true" { (emoji) }
+                    }
+                }
+            }
+        }
+    }
+}
+
+fn reaction_picker(
+    action: &str,
+    post_thread_id: ShortEventId,
+    reactions_target: Option<&str>,
+    cancel_url: &str,
+    disabled: bool,
+) -> Markup {
+    if let Some(reactions_target) = reactions_target {
+        let x_target = format!("post-preview-dialog {reactions_target}");
+        html! {
+            dialog id="post-preview-dialog" ."o-previewDialog -active"
+                aria-labelledby="post-preview-title" {
+                div ."o-previewDialog__content" {
+                    h4 id="post-preview-title" tabindex="-1" ."o-previewDialog__title" {
+                        "Choose a reaction"
+                    }
+                    (reaction_picker_form(action, post_thread_id, Some(&x_target), disabled))
+                    div ."o-previewDialog__actionButtons" {
+                        (fragment::button("o-previewDialog__cancelButton", "Cancel")
+                            .button_type("button")
+                            .onclick("closeRostraDialog(document.getElementById('post-preview-dialog'))")
+                            .call())
+                    }
+                }
+            }
+        }
+    } else {
+        html! {
+            section ."o-reactionConfirmation" {
+                h1 { "Choose a reaction" }
+                (reaction_picker_form(action, post_thread_id, None, disabled))
+                a ."o-reactionConfirmation__cancel" href=(cancel_url) { "Cancel" }
+            }
+        }
+    }
+}
+
+/// Render an emoji picker as an ordinary HTTP page or an enhanced dialog.
 pub async fn get_heart_reaction_confirmation(
     state: State<SharedState>,
     session: UserSession,
@@ -774,25 +853,20 @@ pub async fn get_heart_reaction_confirmation(
     let action = post_heart_reaction_url(target.rostra_id(), target.event_id().to_short());
     let disabled = state.ro_mode(session.session_token()).to_disabled();
     if is_ajax {
-        return Ok(Maud(ajax_reaction_confirmation(
-            ReactionConfirmationAction::Publish,
-            "❤️",
+        return Ok(Maud(reaction_picker(
             &action,
             post_thread_id,
-            &post_reactions_html_id(post_thread_id, target.event_id().to_short()),
+            Some(&post_reactions_html_id(
+                post_thread_id,
+                target.event_id().to_short(),
+            )),
+            &cancel_url,
             disabled,
         ))
         .into_response());
     }
 
-    let body = nojs_reaction_confirmation(
-        ReactionConfirmationAction::Publish,
-        "❤️",
-        &action,
-        post_thread_id,
-        &cancel_url,
-        disabled,
-    );
+    let body = reaction_picker(&action, post_thread_id, None, &cancel_url, disabled);
     Ok(Maud(
         state
             .render_nojs_full_page(&session, "Publish Reaction", body)
@@ -801,13 +875,14 @@ pub async fn get_heart_reaction_confirmation(
     .into_response())
 }
 
-/// Publish a heart reaction after the user submits the confirmation form.
+/// Publish the selected reaction immediately, accepting legacy heart-only
+/// forms.
 pub async fn post_heart_reaction(
     state: State<SharedState>,
     session: UserSession,
     AjaxRequest(is_ajax): AjaxRequest,
     Path((author_id, event_id)): Path<(PostAuthorId, EventPathId)>,
-    Form(input): Form<ReactionContextInput>,
+    Form(input): Form<ReactionInput>,
 ) -> RequestResult<axum::response::Response> {
     let id_secret = state
         .id_secret(session.session_token())
@@ -815,9 +890,20 @@ pub async fn post_heart_reaction(
     let client_handle = state.client(session.id()).await?;
     let client = client_handle.client_ref()?;
     let target = resolve_reaction_target(&client, author_id, event_id).await?;
+    let reaction = input.reaction.as_deref().unwrap_or("❤️");
+    if !REACTION_CHOICES.iter().any(|(emoji, _)| *emoji == reaction) {
+        return Err(RequestError::User {
+            source: UserRequestError::InvalidData,
+        });
+    }
 
     client
-        .social_post(id_secret, "❤️".to_owned(), Some(target), Default::default())
+        .social_post(
+            id_secret,
+            reaction.to_owned(),
+            Some(target),
+            Default::default(),
+        )
         .await?;
 
     if is_ajax {
@@ -1913,8 +1999,8 @@ impl UiState {
                                         ."-disabled"[ro.is_ro()]
                                         type="submit"
                                         disabled[ro.to_disabled()]
-                                        aria-label="Like this post"
-                                        title="Like this post"
+                                        aria-label="React to this post"
+                                        title="React to this post"
                                     {
                                         "❤️"
                                     }
