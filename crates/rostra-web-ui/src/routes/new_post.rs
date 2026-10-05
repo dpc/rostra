@@ -1243,11 +1243,12 @@ impl UiState {
 
                 div ."m-newPostForm__footer" {
                     div ."m-newPostForm__footerRow m-newPostForm__footerRow--main" {
-                        a
+                        button
                             ."m-newPostForm__emojiButton u-requiresJs"
-                            href="#"
+                            type="button"
                             title="Insert emoji"
                             aria-label="Insert emoji"
+                            disabled[ro.to_disabled()]
                             onclick="toggleEmojiPicker('emoji-picker-container', event)"
                         { "😀" }
                         @if user_id.is_some() {

@@ -21,6 +21,39 @@ fn cookie_test_id() -> RostraId {
     RostraId::from_bytes([42; 32])
 }
 
+#[test]
+fn new_post_tools_follow_posting_mode() {
+    for (mode, user_id) in [
+        (RoMode::Ro, None),
+        (RoMode::Ro, Some(cookie_test_id())),
+        (RoMode::Rw, Some(cookie_test_id())),
+    ] {
+        let document =
+            Html::parse_fragment(&UiState::new_post_form_inner(mode, user_id, false).into_string());
+        for label in ["Insert emoji", "Attach media", "Add link"] {
+            let selector = Selector::parse(&format!("[aria-label='{label}']")).unwrap();
+            let control = document.select(&selector).next().unwrap();
+            assert_eq!(control.value().name(), "button", "{label}");
+            assert_eq!(
+                control.value().attr("disabled").is_some(),
+                mode.to_disabled(),
+                "{label}"
+            );
+        }
+        let emoji = document
+            .select(&Selector::parse("[aria-label='Insert emoji']").unwrap())
+            .next()
+            .unwrap();
+        assert_eq!(emoji.value().attr("type"), Some("button"));
+        assert!(emoji.value().attr("onclick").is_some());
+        let link = document
+            .select(&Selector::parse("[aria-label='Add link']").unwrap())
+            .next()
+            .unwrap();
+        assert_eq!(link.value().attr("formaction"), Some("/post/link_dialog"));
+    }
+}
+
 fn transport_test_tags() -> BTreeSet<PersonaTag> {
     [
         "personal",

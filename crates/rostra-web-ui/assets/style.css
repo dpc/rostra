@@ -768,15 +768,17 @@ body:not(.-keyboard-nav) .m-postView__body:has(.m-postView__main[data-href]):hov
   align-items: center;
 }
 
-.m-newPostForm__emojiButton:hover,
-.m-newPostForm__attachButton:hover,
-.m-newPostForm__linkButton:hover,
+.m-newPostForm__emojiButton:hover:not(:disabled),
+.m-newPostForm__attachButton:hover:not(:disabled),
+.m-newPostForm__linkButton:hover:not(:disabled),
 .m-newPostForm__helpButton:hover {
   background: var(--color-button-bg-hover);
   border-radius: var(--border-radius-std);
 }
 
-.m-newPostForm__attachButton:disabled {
+.m-newPostForm__emojiButton:disabled,
+.m-newPostForm__attachButton:disabled,
+.m-newPostForm__linkButton:disabled {
   opacity: 0.5;
   cursor: not-allowed;
 }
