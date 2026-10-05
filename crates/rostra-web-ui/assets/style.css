@@ -1311,6 +1311,24 @@ emoji-picker {
   align-items: flex-start;
   gap: 0.5rem;
   flex: 1;
+  min-width: 0;
+}
+
+.m-profileSummary__identity {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.25rem;
+  width: 100%;
+}
+
+.m-profileSummary__identity .m-profileSummary__displayName {
+  flex: 0 1 auto;
+  min-width: 0;
+  height: auto;
+  line-height: 1.25;
+  overflow-wrap: anywhere;
+  max-width: calc(100% - 3rem);
 }
 
 .m-profileSummary__displayName {
@@ -1350,12 +1368,23 @@ emoji-picker {
   flex-wrap: wrap;
   gap: 0.5rem;
   width: 100%;
-  max-width: 400px;
+  flex-basis: 100%;
+}
+
+.m-profileSummary__buttons > form,
+.m-profileSummary__buttons > a {
+  flex: 1;
+}
+
+.m-profileSummary__buttons form .u-button {
+  width: 100%;
 }
 
 .m-profileSummary__buttons .u-button {
   box-sizing: border-box;
-  min-height: 1.75rem;
+  min-height: 2.75rem;
+  max-width: none;
+  justify-content: center;
   border: 1px solid var(--color-button-border);
   border-radius: var(--border-radius-std);
   background-color: var(--color-button-bg);
@@ -1379,24 +1408,39 @@ emoji-picker {
   color: var(--color-button-border);
 }
 
+.m-profileSummary__buttons .m-profileSummary__followButton:not(:disabled) {
+  border-color: var(--color-text-default);
+  background-color: var(--color-text-default);
+  color: var(--color-bg-default);
+}
+
+.m-profileSummary__buttons .m-profileSummary__followButton:not(:disabled):hover {
+  opacity: 0.85;
+}
+
+.m-profileSummary__followButton:not(:disabled):not(.-loading) .u-buttonIcon {
+  filter: invert(calc(100% - var(--invert)));
+}
+
+.m-profileSummary__buttons .u-button:focus-visible,
+.m-profileSummary__copyButton:focus-visible {
+  outline: 2px solid var(--color-link);
+  outline-offset: 2px;
+}
+
 .m-profileSummary__copyButton {
   display: flex;
   align-items: center;
   justify-content: center;
-  position: relative;
-  padding-left: 2rem;
+  min-width: 2.75rem;
+  min-height: 2.75rem;
+  padding: 0;
+  border-color: transparent;
+  background-color: transparent;
 }
 
 .m-profileSummary__copyButtonIcon {
-  background: url('/assets/icons/id-card.svg') center/contain no-repeat;
-  position: absolute;
-  left: 0.5rem;
-  top: 50%;
-  transform: translateY(-50%);
-}
-
-.m-profileSummary__copyButton:hover .m-profileSummary__copyButtonIcon {
-  background-image: url('/assets/icons/copy.svg');
+  background: url('/assets/icons/copy.svg') center/contain no-repeat;
 }
 
 .m-profileSummary__copyButton.-active .m-profileSummary__copyButtonIcon {

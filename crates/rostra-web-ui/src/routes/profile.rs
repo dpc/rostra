@@ -412,41 +412,44 @@ impl UiState {
                 (fragment::avatar("m-profileSummary__userImage", self.avatar_url(profile_id, profile.event_id), &format!("{}'s avatar", profile.display_name)))
 
                 div ."m-profileSummary__content" {
-                    a ."m-profileSummary__displayName u-displayName"
-                        href=(profile_url(profile_id))
-                    {
-                        (profile.display_name)
-                    }
-                    @if show_profile_actions {
-                        div ."m-profileSummary__buttons" {
-                            (fragment::button("m-profileSummary__copyButton", "RostraId")
+                    div ."m-profileSummary__identity"[show_profile_actions] {
+                        a ."m-profileSummary__displayName u-displayName"
+                            href=(profile_url(profile_id))
+                        {
+                            (profile.display_name)
+                        }
+                        @if show_profile_actions {
+                            (fragment::button("m-profileSummary__copyButton", "")
                                 .button_type("button")
                                 .data_value(&profile_id.to_string())
                                 .onclick("copyIdToClipboard(event)")
                                 .aria_label("Copy RostraId")
                                 .title("Copy RostraId")
                                 .call())
-                            @if session.id() != profile_id {
-                                a ."m-profileSummary__messageButton u-button"
-                                    href=(super::messages::thread_url(profile_id))
-                                {
-                                    span ."m-profileSummary__messageButtonIcon u-buttonIcon" {}
-                                    "Message"
-                                }
-                                @let label = if following { "Following..." } else { "Follow..." };
-                                (fragment::ajax_button(
-                                    &profile_follow_url(profile_id),
-                                    "get",
-                                    "follow-dialog-content",
-                                    "m-profileSummary__followButton",
-                                    label,
-                                )
-                                .disabled(ro.to_disabled())
-                                .hidden_inputs(html! {
-                                    input type="hidden" name="following" value=(following);
-                                })
-                                .call())
-                            }
+                        }
+                    }
+                }
+
+                @if show_profile_actions && session.id() != profile_id {
+                    div ."m-profileSummary__buttons" {
+                        @let label = if following { "Following..." } else { "Follow..." };
+                        (fragment::ajax_button(
+                            &profile_follow_url(profile_id),
+                            "get",
+                            "follow-dialog-content",
+                            "m-profileSummary__followButton",
+                            label,
+                        )
+                        .disabled(ro.to_disabled())
+                        .hidden_inputs(html! {
+                            input type="hidden" name="following" value=(following);
+                        })
+                        .call())
+                        a ."m-profileSummary__messageButton u-button"
+                            href=(super::messages::thread_url(profile_id))
+                        {
+                            span ."m-profileSummary__messageButtonIcon u-buttonIcon" aria-hidden="true" {}
+                            "Message"
                         }
                     }
                 }

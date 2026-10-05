@@ -65,21 +65,79 @@ async fn profile_summary_actions_are_only_rendered_on_profile_pages() {
         let response = driver.get(&format!("/profile/{}", id.to_short())).await;
         assert_eq!(response.status(), 200);
         let document = Html::parse_document(&response.text().await.unwrap());
-        assert!(
-            document
-                .select(
-                    &Selector::parse("#profile-summary button[aria-label='Copy RostraId']")
-                        .unwrap()
+        let copy = document
+            .select(
+                &Selector::parse(
+                    "#profile-summary .m-profileSummary__identity button[aria-label='Copy RostraId']",
                 )
-                .next()
-                .is_some()
+                .unwrap(),
+            )
+            .next()
+            .unwrap();
+        assert_eq!(copy.value().attr("type"), Some("button"));
+        assert_eq!(
+            copy.value().attr("data-value"),
+            Some(id.to_string().as_str())
         );
+        assert_eq!(
+            copy.value().attr("onclick"),
+            Some("copyIdToClipboard(event)")
+        );
+        assert!(copy.text().all(|text| text.trim().is_empty()));
         let message =
             Selector::parse("#profile-summary a.m-profileSummary__messageButton").unwrap();
         let follow = Selector::parse("#profile-summary form[method='get']").unwrap();
         assert_eq!(document.select(&message).next().is_some(), id != viewer);
         assert_eq!(document.select(&follow).next().is_some(), id != viewer);
+        let actions = document
+            .select(&Selector::parse("#profile-summary > .m-profileSummary__buttons").unwrap())
+            .next();
+        assert_eq!(actions.is_some(), id != viewer);
+        if let Some(actions) = actions {
+            let children: Vec<_> = actions.child_elements().collect();
+            assert_eq!(children.len(), 2);
+            assert_eq!(children[0].value().name(), "form");
+            assert_eq!(children[1].value().name(), "a");
+            assert_eq!(
+                children[0].value().attr("action"),
+                Some(format!("/profile/{}/follow", id.to_short()).as_str())
+            );
+            assert_eq!(
+                children[0].value().attr("x-target"),
+                Some("follow-dialog-content")
+            );
+            let button = children[0]
+                .select(&Selector::parse("button").unwrap())
+                .next()
+                .unwrap();
+            assert!(button.text().any(|text| text == "Follow..."));
+            assert!(button.value().attr("disabled").is_none());
+        }
     }
+
+    let readonly = server.driver();
+    readonly.login_readonly(viewer).await;
+    let response = readonly
+        .get(&format!("/profile/{}", target.to_short()))
+        .await;
+    assert_eq!(response.status(), 200);
+    let document = Html::parse_document(&response.text().await.unwrap());
+    assert!(
+        document
+            .select(
+                &Selector::parse("#profile-summary .m-profileSummary__followButton[disabled]")
+                    .unwrap()
+            )
+            .next()
+            .is_some()
+    );
+    assert!(
+        document
+            .select(&Selector::parse("#profile-summary .m-profileSummary__messageButton").unwrap())
+            .next()
+            .is_some(),
+        "the message link retains its destination's server-side authorization"
+    );
 }
 
 #[tokio::test(flavor = "multi_thread")]
