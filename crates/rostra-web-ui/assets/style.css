@@ -414,14 +414,14 @@ img.u-userImage {
     position: sticky;
     top: 0;
     align-self: start;
-    min-width: 250px;
-    max-width: 400px;
+    min-width: 280px;
+    max-width: 440px;
     padding: 10pt;
     padding-right: 5pt;
   }
 
   .o-mainBar {
-    max-width: min(50rem, calc(100% - 250px));
+    max-width: min(50rem, calc(100% - 280px));
   }
 }
 
