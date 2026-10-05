@@ -1328,7 +1328,7 @@ emoji-picker {
   height: auto;
   line-height: 1.25;
   overflow-wrap: anywhere;
-  max-width: calc(100% - 3rem);
+  max-width: calc(100% - 2rem);
 }
 
 .m-profileSummary__displayName {
@@ -1366,24 +1366,15 @@ emoji-picker {
   display: flex;
   flex-direction: row;
   flex-wrap: wrap;
+  align-items: center;
   gap: 0.5rem;
   width: 100%;
   flex-basis: 100%;
 }
 
-.m-profileSummary__buttons > form,
-.m-profileSummary__buttons > a {
-  flex: 1;
-}
-
-.m-profileSummary__buttons form .u-button {
-  width: 100%;
-}
-
 .m-profileSummary__buttons .u-button {
   box-sizing: border-box;
-  min-height: 2.75rem;
-  max-width: none;
+  min-height: 1.75rem;
   justify-content: center;
   border: 1px solid var(--color-button-border);
   border-radius: var(--border-radius-std);
@@ -1432,8 +1423,8 @@ emoji-picker {
   display: flex;
   align-items: center;
   justify-content: center;
-  min-width: 2.75rem;
-  min-height: 2.75rem;
+  min-width: 1.75rem;
+  min-height: 1.75rem;
   padding: 0;
   border-color: transparent;
   background-color: transparent;
