@@ -140,7 +140,26 @@ fn x_oembed_title(body: &[u8]) -> Option<String> {
         }
         pending.extend(node.children().rev());
     }
-    normalized_title(&text)
+    normalized_title(without_trailing_x_shortlinks(&text))
+}
+
+/// Remove bare trailing X shortlinks without changing links inside post text.
+fn without_trailing_x_shortlinks(mut text: &str) -> &str {
+    text = text.trim_end();
+    while !text.is_empty() {
+        let (prefix, token) = text.rsplit_once(char::is_whitespace).unwrap_or(("", text));
+        let Some(code) = token
+            .strip_prefix("https://t.co/")
+            .or_else(|| token.strip_prefix("http://t.co/"))
+        else {
+            break;
+        };
+        if code.is_empty() || !code.bytes().all(|byte| byte.is_ascii_alphanumeric()) {
+            break;
+        }
+        text = prefix.trim_end();
+    }
+    text
 }
 
 fn youtube_oembed_url(original: &Url) -> Option<Url> {

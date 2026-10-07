@@ -969,6 +969,7 @@ emoji-picker {
 }
 
 .lazyload-caption {
+  font-style: italic;
   text-align: center;
   overflow-wrap: anywhere;
 }

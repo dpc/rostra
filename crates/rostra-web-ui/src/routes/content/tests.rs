@@ -149,6 +149,32 @@ async fn production_external_media_cards_are_inert_escaped_and_context_scoped() 
             6
         );
         assert_eq!(document.select(&select(".lazyload-caption")).count(), 4);
+        let captions = document
+            .select(&select(".lazyload-caption"))
+            .map(|caption| {
+                assert_eq!(caption.value().name(), "p");
+                assert!(caption.value().attr("hidden").is_none());
+                assert_eq!(
+                    caption.parent().unwrap().id(),
+                    caption
+                        .ancestors()
+                        .filter_map(scraper::ElementRef::wrap)
+                        .find(|element| element.value().classes().any(|c| c == "lazyload-wrapper"))
+                        .unwrap()
+                        .id()
+                );
+                caption.text().collect::<String>()
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(
+            captions,
+            [
+                "X caption",
+                "X caption",
+                "YouTube caption",
+                "Image <script> & caption"
+            ]
+        );
         assert_eq!(
             document
                 .select(&select("script, [onclick], [src], [srcdoc], [srcset]"))
@@ -187,6 +213,21 @@ async fn production_external_media_cards_are_inert_escaped_and_context_scoped() 
             assert_eq!(url.path(), "/embed/a%22%3E%3Cscript%3E");
         }
     }
+}
+
+#[test]
+fn shared_media_captions_are_italic_in_both_load_states() {
+    let stylesheet = include_str!("../../../assets/style.css");
+    let declarations = stylesheet
+        .split_once(".lazyload-caption {")
+        .unwrap()
+        .1
+        .split_once('}')
+        .unwrap()
+        .0;
+    assert!(declarations.contains("font-style: italic;"));
+    assert!(!declarations.contains("display: none"));
+    assert!(!stylesheet.contains(".-expanded .lazyload-caption"));
 }
 
 #[test]

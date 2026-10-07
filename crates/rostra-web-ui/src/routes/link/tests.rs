@@ -229,6 +229,62 @@ fn x_metadata_uses_fixed_oembed_endpoint_and_discards_tracking() {
 }
 
 #[test]
+fn x_oembed_titles_drop_only_bare_trailing_shortlinks() {
+    let title = |paragraph: &str| {
+        x_oembed_title(
+            serde_json::json!({"html": format!(
+                "<blockquote class='twitter-tweet'><p>{paragraph}</p></blockquote>"
+            )})
+            .to_string()
+            .as_bytes(),
+        )
+    };
+    assert_eq!(
+        title(
+            "WAIT... WHAT? Anthropic has completely lost its mind. It’s over for OpenAI. <a href='https://t.co/LSN592B4Hh'>https://t.co/LSN592B4Hh</a>"
+        ),
+        Some("WAIT... WHAT? Anthropic has completely lost its mind. It’s over for OpenAI.".into())
+    );
+    assert_eq!(
+        title("  A &amp; B<br>https://t.co/abc\u{a0}http://t.co/XYZ123  "),
+        Some("A & B".into())
+    );
+    assert_eq!(title("https://t.co/abc"), None);
+    assert_eq!(title("https://t.co/abc https://t.co/def"), None);
+    for text in [
+        "Read https://t.co/abc for details",
+        "Read https://example.com/abc",
+        "Read https://t.co.evil.test/abc",
+        "Read https://t.co/",
+        "Read https://t.co/abc.",
+        "Read https://t.co/abc?x=1",
+        "Read https://t.co/abc#fragment",
+        "Read https://t.co/abc/def",
+        "Read https://user@t.co/abc",
+        "Read https://t.co:443/abc",
+        "Read nothttps://t.co/abc",
+    ] {
+        assert_eq!(title(text), Some(text.into()), "{text}");
+    }
+    assert_eq!(
+        title("Read <a href='https://t.co/abc'>example.com</a>"),
+        Some("Read example.com".into())
+    );
+    assert_eq!(
+        title(&format!("{} https://t.co/abc", "é".repeat(400))),
+        Some("é".repeat(300))
+    );
+    assert_eq!(
+        oembed_title(br#"{"title":"Video https://t.co/abc"}"#),
+        Some("Video https://t.co/abc".into())
+    );
+    assert_eq!(
+        metadata_title("<title>Page https://t.co/abc</title>"),
+        Some("Page https://t.co/abc".into())
+    );
+}
+
+#[test]
 fn x_oembed_titles_are_only_bounded_inert_post_text() {
     let json = serde_json::json!({"html":
         "<blockquote class=\"twitter-tweet\"><p>Hello <a href=\"javascript:evil()\">world</a><br>again<script>bad</script><style>bad</style><template>bad</template></p>author</blockquote><script>bad</script>"});
