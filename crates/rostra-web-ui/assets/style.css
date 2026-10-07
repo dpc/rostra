@@ -982,8 +982,8 @@ emoji-picker {
   max-width: 550px;
   margin-inline: auto;
   border: 0;
-  /* Avoid an opaque canvas when the provider document uses its default scheme. */
-  color-scheme: normal;
+  /* "normal" still uses our page's light/dark meta; the provider canvas is light. */
+  color-scheme: light;
   background: transparent;
 }
 

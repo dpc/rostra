@@ -121,7 +121,8 @@ fn x_post_frame_keeps_a_transparent_canvas_without_clipping_dimensions() {
         .split('}')
         .next()
         .unwrap();
-    assert!(declarations.contains("color-scheme: normal;"));
+    assert!(declarations.contains("color-scheme: light;"));
+    assert!(!declarations.contains("color-scheme: normal;"));
     assert!(!declarations.contains("border-radius:"));
     assert!(declarations.contains("background: transparent;"));
     assert!(declarations.contains("width: 100%;"));

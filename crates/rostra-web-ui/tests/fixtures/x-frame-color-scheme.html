@@ -1,0 +1,87 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <meta name="color-scheme" content="light dark" />
+    <title>Live X iframe canvas regression</title>
+    <link rel="stylesheet" href="../../assets/style.css" />
+    <style>
+      body {
+        margin: 16px;
+        background: #fff;
+        color: #262626;
+        font: 16px sans-serif;
+      }
+      @media (prefers-color-scheme: dark) {
+        body {
+          background: #262626;
+          color: #ccc;
+        }
+      }
+      .before {
+        color-scheme: normal;
+      }
+    </style>
+  </head>
+  <body>
+    <p>
+      Actual cross-origin provider, not srcdoc. Serve the rostra-web-ui crate
+      directory on a separate loopback port, then open this fixture. Loading the
+      links discloses the selected public post to X; no Rostra credentials exist.
+      Compare corners in light/dark browser modes at wide and narrow widths.
+    </p>
+    <p>Before: normal inherits the page's supported light/dark schemes.</p>
+    <div class="lazyload-wrapper">
+      <p class="lazyload-message -video">
+        <a href="https://twitter.com/i/web/status/2107261648339702108"
+          >Load before comparison</a
+        >
+      </p>
+      <iframe
+        class="m-xPostFrame before"
+        data-x-post
+        title="X post with inherited canvas scheme"
+        height="200"
+        hidden
+        referrerpolicy="no-referrer"
+        sandbox="allow-scripts allow-same-origin allow-popups allow-popups-to-escape-sandbox"
+        data-src="https://platform.twitter.com/embed/Tweet.html?id=2107261648339702108&amp;dnt=true&amp;embedId=rostra-before"
+      ></iframe>
+    </div>
+    <p>After: explicit light matches the provider's default document canvas.</p>
+    <div class="lazyload-wrapper">
+      <p class="lazyload-message -video">
+        <a href="https://twitter.com/i/web/status/2107261648339702108"
+          >Load production comparison</a
+        >
+      </p>
+      <iframe
+        class="m-xPostFrame"
+        data-x-post
+        title="X post with production canvas scheme"
+        height="200"
+        hidden
+        referrerpolicy="no-referrer"
+        sandbox="allow-scripts allow-same-origin allow-popups allow-popups-to-escape-sandbox"
+        data-src="https://platform.twitter.com/embed/Tweet.html?id=2107261648339702108&amp;dnt=true&amp;embedId=rostra-after"
+      ></iframe>
+    </div>
+    <script src="../../assets/app.js"></script>
+    <script>
+      for (const wrapper of document.querySelectorAll(".lazyload-wrapper")) {
+        wrapper.addEventListener("click", (event) => {
+          if (wrapper.classList.contains("-expanded")) return;
+          event.preventDefault();
+          wrapper.classList.add("-expanded");
+          const frame = wrapper.querySelector("iframe");
+          frame.hidden = false;
+          frame.src =
+            frame.dataset.src +
+            "&theme=" +
+            (matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light");
+        });
+      }
+    </script>
+  </body>
+</html>
