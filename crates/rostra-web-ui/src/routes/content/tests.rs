@@ -126,7 +126,7 @@ async fn production_external_media_cards_are_inert_escaped_and_context_scoped() 
 
 ![Image <script> & caption](https://example.test/image.png?x=%22)
 
-![](https://youtu.be/abc)
+![](https://youtu.be/M7lc1UVf-VE)
 
 [ordinary YouTube](https://youtu.be/abc)
 
@@ -165,7 +165,19 @@ async fn production_external_media_cards_are_inert_escaped_and_context_scoped() 
         );
         assert!(html.contains("ordinary YouTube"));
         assert!(html.contains("ordinary X"));
+        for link in document.select(&select("a.lazyload-message")) {
+            assert_eq!(link.value().attr("rel"), Some("noopener noreferrer"));
+        }
         if allow {
+            for youtube in document.select(&select("iframe[title='YouTube video']")) {
+                assert_eq!(
+                    youtube.value().attr("referrerpolicy"),
+                    Some("strict-origin")
+                );
+            }
+            for x_post in document.select(&select("iframe[data-x-post]")) {
+                assert_eq!(x_post.value().attr("referrerpolicy"), Some("no-referrer"));
+            }
             let youtube = document
                 .select(&select("iframe[title='YouTube video']"))
                 .next()

@@ -279,10 +279,12 @@ fn maybe_embed_media_html(s: &str) -> Option<Markup> {
                 .expect("base URL")
                 .pop_if_empty()
                 .push(&vid);
+            // YouTube requires client identification; disclose only our origin
+            // when this frame is explicitly loaded, never the post path.
             Some(maud::html! {
                 iframe hidden loading="lazy" title="YouTube video" width="100%"
                     style="aspect-ratio: 16 / 9;" data-src=(embed.as_str())
-                    referrerpolicy="no-referrer" frameborder="0" {}
+                    referrerpolicy="strict-origin" frameborder="0" {}
             })
         }
         ExternalMedia::XPost => None,
