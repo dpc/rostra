@@ -369,7 +369,7 @@ async fn navigation_tabs_have_icons_and_accessible_labels_without_javascript() {
         "Messages must not carry separate timeline-navigation sizing"
     );
     assert!(stylesheet.contains(
-        ".o-mainBarTimeline__tabs>.o-mainBarTimeline__back {\n  flex: 0 0 auto;\n  padding-inline: 1rem;\n}"
+        ".o-mainBarTimeline__tabs>.o-mainBarTimeline__back,\n.o-mainBarTimeline__tabs>.o-mainBarTimeline__feedLink {\n  flex: 0 0 auto;\n  padding-inline: 1rem;\n}"
     ));
     assert!(stylesheet.contains(
         ".o-mainBarTimeline__pendingNotifications,\n.o-mainBarTimeline__newCount {\n  padding: 0 .1rem;\n}"

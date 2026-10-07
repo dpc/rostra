@@ -1750,7 +1750,8 @@ emoji-picker {
   background-color: var(--color-timeline-bg);
 }
 
-.o-mainBarTimeline__tabs>.o-mainBarTimeline__back {
+.o-mainBarTimeline__tabs>.o-mainBarTimeline__back,
+.o-mainBarTimeline__tabs>.o-mainBarTimeline__feedLink {
   flex: 0 0 auto;
   padding-inline: 1rem;
 }
