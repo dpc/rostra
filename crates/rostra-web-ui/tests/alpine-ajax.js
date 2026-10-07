@@ -13,6 +13,38 @@ const bundle = readFileSync(
 const linkMergeGuard = readFileSync(
   process.env.ROSTRA_LINK_ROUTE_SOURCE ?? new URL("../src/routes/link.rs", import.meta.url), "utf8")
   .match(/"@ajax:merge"="([^"]+)"/)[1];
+const xPostLoad = readFileSync(
+  process.env.ROSTRA_CONTENT_ROUTE_SOURCE ?? new URL("../src/routes/content.rs", import.meta.url), "utf8")
+  .match(/onclick="([^"]+)"/)[1];
+
+test("X post uses existing load presentation and loads only on first activation", () => {
+  const loads = [];
+  const classes = new Set();
+  let prevented = 0;
+  const frame = {
+    hidden: true,
+    dataset: { src: "https://platform.twitter.com/embed/Tweet.html?id=123&dnt=true" },
+    set src(value) { loads.push(value); },
+  };
+  const wrapper = {
+    classList: { contains: name => classes.has(name), add: name => classes.add(name) },
+    lastElementChild: frame,
+  };
+  const activate = () => vm.runInNewContext(`(function() { ${xPostLoad} }).call(wrapper)`, {
+    wrapper,
+    event: { preventDefault() { prevented++; }, stopPropagation() {} },
+    window: { matchMedia: () => ({ matches: true }) },
+  });
+  assert.deepEqual(loads, []);
+  assert.equal(frame.hidden, true);
+  activate();
+  assert.deepEqual(loads, ["https://platform.twitter.com/embed/Tweet.html?id=123&dnt=true&theme=dark"]);
+  assert.equal(frame.hidden, false);
+  assert.equal(prevented, 1);
+  activate();
+  assert.equal(loads.length, 1);
+  assert.equal(prevented, 1);
+});
 
 function harness(fetch, dialogTarget = false, responseScope = "opening-one") {
   const attributes = new Map();

@@ -8,7 +8,7 @@ use axum::http::StatusCode;
 use axum::response::IntoResponse;
 use axum_extra::extract::Form;
 use maud::html;
-use scraper::{Html, Selector};
+use scraper::{ElementRef, Html, Node, Selector};
 use serde::Deserialize;
 use url::Url;
 
@@ -85,12 +85,62 @@ async fn fetch_title(url: &Url) -> Option<String> {
 }
 
 async fn fetch_title_inner(original: &Url) -> Option<String> {
+    if let Some(url) = x_oembed_url(original) {
+        return x_oembed_title(&fetch_metadata(&url, "application/json").await?);
+    }
     if let Some(url) = youtube_oembed_url(original) {
         return oembed_title(&fetch_metadata(&url, "application/json").await?);
     }
     metadata_title(&String::from_utf8_lossy(
         &fetch_metadata(original, "text/html").await?,
     ))
+}
+
+fn x_oembed_url(original: &Url) -> Option<Url> {
+    let id = super::content::x_post_id(original)?;
+    let user = original.path_segments()?.next()?;
+    let path = if original.path().starts_with("/i/web/status/") {
+        format!("/i/web/status/{id}")
+    } else {
+        format!("/{user}/status/{id}")
+    };
+    let mut canonical = Url::parse("https://twitter.com").ok()?;
+    canonical.set_path(&path);
+    let mut endpoint = Url::parse("https://publish.x.com/oembed").ok()?;
+    endpoint
+        .query_pairs_mut()
+        .append_pair("url", canonical.as_str())
+        .append_pair("omit_script", "true")
+        .append_pair("dnt", "true");
+    Some(endpoint)
+}
+
+fn x_oembed_title(body: &[u8]) -> Option<String> {
+    let response: serde_json::Value = serde_json::from_slice(body).ok()?;
+    let document = Html::parse_fragment(response.get("html")?.as_str()?);
+    let selector = Selector::parse("blockquote.twitter-tweet p").ok()?;
+    let paragraph = document.select(&selector).next()?;
+    if paragraph
+        .ancestors()
+        .filter_map(ElementRef::wrap)
+        .any(|element| matches!(element.value().name(), "script" | "style" | "template"))
+    {
+        return None;
+    }
+    let mut text = String::new();
+    let mut pending = paragraph.children().rev().collect::<Vec<_>>();
+    while let Some(node) = pending.pop() {
+        match node.value() {
+            Node::Element(element) if matches!(element.name(), "script" | "style" | "template") => {
+                continue;
+            }
+            Node::Text(value) => text.push_str(value),
+            Node::Element(element) if element.name() == "br" => text.push(' '),
+            _ => {}
+        }
+        pending.extend(node.children().rev());
+    }
+    normalized_title(&text)
 }
 
 fn youtube_oembed_url(original: &Url) -> Option<Url> {

@@ -4,6 +4,32 @@
 
 const copyIdStates = new WeakMap();
 
+// Provider resize messages may only change the sending post frame's height.
+function resizeXPost(event) {
+  if (event.origin !== "https://platform.twitter.com") return;
+  let data = event.data;
+  if (typeof data === "string") {
+    if (data.length > 4096) return;
+    try { data = JSON.parse(data); } catch { return; }
+  }
+  const message = data?.["twttr.embed"];
+  if (!message || message.method !== "twttr.private.resize") return;
+  const params = message.params;
+  const size = Array.isArray(params) ? (params.length === 1 ? params[0] : null) : params;
+  if (!size || typeof size !== "object" || Array.isArray(size)) return;
+  const reported = size.height;
+  const height = typeof reported === "string" && /^\d{2,4}$/.test(reported)
+    ? Number(reported) : reported;
+  if (typeof height !== "number" || !Number.isFinite(height) ||
+      height < 64 || height > 4096) return;
+  const frame = [...document.querySelectorAll("iframe[data-x-post]")].find(
+    candidate => !candidate.hidden && candidate.contentWindow === event.source,
+  );
+  if (frame) frame.style.height = `${Math.ceil(height)}px`;
+}
+
+window.addEventListener("message", resizeXPost);
+
 function copyIdToClipboard(event) {
   const target = event.currentTarget;
   const id = target.getAttribute("data-value");

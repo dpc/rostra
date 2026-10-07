@@ -125,9 +125,13 @@ impl UiState {
 
 enum ExternalMedia<'s> {
     YT(Cow<'s, str>),
+    XPost(&'s str),
 }
 
 fn extract_media(url: &Url) -> Option<ExternalMedia<'_>> {
+    if let Some(id) = x_post_id(url) {
+        return Some(ExternalMedia::XPost(id));
+    }
     let host_str = url.host_str()?;
     match host_str {
         "youtube.com" | "www.youtube.com" => {
@@ -144,6 +148,69 @@ fn extract_media(url: &Url) -> Option<ExternalMedia<'_>> {
     }
 }
 
+/// Recognize credential-free Twitter/X post URLs, never arbitrary embed URLs.
+pub(super) fn x_post_id(url: &Url) -> Option<&str> {
+    if !matches!(url.scheme(), "http" | "https")
+        || !matches!(
+            url.host_str()?,
+            "x.com" | "www.x.com" | "twitter.com" | "www.twitter.com" | "mobile.twitter.com"
+        )
+        || !url.username().is_empty()
+        || url.password().is_some()
+        || url.port().is_some()
+    {
+        return None;
+    }
+    let parts: Vec<_> = url.path_segments()?.collect();
+    let (user, id, suffix) = match parts.as_slice() {
+        [user, "status", id, suffix @ ..] => (*user, *id, suffix),
+        ["i", "web", "status", id, suffix @ ..] => ("i", *id, suffix),
+        _ => return None,
+    };
+    if user.is_empty()
+        || user.len() > 15
+        || !user.bytes().all(|c| c.is_ascii_alphanumeric() || c == b'_')
+        || id.is_empty()
+        || id.len() > 20
+        || !id.bytes().all(|c| c.is_ascii_digit())
+        || id.parse::<u64>().ok()? == 0
+        || !matches!(
+            suffix,
+            [] | [""] | ["photo" | "video", "1" | "2" | "3" | "4"]
+        )
+    {
+        return None;
+    }
+    Some(id)
+}
+
+/// Render a post through the provider's cross-origin frame, never app-origin
+/// JS.
+///
+/// Keep the fixed provider origin: allowing its own origin inside this sandbox
+/// is not safe for a srcdoc or same-origin replacement. Private-page CSP blocks
+/// the initial third-party frame navigation.
+fn x_post_html(id: &str, title: &str) -> String {
+    let canonical = format!("https://twitter.com/i/web/status/{id}");
+    let load_message = if title.trim().is_empty() {
+        "Load x.com media".to_owned()
+    } else {
+        format!("Load x.com media: \"{}\"", title.trim())
+    };
+    maud::html! {
+        div class="lazyload-wrapper"
+            onclick="if (!this.classList.contains('-expanded')) { event.preventDefault(); event.stopPropagation(); this.classList.add('-expanded'); this.lastElementChild.hidden = false; this.lastElementChild.src = this.lastElementChild.dataset.src + '&theme=' + (window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'); }" {
+            p class="lazyload-message -video" {
+                a href=(canonical) rel="noopener noreferrer" { (load_message) }
+            }
+            iframe class="m-xPostFrame" data-x-post title="X / Twitter post" width="100%" height="200" hidden
+                loading="lazy" referrerpolicy="no-referrer"
+                sandbox="allow-scripts allow-same-origin allow-popups allow-popups-to-escape-sandbox"
+                data-src=(format!("https://platform.twitter.com/embed/Tweet.html?id={id}&dnt=true&embedId=rostra-x-{id}")) {}
+        }
+    }.into_string()
+}
+
 /// Whether an external URL uses the renderer's image-style embed syntax.
 pub(super) fn is_external_embed(url: &Url) -> bool {
     extract_media(url).is_some()
@@ -153,6 +220,7 @@ pub(super) fn is_external_embed(url: &Url) -> bool {
 pub(super) fn youtube_video_id(url: &Url) -> Option<Cow<'_, str>> {
     match extract_media(url)? {
         ExternalMedia::YT(id) => Some(id),
+        ExternalMedia::XPost(_) => None,
     }
 }
 
@@ -166,6 +234,7 @@ fn maybe_embed_media_html(s: &str) -> Option<String> {
             "<iframe loading=\"lazy\" width=\"100%\" style=\"aspect-ratio: 16 / 9;\" \
 data-src=\"https://www.youtube.com/embed/{vid}\" frameborder=\"0\"></iframe>"
         )),
+        ExternalMedia::XPost(id) => Some(x_post_html(id, "")),
     }
 }
 

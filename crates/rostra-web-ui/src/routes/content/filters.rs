@@ -153,6 +153,10 @@ where
 
 /// Tracks the type of media transformation being applied
 enum MediaTransform<'s> {
+    /// An ordinary post link retained alongside its optional rendering.
+    XPostLink { id: String },
+    /// Image-style post syntax with an editable caption.
+    XPostImage { id: String, alt: String },
     /// Rostra media link
     RostraMedia { event_id: ShortEventId, alt: String },
     /// External embeddable media (YouTube, etc.)
@@ -203,6 +207,16 @@ where
 
     async fn emit(&mut self, event: Event<'s>) -> Result<(), Self::Error> {
         match event {
+            Event::Start(Container::Link(s, link_type), attr) => {
+                let id = url::Url::parse(&s)
+                    .ok()
+                    .and_then(|url| super::x_post_id(&url).map(str::to_owned));
+                self.container_stack
+                    .push(id.map(|id| MediaTransform::XPostLink { id }));
+                self.inner
+                    .emit(Event::Start(Container::Link(s, link_type), attr))
+                    .await
+            }
             Event::Start(Container::Image(s, link_type), _attr) => {
                 if let Some(event_id) = UiState::extract_rostra_media_link(&s) {
                     // Store event_id to look up content later
@@ -213,6 +227,16 @@ where
                     // Don't emit Start yet - we'll emit everything in End
                     Ok(())
                 } else {
+                    if let Some(id) = url::Url::parse(&s)
+                        .ok()
+                        .and_then(|url| super::x_post_id(&url).map(str::to_owned))
+                    {
+                        self.container_stack.push(Some(MediaTransform::XPostImage {
+                            id,
+                            alt: String::new(),
+                        }));
+                        return Ok(());
+                    }
                     // External image - check if it's embeddable media
                     if let Some(html) = super::maybe_embed_media_html(&s) {
                         let hostname = url::Url::parse(&s)
@@ -256,12 +280,14 @@ where
                 if let Some(Some(transform)) = self.container_stack.last_mut() {
                     match transform {
                         MediaTransform::RostraMedia { alt, .. }
+                        | MediaTransform::XPostImage { alt, .. }
                         | MediaTransform::EmbeddableMedia { alt, .. }
                         | MediaTransform::ExternalImage { alt, .. } => {
                             // Append to alt text (may be split across multiple Str events)
                             alt.push_str(&s);
                             Ok(())
                         }
+                        MediaTransform::XPostLink { .. } => self.inner.emit(Event::Str(s)).await,
                     }
                 } else {
                     self.inner.emit(Event::Str(s)).await
@@ -290,10 +316,12 @@ where
                     };
                     match transform {
                         MediaTransform::RostraMedia { alt, .. }
+                        | MediaTransform::XPostImage { alt, .. }
                         | MediaTransform::EmbeddableMedia { alt, .. }
                         | MediaTransform::ExternalImage { alt, .. } => {
                             alt.push(ch);
                         }
+                        MediaTransform::XPostLink { .. } => return self.inner.emit(event).await,
                     }
                     Ok(())
                 } else {
@@ -305,10 +333,12 @@ where
                 if let Some(Some(transform)) = self.container_stack.last_mut() {
                     match transform {
                         MediaTransform::RostraMedia { alt, .. }
+                        | MediaTransform::XPostImage { alt, .. }
                         | MediaTransform::EmbeddableMedia { alt, .. }
                         | MediaTransform::ExternalImage { alt, .. } => {
                             alt.push(' ');
                         }
+                        MediaTransform::XPostLink { .. } => return self.inner.emit(event).await,
                     }
                     Ok(())
                 } else {
@@ -319,10 +349,12 @@ where
                 if let Some(Some(transform)) = self.container_stack.last_mut() {
                     match transform {
                         MediaTransform::RostraMedia { alt, .. }
+                        | MediaTransform::XPostImage { alt, .. }
                         | MediaTransform::EmbeddableMedia { alt, .. }
                         | MediaTransform::ExternalImage { alt, .. } => {
                             alt.push('\n');
                         }
+                        MediaTransform::XPostLink { .. } => return self.inner.emit(event).await,
                     }
                     Ok(())
                 } else {
@@ -334,12 +366,16 @@ where
                 if let Some(Some(transform)) = self.container_stack.last_mut() {
                     match transform {
                         MediaTransform::RostraMedia { alt, .. }
+                        | MediaTransform::XPostImage { alt, .. }
                         | MediaTransform::EmbeddableMedia { alt, .. }
                         | MediaTransform::ExternalImage { alt, .. } => {
                             // Render as :symbol_name:
                             alt.push(':');
                             alt.push_str(&s);
                             alt.push(':');
+                        }
+                        MediaTransform::XPostLink { .. } => {
+                            return self.inner.emit(Event::Symbol(s)).await;
                         }
                     }
                     Ok(())
@@ -349,7 +385,10 @@ where
             }
             // Escape events are markers for escaped characters, skip them in alt text
             Event::Escape => {
-                if self.container_stack.last().is_some_and(|t| t.is_some()) {
+                if self.container_stack.last().is_some_and(|t| {
+                    t.as_ref()
+                        .is_some_and(|t| !matches!(t, MediaTransform::XPostLink { .. }))
+                }) {
                     // Inside media transform, just skip the escape marker
                     Ok(())
                 } else {
@@ -359,6 +398,28 @@ where
             Event::End => {
                 if let Some(Some(transform)) = self.container_stack.pop() {
                     match transform {
+                        MediaTransform::XPostLink { .. } | MediaTransform::XPostImage { .. } => {
+                            let (id, title) = match transform {
+                                MediaTransform::XPostLink { id } => {
+                                    self.inner.emit(Event::End).await?;
+                                    (id, String::new())
+                                }
+                                MediaTransform::XPostImage { id, alt } => (id, alt),
+                                _ => unreachable!(),
+                            };
+                            self.inner
+                                .emit(Event::Start(
+                                    Container::RawInline {
+                                        format: "html".into(),
+                                    },
+                                    Attributes::new(),
+                                ))
+                                .await?;
+                            self.inner
+                                .emit(Event::Str(super::x_post_html(&id, &title).into()))
+                                .await?;
+                            self.inner.emit(Event::End).await
+                        }
                         MediaTransform::RostraMedia { event_id, alt } => {
                             // Look up the content to get mime type
                             let url = media_url(self.author_id, event_id);

@@ -114,6 +114,8 @@ fn syntax_matches_existing_embed_recognition() {
         "https://youtube.com/watch?v=123",
         "https://www.youtube.com/watch?v=123",
         "https://youtu.be/123",
+        "https://x.com/alice/status/123",
+        "https://twitter.com/alice/status/123",
     ] {
         assert!(link_syntax(&Url::parse(url).unwrap(), "Video").starts_with("![Video]("));
     }
@@ -121,6 +123,8 @@ fn syntax_matches_existing_embed_recognition() {
         "https://example.com/",
         "https://youtube.com/",
         "https://youtube.com.evil.test/watch?v=123",
+        "https://x.com/alice",
+        "https://x.com.evil.test/alice/status/123",
     ] {
         assert!(link_syntax(&Url::parse(url).unwrap(), "Title").starts_with("[Title]("));
     }
@@ -193,6 +197,81 @@ fn youtube_metadata_uses_fixed_endpoint_and_canonical_renderer_video_id() {
     ] {
         assert!(youtube_oembed_url(&Url::parse(input).unwrap()).is_none());
     }
+}
+
+#[test]
+fn x_metadata_uses_fixed_oembed_endpoint_and_discards_tracking() {
+    let url = x_oembed_url(
+        &Url::parse("https://x.com/HQNewsNow/status/2107261648339702108/video/1?s=20#frag")
+            .unwrap(),
+    )
+    .unwrap();
+    assert_eq!(url.host_str(), Some("publish.x.com"));
+    assert_eq!(url.path(), "/oembed");
+    assert_eq!(
+        url.query_pairs().collect::<Vec<_>>(),
+        vec![
+            (
+                "url".into(),
+                "https://twitter.com/HQNewsNow/status/2107261648339702108".into()
+            ),
+            ("omit_script".into(), "true".into()),
+            ("dnt".into(), "true".into()),
+        ]
+    );
+    for url in [
+        "https://x.com.evil.test/alice/status/123",
+        "https://alice@x.com/alice/status/123",
+        "https://x.com/alice",
+    ] {
+        assert!(x_oembed_url(&Url::parse(url).unwrap()).is_none());
+    }
+}
+
+#[test]
+fn x_oembed_titles_are_only_bounded_inert_post_text() {
+    let json = serde_json::json!({"html":
+        "<blockquote class=\"twitter-tweet\"><p>Hello <a href=\"javascript:evil()\">world</a><br>again<script>bad</script><style>bad</style><template>bad</template></p>author</blockquote><script>bad</script>"});
+    assert_eq!(
+        x_oembed_title(json.to_string().as_bytes()),
+        Some("Hello world again".into())
+    );
+    for html in [
+        "",
+        "<blockquote class='twitter-tweet'><p> </p></blockquote>",
+        "<script>text</script>",
+        "<template><blockquote class='twitter-tweet'><p>hidden</p></blockquote></template>",
+        "<p>not post text</p>",
+    ] {
+        assert!(x_oembed_title(serde_json::json!({"html": html}).to_string().as_bytes()).is_none());
+    }
+    assert_eq!(
+        x_oembed_title(
+            serde_json::json!({"html":
+                format!("<blockquote class='twitter-tweet'><p>{}</p></blockquote>", "a".repeat(400))
+            })
+            .to_string()
+            .as_bytes()
+        )
+        .unwrap()
+        .len(),
+        300
+    );
+}
+
+#[tokio::test]
+#[ignore = "Requires access to the public X oEmbed endpoint"]
+async fn x_title_live_uses_the_production_safe_transport() {
+    let url = Url::parse("https://x.com/HQNewsNow/status/2107261648339702108").unwrap();
+    let mut addresses = tokio::net::lookup_host(("publish.x.com", 443))
+        .await
+        .expect("X metadata hostname must resolve for the live check");
+    assert!(addresses.next().is_some());
+    let title = fetch_title(&url)
+        .await
+        .expect("X post metadata must contain post text");
+    assert!(!title.is_empty());
+    assert!(title.chars().count() <= 300);
 }
 
 #[test]

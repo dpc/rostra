@@ -12,12 +12,122 @@ mod xss_sanitization;
 const TEST_EVENT_ID: &str = "AAAAAAAAAAAAAAAAAAAAAAAAAA";
 
 #[test]
+fn x_post_recognition_is_strict_and_discards_tracking_parameters() {
+    for input in [
+        "https://x.com/alice/status/123?s=20#fragment",
+        "http://www.x.com/alice/status/123/",
+        "https://twitter.com/alice/status/123/photo/1",
+        "https://www.twitter.com/alice/status/123/video/1",
+        "https://mobile.twitter.com/alice/status/123",
+        "https://x.com/i/web/status/123",
+    ] {
+        let url = url::Url::parse(input).unwrap();
+        assert_eq!(super::x_post_id(&url), Some("123"), "{input}");
+        assert!(super::is_external_embed(&url));
+    }
+    for input in [
+        "ftp://x.com/alice/status/123",
+        "https://x.com.evil.test/alice/status/123",
+        "https://evil.test/x.com/alice/status/123",
+        "https://alice@x.com/alice/status/123",
+        "https://x.com:444/alice/status/123",
+        "https://x.com/alice",
+        "https://x.com/alice/status/",
+        "https://x.com/alice/status/0",
+        "https://x.com/alice/status/123abc",
+        "https://x.com/alice/status/18446744073709551616",
+        "https://x.com/alice/status/123/evil",
+        "https://x.com/alice/status/123%22",
+        "https://x.com/%22/status/123",
+    ] {
+        assert!(
+            super::x_post_id(&url::Url::parse(input).unwrap()).is_none(),
+            "{input}"
+        );
+    }
+}
+
+#[test]
+fn x_post_widget_is_inert_until_expansion_and_uses_only_fixed_provider_origin() {
+    use scraper::{Html, Selector};
+    let html = super::x_post_html("123", "<script>caption</script>");
+    let document = Html::parse_fragment(&html);
+    let wrapper = document
+        .select(&Selector::parse(".lazyload-wrapper").unwrap())
+        .next()
+        .unwrap();
+    assert!(!wrapper.value().classes().any(|class| class == "-expanded"));
+    assert_eq!(
+        document.select(&Selector::parse("script").unwrap()).count(),
+        0
+    );
+    assert!(
+        document
+            .select(&Selector::parse(".lazyload-message").unwrap())
+            .next()
+            .unwrap()
+            .text()
+            .collect::<String>()
+            .contains("<script>caption</script>")
+    );
+    let frame = document
+        .select(&Selector::parse("iframe").unwrap())
+        .next()
+        .unwrap();
+    assert!(frame.value().attr("src").is_none());
+    assert!(frame.value().attr("srcdoc").is_none());
+    assert!(frame.value().attr("hidden").is_some());
+    assert_eq!(frame.value().attr("referrerpolicy"), Some("no-referrer"));
+    assert_eq!(
+        frame.value().attr("sandbox"),
+        Some("allow-scripts allow-same-origin allow-popups allow-popups-to-escape-sandbox")
+    );
+    assert_eq!(
+        frame.value().attr("data-src"),
+        Some("https://platform.twitter.com/embed/Tweet.html?id=123&dnt=true&embedId=rostra-x-123")
+    );
+    assert_eq!(
+        document
+            .select(&Selector::parse("a").unwrap())
+            .next()
+            .unwrap()
+            .value()
+            .attr("href"),
+        Some("https://twitter.com/i/web/status/123")
+    );
+    assert!(!html.contains("IP address"));
+    assert!(!html.contains("data-srcdoc"));
+    assert_eq!(document.select(&Selector::parse("a").unwrap()).count(), 1);
+    assert!(!html.contains("Open post on X"));
+    assert!(frame.value().attr("data-x-post").is_some());
+}
+
+#[test]
 fn test_extract_rostra_media_link() {
     assert_eq!(
         UiState::extract_rostra_media_link(&format!("rostra-media:{TEST_EVENT_ID}")),
         Some(rostra_core::ShortEventId::from_str(TEST_EVENT_ID).unwrap())
     );
     assert_eq!(UiState::extract_rostra_media_link("not-a-media-link"), None);
+}
+
+#[test]
+fn x_post_frame_keeps_a_transparent_canvas_without_clipping_dimensions() {
+    let stylesheet = include_str!("../../../assets/style.css");
+    let declarations = stylesheet
+        .split(".m-xPostFrame {")
+        .nth(1)
+        .unwrap()
+        .split('}')
+        .next()
+        .unwrap();
+    assert!(declarations.contains("color-scheme: normal;"));
+    assert!(!declarations.contains("border-radius:"));
+    assert!(declarations.contains("background: transparent;"));
+    assert!(declarations.contains("width: 100%;"));
+    assert!(declarations.contains("max-width: 550px;"));
+    assert!(!declarations.contains("height:"));
+    assert!(!declarations.contains("overflow:"));
 }
 
 #[test]

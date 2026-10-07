@@ -15,6 +15,65 @@ fn attr(document: &Html, selector: &str, attribute: &str) -> String {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn x_posts_work_through_add_link_and_render_as_explicit_load_widgets() {
+    let server = TestServer::start().await;
+    let driver = server.driver();
+    driver.login_new_identity().await;
+    let response = driver
+        .post_form(
+            "/post/link_dialog",
+            &[
+                ("url", "https://x.com/alice/status/123?s=20"),
+                ("title", "A post"),
+                ("action", "insert"),
+            ],
+        )
+        .await;
+    assert_eq!(response.status(), 200);
+    let document = Html::parse_document(&response.text().await.unwrap());
+    let syntax = document
+        .select(&Selector::parse("#link-result").unwrap())
+        .next()
+        .unwrap()
+        .text()
+        .collect::<String>();
+    assert_eq!(syntax, "![A post](https://x.com/alice/status/123?s=20)");
+    for content in [
+        syntax.as_str(),
+        "[A post](https://twitter.com/alice/status/123)",
+        "<https://x.com/alice/status/123>",
+    ] {
+        let response = driver
+            .post_form("/post/preview_dialog", &[("content", content)])
+            .await;
+        assert_eq!(response.status(), 200);
+        let document = Html::parse_document(&response.text().await.unwrap());
+        assert_eq!(
+            document
+                .select(&Selector::parse(".lazyload-wrapper").unwrap())
+                .count(),
+            1
+        );
+        assert_eq!(
+            attr(&document, ".lazyload-message a", "href"),
+            "https://twitter.com/i/web/status/123"
+        );
+        let iframe = document
+            .select(&Selector::parse(".lazyload-wrapper iframe").unwrap())
+            .next()
+            .unwrap();
+        assert!(iframe.value().attr("srcdoc").is_none());
+        assert!(iframe.value().attr("src").is_none());
+        assert_eq!(
+            document
+                .select(&Selector::parse("[data-embed-fallback]").unwrap())
+                .count(),
+            0
+        );
+    }
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn ordinary_link_flow_keeps_draft_and_supports_manual_title_after_fetch_failure() {
     let server = TestServer::start().await;
     let driver = server.driver();

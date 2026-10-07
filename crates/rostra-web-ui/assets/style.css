@@ -976,6 +976,21 @@ emoji-picker {
   background: url('/assets/icons/image.svg') center/contain no-repeat;
 }
 
+.m-xPostFrame {
+  display: block;
+  width: 100%;
+  max-width: 550px;
+  margin-inline: auto;
+  border: 0;
+  /* Avoid an opaque canvas when the provider document uses its default scheme. */
+  color-scheme: normal;
+  background: transparent;
+}
+
+.m-xPostFrame[hidden] {
+  display: none;
+}
+
 /* Rostra media with download fallback */
 .m-rostraMedia img {
   max-width: 100%;

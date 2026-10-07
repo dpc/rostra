@@ -77,8 +77,8 @@ authorization, escaping, response-protection, and leakage boundaries above.
 ## User-controlled media responses
 
 The new-post Add link helper accepts credential-free HTTP(S) URLs and produces
-escaped Djot, using the existing renderer's embed recognition rather than adding
-providers. Optional title retrieval requires the requesting session's in-memory
+escaped Djot, using the renderer's YouTube and Twitter/X post recognition.
+Optional title retrieval requires the requesting session's in-memory
 identity secret. It sends no incoming cookies, authorization, or referrer, and
 does not use environment proxies. Only ports 80 and 443 and conservatively
 validated public addresses are fetched. Every redirect repeats validation;
@@ -86,11 +86,34 @@ validated DNS answers are pinned for the actual connection to prevent DNS
 rebinding. Retrieval is limited to three redirects, eight seconds overall,
 256 KiB per response, and four concurrent requests. Recognized YouTube videos
 use the fixed YouTube oEmbed JSON endpoint with a canonical video URL; only its
-plain title is used, never its HTML, thumbnails, or other media fields. Other
+plain title is used, never its HTML, thumbnails, or other media fields. Recognized
+Twitter/X posts use the fixed `publish.x.com/oembed` JSON endpoint with a canonical
+post URL. Only plain text from the returned post paragraph becomes an editable,
+bounded title; script, style, and template content is excluded, and returned HTML
+is never rendered. Other
 links retain HTML title extraction. Metadata is plain, bounded,
 editable text, never markup or executable code. Retrieval failure leaves manual
 insertion available. The request intentionally discloses the chosen URL to its
 website from the Rostra server.
+
+Twitter/X posts use the existing external-media load presentation. The first
+explicit activation assigns a fixed HTTPS `platform.twitter.com/embed/Tweet.html`
+URL to an iframe; no provider request occurs before that action. Only validated
+numeric post IDs enter the URL. Provider scripts never run in the signing-capable
+application document, and remote embed HTML is never accepted. The frame's
+sandbox allows scripts and the provider's own origin, but not top navigation;
+do not replace the fixed cross-origin URL with srcdoc or an app-origin wrapper
+under these permissions. The frame suppresses referrers and requests X's
+do-not-track mode, but expansion still discloses the viewer's IP address and
+allows X's media requests. Private-page CSP blocks the initial third-party frame
+navigation. Without JavaScript, the keyboard-accessible load link performs
+ordinary navigation instead.
+
+Post frames are responsive and accept height-only resize notifications. The
+first-party listener requires the exact provider origin and the exact visible,
+marked iframe's `contentWindow`, validates the `twttr.embed` resize notification
+shape, and limits heights to 64–4096 pixels. Reported widths, element IDs, HTML,
+URLs, and other provider actions confer no authority.
 
 Social-media event bytes and profile avatar bytes are untrusted even when their
 event signatures verify. An avatar must declare and contain one of AVIF, BMP,

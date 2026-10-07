@@ -10,6 +10,43 @@ const source = readFileSync(
   "utf8",
 );
 
+const resizeSource = source.match(/function resizeXPost\(event\) \{[\s\S]*?\n\}/)[0];
+
+test("X resize messages only change their own visible marked frame's bounded height", () => {
+  const sender = {};
+  const other = { hidden: false, contentWindow: {}, style: {} };
+  const frame = { hidden: false, contentWindow: sender, style: {} };
+  const resize = (data, origin = "https://platform.twitter.com", eventSource = sender) =>
+    vm.runInNewContext(`${resizeSource}; resizeXPost(event)`, {
+      document: { querySelectorAll(selector) {
+        assert.equal(selector, "iframe[data-x-post]");
+        return [other, frame];
+      } },
+      event: { origin, source: eventSource, data },
+    });
+  const payload = height => ({ "twttr.embed": {
+    method: "twttr.private.resize", params: [{ height, width: 999999 }], id: "untrusted",
+  } });
+  resize(payload(552.2));
+  assert.equal(frame.style.height, "553px");
+  assert.deepEqual(other.style, {});
+  resize(JSON.stringify(payload(300)));
+  assert.equal(frame.style.height, "300px");
+  resize(payload("300"));
+  assert.equal(frame.style.height, "300px");
+  resize({ "twttr.embed": { method: "twttr.private.resize", params: { height: 300 } } });
+  assert.equal(frame.style.height, "300px");
+  for (const height of [null, "900px", "Infinity", "100000", -1, 0, 63, 4097, Infinity, NaN]) resize(payload(height));
+  for (const data of [null, {}, "bad JSON", "x".repeat(4097),
+    { "twttr.embed": { method: "navigate", params: [{ height: 900 }] } },
+    { "twttr.embed": { method: "twttr.private.resize", params: [] } }]) resize(data);
+  resize(payload(900), "https://evil.test");
+  resize(payload(900), "https://platform.twitter.com", {});
+  frame.hidden = true;
+  resize(payload(900));
+  assert.equal(frame.style.height, "300px");
+});
+
 function harness(targetSelector, initialValue = "") {
   const picker = {
     classList: {
