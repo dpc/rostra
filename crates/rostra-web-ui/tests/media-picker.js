@@ -12,6 +12,47 @@ const source = readFileSync(
 
 const resizeSource = source.match(/function resizeXPost\(event\) \{[\s\S]*?\n\}/)[0];
 
+const expandSource = source.match(/function expandExternalMedia\(event\) \{[\s\S]*?\n\}/)[0];
+
+test("external media enhances only primary activation and loads each occurrence once", () => {
+  const classes = new Set();
+  const loads = [];
+  const media = {
+    hidden: true, dataset: { src: "https://platform.twitter.com/embed/Tweet.html?id=123" },
+    hasAttribute: name => name === "data-x-post",
+    set src(value) { loads.push(value); },
+  };
+  const card = {
+    classList: { contains: value => classes.has(value), add: value => classes.add(value) },
+    querySelector: () => media,
+  };
+  const activate = (options = {}) => {
+    const event = {
+      button: 0, currentTarget: { closest: () => card },
+      preventDefault() { this.prevented = true; },
+      stopPropagation() { this.stopped = true; },
+      ...options,
+    };
+    vm.runInNewContext(`${expandSource}; expandExternalMedia(event)`, {
+      event, window: { matchMedia: () => ({ matches: true }) },
+    });
+    return event;
+  };
+  for (const options of [
+    { button: 1 }, { button: 2 }, { ctrlKey: true }, { metaKey: true },
+    { shiftKey: true }, { altKey: true }, { defaultPrevented: true },
+  ]) {
+    assert.equal(activate(options).prevented, undefined);
+    assert.equal(loads.length, 0);
+  }
+  assert.equal(activate({ detail: 0 }).prevented, true); // Native Enter click.
+  assert.equal(media.hidden, false);
+  assert.deepEqual(loads, ["https://platform.twitter.com/embed/Tweet.html?id=123&theme=dark"]);
+  activate();
+  assert.equal(loads.length, 1);
+  assert.equal(activate({ ctrlKey: true }).prevented, undefined);
+});
+
 test("X resize messages only change their own visible marked frame's bounded height", () => {
   const sender = {};
   const other = { hidden: false, contentWindow: {}, style: {} };

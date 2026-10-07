@@ -4,6 +4,26 @@
 
 const copyIdStates = new WeakMap();
 
+// Enhance only ordinary link activation, leaving browser navigation gestures intact.
+function expandExternalMedia(event) {
+  if (event.defaultPrevented || event.button !== 0 ||
+      event.ctrlKey || event.metaKey || event.shiftKey || event.altKey) return;
+  const card = event.currentTarget.closest(".lazyload-wrapper");
+  const media = card.querySelector("iframe[data-src], img[data-src]");
+  if (!media) return;
+  event.preventDefault();
+  event.stopPropagation();
+  if (card.classList.contains("-expanded")) return;
+  let source = media.dataset.src;
+  if (media.hasAttribute("data-x-post")) {
+    source += "&theme=" + (window.matchMedia("(prefers-color-scheme: dark)").matches
+      ? "dark" : "light");
+  }
+  media.src = source;
+  media.hidden = false;
+  card.classList.add("-expanded");
+}
+
 // Provider resize messages may only change the sending post frame's height.
 function resizeXPost(event) {
   if (event.origin !== "https://platform.twitter.com") return;

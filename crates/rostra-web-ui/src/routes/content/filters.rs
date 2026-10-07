@@ -161,16 +161,12 @@ enum MediaTransform<'s> {
     RostraMedia { event_id: ShortEventId, alt: String },
     /// External embeddable media (YouTube, etc.)
     EmbeddableMedia {
-        html: String,
-        hostname: String,
+        html: maud::Markup,
+        url: Cow<'s, str>,
         alt: String,
     },
     /// Regular external image
-    ExternalImage {
-        url: Cow<'s, str>,
-        link_type: jotup::SpanLinkType,
-        alt: String,
-    },
+    ExternalImage { url: Cow<'s, str>, alt: String },
 }
 
 /// Filter that transforms media elements:
@@ -181,6 +177,8 @@ pub(crate) struct RostraMedia<'s, 'c, R> {
     client: ClientRef<'c>,
     inner: R,
     author_id: RostraId,
+    /// Private pages permit navigation but not external inline loads.
+    allow_external_media: bool,
     /// Stack tracking media transformations in progress
     /// Also tracks other containers as None to maintain proper nesting
     container_stack: Vec<Option<MediaTransform<'s>>>,
@@ -192,8 +190,15 @@ impl<'s, 'c, R> RostraMedia<'s, 'c, R> {
             client,
             inner,
             author_id,
+            allow_external_media: true,
             container_stack: vec![],
         }
+    }
+
+    /// Set whether external cards can expand inside this rendering context.
+    pub(crate) fn external_media(mut self, allow: bool) -> Self {
+        self.allow_external_media = allow;
+        self
     }
 }
 
@@ -217,7 +222,7 @@ where
                     .emit(Event::Start(Container::Link(s, link_type), attr))
                     .await
             }
-            Event::Start(Container::Image(s, link_type), _attr) => {
+            Event::Start(Container::Image(s, _link_type), _attr) => {
                 if let Some(event_id) = UiState::extract_rostra_media_link(&s) {
                     // Store event_id to look up content later
                     self.container_stack.push(Some(MediaTransform::RostraMedia {
@@ -239,36 +244,20 @@ where
                     }
                     // External image - check if it's embeddable media
                     if let Some(html) = super::maybe_embed_media_html(&s) {
-                        let hostname = url::Url::parse(&s)
-                            .ok()
-                            .and_then(|u| u.host_str().map(|h| h.to_string()))
-                            .unwrap_or_default();
                         self.container_stack
                             .push(Some(MediaTransform::EmbeddableMedia {
                                 html,
-                                hostname,
+                                url: s.clone(),
                                 alt: String::new(),
                             }));
                     } else {
                         self.container_stack
                             .push(Some(MediaTransform::ExternalImage {
                                 url: s.clone(),
-                                link_type,
                                 alt: String::new(),
                             }));
                     }
-                    // Start the lazy-load wrapper div
-                    self.inner
-                        .emit(Event::Start(
-                            Container::Div {
-                                class: "lazyload-wrapper".into(),
-                            },
-                            jotup::Attributes::try_from(
-                                "{ onclick=\"if (!this.classList.contains('-expanded')) event.stopPropagation(); this.classList.add('-expanded'); this.lastElementChild.src = this.lastElementChild.dataset.src\" }",
-                            )
-                            .expect("Can't fail"),
-                        ))
-                        .await
+                    Ok(())
                 }
             }
             Event::Start(container, attr) => {
@@ -416,7 +405,10 @@ where
                                 ))
                                 .await?;
                             self.inner
-                                .emit(Event::Str(super::x_post_html(&id, &title).into()))
+                                .emit(Event::Str(
+                                    super::x_post_html(&id, &title, self.allow_external_media)
+                                        .into(),
+                                ))
                                 .await?;
                             self.inner.emit(Event::End).await
                         }
@@ -462,98 +454,44 @@ where
                             self.inner.emit(Event::Str(html.into())).await?;
                             self.inner.emit(Event::End).await
                         }
-                        MediaTransform::EmbeddableMedia {
-                            html,
-                            hostname,
-                            alt,
-                        } => {
-                            // Emit the load message and embedded HTML
-                            let alt = alt.trim();
-                            let load_msg = if hostname.is_empty() {
-                                if alt.is_empty() {
-                                    "Load external media".to_string()
-                                } else {
-                                    format!("Load \"{alt}\"")
-                                }
-                            } else if alt.is_empty() {
-                                format!("Load {hostname} media")
-                            } else {
-                                format!("Load {hostname} media: \"{alt}\"")
-                            };
-
-                            self.inner
-                                .emit(Event::Start(
-                                    Container::Paragraph,
-                                    Attributes::try_from("{ class=\"lazyload-message -video\" }")
-                                        .expect("valid"),
-                                ))
-                                .await?;
-                            self.inner.emit(Event::Str(load_msg.into())).await?;
-                            self.inner.emit(Event::End).await?;
+                        MediaTransform::EmbeddableMedia { html, url, alt } => {
+                            let html = super::external_media_card(
+                                &url,
+                                &alt,
+                                "Load YouTube media",
+                                "-video",
+                                self.allow_external_media,
+                                html,
+                            );
                             self.inner
                                 .emit(Event::Start(
                                     Container::RawInline {
                                         format: "html".into(),
                                     },
-                                    Attributes::try_from("{ loading=lazy }").expect("Can't fail"),
+                                    Attributes::new(),
                                 ))
                                 .await?;
                             self.inner.emit(Event::Str(html.into())).await?;
-                            self.inner.emit(Event::End).await?;
-                            // Close the div
                             self.inner.emit(Event::End).await
                         }
-                        MediaTransform::ExternalImage {
-                            url,
-                            link_type,
-                            alt,
-                        } => {
-                            // Emit load message and the actual image
-                            let alt = alt.trim();
-                            let hostname = url::Url::parse(&url)
-                                .ok()
-                                .and_then(|u| u.host_str().map(|h| h.to_string()))
-                                .unwrap_or_default();
-                            let load_msg = if hostname.is_empty() {
-                                if alt.is_empty() {
-                                    "Load external image".to_string()
-                                } else {
-                                    format!("Load image: \"{alt}\"")
-                                }
-                            } else if alt.is_empty() {
-                                format!("Load {hostname} image")
-                            } else {
-                                format!("Load {hostname} image: \"{alt}\"")
-                            };
-
+                        MediaTransform::ExternalImage { url, alt } => {
+                            let html = super::external_media_card(
+                                &url,
+                                &alt,
+                                "Load image",
+                                "-image",
+                                self.allow_external_media,
+                                maud::html! { img hidden data-src=(&url) alt=(alt.trim()); },
+                            );
                             self.inner
                                 .emit(Event::Start(
-                                    Container::Paragraph,
-                                    Attributes::try_from("{ class=\"lazyload-message -image\" }")
-                                        .expect("valid"),
+                                    Container::RawInline {
+                                        format: "html".into(),
+                                    },
+                                    Attributes::new(),
                                 ))
                                 .await?;
-                            self.inner.emit(Event::Str(load_msg.into())).await?;
-                            self.inner.emit(Event::End).await?;
-                            // Use placeholder src and data-src to prevent eager loading
-                            // 1x1 transparent gif as placeholder
-                            const PLACEHOLDER: &str = "data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7";
-                            let mut attrs = Attributes::new();
-                            attrs.push((
-                                AttributeKind::Pair {
-                                    key: Cow::Borrowed("data-src"),
-                                },
-                                AttributeValue::from(url.clone()),
-                            ));
-                            self.inner
-                                .emit(Event::Start(
-                                    Container::Image(PLACEHOLDER.into(), link_type),
-                                    attrs,
-                                ))
-                                .await?;
-                            self.inner.emit(Event::Str(alt.to_string().into())).await?;
-                            self.inner.emit(Event::End).await?;
-                            // Close the div
+                            self.inner.emit(Event::Str(html.into())).await?;
                             self.inner.emit(Event::End).await
                         }
                     }

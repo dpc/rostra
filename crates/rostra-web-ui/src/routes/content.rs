@@ -85,12 +85,35 @@ impl UiState {
         author_id: RostraId,
         content: &str,
     ) -> Markup {
+        self.render_content_with_external_media(client, author_id, content, true)
+            .await
+    }
+
+    /// Render private content with navigation-only external media cards.
+    pub(crate) async fn render_private_content(
+        &self,
+        client: &ClientRef<'_>,
+        author_id: RostraId,
+        content: &str,
+    ) -> Markup {
+        self.render_content_with_external_media(client, author_id, content, false)
+            .await
+    }
+
+    async fn render_content_with_external_media(
+        &self,
+        client: &ClientRef<'_>,
+        author_id: RostraId,
+        content: &str,
+        allow_external_media: bool,
+    ) -> Markup {
         // Compose filters: ProfileLinks -> Media -> (Prism + Sanitize via
         // make_base_renderer)
         let renderer = make_base_renderer(
             jotup::html::tokio::Renderer::default()
                 .rostra_profile_links(client.clone())
-                .rostra_media(client.clone(), author_id),
+                .rostra_media(client.clone(), author_id)
+                .external_media(allow_external_media),
         );
 
         let out = renderer
@@ -125,12 +148,12 @@ impl UiState {
 
 enum ExternalMedia<'s> {
     YT(Cow<'s, str>),
-    XPost(&'s str),
+    XPost,
 }
 
 fn extract_media(url: &Url) -> Option<ExternalMedia<'_>> {
-    if let Some(id) = x_post_id(url) {
-        return Some(ExternalMedia::XPost(id));
+    if x_post_id(url).is_some() {
+        return Some(ExternalMedia::XPost);
     }
     let host_str = url.host_str()?;
     match host_str {
@@ -190,23 +213,42 @@ pub(super) fn x_post_id(url: &Url) -> Option<&str> {
 /// Keep the fixed provider origin: allowing its own origin inside this sandbox
 /// is not safe for a srcdoc or same-origin replacement. Private-page CSP blocks
 /// the initial third-party frame navigation.
-fn x_post_html(id: &str, title: &str) -> String {
+fn x_post_html(id: &str, title: &str, allow_external_media: bool) -> String {
     let canonical = format!("https://twitter.com/i/web/status/{id}");
-    let load_message = if title.trim().is_empty() {
-        "Load x.com media".to_owned()
-    } else {
-        format!("Load x.com media: \"{}\"", title.trim())
-    };
+    external_media_card(
+        &canonical,
+        title,
+        "Load X media",
+        "-video",
+        allow_external_media,
+        maud::html! {
+                iframe class="m-xPostFrame" data-x-post title="X / Twitter post" width="100%" height="200" hidden
+                    loading="lazy" referrerpolicy="no-referrer"
+                    sandbox="allow-scripts allow-same-origin allow-popups allow-popups-to-escape-sandbox"
+                    data-src=(format!("https://platform.twitter.com/embed/Tweet.html?id={id}&dnt=true&embedId=rostra-x-{id}")) {}
+        },
+    )
+}
+
+/// Generate trusted markup with escaped data and an ordinary navigation
+/// fallback.
+fn external_media_card(
+    url: &str,
+    title: &str,
+    action: &str,
+    icon: &str,
+    allow_external_media: bool,
+    media: Markup,
+) -> String {
     maud::html! {
-        div class="lazyload-wrapper"
-            onclick="if (!this.classList.contains('-expanded')) { event.preventDefault(); event.stopPropagation(); this.classList.add('-expanded'); this.lastElementChild.hidden = false; this.lastElementChild.src = this.lastElementChild.dataset.src + '&theme=' + (window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'); }" {
-            p class="lazyload-message -video" {
-                a href=(canonical) rel="noopener noreferrer" { (load_message) }
+        div class="lazyload-wrapper" {
+            a class=(format!("lazyload-message {icon}")) href=(url) rel="noopener noreferrer"
+                x-data=[allow_external_media.then_some("{}")]
+                "@click"=[allow_external_media.then_some("expandExternalMedia($event)")] { (action) }
+            @if allow_external_media { (media) }
+            @if !title.trim().is_empty() {
+                p class="lazyload-caption" { (title.trim()) }
             }
-            iframe class="m-xPostFrame" data-x-post title="X / Twitter post" width="100%" height="200" hidden
-                loading="lazy" referrerpolicy="no-referrer"
-                sandbox="allow-scripts allow-same-origin allow-popups allow-popups-to-escape-sandbox"
-                data-src=(format!("https://platform.twitter.com/embed/Tweet.html?id={id}&dnt=true&embedId=rostra-x-{id}")) {}
         }
     }.into_string()
 }
@@ -220,21 +262,30 @@ pub(super) fn is_external_embed(url: &Url) -> bool {
 pub(super) fn youtube_video_id(url: &Url) -> Option<Cow<'_, str>> {
     match extract_media(url)? {
         ExternalMedia::YT(id) => Some(id),
-        ExternalMedia::XPost(_) => None,
+        ExternalMedia::XPost => None,
     }
 }
 
-fn maybe_embed_media_html(s: &str) -> Option<String> {
+fn maybe_embed_media_html(s: &str) -> Option<Markup> {
     let Ok(url) = Url::parse(s) else {
         return None;
     };
 
     match extract_media(&url)? {
-        ExternalMedia::YT(vid) => Some(format!(
-            "<iframe loading=\"lazy\" width=\"100%\" style=\"aspect-ratio: 16 / 9;\" \
-data-src=\"https://www.youtube.com/embed/{vid}\" frameborder=\"0\"></iframe>"
-        )),
-        ExternalMedia::XPost(id) => Some(x_post_html(id, "")),
+        ExternalMedia::YT(vid) => {
+            let mut embed = Url::parse("https://www.youtube.com/embed/").expect("fixed URL");
+            embed
+                .path_segments_mut()
+                .expect("base URL")
+                .pop_if_empty()
+                .push(&vid);
+            Some(maud::html! {
+                iframe hidden loading="lazy" title="YouTube video" width="100%"
+                    style="aspect-ratio: 16 / 9;" data-src=(embed.as_str())
+                    referrerpolicy="no-referrer" frameborder="0" {}
+            })
+        }
+        ExternalMedia::XPost => None,
     }
 }
 

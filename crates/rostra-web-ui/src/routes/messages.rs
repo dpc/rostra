@@ -625,7 +625,7 @@ async fn render_thread(
         rendered_entries.push((
             entry,
             state
-                .render_content(&client, entry.entry.sender, &entry.entry.text)
+                .render_private_content(&client, entry.entry.sender, &entry.entry.text)
                 .await,
         ));
     }

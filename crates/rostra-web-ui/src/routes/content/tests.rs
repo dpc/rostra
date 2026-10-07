@@ -50,7 +50,7 @@ fn x_post_recognition_is_strict_and_discards_tracking_parameters() {
 #[test]
 fn x_post_widget_is_inert_until_expansion_and_uses_only_fixed_provider_origin() {
     use scraper::{Html, Selector};
-    let html = super::x_post_html("123", "<script>caption</script>");
+    let html = super::x_post_html("123", "<script>caption</script>", true);
     let document = Html::parse_fragment(&html);
     let wrapper = document
         .select(&Selector::parse(".lazyload-wrapper").unwrap())
@@ -63,7 +63,7 @@ fn x_post_widget_is_inert_until_expansion_and_uses_only_fixed_provider_origin() 
     );
     assert!(
         document
-            .select(&Selector::parse(".lazyload-message").unwrap())
+            .select(&Selector::parse(".lazyload-caption").unwrap())
             .next()
             .unwrap()
             .text()
@@ -100,6 +100,81 @@ fn x_post_widget_is_inert_until_expansion_and_uses_only_fixed_provider_origin() 
     assert_eq!(document.select(&Selector::parse("a").unwrap()).count(), 1);
     assert!(!html.contains("Open post on X"));
     assert!(frame.value().attr("data-x-post").is_some());
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn production_external_media_cards_are_inert_escaped_and_context_scoped() {
+    use rostra_core::id::RostraIdSecretKey;
+    use scraper::{Html, Selector};
+
+    let id = RostraIdSecretKey::generate().id();
+    let client = rostra_client::Client::builder(id)
+        .db(rostra_client_db::Database::new_in_memory(id).await.unwrap())
+        .start_background_tasks(false)
+        .start_request_handler(false)
+        .build()
+        .await
+        .unwrap();
+    let handle = client.handle();
+    let client_ref = handle.client_ref().unwrap();
+    let content = r#"
+![X caption](https://x.com/alice/status/123)
+
+![X caption](https://x.com/alice/status/123)
+
+![YouTube caption](https://www.youtube.com/watch?v=a%22%3E%3Cscript%3E)
+
+![Image <script> & caption](https://example.test/image.png?x=%22)
+
+![](https://youtu.be/abc)
+
+[ordinary YouTube](https://youtu.be/abc)
+
+[ordinary X](https://x.com/alice/status/456)
+"#;
+    for allow in [true, false] {
+        let renderer = make_base_renderer(
+            jotup::html::tokio::Renderer::default()
+                .rostra_profile_links(client_ref.clone())
+                .rostra_media(client_ref.clone(), id)
+                .external_media(allow),
+        );
+        let out = renderer.render_into_document(content).await.unwrap();
+        let html = String::from_utf8(out.into_inner()).unwrap();
+        let document = Html::parse_fragment(&html);
+        let select = |s| Selector::parse(s).unwrap();
+        assert_eq!(document.select(&select(".lazyload-wrapper")).count(), 6);
+        assert_eq!(
+            document.select(&select(".lazyload-message[href]")).count(),
+            6
+        );
+        assert_eq!(document.select(&select(".lazyload-caption")).count(), 4);
+        assert_eq!(
+            document
+                .select(&select("script, [onclick], [src], [srcdoc], [srcset]"))
+                .count(),
+            0
+        );
+        assert_eq!(
+            document.select(&select("[data-src][hidden]")).count(),
+            if allow { 6 } else { 0 }
+        );
+        assert_eq!(
+            document.select(&select("[x-data]")).count(),
+            if allow { 6 } else { 0 }
+        );
+        assert!(html.contains("ordinary YouTube"));
+        assert!(html.contains("ordinary X"));
+        if allow {
+            let youtube = document
+                .select(&select("iframe[title='YouTube video']"))
+                .next()
+                .unwrap();
+            let url = url::Url::parse(youtube.value().attr("data-src").unwrap()).unwrap();
+            assert_eq!(url.host_str(), Some("www.youtube.com"));
+            assert_eq!(url.path(), "/embed/a%22%3E%3Cscript%3E");
+        }
+    }
 }
 
 #[test]

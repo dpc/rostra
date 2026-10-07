@@ -924,17 +924,28 @@ emoji-picker {
   display: none;
 }
 
-.m-postView__content .lazyload-wrapper.-expanded p {
+.lazyload-wrapper.-expanded .lazyload-message {
   display: none;
 }
 
-.m-postView__content .lazyload-message {
+.lazyload-wrapper {
+  width: 100%;
+  margin-block: 1rem;
+}
+
+.lazyload-message {
   display: flex;
-  align-items: baseline;
-  width: fit-content;
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
+  gap: 0.6rem;
+  box-sizing: border-box;
+  width: min(100%, 550px);
+  min-height: 9rem;
+  margin-inline: auto;
   max-width: 100%;
-  padding: 0.25rem 0.55rem;
-  border-left: 3px solid var(--color-link);
+  padding: 1rem;
+  border: 1px solid var(--color-link);
   border-radius: var(--border-radius-std);
   color: var(--color-link);
   background: var(--color-post-highlight-bg);
@@ -947,9 +958,23 @@ emoji-picker {
   transition: color 0.2s, border-color 0.2s;
 }
 
-.m-postView__content .lazyload-wrapper:hover .lazyload-message {
+.lazyload-message:hover {
   border-color: var(--color-link-hover);
   color: var(--color-link-hover);
+}
+
+.lazyload-message:focus-visible {
+  outline: 3px solid var(--color-link);
+  outline-offset: 3px;
+}
+
+.lazyload-caption {
+  text-align: center;
+  overflow-wrap: anywhere;
+}
+
+.lazyload-wrapper > [hidden] {
+  display: none;
 }
 
 .m-postView__content .m-rostraMedia img,
@@ -961,9 +986,8 @@ emoji-picker {
 .lazyload-message::before {
   content: "";
   display: inline-block;
-  width: 1em;
-  height: 1em;
-  margin-right: 0.3em;
+  width: 2rem;
+  height: 2rem;
   vertical-align: -0.1em;
   filter: invert(var(--invert));
 }

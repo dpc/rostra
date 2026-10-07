@@ -55,7 +55,7 @@ async fn x_posts_work_through_add_link_and_render_as_explicit_load_widgets() {
             1
         );
         assert_eq!(
-            attr(&document, ".lazyload-message a", "href"),
+            attr(&document, "a.lazyload-message", "href"),
             "https://twitter.com/i/web/status/123"
         );
         let iframe = document
