@@ -122,6 +122,9 @@ Key web UI files:
 
 ## Web UI Conventions
 
+- Use the [UI design guide](crates/rostra-web-ui/design-ui.md) as context for the
+  current visual language and shared patterns; the governing specs below remain
+  authoritative.
 - Follow
   [`DESIGN-server-rendered-hypermedia`](crates/rostra-web-ui/specs/DESIGN-server-rendered-hypermedia.md):
   changed workflows must work through ordinary HTTP without JavaScript. Alpine

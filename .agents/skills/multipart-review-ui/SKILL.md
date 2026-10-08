@@ -12,6 +12,9 @@ a project-specific focused review extension, not a separate review workflow.
 ## Scope
 
 Review the changed UI and its ordinary HTTP and enhanced interaction paths.
+Use the [UI design guide](../../../crates/rostra-web-ui/design-ui.md) as context
+for the current visual language and maintenance guidance, not as a new source of
+stakeholder mandates.
 Read comparable existing screens, shared helpers in
 `crates/rostra-web-ui/src/routes/fragment.rs`, and relevant styles before judging
 consistency. Apply
