@@ -251,6 +251,31 @@ fn x_oembed_titles_drop_only_bare_trailing_shortlinks() {
     );
     assert_eq!(title("https://t.co/abc"), None);
     assert_eq!(title("https://t.co/abc https://t.co/def"), None);
+    assert_eq!(
+        title("Too much winning... pic.twitter.com/b4wEQlVZYt"),
+        Some("Too much winning...".into())
+    );
+    assert_eq!(
+        title("Too much winning... <a href='https://t.co/abc'>pic.twitter.com/b4wEQlVZYt</a>"),
+        Some("Too much winning...".into())
+    );
+    for prefix in [
+        "pic.twitter.com/",
+        "https://pic.twitter.com/",
+        "http://pic.twitter.com/",
+    ] {
+        assert_eq!(
+            title(&format!("Post {prefix}b4wEQlVZYt")),
+            Some("Post".into())
+        );
+        assert_eq!(title(&format!("{prefix}b4wEQlVZYt")), None);
+    }
+    assert_eq!(
+        title(
+            "Post https://t.co/abc\u{a0}pic.twitter.com/b4wEQlVZYt http://pic.twitter.com/XYZ123"
+        ),
+        Some("Post".into())
+    );
     for text in [
         "Read https://t.co/abc for details",
         "Read https://example.com/abc",
@@ -263,12 +288,27 @@ fn x_oembed_titles_drop_only_bare_trailing_shortlinks() {
         "Read https://user@t.co/abc",
         "Read https://t.co:443/abc",
         "Read nothttps://t.co/abc",
+        "Read pic.twitter.com/abc for details",
+        "Read https://pic.twitter.com/abc for details",
+        "Read pic.twitter.com.evil.test/abc",
+        "Read pic.twitter.com/",
+        "Read pic.twitter.com/abc.",
+        "Read pic.twitter.com/abc?x=1",
+        "Read pic.twitter.com/abc#fragment",
+        "Read pic.twitter.com/abc/def",
+        "Read https://user@pic.twitter.com/abc",
+        "Read https://pic.twitter.com:443/abc",
+        "Read nothttps://pic.twitter.com/abc",
     ] {
         assert_eq!(title(text), Some(text.into()), "{text}");
     }
     assert_eq!(
         title("Read <a href='https://t.co/abc'>example.com</a>"),
         Some("Read example.com".into())
+    );
+    assert_eq!(
+        title("Read <a href='https://pic.twitter.com/abc'>the picture</a>"),
+        Some("Read the picture".into())
     );
     assert_eq!(
         title(&format!("{} https://t.co/abc", "é".repeat(400))),
@@ -281,6 +321,14 @@ fn x_oembed_titles_drop_only_bare_trailing_shortlinks() {
     assert_eq!(
         metadata_title("<title>Page https://t.co/abc</title>"),
         Some("Page https://t.co/abc".into())
+    );
+    assert_eq!(
+        oembed_title(br#"{"title":"Video pic.twitter.com/abc"}"#),
+        Some("Video pic.twitter.com/abc".into())
+    );
+    assert_eq!(
+        metadata_title("<title>Page pic.twitter.com/abc</title>"),
+        Some("Page pic.twitter.com/abc".into())
     );
 }
 

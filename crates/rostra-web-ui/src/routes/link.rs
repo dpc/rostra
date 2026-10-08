@@ -143,7 +143,7 @@ fn x_oembed_title(body: &[u8]) -> Option<String> {
     normalized_title(without_trailing_x_shortlinks(&text))
 }
 
-/// Remove bare trailing X shortlinks without changing links inside post text.
+/// Remove trailing X shortlink labels without changing links inside post text.
 fn without_trailing_x_shortlinks(mut text: &str) -> &str {
     text = text.trim_end();
     while !text.is_empty() {
@@ -151,6 +151,9 @@ fn without_trailing_x_shortlinks(mut text: &str) -> &str {
         let Some(code) = token
             .strip_prefix("https://t.co/")
             .or_else(|| token.strip_prefix("http://t.co/"))
+            .or_else(|| token.strip_prefix("pic.twitter.com/"))
+            .or_else(|| token.strip_prefix("https://pic.twitter.com/"))
+            .or_else(|| token.strip_prefix("http://pic.twitter.com/"))
         else {
             break;
         };
