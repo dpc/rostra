@@ -1765,6 +1765,12 @@ emoji-picker {
   filter: invert(var(--invert));
 }
 
+.o-mainBarTimeline__profile .o-mainBarTimeline__tabLabel {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
+}
+
 .o-mainBarTimeline__tabIcon.-back {
   background: url('/assets/icons/arrow-left.svg') center/contain no-repeat;
 }

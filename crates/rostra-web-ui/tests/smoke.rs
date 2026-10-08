@@ -35,6 +35,55 @@ fn assert_link_precedes(document: &Html, first: &str, second: &str) {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn profile_tab_uses_viewed_profile_summary_name_and_fallback() {
+    let server = TestServer::start().await;
+    let driver = server.driver();
+    let (viewer, secret) = driver.login_new_identity().await;
+    let target = retain_test_identity(&server, viewer).await;
+    let hostile_name = "<img src=x onerror=alert(1)> & 世界";
+    let response = driver
+        .api_post_json(
+            &format!("/api/{viewer}/update-social-profile-managed"),
+            Some(&secret.to_string()),
+            &json!({ "display_name": hostile_name, "bio": "" }),
+        )
+        .await;
+    assert_eq!(response.status(), 200);
+
+    for (id, expected) in [
+        (viewer, hostile_name.to_owned()),
+        (target, target.to_short().to_string()),
+    ] {
+        let response = driver.get(&format!("/profile/{}", id.to_short())).await;
+        assert_eq!(response.status(), 200);
+        let document = Html::parse_document(&response.text().await.unwrap());
+        let tab = document
+            .select(
+                &Selector::parse(".o-mainBarTimeline__profile .o-mainBarTimeline__tabLabel")
+                    .unwrap(),
+            )
+            .next()
+            .unwrap();
+        let summary = document
+            .select(&Selector::parse("#profile-summary .m-profileSummary__displayName").unwrap())
+            .next()
+            .unwrap();
+        assert_eq!(tab.text().collect::<String>(), expected);
+        assert_eq!(
+            tab.text().collect::<String>(),
+            summary.text().collect::<String>()
+        );
+        assert_eq!(tab.child_elements().count(), 0);
+        assert_eq!(
+            document
+                .select(&Selector::parse(".o-mainBarTimeline__feedLink").unwrap())
+                .count(),
+            1
+        );
+    }
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn profile_summary_actions_are_only_rendered_on_profile_pages() {
     let server = TestServer::start().await;
     let driver = server.driver();

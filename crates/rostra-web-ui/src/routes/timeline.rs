@@ -918,13 +918,14 @@ impl UiState {
                     true,
                     html! {
                         @if let TimelineMode::Profile(profile_id) = mode {
+                            @let profile = self.get_social_profile(profile_id, &client_ref).await;
                             a ."o-mainBarTimeline__profile"
                                 ."-active"[mode.is_profile()]
                                 href=(mode.to_path())
                                 aria-current=[mode.is_profile().then_some("page")]
                             {
                                 span ."o-mainBarTimeline__tabIcon -profile" aria-hidden="true" {}
-                                span ."o-mainBarTimeline__tabLabel" { "Profile" }
+                                span ."o-mainBarTimeline__tabLabel" { (profile.display_name) }
                             }
                             a ."o-mainBarTimeline__feedLink"
                                 href=(profile_feed_url(profile_id))
