@@ -410,6 +410,11 @@ img.u-userImage {
     flex-direction: row;
   }
 
+  .o-pageLayout:has(> .o-navBar #new-post-form):has(> .o-mainBar) {
+    max-width: calc(440px + 50rem);
+    margin-inline: auto;
+  }
+
   .o-navBar {
     position: sticky;
     top: 0;
