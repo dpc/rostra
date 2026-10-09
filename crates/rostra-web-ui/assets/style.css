@@ -424,9 +424,19 @@ img.u-userImage {
     max-width: min(50rem, calc(100% - 280px));
   }
 
-  .o-pageLayout:has(> .o-mainBar) > .o-navBar:has(#new-post-form:focus-within) {
-    flex: 0 0 50%;
+  .o-pageLayout:has(> .o-mainBar) > .o-navBar:has(#new-post-form) {
+    flex: 0 0 clamp(280px, calc(100% - 50rem), 440px);
     max-width: 50%;
+  }
+
+  .o-pageLayout:has(> .o-mainBar) > .o-navBar:has(#new-post-form:focus-within) {
+    flex-basis: 50%;
+  }
+}
+
+@media (min-width: 768px) and (prefers-reduced-motion: no-preference) {
+  .o-pageLayout:has(> .o-mainBar) > .o-navBar:has(#new-post-form) {
+    transition: flex-basis 150ms ease;
   }
 }
 
