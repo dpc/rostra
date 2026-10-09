@@ -1,6 +1,6 @@
 ---
 name: multipart-review-ui
-description: Use when reviewing Rostra web UI changes to controls, forms, layout, or user-facing interactions.
+description: Must apply when reviewing Rostra web UI changes to controls, forms, layout, or user-facing interactions, whether in direct general review or delegated UI review.
 only-roles: [reviewer]
 ---
 
@@ -29,10 +29,16 @@ prerequisites; otherwise report the uncertainty when it blocks a verdict.
 
 - **Existing patterns:** Check all changed elements against comparable Rostra
   UI: shared components, styles, spacing, action placement, and interaction
-  conventions. Buttons should use the established helpers and icon patterns
+  conventions. For new or materially changed controls, compare the actual
+  equivalent controls, shared helper implementations, and relevant styles,
+  rather than assuming that global styles make an ad hoc control equivalent.
+  Buttons should use the established helpers and icon patterns
   where applicable; flag missing icons or ad hoc controls inconsistent with
   their peers. Respect legitimate existing exceptions rather than demanding
-  an icon on every button or making incidental markup a mandate.
+  an icon on every button or making incidental markup a mandate. Establish an
+  exception with a comparable control or documented rationale that fits the
+  changed control's role; an assumed exception cannot justify PASS. Report
+  unresolved evidence that blocks a verdict through the common contract.
 - **Text and layout:** Check that labels explain actions, primary and secondary
   actions are distinguishable, and content remains usable on narrow screens.
   Look for misleading wording, crowded controls, or layouts that obscure the
@@ -54,6 +60,13 @@ prerequisites; otherwise report the uncertainty when it blocks a verdict.
   states where affected. Look for duplicate submissions, stale controls, or
   updates that leave users unable to continue. Do not reject required
   first-party browser conveniences merely for using Alpine.
+- **Claimed UX outcome:** Verify the intended user-visible improvement, not
+  merely that the interaction functions. Choose concrete boundary examples
+  proportionate to the changed workflow: an enlarged image should remain
+  viewable and dismissible when taller than the viewport; a widening composer
+  should remain within its available workspace. Use relevant source, styles,
+  or authorized inspection as evidence, without imposing an unrelated test
+  matrix or requiring browser access.
 
 ## Findings
 
