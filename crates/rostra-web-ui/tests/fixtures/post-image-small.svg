@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="160" height="100" viewBox="0 0 1600 1000">
+  <rect width="1600" height="1000" fill="#456"/>
+  <circle cx="800" cy="500" r="350" fill="#ea8"/>
+  <text x="800" y="520" text-anchor="middle" font-size="64">Small image</text>
+</svg>

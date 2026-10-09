@@ -1047,34 +1047,41 @@ emoji-picker {
 
 .o-imageDialog {
   margin: auto;
-  padding: 0.75rem;
+  padding: 0.5rem;
   border: 1px solid var(--color-border);
   border-radius: var(--border-radius-std);
   background: var(--color-post-bg);
   color: var(--color-text-default);
-  max-width: calc(100vw - 2rem);
-  max-height: calc(100dvh - 2rem);
+  width: calc(100vw - 1rem);
+  height: calc(100dvh - 1rem);
+  max-width: calc(100vw - 1rem);
+  max-height: calc(100dvh - 1rem);
 }
 
 .o-imageDialog[open] {
-  display: flex;
-  flex-direction: column;
-  gap: 0.75rem;
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  gap: 0.5rem;
 }
 
 .o-imageDialog::backdrop {
   background: rgba(0, 0, 0, 0.75);
 }
 
-.o-imageDialog button {
-  align-self: flex-end;
+.o-imageDialog__closeButton {
+  justify-self: end;
+}
+
+.o-imageDialog__closeButtonIcon {
+  background: url('/assets/icons/xmark.svg') center/contain no-repeat;
 }
 
 .o-imageDialog img {
   display: block;
+  min-width: 0;
   min-height: 0;
-  max-width: 100%;
-  max-height: calc(100dvh - 7rem);
+  width: 100%;
+  height: 100%;
   object-fit: contain;
 }
 

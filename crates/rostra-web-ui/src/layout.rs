@@ -240,8 +240,10 @@ pub(crate) fn render_html_body(
 pub(crate) fn render_post_image_dialog() -> Markup {
     html! {
         dialog #post-image-dialog ."o-imageDialog" aria-label="Enlarged post image" {
-            button type="button" autofocus
-                "@click"="closeRostraDialog($el.closest('dialog'))" { "Close" }
+            (crate::routes::fragment::button("o-imageDialog__closeButton", "Close")
+                .button_type("button")
+                .onclick("closeRostraDialog(this.closest('dialog'))")
+                .call())
             img alt="";
         }
     }

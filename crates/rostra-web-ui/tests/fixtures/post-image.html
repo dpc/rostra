@@ -5,17 +5,21 @@
     <meta name="viewport" content="width=device-width,initial-scale=1">
     <title>Hosted post image regression</title>
     <link rel="stylesheet" href="../../assets/style.css">
+    <style>body > a img { max-height: 120px; }</style>
     <script defer src="../../assets/app.js"></script>
     <script defer src="../../assets/libs/alpinejs@3.14.3.js"></script>
   </head>
   <body x-data>
     <p>Inert local fixture: no Rostra identity, server actions or remote media.</p>
     <a class="m-rostraMedia__image" href="post-image.svg"><img src="post-image.svg" alt="Wide local sample"></a>
+    <a class="m-rostraMedia__image" href="post-image-portrait.svg"><img src="post-image-portrait.svg" alt="Tall local sample"></a>
+    <a class="m-rostraMedia__image" href="post-image-small.svg"><img src="post-image-small.svg" alt="Small wide local sample"></a>
+    <a class="m-rostraMedia__image" href="post-image-small-portrait.svg"><img src="post-image-small-portrait.svg" alt="Small tall local sample"></a>
     <button type="button" onclick="document.querySelector('#inserted').append(document.querySelector('template').content.cloneNode(true))">Insert another image</button>
     <div id="inserted"></div>
     <template><a class="m-rostraMedia__image" href="post-image.svg"><img src="post-image.svg" alt="Inserted local sample"></a></template>
     <dialog id="post-image-dialog" class="o-imageDialog" aria-label="Enlarged post image">
-      <button type="button" autofocus @click="closeRostraDialog($el.closest('dialog'))">Close</button>
+      <button class="o-imageDialog__closeButton u-button" type="button" onclick="closeRostraDialog(this.closest('dialog'))"><span class="o-imageDialog__closeButtonIcon u-buttonIcon"></span>Close</button>
       <img alt="">
     </dialog>
   </body>

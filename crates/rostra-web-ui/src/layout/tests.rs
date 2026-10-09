@@ -102,7 +102,14 @@ fn image_dialog_is_named_closed_and_has_no_initial_media_request() {
         .next()
         .unwrap();
     assert_eq!(close.text().collect::<String>(), "Close");
-    assert!(close.value().attr("autofocus").is_some());
+    assert_eq!(close.value().attr("type"), Some("button"));
+    assert!(close.value().classes().any(|class| class == "u-button"));
+    assert_eq!(
+        close
+            .select(&Selector::parse(".o-imageDialog__closeButtonIcon.u-buttonIcon").unwrap())
+            .count(),
+        1
+    );
     let image = dialog
         .select(&Selector::parse("img").unwrap())
         .next()
