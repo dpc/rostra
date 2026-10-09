@@ -423,6 +423,11 @@ img.u-userImage {
   .o-mainBar {
     max-width: min(50rem, calc(100% - 280px));
   }
+
+  .o-pageLayout:has(> .o-mainBar) > .o-navBar:has(#new-post-form:focus-within) {
+    flex: 0 0 50%;
+    max-width: 50%;
+  }
 }
 
 
