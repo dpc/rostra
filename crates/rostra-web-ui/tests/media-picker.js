@@ -233,6 +233,48 @@ test("omitted targets preserve composer and upload insertion behavior", () => {
 });
 
 const enlargeSource = source.match(/function enlargePostImage\(event\) \{[\s\S]*?\n\}/)[0];
+const fitSource = source.match(/function fitPostImageClose\(dialog\) \{[\s\S]*?\n\}/)[0];
+
+test("image Close uses actual full-height letterbox space, independent of current mode", () => {
+  let side;
+  const image = { naturalWidth: 1000, naturalHeight: 1600 };
+  const close = { getBoundingClientRect: () => ({ width: 80 }) };
+  const dialog = {
+    open: true, clientWidth: 1262, clientHeight: 782,
+    querySelector: selector => selector === "img" ? image : close,
+    classList: { toggle(name, value) { assert.equal(name, "-sideClose"); side = value; } },
+  };
+  const fit = () => vm.runInNewContext(`${fitSource}; fitPostImageClose(dialog)`, {
+    dialog, getComputedStyle: () => ({
+      paddingLeft: "8px", paddingRight: "8px", paddingTop: "8px", paddingBottom: "8px", gap: "8px",
+    }),
+  });
+  fit();
+  assert.equal(side, true, "wide viewport portrait");
+  fit();
+  assert.equal(side, true, "no oscillation after removing top row");
+  image.naturalWidth = 1600;
+  image.naturalHeight = 1000;
+  fit();
+  assert.equal(side, false, "wide landscape must not lose width to a side column");
+  dialog.clientWidth = 357;
+  dialog.clientHeight = 649;
+  image.naturalWidth = 1000;
+  image.naturalHeight = 1600;
+  fit();
+  assert.equal(side, false, "narrow portrait fallback");
+  dialog.clientWidth = 1000;
+  dialog.clientHeight = 400;
+  fit();
+  assert.equal(side, true, "short viewport also has real side space");
+  image.naturalHeight = 0;
+  fit();
+  assert.equal(side, false, "unloaded image keeps safe top row");
+  side = undefined;
+  dialog.open = false;
+  fit();
+  assert.equal(side, undefined, "closed dialog is untouched");
+});
 
 test("hosted image enlargement preserves native fallback and copies only image data", () => {
   const enlarged = {};

@@ -1072,6 +1072,16 @@ emoji-picker {
   justify-self: end;
 }
 
+.o-imageDialog[open].-sideClose {
+  grid-template-rows: minmax(0, 1fr);
+}
+
+.o-imageDialog.-sideClose .o-imageDialog__closeButton {
+  position: absolute;
+  top: 0.5rem;
+  right: 0.5rem;
+}
+
 .o-imageDialog__closeButtonIcon {
   background: url('/assets/icons/xmark.svg') center/contain no-repeat;
 }

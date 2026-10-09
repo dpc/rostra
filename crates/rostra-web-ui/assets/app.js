@@ -243,6 +243,7 @@ window.closeRostraDialog = function (dialog) {
   if (dialog.open) dialog.close();
   if (activeRostraDialog === dialog) restoreRostraDialogFocus(dialog);
   if (dialog.matches("dialog.o-imageDialog")) {
+    dialog.classList.remove("-sideClose");
     dialog.querySelector("img").removeAttribute("src");
     dialog.querySelector("img").alt = "";
   }
@@ -310,6 +311,32 @@ function enlargePostImage(event) {
 }
 
 document.addEventListener("click", enlargePostImage);
+
+// Use the full-height image's letterbox, never a column that reduces its size.
+function fitPostImageClose(dialog) {
+  if (!dialog.open) return;
+  const image = dialog.querySelector("img");
+  const close = dialog.querySelector("button");
+  const style = getComputedStyle(dialog);
+  const width = dialog.clientWidth - parseFloat(style.paddingLeft) - parseFloat(style.paddingRight);
+  const height = dialog.clientHeight - parseFloat(style.paddingTop) - parseFloat(style.paddingBottom);
+  const paintedWidth = Math.min(width, height * image.naturalWidth / image.naturalHeight);
+  const spare = (width - paintedWidth) / 2;
+  dialog.classList.toggle("-sideClose",
+    image.naturalHeight > 0 && spare >= close.getBoundingClientRect().width + parseFloat(style.gap));
+}
+
+document.addEventListener("DOMContentLoaded", () => {
+  const dialog = document.getElementById("post-image-dialog");
+  if (!dialog || typeof ResizeObserver !== "function") return;
+  const fit = () => fitPostImageClose(dialog);
+  dialog.querySelector("img").addEventListener("load", fit);
+  dialog.querySelector("img").addEventListener("error", () => dialog.classList.remove("-sideClose"));
+  const observer = new ResizeObserver(fit);
+  observer.observe(dialog);
+  observer.observe(dialog.querySelector("button"));
+});
+
 document.addEventListener("click", (event) => {
   const dialog = event.target;
   if (!dialog.matches("dialog.o-imageDialog") || !dialog.open) return;
