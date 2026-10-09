@@ -293,6 +293,7 @@ pub async fn get_shoutbox(
 
     let content = html! {
         (page_layout)
+        (crate::layout::render_post_image_dialog())
         div id="ajax-scripts" style="display: none;" {}
         // Initialize emoji database for autocomplete
         script type="module" src="/assets/emoji-init.js" {}

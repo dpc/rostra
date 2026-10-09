@@ -656,6 +656,7 @@ impl UiState {
             (page_layout)
 
             // Dialog containers for timeline interactions
+            (crate::layout::render_post_image_dialog())
             div id="post-preview-dialog" ."o-previewDialog" x-sync {}
             div id="media-list" ."o-mediaList" x-sync {}
             div id="ajax-scripts" style="display: none;" {}

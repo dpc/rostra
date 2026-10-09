@@ -84,3 +84,38 @@ fn viewport_requests_layout_resize_for_interactive_widgets() {
         Some("width=device-width, initial-scale=1.0, interactive-widget=resizes-content")
     );
 }
+#[test]
+fn image_dialog_is_named_closed_and_has_no_initial_media_request() {
+    let rendered = super::render_post_image_dialog();
+    let document = Html::parse_document(&rendered.into_string());
+    let dialog = document
+        .select(&Selector::parse("dialog").unwrap())
+        .next()
+        .unwrap();
+    assert_eq!(
+        dialog.value().attr("aria-label"),
+        Some("Enlarged post image")
+    );
+    assert!(dialog.value().attr("open").is_none());
+    let close = dialog
+        .select(&Selector::parse("button").unwrap())
+        .next()
+        .unwrap();
+    assert_eq!(close.text().collect::<String>(), "Close");
+    assert!(close.value().attr("autofocus").is_some());
+    let image = dialog
+        .select(&Selector::parse("img").unwrap())
+        .next()
+        .unwrap();
+    assert!(image.value().attr("src").is_none());
+    for resources in [PageResources::Private, PageResources::PrivateRich] {
+        let rendered = super::render_html_body(maud::html! {}, "", resources);
+        let document = Html::parse_document(&rendered.into_string());
+        assert_eq!(
+            document
+                .select(&Selector::parse("dialog, img").unwrap())
+                .count(),
+            0
+        );
+    }
+}

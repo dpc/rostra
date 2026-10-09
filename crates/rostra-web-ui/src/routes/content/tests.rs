@@ -8,6 +8,67 @@ use crate::UiState;
 mod url_sanitization;
 mod xss_sanitization;
 
+#[tokio::test(flavor = "multi_thread")]
+async fn production_hosted_images_keep_explicit_author_links() {
+    use rostra_core::event::content_kind;
+    use rostra_core::id::{RostraIdSecretKey, ToShort};
+    use scraper::{Html, Selector};
+
+    let secret = RostraIdSecretKey::generate();
+    let id = secret.id();
+    let client = rostra_client::Client::builder(id)
+        .db(rostra_client_db::Database::new_in_memory(id).await.unwrap())
+        .start_background_tasks(false)
+        .start_request_handler(false)
+        .build()
+        .await
+        .unwrap();
+    let media = client
+        .publish_event(
+            secret,
+            content_kind::SocialMedia {
+                mime: "image/png".to_owned(),
+                data: b"\x89PNG\r\n\x1a\n".to_vec(),
+            },
+        )
+        .call()
+        .await
+        .unwrap();
+    let handle = client.handle();
+    let client_ref = handle.client_ref().unwrap();
+    let event_id = media.event_id.to_short();
+    for linked in [false, true] {
+        let image = format!("![caption](rostra-media:{event_id})");
+        let text = if linked {
+            format!("[{image}](https://example.test)")
+        } else {
+            image
+        };
+        let renderer = make_base_renderer(
+            jotup::html::tokio::Renderer::default().rostra_media(client_ref.clone(), id),
+        );
+        let out = renderer.render_into_document(&text).await.unwrap();
+        let document = Html::parse_fragment(&String::from_utf8(out.into_inner()).unwrap());
+        let anchors = document
+            .select(&Selector::parse("a").unwrap())
+            .collect::<Vec<_>>();
+        assert_eq!(anchors.len(), 1);
+        let anchor = anchors[0];
+        assert_eq!(anchor.select(&Selector::parse("img").unwrap()).count(), 1);
+        if linked {
+            assert_eq!(anchor.value().attr("href"), Some("https://example.test"));
+            assert!(
+                !anchor
+                    .value()
+                    .classes()
+                    .any(|class| class == "m-rostraMedia__image")
+            );
+        } else {
+            assert!(anchor.value().attr("href").unwrap().starts_with("/media/"));
+        }
+    }
+}
+
 /// Valid base32 test event ID (16 bytes = 26 base32 characters)
 const TEST_EVENT_ID: &str = "AAAAAAAAAAAAAAAAAAAAAAAAAA";
 
@@ -539,4 +600,48 @@ pub(super) async fn render_sanitized(content: &str) -> String {
         .expect("Rendering failed");
 
     String::from_utf8(out.into_inner()).expect("valid utf8")
+}
+#[test]
+fn hosted_image_links_preserve_original_and_escaped_alt() {
+    use scraper::{Html, Selector};
+
+    use super::filters::media_html;
+    use crate::routes::media_type::VerifiedMedia;
+
+    let rendered = media_html(
+        Some(VerifiedMedia::Image("image/png")),
+        "/media/author/event?x=1&amp;y=2",
+        "&quot;&lt;caption&gt;&amp;",
+        "download",
+        true,
+    );
+    let document = Html::parse_fragment(&rendered);
+    let link = document
+        .select(&Selector::parse("a.m-rostraMedia__image").unwrap())
+        .next()
+        .unwrap();
+    let image = link
+        .select(&Selector::parse("img").unwrap())
+        .next()
+        .unwrap();
+    assert_eq!(link.value().attr("href"), image.value().attr("src"));
+    assert_eq!(image.value().attr("alt"), Some("\"<caption>&"));
+    assert_eq!(
+        document.select(&Selector::parse("script").unwrap()).count(),
+        0
+    );
+    for media in [
+        Some(VerifiedMedia::Video("video/mp4")),
+        None,
+        Some(VerifiedMedia::Image("image/png")),
+    ] {
+        let rendered = media_html(media, "/media/author/event", "caption", "download", false);
+        let document = Html::parse_fragment(&rendered);
+        assert_eq!(
+            document
+                .select(&Selector::parse("a.m-rostraMedia__image").unwrap())
+                .count(),
+            0
+        );
+    }
 }

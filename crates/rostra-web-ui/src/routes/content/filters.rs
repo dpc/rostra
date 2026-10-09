@@ -153,6 +153,8 @@ where
 
 /// Tracks the type of media transformation being applied
 enum MediaTransform<'s> {
+    /// A link whose destination must remain the image's click action.
+    OrdinaryLink,
     /// An ordinary post link retained alongside its optional rendering.
     XPostLink { id: String },
     /// Image-style post syntax with an editable caption.
@@ -217,7 +219,9 @@ where
                     .ok()
                     .and_then(|url| super::x_post_id(&url).map(str::to_owned));
                 self.container_stack
-                    .push(id.map(|id| MediaTransform::XPostLink { id }));
+                    .push(Some(id.map_or(MediaTransform::OrdinaryLink, |id| {
+                        MediaTransform::XPostLink { id }
+                    })));
                 self.inner
                     .emit(Event::Start(Container::Link(s, link_type), attr))
                     .await
@@ -276,7 +280,9 @@ where
                             alt.push_str(&s);
                             Ok(())
                         }
-                        MediaTransform::XPostLink { .. } => self.inner.emit(Event::Str(s)).await,
+                        MediaTransform::OrdinaryLink | MediaTransform::XPostLink { .. } => {
+                            self.inner.emit(Event::Str(s)).await
+                        }
                     }
                 } else {
                     self.inner.emit(Event::Str(s)).await
@@ -310,7 +316,9 @@ where
                         | MediaTransform::ExternalImage { alt, .. } => {
                             alt.push(ch);
                         }
-                        MediaTransform::XPostLink { .. } => return self.inner.emit(event).await,
+                        MediaTransform::OrdinaryLink | MediaTransform::XPostLink { .. } => {
+                            return self.inner.emit(event).await;
+                        }
                     }
                     Ok(())
                 } else {
@@ -327,7 +335,9 @@ where
                         | MediaTransform::ExternalImage { alt, .. } => {
                             alt.push(' ');
                         }
-                        MediaTransform::XPostLink { .. } => return self.inner.emit(event).await,
+                        MediaTransform::OrdinaryLink | MediaTransform::XPostLink { .. } => {
+                            return self.inner.emit(event).await;
+                        }
                     }
                     Ok(())
                 } else {
@@ -343,7 +353,9 @@ where
                         | MediaTransform::ExternalImage { alt, .. } => {
                             alt.push('\n');
                         }
-                        MediaTransform::XPostLink { .. } => return self.inner.emit(event).await,
+                        MediaTransform::OrdinaryLink | MediaTransform::XPostLink { .. } => {
+                            return self.inner.emit(event).await;
+                        }
                     }
                     Ok(())
                 } else {
@@ -363,7 +375,7 @@ where
                             alt.push_str(&s);
                             alt.push(':');
                         }
-                        MediaTransform::XPostLink { .. } => {
+                        MediaTransform::OrdinaryLink | MediaTransform::XPostLink { .. } => {
                             return self.inner.emit(Event::Symbol(s)).await;
                         }
                     }
@@ -375,8 +387,12 @@ where
             // Escape events are markers for escaped characters, skip them in alt text
             Event::Escape => {
                 if self.container_stack.last().is_some_and(|t| {
-                    t.as_ref()
-                        .is_some_and(|t| !matches!(t, MediaTransform::XPostLink { .. }))
+                    t.as_ref().is_some_and(|t| {
+                        !matches!(
+                            t,
+                            MediaTransform::OrdinaryLink | MediaTransform::XPostLink { .. }
+                        )
+                    })
                 }) {
                     // Inside media transform, just skip the escape marker
                     Ok(())
@@ -387,6 +403,7 @@ where
             Event::End => {
                 if let Some(Some(transform)) = self.container_stack.pop() {
                     match transform {
+                        MediaTransform::OrdinaryLink => self.inner.emit(Event::End).await,
                         MediaTransform::XPostLink { .. } | MediaTransform::XPostImage { .. } => {
                             let (id, title) = match transform {
                                 MediaTransform::XPostLink { id } => {
@@ -434,9 +451,24 @@ where
                                         &url_escaped,
                                         &alt_escaped,
                                         &display_escaped,
+                                        !self.container_stack.iter().any(|container| {
+                                            matches!(
+                                                container,
+                                                Some(
+                                                    MediaTransform::OrdinaryLink
+                                                        | MediaTransform::XPostLink { .. }
+                                                )
+                                            )
+                                        }),
                                     )
                                 } else {
-                                    media_html(None, &url_escaped, &alt_escaped, &display_escaped)
+                                    media_html(
+                                        None,
+                                        &url_escaped,
+                                        &alt_escaped,
+                                        &display_escaped,
+                                        false,
+                                    )
                                 }
                             } else {
                                 // Content not available yet
@@ -506,13 +538,17 @@ where
     }
 }
 
-fn media_html(
+pub(super) fn media_html(
     media: Option<VerifiedMedia>,
     url_escaped: &str,
     alt_escaped: &str,
     display_escaped: &str,
+    link_image: bool,
 ) -> String {
     match media {
+        Some(VerifiedMedia::Image(_)) if link_image => format!(
+            r#"<span class="m-rostraMedia"><a href="{url_escaped}" class="m-rostraMedia__image"><img src="{url_escaped}" alt="{alt_escaped}"/></a></span>"#
+        ),
         Some(VerifiedMedia::Image(_)) => format!(
             r#"<span class="m-rostraMedia"><img src="{url_escaped}" alt="{alt_escaped}"/></span>"#
         ),

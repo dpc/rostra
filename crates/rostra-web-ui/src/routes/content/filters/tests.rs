@@ -8,6 +8,7 @@ fn mismatched_image_uses_download_markup() {
         "/media/test",
         "hostile",
         "hostile",
+        true,
     );
 
     assert!(html.contains("m-rostraMedia__download"));

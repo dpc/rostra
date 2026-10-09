@@ -1036,6 +1036,43 @@ emoji-picker {
   max-width: 100%;
 }
 
+.m-rostraMedia__image {
+  cursor: zoom-in;
+}
+
+.o-imageDialog {
+  margin: auto;
+  padding: 0.75rem;
+  border: 1px solid var(--color-border);
+  border-radius: var(--border-radius-std);
+  background: var(--color-post-bg);
+  color: var(--color-text-default);
+  max-width: calc(100vw - 2rem);
+  max-height: calc(100dvh - 2rem);
+}
+
+.o-imageDialog[open] {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.o-imageDialog::backdrop {
+  background: rgba(0, 0, 0, 0.75);
+}
+
+.o-imageDialog button {
+  align-self: flex-end;
+}
+
+.o-imageDialog img {
+  display: block;
+  min-height: 0;
+  max-width: 100%;
+  max-height: calc(100dvh - 7rem);
+  object-fit: contain;
+}
+
 .m-rostraMedia__download {
   display: inline-flex;
   align-items: center;

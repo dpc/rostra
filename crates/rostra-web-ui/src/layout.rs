@@ -236,6 +236,17 @@ pub(crate) fn render_html_body(
     }
 }
 
+/// Render the shared image viewer on pages that display social posts.
+pub(crate) fn render_post_image_dialog() -> Markup {
+    html! {
+        dialog #post-image-dialog ."o-imageDialog" aria-label="Enlarged post image" {
+            button type="button" autofocus
+                "@click"="closeRostraDialog($el.closest('dialog'))" { "Close" }
+            img alt="";
+        }
+    }
+}
+
 /// Render the shared application navbar around page-specific sidebar content.
 pub(crate) fn render_app_navbar(aria_label: Option<&str>, content: Markup) -> Markup {
     html! {

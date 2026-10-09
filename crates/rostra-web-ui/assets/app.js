@@ -242,6 +242,10 @@ window.closeRostraDialog = function (dialog) {
   dialog.classList.remove("-active");
   if (dialog.open) dialog.close();
   if (activeRostraDialog === dialog) restoreRostraDialogFocus(dialog);
+  if (dialog.matches("dialog.o-imageDialog")) {
+    dialog.querySelector("img").removeAttribute("src");
+    dialog.querySelector("img").alt = "";
+  }
 };
 
 function restoreRostraDialogFocus(dialog) {
@@ -261,7 +265,7 @@ function syncRostraDialogs() {
   }
 
   const dialog = document.querySelector(
-    "dialog.o-mediaList.-active, dialog.o-previewDialog.-active",
+    "dialog.o-mediaList.-active, dialog.o-previewDialog.-active, dialog.o-imageDialog.-active",
   );
   if (!dialog || dialog.open) return;
   rostraDialogFocus.set(dialog, document.activeElement);
@@ -281,11 +285,40 @@ document.addEventListener("DOMContentLoaded", () => {
 });
 
 document.addEventListener("cancel", (event) => {
-  if (event.target.matches("dialog.o-mediaList, dialog.o-previewDialog")) {
+  if (event.target.matches("dialog.o-mediaList, dialog.o-previewDialog, dialog.o-imageDialog")) {
     event.preventDefault();
     closeRostraDialog(event.target);
   }
 }, true);
+
+function enlargePostImage(event) {
+  if (event.defaultPrevented || event.button !== 0 ||
+      event.ctrlKey || event.metaKey || event.shiftKey || event.altKey) return;
+  const link = event.target.closest("a.m-rostraMedia__image");
+  // Keep native navigation inside an existing modal instead of stacking dialogs.
+  if (document.querySelector("dialog[open]")) return;
+  const dialog = document.getElementById("post-image-dialog");
+  const image = link?.querySelector("img");
+  if (!image || !dialog || typeof dialog.showModal !== "function") return;
+  event.preventDefault();
+  link.focus();
+  const enlarged = dialog.querySelector("img");
+  enlarged.src = link.href;
+  enlarged.alt = image.alt;
+  dialog.classList.add("-active");
+  syncRostraDialogs();
+}
+
+document.addEventListener("click", enlargePostImage);
+document.addEventListener("click", (event) => {
+  const dialog = event.target;
+  if (!dialog.matches("dialog.o-imageDialog") || !dialog.open) return;
+  const bounds = dialog.getBoundingClientRect();
+  if (event.clientX < bounds.left || event.clientX > bounds.right ||
+      event.clientY < bounds.top || event.clientY > bounds.bottom) {
+    closeRostraDialog(dialog);
+  }
+});
 
 window.uploadMediaFile = function (inputEl) {
   const file = inputEl.files[0];
@@ -696,7 +729,7 @@ document.addEventListener(
     }
 
     if (e.key === "?" && !isTextInputFocused() &&
-        !document.querySelector("dialog.o-mediaList[open], dialog.o-previewDialog[open]")) {
+        !document.querySelector("dialog[open]")) {
       e.preventDefault();
       toggle();
     }
@@ -855,7 +888,7 @@ document.addEventListener("keydown", (e) => {
 
   document.addEventListener("keydown", (e) => {
     if (isTextInputFocused()) return;
-    if (document.querySelector("dialog.o-previewDialog[open], dialog.o-mediaList[open], dialog.o-shortcutsDialog[open]")) return;
+    if (document.querySelector("dialog[open]")) return;
 
     // Page-global shortcuts (work on any page)
     if (e.key >= "1" && e.key <= "9") {

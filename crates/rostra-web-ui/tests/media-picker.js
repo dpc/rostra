@@ -90,6 +90,7 @@ test("X resize messages only change their own visible marked frame's bounded hei
 
 function harness(targetSelector, initialValue = "") {
   const picker = {
+    matches() { return false; },
     classList: {
       removed: [],
       remove(name) {
@@ -229,4 +230,57 @@ test("omitted targets preserve composer and upload insertion behavior", () => {
     assert.equal(app.picker.open, false, target);
     assert.deepEqual(app.picker.classList.removed, ["-active"], target);
   }
+});
+
+const enlargeSource = source.match(/function enlargePostImage\(event\) \{[\s\S]*?\n\}/)[0];
+
+test("hosted image enlargement preserves native fallback and copies only image data", () => {
+  const enlarged = {};
+  let focused = 0;
+  let opened = 0;
+  const link = {
+    href: "http://[::1]/media/author/event",
+    focus() { focused++; },
+    querySelector() { return { alt: 'Untrusted "<text>"' }; },
+  };
+  const dialog = {
+    showModal() {},
+    querySelector() { return enlarged; },
+    classList: { add(value) { assert.equal(value, "-active"); } },
+  };
+  const activate = (options = {}, targetLink = link, targetDialog = dialog) => {
+    const event = {
+      button: 0,
+      target: { closest(selector) {
+        assert.equal(selector, "a.m-rostraMedia__image");
+        return targetLink;
+      } },
+      preventDefault() { this.prevented = true; },
+      ...options,
+    };
+    vm.runInNewContext(`${enlargeSource}; enlargePostImage(event)`, {
+      event,
+      document: {
+        getElementById() { return targetDialog; },
+        querySelector() { return options.modalOpen ? dialog : null; },
+      },
+      syncRostraDialogs() { opened++; },
+    });
+    return event;
+  };
+  for (const options of [
+    { button: 1 }, { button: 2 }, { ctrlKey: true }, { metaKey: true },
+    { shiftKey: true }, { altKey: true }, { defaultPrevented: true },
+  ]) assert.equal(activate(options).prevented, undefined);
+  assert.equal(activate({}, null).prevented, undefined, "remote images are not eligible");
+  assert.equal(activate({}, link, null).prevented, undefined);
+  assert.equal(activate({}, link, { showModal: undefined }).prevented, undefined);
+  assert.equal(activate({ modalOpen: true }).prevented, undefined, "avoid stacking preview modals");
+  assert.equal(opened, 0);
+  assert.equal(activate({ detail: 0 }).prevented, true, "native Enter activation");
+  assert.equal(focused, 1);
+  assert.equal(opened, 1);
+  assert.equal(enlarged.src, link.href);
+  assert.equal(enlarged.alt, 'Untrusted "<text>"');
+  assert.equal(activate().prevented, true, "delegation also handles newly inserted links");
 });

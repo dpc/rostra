@@ -1,0 +1,22 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width,initial-scale=1">
+    <title>Hosted post image regression</title>
+    <link rel="stylesheet" href="../../assets/style.css">
+    <script defer src="../../assets/app.js"></script>
+    <script defer src="../../assets/libs/alpinejs@3.14.3.js"></script>
+  </head>
+  <body x-data>
+    <p>Inert local fixture: no Rostra identity, server actions or remote media.</p>
+    <a class="m-rostraMedia__image" href="post-image.svg"><img src="post-image.svg" alt="Wide local sample"></a>
+    <button type="button" onclick="document.querySelector('#inserted').append(document.querySelector('template').content.cloneNode(true))">Insert another image</button>
+    <div id="inserted"></div>
+    <template><a class="m-rostraMedia__image" href="post-image.svg"><img src="post-image.svg" alt="Inserted local sample"></a></template>
+    <dialog id="post-image-dialog" class="o-imageDialog" aria-label="Enlarged post image">
+      <button type="button" autofocus @click="closeRostraDialog($el.closest('dialog'))">Close</button>
+      <img alt="">
+    </dialog>
+  </body>
+</html>
