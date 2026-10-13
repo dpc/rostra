@@ -101,6 +101,8 @@
                       ROSTRA_APP_JS=${buildSrc}/crates/rostra-web-ui/assets/app.js \
                         node --test ${./crates/rostra-web-ui/tests/media-picker.js}
                       ROSTRA_APP_JS=${buildSrc}/crates/rostra-web-ui/assets/app.js \
+                        node --test ${./crates/rostra-web-ui/tests/post-navigation.js}
+                      ROSTRA_APP_JS=${buildSrc}/crates/rostra-web-ui/assets/app.js \
                         node --test ${./crates/rostra-web-ui/tests/messages.js}
                       touch $out
                     '';

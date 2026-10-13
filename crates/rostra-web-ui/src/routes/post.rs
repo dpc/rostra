@@ -1850,7 +1850,8 @@ impl UiState {
         let post_main = html! {
             div ."m-postView__main"
                 data-href=[clickable_post_url.as_deref()]
-                "@click"=[clickable_post_url.as_ref().map(|_| "if ($el.dataset.href && !event.target.closest('a, button, details, form, textarea, input, select') && !event.target.closest('.m-postContext__postParent:not(.-expanded)')) window.location = $el.dataset.href")]
+                "@click"=[clickable_post_url.as_ref().map(|_| "navigatePost($event)")]
+                "@auxclick"=[clickable_post_url.as_ref().map(|_| "navigatePost($event)")]
             {
                 div ."m-postView__topRow" {
                     (fragment::avatar("m-postView__userImage", self.avatar_url(author, user_profile.as_ref().map(|p| p.event_id).unwrap_or(ShortEventId::ZERO)), &format!("{display_name}'s avatar")))

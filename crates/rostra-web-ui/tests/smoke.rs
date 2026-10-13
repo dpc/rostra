@@ -1586,6 +1586,7 @@ async fn focused_post_page_does_not_link_the_focused_post() {
         "the focused post must not link to itself"
     );
     assert_eq!(focused_post.value().attr("@click"), None);
+    assert_eq!(focused_post.value().attr("@auxclick"), None);
     for event_id in [parent_id, reply_id] {
         let post = post_main(&event_id);
         assert!(
@@ -1593,7 +1594,9 @@ async fn focused_post_page_does_not_link_the_focused_post() {
                 == Some(format!("/post/{author_short}/{event_id}").as_str()),
             "contextual post {event_id} must retain its link"
         );
-        assert!(post.value().attr("@click").is_some());
+        for event in ["@click", "@auxclick"] {
+            assert_eq!(post.value().attr(event), Some("navigatePost($event)"));
+        }
     }
 }
 

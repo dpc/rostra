@@ -4,6 +4,23 @@
 
 const copyIdStates = new WeakMap();
 
+// Post bodies contain links and controls, so they cannot themselves be anchors.
+function navigatePost(event) {
+  const href = event.currentTarget.dataset.href;
+  if (!href || event.defaultPrevented ||
+      (event.button !== 0 && event.button !== 1) ||
+      event.target.closest("a, button, details, form, textarea, input, select, audio, video, [contenteditable]") ||
+      event.target.closest(".m-postContext__postParent:not(.-expanded)") ||
+      window.getSelection()?.toString()) return;
+
+  event.preventDefault();
+  if (event.button === 1 || event.ctrlKey || event.metaKey || event.shiftKey) {
+    window.open(href, "_blank", "noopener");
+  } else {
+    window.location = href;
+  }
+}
+
 // Enhance only ordinary link activation, leaving browser navigation gestures intact.
 function expandExternalMedia(event) {
   if (event.defaultPrevented || event.button !== 0 ||
