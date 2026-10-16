@@ -399,7 +399,7 @@ pub async fn get_single_post(
             let metadata = metadata::social_metadata(
                 &excerpt,
                 &display_name,
-                post_record.reply_to.is_some(),
+                &post_record.content,
                 reply_target_name.as_deref(),
             );
 

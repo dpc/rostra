@@ -1,11 +1,27 @@
+use rostra_core::event::SocialPost;
+use rostra_core::id::RostraId;
+use rostra_core::{ExternalEventId, ShortEventId};
 use rostra_djot::extract::SocialExcerpt;
 
-use super::{DESCRIPTION_MAX_CHARS, display_name_or_short_id, social_metadata};
+use super::{DESCRIPTION_MAX_CHARS, display_name_or_short_id};
+
+fn social_metadata(
+    excerpt: &SocialExcerpt,
+    author: &str,
+    is_reply: bool,
+    reply_target: Option<&str>,
+) -> super::SocialMetadata {
+    let reply_to =
+        is_reply.then(|| ExternalEventId::new(RostraId::from_bytes([42; 32]), ShortEventId::ZERO));
+    let post = SocialPost::new_text(String::new(), reply_to, Default::default());
+    super::social_metadata(excerpt, author, &post, reply_target)
+}
 
 fn excerpt(heading: Option<&str>, paragraphs: &[&str]) -> SocialExcerpt {
     SocialExcerpt {
         first_heading: heading.map(str::to_owned),
         paragraphs: paragraphs.iter().map(ToString::to_string).collect(),
+        ..Default::default()
     }
 }
 
@@ -81,11 +97,110 @@ fn padded_reply_target_name_is_trimmed() {
 }
 
 #[test]
-fn heading_only_content_does_not_duplicate_its_title_as_description() {
+fn heading_only_content_has_a_useful_description() {
     let metadata = social_metadata(&excerpt(Some("Title"), &[]), "Alice", false, None);
 
     assert_eq!(metadata.title, "Title");
-    assert!(metadata.description.is_empty());
+    assert_eq!(metadata.description, "Title");
+}
+
+#[test]
+fn link_post_description_uses_the_visible_title_even_without_a_body() {
+    let post = SocialPost::new_text(String::new(), None, Default::default()).with_news_fields(
+        Some(
+            "https://play.rust-lang.org/?version=stable&mode=debug&edition=2024"
+                .parse()
+                .unwrap(),
+        ),
+        Some("Rust playground can now handle multiple files".to_owned()),
+    );
+    let metadata = super::social_metadata(&excerpt(None, &[]), "dpc", &post, None);
+    assert_eq!(
+        metadata.description,
+        "Rust playground can now handle multiple files"
+    );
+}
+
+#[test]
+fn link_title_and_body_are_normalized_readable_and_bounded() {
+    let mut post = SocialPost::new_text(String::new(), None, Default::default());
+    post.title = Some("  A\tuseful\nlink  ".to_owned());
+    let metadata =
+        super::social_metadata(&excerpt(None, &["My commentary."]), "Alice", &post, None);
+    assert_eq!(metadata.description, "A useful link\n\nMy commentary.");
+
+    post.title = Some("界".repeat(DESCRIPTION_MAX_CHARS + 1));
+    let metadata = super::social_metadata(&excerpt(None, &[]), "Alice", &post, None);
+    assert_eq!(metadata.description.chars().count(), DESCRIPTION_MAX_CHARS);
+    assert!(metadata.description.ends_with('…'));
+}
+
+#[test]
+fn untitled_link_media_and_empty_posts_have_fallbacks() {
+    let mut post = SocialPost::new_text(String::new(), None, Default::default());
+    post.title = Some(" \n ".to_owned());
+    post.url = Some("https://example.com/story".parse().unwrap());
+    assert_eq!(
+        super::social_metadata(&excerpt(None, &[]), "Alice", &post, None).description,
+        "https://example.com/story"
+    );
+    post.url = None;
+    let media = rostra_djot::extract::extract_social_excerpt(
+        "![](rostra-media:AAAAAAAAAAAAAAAAAAAAAAAAAA)",
+    );
+    assert_eq!(
+        super::social_metadata(&media, "Alice", &post, None).description,
+        "Media attachment"
+    );
+    let captioned = rostra_djot::extract::extract_social_excerpt(
+        "![A mountain at sunset](rostra-media:AAAAAAAAAAAAAAAAAAAAAAAAAA)",
+    );
+    assert_eq!(
+        super::social_metadata(&captioned, "Alice", &post, None).description,
+        "A mountain at sunset"
+    );
+    assert_eq!(
+        super::social_metadata(&excerpt(None, &[]), "Alice", &post, None).description,
+        "Alice's post on Rostra"
+    );
+}
+
+#[test]
+fn social_description_attributes_preserve_text_without_creating_markup() {
+    use crate::layout::{OpenGraphMeta, PageResources};
+
+    let mut post = SocialPost::new_text(String::new(), None, Default::default());
+    post.title = Some("世界 \"quoted\" & <script>alert(1)</script>".to_owned());
+    let metadata = super::social_metadata(&excerpt(None, &[]), "Alice", &post, None);
+    let og = OpenGraphMeta {
+        title: metadata.title,
+        description: metadata.description.clone(),
+        url: "https://example.com/post".to_owned(),
+        image: None,
+    };
+    let markup = crate::UiState::render_html_head(
+        &og.title,
+        None,
+        Some(&og),
+        None,
+        false,
+        PageResources::Standard,
+    )
+    .into_string();
+    let html = scraper::Html::parse_fragment(&markup);
+    for selector in [
+        "meta[name='description']",
+        "meta[property='og:description']",
+        "meta[name='twitter:description']",
+    ] {
+        let selector = scraper::Selector::parse(selector).unwrap();
+        let element = html.select(&selector).next().unwrap();
+        assert_eq!(
+            element.value().attr("content"),
+            Some(metadata.description.as_str())
+        );
+    }
+    assert!(!markup.contains("<script>alert(1)</script>"));
 }
 
 #[test]

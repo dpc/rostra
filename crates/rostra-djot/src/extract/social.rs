@@ -9,6 +9,8 @@ pub struct SocialExcerpt {
     pub first_heading: Option<String>,
     /// Plain text from each non-empty top-level paragraph, in document order.
     pub paragraphs: Vec<String>,
+    /// Whether the document contains an image or embedded media reference.
+    pub has_media: bool,
 }
 
 /// Extract social metadata from Djot content.
@@ -43,6 +45,9 @@ impl<'s> Render<'s> for SocialExcerptRenderer {
     fn emit(&mut self, event: Event<'s>) -> Result<(), Self::Error> {
         match event {
             Event::Start(container, _attrs) => {
+                if matches!(container, Container::Image(..)) {
+                    self.excerpt.has_media = true;
+                }
                 if self.capturing.is_some() {
                     self.depth += 1;
                 } else {

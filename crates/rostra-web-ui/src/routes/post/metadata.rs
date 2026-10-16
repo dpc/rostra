@@ -1,3 +1,4 @@
+use rostra_core::event::SocialPost;
 use rostra_djot::extract::SocialExcerpt;
 
 /// The title and description shared by post social-metadata formats.
@@ -24,11 +25,11 @@ pub(crate) fn display_name_or_short_id(display_name: Option<&str>, short_id: &st
 pub(crate) fn social_metadata(
     excerpt: &SocialExcerpt,
     author_name: &str,
-    is_reply: bool,
+    post: &SocialPost,
     reply_target_name: Option<&str>,
 ) -> SocialMetadata {
     let title = excerpt.first_heading.clone().unwrap_or_else(|| {
-        if is_reply {
+        if post.reply_to.is_some() {
             reply_target_name.map_or_else(
                 || format!("{} reply to a post", possessive(author_name)),
                 |reply_target_name| {
@@ -44,9 +45,29 @@ pub(crate) fn social_metadata(
         }
     });
 
+    let mut blocks = Vec::new();
+    if let Some(post_title) = post.title.as_deref() {
+        let post_title = post_title.split_whitespace().collect::<Vec<_>>().join(" ");
+        if !post_title.is_empty() {
+            blocks.push(post_title);
+        }
+    }
+    blocks.extend(excerpt.paragraphs.iter().cloned());
+    if blocks.is_empty() {
+        if let Some(heading) = &excerpt.first_heading {
+            blocks.push(heading.clone());
+        } else if let Some(url) = &post.url {
+            blocks.push(url.to_string());
+        } else if excerpt.has_media {
+            blocks.push("Media attachment".to_owned());
+        } else {
+            blocks.push(title.clone());
+        }
+    }
+
     SocialMetadata {
         title,
-        description: social_description(&excerpt.paragraphs),
+        description: social_description(&blocks),
     }
 }
 

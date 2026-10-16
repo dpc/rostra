@@ -32,3 +32,14 @@ fn code_and_media_only_content_have_no_social_excerpt() {
         assert!(excerpt.paragraphs.is_empty());
     }
 }
+
+#[test]
+fn media_detection_preserves_alt_text_and_does_not_treat_links_as_media() {
+    let media =
+        extract_social_excerpt("![A *beautiful* view](rostra-media:AAAAAAAAAAAAAAAAAAAAAAAAAA)");
+    assert!(media.has_media);
+    assert_eq!(media.paragraphs, ["A beautiful view"]);
+    assert!(extract_social_excerpt("![](https://example.com/image.png)").has_media);
+    assert!(!extract_social_excerpt("[A link](https://example.com)").has_media);
+    assert!(!extract_social_excerpt("``` rust\nfn main() {}\n```").has_media);
+}
