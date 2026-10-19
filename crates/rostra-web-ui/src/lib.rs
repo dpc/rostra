@@ -270,6 +270,12 @@ pub enum WebUiServerError {
         source: axum_dpc_static_assets::LoadError,
     },
 
+    #[snafu(display("Failed to create data directory {}: {source}", path.display()))]
+    DataDir {
+        path: PathBuf,
+        source: io::Error,
+    },
+
     #[snafu(transparent)]
     ClientRef {
         source: ClientRefError,
@@ -356,6 +362,12 @@ async fn build_state_and_session(
                 .context(AssetsLoadSnafu)?,
         ))
     };
+
+    tokio::fs::create_dir_all(&opts.data_dir)
+        .await
+        .context(DataDirSnafu {
+            path: opts.data_dir.clone(),
+        })?;
 
     let session_db_path = opts.data_dir.join("webui.redb");
     let session_db = tokio::task::spawn_blocking(move || {
