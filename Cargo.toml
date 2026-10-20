@@ -135,7 +135,7 @@ reqwest-13 = { package = "reqwest", version = "0.13", default-features = false, 
 quick-xml = "0.41.0"
 scraper = "0.20"
 cssparser = "0.31"
-webpki-root-certs = "1.0"
+webpki-root-certs = "1.0.10"
 
 
 [profile.dev]
