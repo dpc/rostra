@@ -50,11 +50,14 @@ async fn extension_tables_persist_without_exposing_builtin_mutation() -> anyhow:
         .await?;
     assert_eq!(value.as_deref(), Some("persisted"));
 
-    for reserved_name in std::iter::once("events".to_owned()).chain(
-        EXPECTED_RESERVED_PREFIXES
-            .iter()
-            .map(|prefix| format!("{prefix}probe")),
-    ) {
+    for reserved_name in ["events".to_owned(), "social_reaction_receipts".to_owned()]
+        .into_iter()
+        .chain(
+            EXPECTED_RESERVED_PREFIXES
+                .iter()
+                .map(|prefix| format!("{prefix}probe")),
+        )
+    {
         let definition = ExtensionTableDefinition::<u64, String>::new(&reserved_name);
         let error = db
             .extension_write(|tx| {

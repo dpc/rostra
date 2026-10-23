@@ -157,6 +157,10 @@ def_table! {
     /// Independent non-replayable namespace for local edit/delete receipts.
     social_post_mutation_receipts: [u8; 16] => crate::social_post_receipt::Receipt
 }
+def_table! {
+    /// Permanent independent local reaction receipts, preserved through replay.
+    social_reaction_receipts: [u8; 16] => crate::social_post_receipt::Receipt
+}
 #[cfg(test)]
 pub(crate) use def_table;
 

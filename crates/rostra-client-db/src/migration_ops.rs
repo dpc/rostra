@@ -88,7 +88,8 @@ pub(crate) struct LegacyEventReceivedRecord {
 /// state.
 // Version 34 adds non-replayable local social-post request receipts.
 // Version 35 adds an independent local text mutation receipt namespace.
-const DB_VER: u64 = 35;
+// Version 36 adds non-replayable independent reaction request receipts.
+const DB_VER: u64 = 36;
 
 /// Versions older than this require a total migration.
 ///
@@ -168,6 +169,7 @@ impl Database {
     pub(crate) fn init_tables_tx(tx: &WriteTransactionCtx) -> DbResult<()> {
         tx.open_table(&crate::social_post_receipts::TABLE)?;
         tx.open_table(&crate::social_post_mutation_receipts::TABLE)?;
+        tx.open_table(&crate::social_reaction_receipts::TABLE)?;
         Self::init_dm_tables_tx(tx)?;
         tx.open_table(&crate::content_pressure_state::TABLE)?;
         tx.open_table(&crate::content_pressure_authors::TABLE)?;
@@ -594,6 +596,7 @@ impl Database {
                 // Keep it in place throughout stash/recovery, byte-for-byte.
                 || name == "social_post_receipts"
                 || name == "social_post_mutation_receipts"
+                || name == "social_reaction_receipts"
                 || !crate::extension::is_reserved_extension_table(name)
             {
                 continue;

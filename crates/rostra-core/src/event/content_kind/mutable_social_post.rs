@@ -38,6 +38,22 @@ impl SocialPost {
     /// input limit is local policy, not a change to signed-event compatibility.
     /// Legacy persona and declared tags are preserved independently.
     pub fn decode_mutable_text(bytes: &[u8]) -> Option<Self> {
+        let post = Self::decode_mutable_fields(bytes)?;
+        (post.djot_content.is_some() && post.reaction.is_none()).then_some(post)
+    }
+
+    /// Decode only an exact, bounded, known reaction payload for local removal.
+    /// This compatibility check is not Unicode emoji validation.
+    pub fn decode_mutable_reaction(bytes: &[u8]) -> Option<Self> {
+        let post = Self::decode_mutable_fields(bytes)?;
+        (post.djot_content.is_none()
+            && post.reaction.as_deref().is_some_and(|reaction| {
+                Self::is_reaction(&post.reply_to, reaction) == Some(reaction)
+            }))
+        .then_some(post)
+    }
+
+    fn decode_mutable_fields(bytes: &[u8]) -> Option<Self> {
         if bytes.len() > 1_000_000 || bytes.first()? >> 5 != 5 {
             return None;
         }
@@ -49,20 +65,14 @@ impl SocialPost {
             cbor4ii::core::dec::Reference::Long(bytes)
             | cbor4ii::core::dec::Reference::Short(bytes) => !bytes.is_empty(),
         };
-        if remaining
-            || post.c.is_none()
-            || post.e.is_some()
-            || post.u.is_some()
-            || post.h.is_some()
-            || post.n
-        {
+        if remaining || post.u.is_some() || post.h.is_some() || post.n {
             return None;
         }
         Some(Self {
             persona: post.p,
             djot_content: post.c,
             reply_to: post.r,
-            reaction: None,
+            reaction: post.e,
             url: None,
             title: None,
             news: false,

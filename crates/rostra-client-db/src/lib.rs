@@ -53,6 +53,13 @@ mod process_event_ops;
 mod quota_pruning;
 #[cfg(test)]
 mod quota_pruning_tests;
+mod reaction_ops;
+mod reaction_read;
+pub mod reaction_request;
+pub mod reaction_summary;
+mod reaction_summary_ops;
+#[cfg(test)]
+mod reaction_tests;
 mod reception_order_ops;
 mod retention;
 mod retention_index;
@@ -318,6 +325,39 @@ pub type TableDumpResult<T> = std::result::Result<T, TableDumpError>;
 
 #[derive(Debug, Snafu)]
 pub enum DbError {
+    /// A reaction request ID already committed different exact input.
+    #[snafu(display("Reaction request input mismatch"))]
+    ReactionMismatch,
+    /// Change or the retained payload shape is unsupported.
+    #[snafu(display("Unsupported reaction operation or payload"))]
+    ReactionUnsupported,
+    /// Input is not an exact whole legacy-compatible reaction.
+    #[snafu(display("Invalid exact reaction input"))]
+    ReactionInvalidInput,
+    /// Target envelope is missing, mismatched, or not a social post.
+    #[snafu(display("Reaction full target identity or author mismatch"))]
+    ReactionTarget,
+    /// Selected row is not owned by this database.
+    #[snafu(display("Reaction row is not owned"))]
+    ReactionNotOwner,
+    /// Selected row or add target is no longer canonical/current.
+    #[snafu(display("Reaction target is stale"))]
+    ReactionConflict,
+    /// Required payload is deleted, pruned, or missing.
+    #[snafu(display("Reaction payload is unavailable"))]
+    ReactionUnavailable,
+    /// Traversal exceeded the per-path or total snapshot lineage budget.
+    #[snafu(display("Reaction history limit exceeded"))]
+    ReactionHistoryLimit,
+    /// The snapshot exceeded 10000 raw index entries.
+    #[snafu(display("Reaction index scan limit exceeded"))]
+    ReactionScanLimit,
+    /// The snapshot exceeded its cumulative or per-payload decoding budget.
+    #[snafu(display("Reaction payload inspection limit exceeded"))]
+    ReactionPayloadLimit,
+    /// Requested page size is outside 1..=100.
+    #[snafu(display("Reaction page size must be between 1 and 100"))]
+    ReactionPageLimit,
     /// The mutation request ID was already committed with other input.
     #[snafu(display("Social post mutation request input mismatch"))]
     SocialPostMutationMismatch,

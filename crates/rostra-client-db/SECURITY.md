@@ -33,6 +33,14 @@ receipts before validating current targets, then bind supported candidate fields
 to exact requested text and preserved metadata in the same conditional writer
 transaction. Never infer a tombstone from a missing projection plus delete flag.
 
+Independent Add/Remove follows the [reaction request contract](docs/reactions.md).
+Keep full target/author binding, selected-row ownership/canonical checks, candidate
+payload/nonce binding, admission and receipts in one transaction. The
+`social_reaction_receipts` table stays outside extension access and survives
+replay. Nonzero request-derived nonsingleton auxiliary keys keep distinct
+same-head/same-second adds independent; they do not change singleton or replacement
+semantics. Exact materialized summaries fail closed at explicit work limits.
+
 Direct-message source tables additionally contain plaintext history and live
 native age identities. Never debug-format these records or export epoch secrets.
 Schema32 migration must preserve all four authoritative tables through typed,

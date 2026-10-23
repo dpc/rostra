@@ -246,6 +246,21 @@ impl SocialPost {
         Self::from_parts(Some(body), reply_to, None, persona_tags)
     }
 
+    /// Construct an explicit reaction without trimming or inferred-prefix loss.
+    /// Uses the legacy eight-byte compatibility heuristic, not Unicode
+    /// validation.
+    pub fn new_reaction(reaction: String, reply_to: ExternalEventId) -> Option<Self> {
+        if Self::is_reaction(&Some(reply_to), &reaction) != Some(reaction.as_str()) {
+            return None;
+        }
+        Some(Self::from_parts(
+            None,
+            Some(reply_to),
+            Some(reaction),
+            BTreeSet::new(),
+        ))
+    }
+
     fn from_parts(
         djot_content: Option<String>,
         reply_to: Option<ExternalEventId>,

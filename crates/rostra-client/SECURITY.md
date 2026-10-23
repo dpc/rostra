@@ -36,6 +36,13 @@ without republishing after deletion or pruning. The database binds supported
 candidate fields and revalidates the target atomically; remote updates after
 commit remain outside this local guarantee.
 
+`react_idempotent` follows the [independent reaction contract](../rostra-client-db/docs/reactions.md).
+Add never toggles other rows; Remove binds one exact owned current row. Change
+is unsupported because existing deleting reaction payloads are not replacements.
+Persist immutable pending inputs through uncertainty. Bounded summary errors mean
+unavailable, not zero or partial counts; successful counts cover supported
+materialized rows, not all network reactions.
+
 Direct-message publication requires a full active client and the matching
 account secret. That is not sufficient HTTP authority: each UI request must
 independently require its own unlocked full-account session. Do not use another
