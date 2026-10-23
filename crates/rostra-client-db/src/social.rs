@@ -148,6 +148,10 @@ pub struct SocialPostState {
     pub post: Option<SocialPostRecord<content_kind::SocialPost>>,
     /// Durable payload availability for the same latest event.
     pub availability: EventContentAvailability,
+    /// This available event itself contains a strict supported blank text
+    /// deletion payload. Distinct from `Deleted` availability of its target.
+    /// Unknown/unsupported payloads never imply a tombstone.
+    pub is_tombstone: bool,
 }
 
 /// Record for a shoutbox post with associated metadata.
@@ -185,6 +189,20 @@ impl Database {
                 .expect("replacement lineage references a retained event");
             let availability = Self::get_event_content_availability_tx(event_id, tx)?
                 .expect("the event was read from the same snapshot");
+            let is_tombstone = availability == EventContentAvailability::Available
+                && event.is_delete_parent_aux_content_set()
+                && event.parent_aux().is_some()
+                && event.kind() == rostra_core::event::EventKind::SOCIAL_POST
+                && content_store_table
+                    .get(&event.content_hash())?
+                    .and_then(|row| {
+                        SocialPost::decode_mutable_text(row.value().0.as_ref().as_ref())
+                    })
+                    .is_some_and(|post| {
+                        post.djot_content
+                            .as_deref()
+                            .is_some_and(|body| body.trim().is_empty())
+                    });
 
             let post = match Self::get_social_post_record_tx(
                 &events_table,
@@ -223,6 +241,7 @@ impl Database {
                 timestamp: event.timestamp(),
                 post,
                 availability,
+                is_tombstone,
             }))
         })
         .await

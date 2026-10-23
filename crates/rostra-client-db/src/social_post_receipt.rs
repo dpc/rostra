@@ -21,7 +21,7 @@ pub(crate) enum Receipt {
 }
 
 impl Receipt {
-    fn resolve(&self, digest: [u8; 32], db: &Database) -> DbResult<VerifiedEvent> {
+    pub(crate) fn resolve(&self, digest: [u8; 32], db: &Database) -> DbResult<VerifiedEvent> {
         let Self::V1 {
             digest: original,
             event,

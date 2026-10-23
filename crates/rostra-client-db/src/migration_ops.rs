@@ -87,7 +87,8 @@ pub(crate) struct LegacyEventReceivedRecord {
 /// Version 33 adds derived local-arrival indexes for direct-message unread
 /// state.
 // Version 34 adds non-replayable local social-post request receipts.
-const DB_VER: u64 = 34;
+// Version 35 adds an independent local text mutation receipt namespace.
+const DB_VER: u64 = 35;
 
 /// Versions older than this require a total migration.
 ///
@@ -166,6 +167,7 @@ impl Database {
     /// Initialize all current schema tables.
     pub(crate) fn init_tables_tx(tx: &WriteTransactionCtx) -> DbResult<()> {
         tx.open_table(&crate::social_post_receipts::TABLE)?;
+        tx.open_table(&crate::social_post_mutation_receipts::TABLE)?;
         Self::init_dm_tables_tx(tx)?;
         tx.open_table(&crate::content_pressure_state::TABLE)?;
         tx.open_table(&crate::content_pressure_authors::TABLE)?;
@@ -591,6 +593,7 @@ impl Database {
                 // This authoritative journal needs no replay or conversion.
                 // Keep it in place throughout stash/recovery, byte-for-byte.
                 || name == "social_post_receipts"
+                || name == "social_post_mutation_receipts"
                 || !crate::extension::is_reserved_extension_table(name)
             {
                 continue;

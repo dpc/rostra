@@ -153,6 +153,10 @@ def_table! {
     /// Authoritative, non-expiring local publication receipts; never replayed.
     social_post_receipts: [u8; 16] => crate::social_post_receipt::Receipt
 }
+def_table! {
+    /// Independent non-replayable namespace for local edit/delete receipts.
+    social_post_mutation_receipts: [u8; 16] => crate::social_post_receipt::Receipt
+}
 #[cfg(test)]
 pub(crate) use def_table;
 

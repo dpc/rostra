@@ -55,9 +55,22 @@ impl Database {
         allocation: &mut Option<PayloadAllocation>,
         buffer: &mut Option<PayloadBuffer>,
     ) -> DbResult<()> {
+        self.process_local_social_post_candidate_tx(tx, content, allocation, buffer, false)
+    }
+
+    /// Share admission and rollback without relaxing ordinary create
+    /// validation.
+    pub(crate) fn process_local_social_post_candidate_tx(
+        &self,
+        tx: &WriteTransactionCtx,
+        content: &VerifiedEventContent,
+        allocation: &mut Option<PayloadAllocation>,
+        buffer: &mut Option<PayloadBuffer>,
+        deletion: bool,
+    ) -> DbResult<()> {
         if content.author() != self.self_id
             || content.kind() != EventKind::SOCIAL_POST
-            || content.is_delete_parent_aux_content_set()
+            || content.is_delete_parent_aux_content_set() != deletion
             || content.is_singleton()
             || content.content_len() >= Self::MAX_CONTENT_LEN
             || content.content.is_none()

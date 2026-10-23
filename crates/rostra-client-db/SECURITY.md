@@ -27,6 +27,12 @@ header-committing `reserve_payload` call. Receipts survive payload deletion,
 pruning and migration, have unbounded aggregate growth outside payload quotas,
 and expose metadata and dictionary guesses as described in the linked contract.
 
+Own-text edits/deletes use the separate
+[mutation request contract](docs/social-post-mutations.md). Reconcile original
+receipts before validating current targets, then bind supported candidate fields
+to exact requested text and preserved metadata in the same conditional writer
+transaction. Never infer a tombstone from a missing projection plus delete flag.
+
 Direct-message source tables additionally contain plaintext history and live
 native age identities. Never debug-format these records or export epoch secrets.
 Schema32 migration must preserve all four authoritative tables through typed,

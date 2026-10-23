@@ -63,6 +63,10 @@ mod retention_tests;
 mod self_followee;
 pub mod social;
 mod social_post_materialization;
+pub mod social_post_mutation;
+mod social_post_mutation_ops;
+#[cfg(test)]
+mod social_post_mutation_tests;
 mod social_post_receipt;
 pub mod social_post_request;
 #[cfg(test)]
@@ -314,6 +318,39 @@ pub type TableDumpResult<T> = std::result::Result<T, TableDumpError>;
 
 #[derive(Debug, Snafu)]
 pub enum DbError {
+    /// The mutation request ID was already committed with other input.
+    #[snafu(display("Social post mutation request input mismatch"))]
+    SocialPostMutationMismatch,
+    /// No envelope is retained for this target prefix.
+    #[snafu(display("Social post mutation target is missing"))]
+    SocialPostMutationMissing,
+    /// A retained prefix is not proof of the supplied full identity.
+    #[snafu(display("Social post mutation full target identity mismatch"))]
+    SocialPostMutationTargetMismatch,
+    /// Only this database's identity may mutate its posts.
+    #[snafu(display("Social post mutation target is not owned"))]
+    SocialPostMutationNotOwner,
+    /// A different version is canonical in the committed local lineage.
+    #[snafu(display("Social post mutation target is stale"))]
+    SocialPostMutationConflict,
+    /// The target is deleted or is itself a supported explicit tombstone.
+    #[snafu(display("Social post mutation target is deleted"))]
+    SocialPostMutationDeleted,
+    /// Target bytes are missing or pruned.
+    #[snafu(display("Social post mutation payload is unavailable"))]
+    SocialPostMutationUnavailable,
+    /// The target type, encoding, metadata, or bounded lineage is unsupported.
+    #[snafu(display("Social post mutation target is unsupported"))]
+    SocialPostMutationUnsupported,
+    /// Empty/whitespace edits must not silently turn into deletes.
+    #[snafu(display("Social post edit body is blank"))]
+    SocialPostMutationEmpty,
+    /// Local edits are bounded independently of remote ingestion.
+    #[snafu(display("Social post edit body exceeds one MB"))]
+    SocialPostMutationTooLarge,
+    /// Validation stops rather than silently truncating an overlong lineage.
+    #[snafu(display("Social post mutation lineage exceeds 1024 steps"))]
+    SocialPostMutationLineageLimit,
     /// The managed publication's expected parent is no longer a current head.
     #[snafu(display("Social post parent head is stale"))]
     SocialPostHeadConflict,

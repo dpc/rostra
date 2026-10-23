@@ -28,6 +28,14 @@ back an already started transaction. The digest receipt's retention, metadata
 and dictionary-inference limits are part of that contract, not remote-delivery
 or lost-database recovery guarantees.
 
+`mutate_social_post_idempotent` follows the separate
+[own-text mutation contract](../rostra-client-db/docs/social-post-mutations.md).
+Its full expected-current target and immutable edit/delete input must survive
+ambiguous acknowledgment. Original receipts reconcile before target checks,
+without republishing after deletion or pruning. The database binds supported
+candidate fields and revalidates the target atomically; remote updates after
+commit remain outside this local guarantee.
+
 Direct-message publication requires a full active client and the matching
 account secret. That is not sufficient HTTP authority: each UI request must
 independently require its own unlocked full-account session. Do not use another
