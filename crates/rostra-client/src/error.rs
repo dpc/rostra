@@ -2,9 +2,9 @@ use std::io;
 
 use pkarr::dns::SimpleDnsError;
 use rostra_client_db::DbError;
-use rostra_core::ShortEventId;
 use rostra_core::event::ContentValidationError;
 use rostra_core::id::{RostraId, RostraIdSecretKeyError};
+use rostra_core::{ShortEventId, Timestamp};
 use rostra_util_error::BoxedError;
 use snafu::Snafu;
 
@@ -116,6 +116,19 @@ pub enum PostError {
     /// Shutdown permanently prevents new signing operations.
     #[snafu(display("Client shutdown has started"))]
     ClientClosing,
+    /// No event was signed: the local follow queue/clock wait budget expired.
+    /// The caller may explicitly retry; publication is never retried
+    /// internally.
+    #[snafu(display("Follow ordering is busy; retry the operation"))]
+    FollowOrderingBusy,
+    /// No event was signed: a retained same-author follow is ahead of the
+    /// clock. Check the device clock or the other signing device before
+    /// retrying.
+    #[snafu(display("Follow timestamp {latest} is ahead of the device clock {now}"))]
+    FollowClockBehind { latest: Timestamp, now: Timestamp },
+    /// No strictly greater timestamp can follow the retained boundary.
+    #[snafu(display("Follow timestamp ordering is exhausted"))]
+    FollowTimestampExhausted,
     #[snafu(display("Direct messages require an unlocked full-account client"))]
     DirectMessageUnavailable,
     #[snafu(display("Direct-message encoding failed: {source}"))]

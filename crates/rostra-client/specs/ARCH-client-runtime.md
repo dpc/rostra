@@ -124,6 +124,18 @@ DryRun keeps forecast policy separate from the actual Disabled admission ledger.
 There is no live reconfiguration API; startup configuration changes require fresh
 construction after old client work and guards have quiesced.
 
+Local follow publication serializes mutations per full followee identity and
+consults durable active-follow and unfollow-boundary timestamps. It waits for a
+strictly later wall-clock second rather than relying on a hash tie-break between
+successive local intentions. Queue and clock waits share a bounded admission
+budget; future timestamps, exhaustion, and admission timeout return distinct
+errors without signing. This is not a total database-I/O latency guarantee.
+Publication never invents future logical timestamps or automatically republishes
+an event, so follow-epoch notification cutoffs retain their wall-time meaning.
+Imports and the replicated total-order reducers are unchanged. This local queue
+does not serialize remote same-author ingestion: a remote event arriving after
+the ordering snapshot can still supersede the local operation.
+
 Head handling depends on the operation. Local publication and retained state
 use the minimum event ID as a deterministic representative. Incremental
 broadcasts carry the exact newly accepted head. The broadcaster initially

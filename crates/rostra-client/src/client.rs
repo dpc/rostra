@@ -36,6 +36,7 @@ mod child_task;
 mod dm;
 #[cfg(test)]
 mod dm_tests;
+mod follow_ordering;
 mod init;
 mod shutdown;
 pub use shutdown::{ClientShutdown, ClientShutdownError};
@@ -343,6 +344,8 @@ pub struct Client {
 
     /// Serializes the fallible transition into active/signing mode.
     activation_lock: tokio::sync::Mutex<()>,
+    /// Per-target queue for locally authored follow/selector/unfollow changes.
+    follow_ordering: follow_ordering::FollowOrdering,
 
     /// Networking layer (endpoint, pkarr, p2p_state, connection cache)
     pub(crate) networking: Arc<crate::net::ClientNetworking>,
@@ -499,6 +502,7 @@ impl Client {
             owns_endpoint,
             is_mode_full,
             activation_lock: tokio::sync::Mutex::new(()),
+            follow_ordering: follow_ordering::FollowOrdering::default(),
             task_handles: task_owner,
         });
 
@@ -988,6 +992,19 @@ impl Client {
             .await
     }
 
+    /// Signs and stores one local event.
+    ///
+    /// Valid Follow payloads (including legacy Unfollow kind) serialize per
+    /// full followee identity. They wait for wall time to exceed the retained
+    /// follow/unfollow timestamp, including across restart. Queue and clock
+    /// waiting share a two-second budget; encoding, database I/O and commit are
+    /// not subject to a hard total-latency bound. Busy, future-clock and
+    /// exhausted timestamp errors sign nothing and are distinguishable in
+    /// [`crate::error::PostError`].
+    ///
+    /// Cancellation while waiting signs nothing. No event is automatically
+    /// republished. Signed imports are untouched; a concurrent same-author
+    /// remote event arriving after the ordering snapshot may still win.
     #[builder]
     pub async fn publish_event<C>(
         &self,
@@ -998,7 +1015,35 @@ impl Client {
     where
         C: content_kind::EventContentKind,
     {
+        self.publish_event_with_clock(id_secret, content, replace, &follow_ordering::WallClock)
+            .await
+    }
+
+    async fn publish_event_with_clock<C>(
+        &self,
+        id_secret: RostraIdSecretKey,
+        content: C,
+        replace: Option<ShortEventId>,
+        clock: &impl follow_ordering::FollowClock,
+    ) -> PostResult<VerifiedEvent>
+    where
+        C: content_kind::EventContentKind,
+    {
         self.require_open_for_signing()?;
+        let mut encoded = crate::encoded_payload::EncodedPayload::encode(&self.db, &content)?;
+        // Malformed custom payloads retain ordinary ingestion behavior.
+        let followee = matches!(
+            C::KIND,
+            rostra_core::event::EventKind::FOLLOW | rostra_core::event::EventKind::UNFOLLOW
+        )
+        .then(|| encoded.raw.deserialize_cbor::<content_kind::Follow>().ok())
+        .flatten()
+        .map(|follow| follow.followee);
+        let follow_ordering = if let Some(followee) = followee {
+            Some(self.follow_ordering.prepare(self, followee, clock).await?)
+        } else {
+            None
+        };
         let current_head = self.db.get_self_current_head().await;
         let aux_event = if replace.is_some() {
             None
@@ -1006,8 +1051,7 @@ impl Client {
             self.db.get_self_random_eventid().await
         };
 
-        let mut encoded = crate::encoded_payload::EncodedPayload::encode(&self.db, &content)?;
-        let event = Event::builder_raw_content()
+        let mut event = Event::builder_raw_content()
             .author(self.id)
             .kind(C::KIND)
             .maybe_singleton_aux_key(content.singleton_key_aux())
@@ -1017,6 +1061,10 @@ impl Client {
             .content(&encoded.raw)
             .build();
 
+        if let Some((_, timestamp)) = &follow_ordering {
+            event.timestamp = (*timestamp).into();
+        }
+        self.require_open_for_signing()?;
         let signed_event = event.signed_by(id_secret);
 
         let verified_event = VerifiedEvent::verify_signed(self.id, signed_event)

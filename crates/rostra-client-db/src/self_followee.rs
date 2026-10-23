@@ -5,7 +5,7 @@ use rostra_core::Timestamp;
 use rostra_core::event::PersonasTagsSelector;
 use rostra_core::id::RostraId;
 
-use crate::{Database, DbResult, IdsFolloweesRecord, ids_followees};
+use crate::{Database, DbResult, IdsFolloweesRecord, ids_followees, ids_unfollowed};
 
 /// One active direct follow in a coherent current self-follow snapshot.
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -19,6 +19,31 @@ pub struct SelfFollowee {
 }
 
 impl Database {
+    /// Returns the greatest retained follow or unfollow timestamp for this
+    /// account and full followee identity, including legacy unfollows.
+    ///
+    /// The durable unfollow boundary survives removal of the active follow and
+    /// reopening storage. This snapshot does not reserve an ordering position
+    /// against concurrent ingestion.
+    pub async fn get_self_follow_timestamp(
+        &self,
+        followee: RostraId,
+    ) -> DbResult<Option<Timestamp>> {
+        self.read_with(|tx| {
+            let key = (self.self_id, followee);
+            let active = tx
+                .open_table(&ids_followees::TABLE)?
+                .get(&key)?
+                .map(|record| record.value().latest_ts);
+            let unfollowed = tx
+                .open_table(&ids_unfollowed::TABLE)?
+                .get(&key)?
+                .map(|record| record.value().ts);
+            Ok(active.max(unfollowed))
+        })
+        .await
+    }
+
     /// Gets all active direct self-follows from one current-state read
     /// snapshot.
     ///
