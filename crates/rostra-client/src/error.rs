@@ -129,6 +129,15 @@ pub enum PostError {
     /// No strictly greater timestamp can follow the retained boundary.
     #[snafu(display("Follow timestamp ordering is exhausted"))]
     FollowTimestampExhausted,
+    /// No event was signed before the profile queue/clock budget expired.
+    #[snafu(display("Profile ordering is busy; retry the operation"))]
+    ProfileOrderingBusy,
+    /// A retained profile is ahead of wall time; no event was signed.
+    #[snafu(display("Profile timestamp {latest} is ahead of the device clock {now}"))]
+    ProfileClockBehind { latest: Timestamp, now: Timestamp },
+    /// No strictly greater profile timestamp can be represented.
+    #[snafu(display("Profile timestamp ordering is exhausted"))]
+    ProfileTimestampExhausted,
     #[snafu(display("Direct messages require an unlocked full-account client"))]
     DirectMessageUnavailable,
     #[snafu(display("Direct-message encoding failed: {source}"))]

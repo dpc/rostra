@@ -121,6 +121,7 @@
                   buildPhaseCargoCommand = ''
                     for combo in \
                       "--no-default-features" \
+                      "--no-default-features --features raster-avatar" \
                       "--no-default-features --features bincode" \
                       "--no-default-features --features ed25519-dalek" \
                       "--no-default-features --features serde" \
@@ -133,6 +134,7 @@
                       >&2 echo "Checking rostra-core $combo ..."
                       cargo check --profile $CARGO_PROFILE --package rostra-core $combo
                     done
+                    cargo test --profile $CARGO_PROFILE --package rostra-core --features raster-avatar avatar::
                   '';
                 };
 

@@ -122,6 +122,21 @@ type and is limited to the existing 1 MB avatar limit. Validate locally
 submitted avatars and repeat validation when serving retained data; signed
 event compatibility still permits historical malformed declarations.
 
+Native hosts can opt into `rostra-core`'s `raster-avatar` feature and
+`avatar::validate_raster_avatar` for a narrower static PNG/WebP policy on
+replacement and presentation. It fully decodes bounded pixels, rejects
+animation and incomplete containers, accepts only exact canonical MIME types,
+and limits encoded data to 1,000,000 bytes, each dimension to 2048, and pixels to
+4,000,000. PNG metadata text/ICC decompression is skipped. JPEG is unsupported
+because evaluated decoders accept missing entropy data even in strict mode.
+These are input/output bounds, not a CPU deadline
+or process RSS ceiling; codec scratch allocations are not uniformly budgeted.
+Hosts must bound concurrency and avoid decoding on the UI/async executor. The
+validator does not rewrite bytes or sanitize metadata. An unsupported historical
+avatar may be preserved byte-for-byte during unrelated profile edits, but must
+not be displayed through the native raster path without passing validation.
+This opt-in policy does not narrow web presentation or signed-event ingestion.
+
 The content renderer and `/media/...` route only embed and serve inline a
 declared type when its detected bytes match the intentional passive set: those
 image formats, plus MP4 and WebM video. Every other generic media response,

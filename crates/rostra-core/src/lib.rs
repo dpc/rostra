@@ -1,6 +1,8 @@
 use std::fmt;
 use std::str::FromStr;
 
+#[cfg(feature = "raster-avatar")]
+pub mod avatar;
 #[cfg(feature = "bincode")]
 pub mod bincode;
 pub mod event;

@@ -1752,6 +1752,18 @@ impl Database {
         .expect("Database panic")
     }
 
+    /// Return the retained local profile timestamp, even if its source payload
+    /// was deleted. This snapshot does not reserve against concurrent imports.
+    pub async fn get_self_profile_timestamp(&self) -> DbResult<Option<Timestamp>> {
+        self.read_with(|tx| {
+            Ok(tx
+                .open_table(&social_profiles::TABLE)?
+                .get(&self.self_id)?
+                .map(|record| record.value().ts))
+        })
+        .await
+    }
+
     pub async fn get_social_profile(&self, id: RostraId) -> Option<IdSocialProfileRecord> {
         self.read_with(|tx| {
             let events_heads = tx.open_table(&social_profiles::TABLE)?;

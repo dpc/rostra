@@ -1,5 +1,15 @@
 # Client security and reliability
 
+Locally authored valid profile snapshots serialize through ingestion per client
+and use actual wall time strictly greater than the persisted profile projection.
+Queue/clock waiting shares a two-second budget; storage and encoding are not
+covered by that deadline. Busy, clock-behind and exhausted timestamp errors sign
+nothing. Cancellation while waiting releases admission, and no retry is automatic.
+The projection watermark survives reopening and source payload deletion.
+This does not merge stale full-snapshot edits or order independent devices:
+concurrent same-author imports after the ordering snapshot may still win.
+Signed reducers keep their deterministic timestamp/event-ID conflict rule.
+
 `social_post_if_head` preserves the existing managed HTTP one-use head contract
 without activating the account. The route commits the supplied head's consumer
 before calling `unlock_active`, since activation can itself create heads.

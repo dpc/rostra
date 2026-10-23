@@ -23,6 +23,7 @@ include = [
 
 [features]
 default = []
+raster-avatar = ["dep:png", "dep:image-webp", "dep:flate2"]
 bincode = ["dep:bincode"]
 ed25519-dalek = ["dep:ed25519-dalek", "dep:rand"]
 serde = [
@@ -42,6 +43,9 @@ name = "event"
 harness = false
 
 [dependencies]
+png = { workspace = true, optional = true }
+flate2 = { workspace = true, optional = true }
+image-webp = { workspace = true, optional = true }
 bech32 = { workspace = true }
 bincode = { workspace = true, optional = true }
 bip39 = { workspace = true, optional = true }

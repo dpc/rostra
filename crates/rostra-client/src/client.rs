@@ -38,6 +38,7 @@ mod dm;
 mod dm_tests;
 mod follow_ordering;
 mod init;
+mod profile_ordering;
 mod shutdown;
 mod social_post_head;
 #[cfg(test)]
@@ -352,6 +353,8 @@ pub struct Client {
     activation_lock: tokio::sync::Mutex<()>,
     /// Per-target queue for locally authored follow/selector/unfollow changes.
     follow_ordering: follow_ordering::FollowOrdering,
+    /// Queue for locally authored full profile snapshots.
+    profile_ordering: profile_ordering::ProfileOrdering,
 
     /// Networking layer (endpoint, pkarr, p2p_state, connection cache)
     pub(crate) networking: Arc<crate::net::ClientNetworking>,
@@ -509,6 +512,7 @@ impl Client {
             is_mode_full,
             activation_lock: tokio::sync::Mutex::new(()),
             follow_ordering: follow_ordering::FollowOrdering::default(),
+            profile_ordering: profile_ordering::ProfileOrdering::default(),
             task_handles: task_owner,
         });
 
@@ -1011,6 +1015,11 @@ impl Client {
     /// Cancellation while waiting signs nothing. No event is automatically
     /// republished. Signed imports are untouched; a concurrent same-author
     /// remote event arriving after the ordering snapshot may still win.
+    ///
+    /// Valid profile snapshots use the same wall-time policy, serialized per
+    /// client against the durable profile projection. Profile-specific errors
+    /// distinguish busy, clock-behind and exhausted boundaries. This orders
+    /// publication, not stale form edits or independent signing devices.
     #[builder]
     pub async fn publish_event<C>(
         &self,
@@ -1050,6 +1059,16 @@ impl Client {
         } else {
             None
         };
+        let profile_ordering = if C::KIND == rostra_core::event::EventKind::SOCIAL_PROFILE_UPDATE
+            && encoded
+                .raw
+                .deserialize_cbor::<content_kind::SocialProfileUpdate>()
+                .is_ok()
+        {
+            Some(self.profile_ordering.prepare(self, clock).await?)
+        } else {
+            None
+        };
         let current_head = self.db.get_self_current_head().await;
         let aux_event = if replace.is_some() {
             None
@@ -1068,6 +1087,9 @@ impl Client {
             .build();
 
         if let Some((_, timestamp)) = &follow_ordering {
+            event.timestamp = (*timestamp).into();
+        }
+        if let Some((_, timestamp)) = &profile_ordering {
             event.timestamp = (*timestamp).into();
         }
         self.require_open_for_signing()?;
@@ -1178,6 +1200,11 @@ impl Client {
     pub async fn get_self_social_vote(&self, post_id: ExternalEventId) -> Option<Option<bool>> {
         self.db.get_social_vote(self.rostra_id(), post_id).await
     }
+    /// Publish a full profile snapshot; `None` removes the avatar.
+    ///
+    /// To preserve an avatar, explicitly pass its existing bytes. This retains
+    /// the historical protocol image policy; native applications may opt into
+    /// `rostra_core::avatar` validation for replacements and presentation.
     pub async fn post_social_profile_update(
         &self,
         id_secret: RostraIdSecretKey,
