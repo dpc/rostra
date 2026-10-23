@@ -127,6 +127,20 @@ If you reuse a stale head (e.g. retrying after a network timeout), the server
 returns `409 Conflict`. This is intentional — it prevents duplicate posts. When
 you get a 409, call `GET .../heads` to check whether your post actually landed.
 
+Managed publication checks and consumes the supplied head in one local database
+transaction, even when other sibling heads exist. Concurrent requests using the
+same head (or `null` against an empty graph) cannot both publish. This is a
+one-use optimistic head token, not a request/result receipt: another operation
+can also consume that head, and a 409 does not identify which operation won.
+Do not automatically switch to a fresh head after an ambiguous network error.
+
+The post commits before account activation, whose initialization can itself
+create heads. Cancellation or activation failure after commit does not roll the
+post back; an activation error explicitly reports that the post committed.
+Preparation and raw signed-event APIs do not gain this atomic managed-publication
+check. The Rust `social_post_idempotent` API separately supports durable
+caller-request IDs and original-result reconciliation.
+
 ## Complete Example Session
 
 ```

@@ -249,43 +249,12 @@ async fn publish_social_post_managed(
         )
     })?;
 
-    // Get current heads BEFORE unlock_active (which may create a
-    // node-announcement event and change heads). This ensures the
-    // idempotence check matches what the caller saw via GET /heads.
-    let current_heads = client_ref.db().get_heads_events_for_id(rostra_id).await;
-
-    match &req.parent_head_id {
-        None => {
-            if !current_heads.is_empty() {
-                return Err(api_error(
-                    StatusCode::CONFLICT,
-                    "parent_head_id is null but identity has existing heads. \
-                     Call GET /api/{id}/heads to get current heads and pass one as parent_head_id.",
-                ));
-            }
-        }
-        Some(head_str) => {
-            let head: ShortEventId = head_str
-                .parse()
-                .map_err(|_| api_error(StatusCode::BAD_REQUEST, "Invalid parent_head_id format"))?;
-            if !current_heads.contains(&head) {
-                return Err(api_error(
-                    StatusCode::CONFLICT,
-                    "parent_head_id is not among current heads. \
-                     The post may have already been published, or the state is stale. \
-                     Call GET /api/{id}/heads to verify.",
-                ));
-            }
-        }
-    }
-
-    // Unlock client (may create a node-announcement event)
-    client_ref.unlock_active(id_secret).await.map_err(|e| {
-        api_error(
-            StatusCode::INTERNAL_SERVER_ERROR,
-            format!("Unlock error: {e}"),
-        )
-    })?;
+    let expected_head = req
+        .parent_head_id
+        .as_deref()
+        .map(str::parse::<ShortEventId>)
+        .transpose()
+        .map_err(|_| api_error(StatusCode::BAD_REQUEST, "Invalid parent_head_id format"))?;
 
     // Parse persona tags
     let persona_tags: BTreeSet<PersonaTag> = req
@@ -304,14 +273,47 @@ async fn publish_social_post_managed(
 
     // Publish the social post
     let verified_event = client_ref
-        .social_post(id_secret, req.content, reply_to, persona_tags)
+        .social_post_if_head(
+            id_secret,
+            expected_head,
+            req.content,
+            reply_to,
+            persona_tags,
+        )
         .await
         .map_err(|e| {
+            if matches!(
+                e,
+                rostra_client::error::PostError::Storage {
+                    source: rostra_client_db::DbError::SocialPostHeadConflict,
+                }
+            ) {
+                return api_error(
+                    StatusCode::CONFLICT,
+                    if expected_head.is_some() {
+                        "parent_head_id is not among current heads. \
+                     The post may have already been published, or the state is stale. \
+                     Call GET /api/{id}/heads to verify."
+                    } else {
+                        "parent_head_id is null but identity has existing heads. \
+                     Call GET /api/{id}/heads to get current heads and pass one as parent_head_id."
+                    },
+                );
+            }
             api_error(
                 StatusCode::INTERNAL_SERVER_ERROR,
                 format!("Failed to publish: {e}"),
             )
         })?;
+
+    // Publish before activation: initialization itself can create graph heads.
+    // Failure/cancellation here does not roll back the already consumed head.
+    client_ref.unlock_active(id_secret).await.map_err(|e| {
+        api_error(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("Post committed, but activation failed: {e}"),
+        )
+    })?;
 
     // Get updated heads
     let mut heads: Vec<String> = client_ref

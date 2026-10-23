@@ -39,6 +39,9 @@ mod dm_tests;
 mod follow_ordering;
 mod init;
 mod shutdown;
+mod social_post_head;
+#[cfg(test)]
+mod social_post_head_tests;
 mod social_post_request;
 #[cfg(test)]
 mod social_post_request_tests;

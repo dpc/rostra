@@ -1,5 +1,13 @@
 # Client database security and reliability
 
+Managed post publication atomically checks self-head membership and ingests a
+candidate whose previous parent is that exact supplied head. A null expectation
+requires both empty self-heads and a root candidate. Do not separate this check
+from ingestion or use the independent minimum-head selector: sibling heads and
+concurrent requests otherwise break one-use head consumption. Both managed
+head consumption and durable request receipts use the same transaction-local
+admission helper; failure must not retain a candidate envelope.
+
 Local text-post idempotency uses the
 [durable request contract](docs/social-post-idempotency.md).
 `commit_social_post_request` trusts its in-process publisher to supply exactly

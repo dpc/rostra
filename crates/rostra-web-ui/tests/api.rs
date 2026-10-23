@@ -276,6 +276,49 @@ async fn publish_post(
     (event_id, heads)
 }
 
+/// Establish a successful setup post despite background activation consuming
+/// the observed head; return the exact head used by the successful attempt.
+async fn publish_setup_post(
+    driver: &common::UiDriver,
+    rostra_id: &str,
+    secret: &str,
+    initial_head: &str,
+    content: &str,
+) -> (serde_json::Value, String) {
+    let mut head = initial_head.to_owned();
+    for attempt in 0..4 {
+        let response = driver
+            .api_post_json(
+                &format!("/api/{rostra_id}/publish-social-post-managed"),
+                Some(secret),
+                &serde_json::json!({ "parent_head_id": head, "content": content }),
+            )
+            .await;
+        if response.status() == 200 {
+            return (response.json().await.unwrap(), head);
+        }
+        // Only this explicit prepublication refusal permits a fresh token.
+        // The dedicated rejection assertion must not call this setup helper.
+        assert_eq!(response.status(), 409);
+        let error: serde_json::Value = response.json().await.unwrap();
+        assert_eq!(
+            error["error"].as_str(),
+            Some(
+                "parent_head_id is not among current heads. The post may have already been published, or the state is stale. Call GET /api/{id}/heads to verify."
+            )
+        );
+        assert!(
+            attempt < 3,
+            "fixture head remained stale after four attempts"
+        );
+        let response = driver.api_get(&format!("/api/{rostra_id}/heads")).await;
+        assert_eq!(response.status(), 200);
+        let heads: serde_json::Value = response.json().await.unwrap();
+        head = heads["heads"][0].as_str().unwrap().to_owned();
+    }
+    unreachable!("last failed attempt panics")
+}
+
 #[test_log::test(tokio::test(flavor = "multi_thread"))]
 async fn generate_id_returns_keypair() {
     let server = TestServer::start().await;
@@ -426,18 +469,7 @@ async fn publish_post_full_flow() {
 
     // 5. Publish second post using a head from the first
     let head = heads[0].as_str().unwrap();
-    let resp = driver
-        .api_post_json(
-            &format!("/api/{rostra_id}/publish-social-post-managed"),
-            Some(secret),
-            &serde_json::json!({
-                "parent_head_id": head,
-                "content": "Second post!",
-            }),
-        )
-        .await;
-    assert_eq!(resp.status(), 200);
-    let post2: serde_json::Value = resp.json().await.unwrap();
+    let (post2, _) = publish_setup_post(&driver, rostra_id, secret, head, "Second post!").await;
     assert!(
         post2["event_id"].as_str().is_some_and(|s| !s.is_empty()),
         "Second post should return an event_id"
@@ -471,17 +503,8 @@ async fn publish_twice_with_same_head_is_rejected() {
     let head_after_first = post1["heads"][0].as_str().unwrap().to_string();
 
     // Second post using the head from the first
-    let resp = driver
-        .api_post_json(
-            &format!("/api/{rostra_id}/publish-social-post-managed"),
-            Some(secret),
-            &serde_json::json!({
-                "parent_head_id": head_after_first,
-                "content": "Post two",
-            }),
-        )
-        .await;
-    assert_eq!(resp.status(), 200);
+    let (_, consumed_head) =
+        publish_setup_post(&driver, rostra_id, secret, &head_after_first, "Post two").await;
 
     // Third post reusing the SAME head as the second post used — should fail
     // because the head changed after the second post succeeded
@@ -490,7 +513,7 @@ async fn publish_twice_with_same_head_is_rejected() {
             &format!("/api/{rostra_id}/publish-social-post-managed"),
             Some(secret),
             &serde_json::json!({
-                "parent_head_id": head_after_first,
+                "parent_head_id": consumed_head,
                 "content": "Post three (duplicate)",
             }),
         )

@@ -13,6 +13,9 @@ mod events_content_missing_ops;
 mod extension;
 mod id_nodes_ops;
 mod ids_full;
+mod local_social_post;
+#[cfg(test)]
+mod local_social_post_tests;
 mod migration_ops;
 mod models;
 pub mod news;
@@ -311,6 +314,9 @@ pub type TableDumpResult<T> = std::result::Result<T, TableDumpError>;
 
 #[derive(Debug, Snafu)]
 pub enum DbError {
+    /// The managed publication's expected parent is no longer a current head.
+    #[snafu(display("Social post parent head is stale"))]
+    SocialPostHeadConflict,
     /// A durable post request ID was reused for different canonical input.
     #[snafu(display("Social post request ID input mismatch"))]
     SocialPostRequestMismatch,

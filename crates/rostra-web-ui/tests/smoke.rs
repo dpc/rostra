@@ -527,7 +527,7 @@ async fn publish_social_post(
                 .to_owned();
         }
         // Background activation can advance heads after a fixture's GET.
-        // This exact managed-route refusal precedes unlock/sign/publication.
+        // This exact managed-route refusal commits no post or consumed head.
         // Never retry network failures, ambiguous results, or other errors.
         let error: serde_json::Value = response.json().await.unwrap();
         assert_eq!(

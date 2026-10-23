@@ -1,5 +1,13 @@
 # Client security and reliability
 
+`social_post_if_head` preserves the existing managed HTTP one-use head contract
+without activating the account. The route commits the supplied head's consumer
+before calling `unlock_active`, since activation can itself create heads.
+Cancellation, shutdown or activation failure between these steps can leave a
+committed post with an inactive client; neither an error nor stale-head rejection
+is proof of rollback. Hosts must retain the distinction between local commit and
+activation, and must not blindly retry with a new head after an ambiguous result.
+
 `social_post_idempotent` follows the
 [local durable request contract](../rostra-client-db/docs/social-post-idempotency.md).
 The caller persists an immutable random request ID and exact input before
