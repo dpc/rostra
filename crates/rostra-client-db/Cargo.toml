@@ -30,6 +30,7 @@ workspace = true
 anyhow = { workspace = true }
 backon = { workspace = true }
 bincode = { workspace = true }
+blake3 = { workspace = true }
 convi = { workspace = true }
 bon = { workspace = true }
 data-encoding = { workspace = true }

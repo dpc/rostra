@@ -1,5 +1,15 @@
 # Client security and reliability
 
+`social_post_idempotent` follows the
+[local durable request contract](../rostra-client-db/docs/social-post-idempotency.md).
+The caller persists an immutable random request ID and exact input before
+publication, including the full validated reply target. Cancellation, shutdown
+races and lost acknowledgments remain unresolved until unchanged-key retry in
+the same durable account database. Closing rejects new calls, but does not roll
+back an already started transaction. The digest receipt's retention, metadata
+and dictionary-inference limits are part of that contract, not remote-delivery
+or lost-database recovery guarantees.
+
 Direct-message publication requires a full active client and the matching
 account secret. That is not sufficient HTTP authority: each UI request must
 independently require its own unlocked full-account session. Do not use another

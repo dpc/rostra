@@ -60,6 +60,10 @@ mod retention_tests;
 mod self_followee;
 pub mod social;
 mod social_post_materialization;
+mod social_post_receipt;
+pub mod social_post_request;
+#[cfg(test)]
+mod social_post_request_tests;
 mod table_ops;
 mod tables;
 mod tx_ops;
@@ -307,6 +311,15 @@ pub type TableDumpResult<T> = std::result::Result<T, TableDumpError>;
 
 #[derive(Debug, Snafu)]
 pub enum DbError {
+    /// A durable post request ID was reused for different canonical input.
+    #[snafu(display("Social post request ID input mismatch"))]
+    SocialPostRequestMismatch,
+    /// The full reply target does not name a retained social-post envelope.
+    #[snafu(display("Social post reply target is unavailable or mismatched"))]
+    SocialPostReplyTarget,
+    /// A local post candidate violates the publication contract.
+    #[snafu(display("Invalid social post publication candidate or receipt"))]
+    SocialPostCandidate,
     #[snafu(display("Direct-message processing is unavailable during migration"))]
     DmMigrationPending,
     #[snafu(display("No eligible direct-message device is known for the recipient"))]

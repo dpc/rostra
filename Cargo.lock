@@ -4744,6 +4744,7 @@ dependencies = [
  "anyhow",
  "backon",
  "bincode",
+ "blake3",
  "bon",
  "convi",
  "data-encoding",

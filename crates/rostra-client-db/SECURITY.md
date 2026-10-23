@@ -1,5 +1,16 @@
 # Client database security and reliability
 
+Local text-post idempotency uses the
+[durable request contract](docs/social-post-idempotency.md).
+`commit_social_post_request` trusts its in-process publisher to supply exactly
+`request.to_social_post()` as the verified candidate content; it deliberately
+does not rebind that supplied payload to the input digest. Network or untrusted
+callers must not use this seam. Receipt lookup and admitted ingestion share one
+transaction, including envelope reservation; never substitute the separate
+header-committing `reserve_payload` call. Receipts survive payload deletion,
+pruning and migration, have unbounded aggregate growth outside payload quotas,
+and expose metadata and dictionary guesses as described in the linked contract.
+
 Direct-message source tables additionally contain plaintext history and live
 native age identities. Never debug-format these records or export epoch secrets.
 Schema32 migration must preserve all four authoritative tables through typed,
