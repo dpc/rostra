@@ -57,12 +57,13 @@ impl PkarrClient {
     pub(crate) async fn resolve(
         &self,
         public_key: &pkarr::PublicKey,
+        tasks: &crate::client::tasks::ClientTasks,
     ) -> Result<SignedPacket, pkarr::errors::ResolveError> {
         if let Some(packet) = self.cache.get(&CacheKey::from(public_key)) {
             if packet.is_expired(self.minimum_ttl, self.maximum_ttl) {
                 let client = self.client.clone();
                 let public_key = public_key.clone();
-                tokio::spawn(async move {
+                tasks.spawn(async move {
                     let _ = client.resolve(&public_key, ResolvePolicy::CacheFirst).await;
                 });
             }

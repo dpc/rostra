@@ -1,11 +1,12 @@
 use std::collections::{BTreeSet, HashSet};
 use std::sync::{Arc, Mutex};
 
+use futures::StreamExt as _;
+use futures::stream::FuturesUnordered;
 use rostra_client_db::{CurrentState, Database, DbResult, WotData};
 use rostra_core::ShortEventId;
 use rostra_core::id::{RostraId, ToShort as _};
 use tokio::sync::{broadcast, watch};
-use tokio::task::JoinSet;
 use tracing::{debug, error, instrument, trace, warn};
 
 use crate::LOG_TARGET;
@@ -156,9 +157,9 @@ impl NewHeadFetcher {
 
         let (queue, notify_rx) = WorkQueue::new();
 
-        let mut workers = JoinSet::new();
+        let mut workers = FuturesUnordered::new();
         for worker_id in 0..NUM_WORKERS {
-            workers.spawn(Self::worker(
+            let Some(worker) = self.networking.tasks.spawn_child(Self::worker(
                 worker_id,
                 queue.clone(),
                 notify_rx.clone(),
@@ -166,7 +167,10 @@ impl NewHeadFetcher {
                 self.db.clone(),
                 self.self_id,
                 self.connections.clone(),
-            ));
+            )) else {
+                return;
+            };
+            workers.push(worker);
         }
         let mut reconcile_cursor = None;
         // Capture the WoT baseline before the startup scan. Any admission that
@@ -293,7 +297,7 @@ impl NewHeadFetcher {
                         );
                     }
                 }
-                worker = workers.join_next() => {
+                worker = workers.next() => {
                     match worker {
                         Some(Ok(Ok(()))) => {
                             error!(target: LOG_TARGET, "New-head worker stopped unexpectedly; stopping fetcher");
@@ -321,8 +325,9 @@ impl NewHeadFetcher {
             }
         }
 
-        workers.abort_all();
-        while workers.join_next().await.is_some() {}
+        // Dropping parent cancellation owners aborts the workers. Their actual
+        // joins remain in the client registry even if this parent is cancelled.
+        drop(workers);
     }
 
     async fn advance_current_heads_reconciliation(

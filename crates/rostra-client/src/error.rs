@@ -32,6 +32,9 @@ pub type InitResult<T> = std::result::Result<T, InitError>;
 #[derive(Debug, Snafu)]
 #[snafu(visibility(pub(crate)))]
 pub enum ActivateError {
+    /// Shutdown permanently prevents activation of this client.
+    #[snafu(display("Client shutdown has started"))]
+    ActivationClosing,
     #[snafu(display("Secret key does not match RostraId"))]
     SecretMismatch,
     #[snafu(display("Failed to store the local node announcement: {source}"))]
@@ -110,6 +113,9 @@ pub type IdSecretReadResult<T> = std::result::Result<T, IdSecretReadError>;
 #[derive(Debug, Snafu)]
 #[snafu(visibility(pub(crate)))]
 pub enum PostError {
+    /// Shutdown permanently prevents new signing operations.
+    #[snafu(display("Client shutdown has started"))]
+    ClientClosing,
     #[snafu(display("Direct messages require an unlocked full-account client"))]
     DirectMessageUnavailable,
     #[snafu(display("Direct-message encoding failed: {source}"))]

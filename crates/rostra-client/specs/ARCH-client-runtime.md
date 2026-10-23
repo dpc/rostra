@@ -61,6 +61,14 @@ a unique abort-on-drop owner moves from partial construction into the client.
 Failed or panicked initialization therefore follows the same join-before-retry
 rule, including workers that hold no database reference.
 
+Direct single-client hosts can instead initiate irreversible shutdown and retain
+a completion token across cancellation or outstanding-owner errors. Completion
+joins all Rostra descendants, closes internally owned transport, and requires
+atomic sole ownership before destroying the database. Injected shared services
+remain caller-owned. This permits serialized close/reopen without destroying the
+host executor; it is neither in-place relocking nor credential zeroization.
+Public construction must be awaited rather than cancelled for this lifecycle.
+
 Retained current-state subscriptions expose owned snapshots of the self head,
 followees, followers, and Web of Trust. Runtime tasks may keep those snapshots
 across network waits or database operations without retaining a Tokio watch

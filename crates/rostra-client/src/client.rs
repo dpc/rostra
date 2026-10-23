@@ -14,7 +14,6 @@ use std::time::Duration;
 
 use backon::Retryable as _;
 use iroh_base::EndpointAddr;
-use n0_future::task::AbortOnDropHandle;
 use rostra_client_db::{
     CurrentState, Database, DbError, DbResult, IdsFolloweesRecord, IdsFollowersRecord, WotData,
 };
@@ -33,10 +32,13 @@ use tokio::sync::{RwLock, broadcast};
 use tokio::time::Instant;
 use tracing::{debug, info, trace, warn};
 
+mod child_task;
 mod dm;
 #[cfg(test)]
 mod dm_tests;
 mod init;
+mod shutdown;
+pub use shutdown::{ClientShutdown, ClientShutdownError};
 pub(crate) mod task_owner;
 pub(crate) mod tasks;
 
@@ -263,22 +265,20 @@ pub struct ClientHandle(Weak<Client>);
 impl ClientHandle {
     pub fn app_ref_opt(&self) -> Option<ClientRef<'_>> {
         let client = self.0.upgrade()?;
+        if client.closing.load(SeqCst) {
+            return None;
+        }
         Some(ClientRef {
             client,
             r: PhantomData,
         })
     }
     pub fn client_ref(&self) -> ClientRefResult<ClientRef<'_>> {
-        let client = self.0.upgrade().context(ClientRefSnafu)?;
-        Ok(ClientRef {
-            client,
-            r: PhantomData,
-        })
+        self.app_ref_opt().context(ClientRefSnafu)
     }
 
     pub fn db(&self) -> ClientRefResult<Arc<Database>> {
-        let client = self.0.upgrade().context(ClientRefSnafu)?;
-
+        let client = self.client_ref()?;
         Ok(client.db().clone())
     }
 }
@@ -333,6 +333,11 @@ pub struct Client {
     pub(crate) db: Arc<Database>,
 
     active: AtomicBool,
+    /// Irreversible single-client shutdown admission boundary.
+    closing: AtomicBool,
+    /// Injected endpoints remain the caller's transport lifecycle
+    /// responsibility.
+    owns_endpoint: bool,
     /// DM secret/history ownership is available only to full clients.
     is_mode_full: bool,
 
@@ -460,6 +465,7 @@ impl Client {
             pc
         };
 
+        let owns_endpoint = iroh_endpoint.is_none();
         let endpoint = if let Some(ep) = iroh_endpoint {
             ep
         } else {
@@ -481,6 +487,7 @@ impl Client {
             endpoint,
             pkarr_client,
             db.clone() as Arc<dyn crate::net::IdEndpointLookup>,
+            Arc::clone(&task_owner),
         ));
         let client = Arc::new_cyclic(|client| Self {
             handle: client.clone().into(),
@@ -488,6 +495,8 @@ impl Client {
             db,
             id,
             active: AtomicBool::new(false),
+            closing: AtomicBool::new(false),
+            owns_endpoint,
             is_mode_full,
             activation_lock: tokio::sync::Mutex::new(()),
             task_handles: task_owner,
@@ -548,6 +557,10 @@ impl Client {
         let unlock_start = Instant::now();
         ensure!(self.id == id_secret.id(), SecretMismatchSnafu);
         let _activation_guard = self.activation_lock.lock().await;
+        ensure!(
+            !self.closing.load(SeqCst),
+            crate::error::ActivationClosingSnafu
+        );
         if self.active.load(SeqCst) {
             return Ok(());
         }
@@ -580,6 +593,10 @@ impl Client {
         id_secret: RostraIdSecretKey,
         announcement_result: PostResult<()>,
     ) -> ActivateResult<()> {
+        ensure!(
+            !self.closing.load(SeqCst),
+            crate::error::ActivationClosingSnafu
+        );
         announcement_result.context(LocalAnnouncementStorageSnafu)?;
         self.active.store(true, SeqCst);
         self.start_pkarr_id_publisher(id_secret);
@@ -663,8 +680,7 @@ impl Client {
     }
 
     fn spawn_task(&self, future: impl Future<Output = ()> + Send + 'static) {
-        let handle = AbortOnDropHandle::new(tokio::spawn(future));
-        self.task_handles.push(handle);
+        self.task_handles.spawn(future);
     }
 
     pub(crate) fn start_pkarr_id_publisher(&self, secret_id: RostraIdSecretKey) {
@@ -982,6 +998,7 @@ impl Client {
     where
         C: content_kind::EventContentKind,
     {
+        self.require_open_for_signing()?;
         let current_head = self.db.get_self_current_head().await;
         let aux_event = if replace.is_some() {
             None
@@ -1173,6 +1190,7 @@ impl Client {
         id_secret: RostraIdSecretKey,
         body: String,
     ) -> PostResult<()> {
+        self.require_open_for_signing()?;
         pub(crate) const ACTIVE_RESERVATION_TIMEOUT: Duration = Duration::from_secs(120);
         let mut known_head = None;
         let mut active_reservation: Option<(CompactTicket, Instant)> = None;

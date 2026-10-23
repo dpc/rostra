@@ -34,7 +34,8 @@ async fn reversed_ttl_bounds_use_upstream_normalization() {
         .cache
         .put(&CacheKey::from(&keypair.public_key()), &packet);
 
-    let resolved = client.resolve(&keypair.public_key()).await.unwrap();
+    let tasks = crate::client::task_owner::ClientTaskOwner::default();
+    let resolved = client.resolve(&keypair.public_key(), &tasks).await.unwrap();
 
     assert_eq!(resolved, packet);
     assert_eq!(client.minimum_ttl, 30);
@@ -59,15 +60,18 @@ async fn expired_cached_packet_remains_available_during_backend_outage() {
         .cache
         .put(&CacheKey::from(&keypair.public_key()), &packet);
 
+    let tasks = crate::client::task_owner::ClientTaskOwner::default();
     let resolved = tokio::time::timeout(
         Duration::from_millis(100),
-        client.resolve(&keypair.public_key()),
+        client.resolve(&keypair.public_key(), &tasks),
     )
     .await
     .expect("cached resolution should not wait for an unavailable backend")
     .unwrap();
 
     assert_eq!(resolved, packet);
+    tasks.abort();
+    tasks.terminated().await;
 }
 
 #[tokio::test]
@@ -83,9 +87,10 @@ async fn cache_miss_starts_normal_resolution_without_cache_only_delay() {
     .unwrap();
     let keypair = Keypair::random();
 
+    let tasks = crate::client::task_owner::ClientTaskOwner::default();
     let result = tokio::time::timeout(
         Duration::from_millis(1500),
-        client.resolve(&keypair.public_key()),
+        client.resolve(&keypair.public_key(), &tasks),
     )
     .await
     .expect("a cache miss should perform one relay-timeout period");

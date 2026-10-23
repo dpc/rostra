@@ -70,6 +70,8 @@ pub enum EndpointConnectResult {
 /// - Pkarr-based endpoint resolution
 /// - Connection caching
 pub struct ClientNetworking {
+    /// Owns discovery refresh tasks even when the discovery service is shared.
+    pub(crate) tasks: Arc<crate::client::tasks::ClientTasks>,
     pub(crate) endpoint: iroh::Endpoint,
     pub(crate) pkarr_client: Arc<PkarrClient>,
     pub(crate) p2p_state: P2PState,
@@ -82,8 +84,10 @@ impl ClientNetworking {
         endpoint: iroh::Endpoint,
         pkarr_client: Arc<PkarrClient>,
         id_endpoint_lookup: Arc<dyn IdEndpointLookup>,
+        tasks: Arc<crate::client::tasks::ClientTasks>,
     ) -> Self {
         Self {
+            tasks,
             endpoint,
             pkarr_client,
             p2p_state: P2PState::new(),
@@ -422,7 +426,7 @@ impl ClientNetworking {
         let domain = public_key.to_string();
         let packet = self
             .pkarr_client
-            .resolve(&public_key)
+            .resolve(&public_key, &self.tasks)
             .await
             .map_err(|_| PkarrResolveSnafu.build())?;
 

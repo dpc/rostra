@@ -192,6 +192,18 @@ async fn admitted_long_poll_survives_finite_deadline_and_allows_ordinary_rpc() {
         connection.ping(42).await.expect("reserved ordinary RPC"),
         42
     );
-    drop(wait);
+    let database = std::sync::Arc::downgrade(server.db());
+    let mut closing = server.begin_shutdown().unwrap();
+    tokio::time::timeout(Duration::from_secs(5), closing.join())
+        .await
+        .expect("shutdown joins the active connection and long-poll RPC")
+        .unwrap();
+    assert!(database.upgrade().is_none());
+    assert!(
+        tokio::time::timeout(Duration::from_secs(5), &mut wait)
+            .await
+            .expect("cancelled long poll releases its stream")
+            .is_err()
+    );
     caller_endpoint.close().await;
 }

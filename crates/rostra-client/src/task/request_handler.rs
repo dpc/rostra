@@ -6,7 +6,6 @@ use futures::StreamExt as _;
 use futures::stream::FuturesUnordered;
 use iroh::Endpoint;
 use iroh::endpoint::Incoming;
-use n0_future::task::AbortOnDropHandle;
 use rostra_client_db::{CurrentState, DbError, IdsFolloweesRecord, IdsFollowersRecord};
 use rostra_core::event::{EventContentRaw, EventExt as _, VerifiedEvent, VerifiedEventContent};
 use rostra_core::id::RostraId;
@@ -164,6 +163,8 @@ pub enum IncomingConnectionError {
 pub type IncomingConnectionResult<T> = std::result::Result<T, IncomingConnectionError>;
 
 pub struct RequestHandler {
+    /// Retains actual child joins beyond cancellation of this handler.
+    tasks: Arc<crate::client::tasks::ClientTasks>,
     client: ClientHandle,
     endpoint: Endpoint,
     our_id: RostraId,
@@ -176,6 +177,7 @@ impl RequestHandler {
     pub fn new(client: &Client, endpoint: Endpoint) -> Arc<Self> {
         info!(id = %client.rostra_id().fmt_short(), iroh_endpoint = %endpoint.id(), "Starting request handler task");
         Self {
+            tasks: Arc::clone(&client.task_handles),
             client: client.handle(),
             endpoint,
             our_id: client.rostra_id(),
@@ -212,9 +214,10 @@ impl RequestHandler {
                         continue;
                     };
                     trace!(target: LOG_TARGET, "New connection" );
-                    connection_tasks.push(AbortOnDropHandle::new(tokio::spawn(
+                    let Some(task) = self.tasks.spawn_child(
                         self.clone().handle_incoming(incoming, connection_permit),
-                    )));
+                    ) else { break };
+                    connection_tasks.push(task);
                 }
                 Some(_) = connection_tasks.next(), if !connection_tasks.is_empty() => {}
             }
@@ -306,7 +309,7 @@ impl RequestHandler {
                     // RPCs (WAIT_HEAD_UPDATE, WAIT_FOLLOWERS_NEW_HEADS) don't
                     // prevent other RPCs on the same connection from being accepted.
                     let handler = self.clone();
-                    rpc_tasks.push(AbortOnDropHandle::new(tokio::spawn(async move {
+                    let Some(task) = self.tasks.spawn_child(async move {
                         let request = async {
                             match rpc_id {
                                 RpcId::PING => handler.handle_ping_request(req_msg, send).await,
@@ -348,7 +351,8 @@ impl RequestHandler {
                         if let Err(err) = result {
                             debug!(target: LOG_TARGET, err = %err.fmt_compact(), "RPC handler error");
                         }
-                    })));
+                    }) else { break Ok(()) };
+                    rpc_tasks.push(task);
                 }
                 Some(_) = rpc_tasks.next(), if !rpc_tasks.is_empty() => {}
             }

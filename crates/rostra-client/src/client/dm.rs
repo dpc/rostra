@@ -152,6 +152,7 @@ impl Client {
     ///
     /// A shared active client alone must never authorize plaintext access.
     pub fn require_dm_authority(&self, secret: RostraIdSecretKey) -> PostResult<()> {
+        self.require_open_for_signing()?;
         if !self.is_mode_full
             || !self.active.load(std::sync::atomic::Ordering::SeqCst)
             || secret.id() != self.id

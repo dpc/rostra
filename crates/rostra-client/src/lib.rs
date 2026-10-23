@@ -17,10 +17,22 @@
 //! A client owns its background tasks. Clone the returned [`std::sync::Arc`] to
 //! keep the runtime alive; dropping the final strong reference aborts those
 //! tasks. [`ClientHandle`] is weak and does not extend the runtime's lifetime.
-//! There is no separate public shutdown protocol. Internal multi-client reloads
-//! wait for actual termination of a dropped runtime's tasks before
-//! reconstructing a client around still-live storage. The same ownership and
-//! joining rule covers partially constructed runtimes that fail or panic.
+//! Single-client integrations should consume the client with
+//! [`Client::begin_shutdown`] and retain the [`ClientShutdown`] token until its
+//! cancellation-safe [`ClientShutdown::join`] succeeds before reopening
+//! storage. Internal multi-client reloads separately wait for termination
+//! before reconstructing a client around still-live storage.
+//!
+//! Hiding or backgrounding an application's UI does not stop signing or network
+//! work. Hosts that close on background must keep Tokio running through join.
+//! There is no in-place relock: close and construct a new read-only client.
+//! Closing is not secret zeroization; caller-held credentials, persistent
+//! device keys and plaintext, managed/native copies and OS caches remain
+//! independent. Read-only mode means no retained signing authority, not a
+//! capability sandbox against trusted in-process callers that supply a secret
+//! to publication APIs. Await public construction to completion; cancelling
+//! construction does not supply a cleanup token or certify that storage is
+//! immediately reopenable.
 //!
 //! Initialization, activation, peer connection, publication, and explicit
 //! synchronization return typed errors from [`error`] or [`DbError`]. A
@@ -74,8 +86,8 @@ pub use rostra_core::id::{RostraId, RostraIdSecretKey};
 pub use rostra_core::{ExternalEventId, ShortEventId};
 
 pub use crate::client::{
-    Client, ClientHandle, ClientRef, ClientRefError, ClientRefResult, IdP2PState, NodeP2PState,
-    NodeSource, P2PState,
+    Client, ClientHandle, ClientRef, ClientRefError, ClientRefResult, ClientShutdown,
+    ClientShutdownError, IdP2PState, NodeP2PState, NodeSource, P2PState,
 };
 pub use crate::id::{CompactTicket, IdPublishedData, IdResolvedData};
 pub use crate::multiclient::{MultiClient, MultiClientError, MultiClientResult};
