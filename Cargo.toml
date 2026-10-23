@@ -83,7 +83,8 @@ iroh = { version = "1.1.0", default-features = false, features = ["tls-ring"] }
 iroh-base = { version = "1.1.0", default-features = false }
 iroh-io = "0.6.2"
 itertools = "0.13.0"
-jotup = { version = "0.10.0", features = ["async"] }
+# Re-audit rostra-djot's native pre-parser recursion guard before upgrading.
+jotup = { version = "=0.10.0", features = ["async"] }
 pkarr = "8.0.1"
 proptest = "1.6.0"
 maud = "*"

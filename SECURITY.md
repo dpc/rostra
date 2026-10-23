@@ -1,5 +1,33 @@
 # Agent-browser security boundaries
 
+## Native Djot presentation
+
+`rostra-djot::native::render` emits only bounded literal text segments and typed
+identity or credential-free HTTP(S) destinations, never HTML or media fetch
+instructions. Hosts must display lossy-conversion warnings and disclose actual
+destinations before external navigation. A link label does not authenticate its
+destination. Short identity references stay unresolved until checked against the
+host's retained identity index; unknown references remain inert.
+
+The native renderer checks input size and a conservative recursive-block-opener
+budget before constructing jotup's eager parser, then separately bounds event
+depth/count and owned output. The guard is tied to the exact pinned jotup 0.10.0
+recursive paths and must be re-audited on upgrade. It can reject flat lists and
+literal code with many apparent block openers; it is not merely a nesting limit.
+Limit failure returns no partial document. Source-only fallback must be explicitly
+labelled, independently display-bounded, and noninteractive. Run rendering off
+the UI executor with bounded concurrency; no CPU deadline or RSS ceiling is
+claimed. This policy does not change the web renderer or signed-event format.
+
+Remote SocialPost ingestion also uses this pre-parser guard in
+`mention::contains_mention`. Over-budget content returns false without parsing:
+the signed event and original content are retained normally, but mention
+indexing/notifications may be omitted, including for more than 64 flat list
+items. In-budget full/short matching remains unchanged. The separate excerpt
+helpers and web HTML renderer are not covered by this guard.
+
+## Browser boundary
+
 Rostra's `preview-rostra` skill drives a signing-capable development UI with an
 external browser daemon. Treat the daemon, browser process, local host, page
 content, and development identity as security boundaries rather than ordinary

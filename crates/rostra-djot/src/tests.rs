@@ -7,6 +7,27 @@ use crate::links::{
 use crate::mention::contains_mention;
 
 #[test]
+fn mention_scan_skips_hostile_or_over_budget_source_without_partial_matching() {
+    let id = RostraId::from_bytes([42; 32]);
+    let mention = format!("<rostra:{id}>");
+    for content in [
+        format!("{mention}\n\n{}nested", "> ".repeat(1000)),
+        format!("{mention}\n\n{}", "- flat\n".repeat(65)),
+        format!(
+            "{mention}\n\n{}",
+            "a".repeat(crate::native::MAX_INPUT_BYTES)
+        ),
+        "#".repeat(crate::native::MAX_INPUT_BYTES),
+    ] {
+        assert!(!contains_mention(&content, id));
+    }
+    assert!(contains_mention(
+        &format!("{mention}\n\n{}", "- flat\n".repeat(64)),
+        id
+    ));
+}
+
+#[test]
 fn extracts_full_rostra_id_link_encodings() {
     let id = RostraId::from_bytes([42; 32]);
 

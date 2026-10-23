@@ -1,5 +1,13 @@
 # Client database security and reliability
 
+SocialPost mention indexing parses remote-authored Djot only after the shared
+`rostra-djot` source-size and conservative recursive-block-opener guard succeeds.
+Over-budget posts remain eligible for normal signed-event/content ingestion, but
+`contains_mention` returns false and their mention index/notification may be
+omitted. The budget counts siblings and apparent literal-code openers as well as
+nesting, so this includes more than 64 flat list items. It is not a validity rule
+for signed content, nor protection for separate unguarded web/excerpt renderers.
+
 Managed post publication atomically checks self-head membership and ingests a
 candidate whose previous parent is that exact supplied head. A null expectation
 requires both empty self-heads and a root candidate. Do not separate this check

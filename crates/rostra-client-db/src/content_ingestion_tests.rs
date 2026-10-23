@@ -189,6 +189,71 @@ fn force_total_replay(path: &std::path::Path) -> BoxedErrorResult<()> {
 }
 
 #[test_log::test(tokio::test(flavor = "multi_thread"))]
+async fn hostile_djot_is_retained_without_unbounded_mention_parsing() -> BoxedErrorResult<()> {
+    let local = RostraIdSecretKey::from_bytes([88; 32]).id();
+    let remote = RostraIdSecretKey::from_bytes([89; 32]);
+    let dir = tempdir()?;
+    let path = dir.path().join("db.redb");
+    let db = Database::open(&path, local).await.boxed()?;
+    let full_mention = format!("<rostra:{local}>");
+    let cases = [
+        (full_mention.clone(), true),
+        (format!("<rostra:{}>", local.to_short()), true),
+        (
+            format!("{full_mention}\n\n{}nested", "> ".repeat(1000)),
+            false,
+        ),
+        (
+            format!("{full_mention}\n\n{}", "- flat\n".repeat(65)),
+            false,
+        ),
+        (
+            format!(
+                "{full_mention}\n\n{}",
+                "x".repeat(rostra_djot::native::MAX_INPUT_BYTES)
+            ),
+            false,
+        ),
+    ];
+    let mut expected = Vec::new();
+    for (source, mentioned) in cases {
+        let content = post(remote, &source);
+        let id = content.event_id().to_short();
+        db.process_event_with_content(&content).await;
+        assert_eq!(db.is_self_mention(id).await, mentioned);
+        let retained = db
+            .get_event_content(id)
+            .await
+            .expect("signed content retained");
+        assert_eq!(
+            retained.as_ref(),
+            content.content.as_ref().unwrap().as_ref()
+        );
+        let observed = snapshot(&db, remote.id(), id, content.content_hash()).await?;
+        assert!(observed.event_present);
+        assert_eq!(observed.content_state, None);
+        expected.push((id, retained, mentioned));
+    }
+    let (posts, _) = db.paginate_social_posts_rev(None, 10, |_| true).await;
+    assert_eq!(posts.len(), expected.len());
+    drop(db);
+
+    let reopened = Database::open(&path, local).await.boxed()?;
+    for (id, retained, mentioned) in expected {
+        assert_eq!(
+            reopened
+                .get_event_content(id)
+                .await
+                .expect("content survives reopen")
+                .as_ref(),
+            retained.as_ref()
+        );
+        assert_eq!(reopened.is_self_mention(id).await, mentioned);
+    }
+    Ok(())
+}
+
+#[test_log::test(tokio::test(flavor = "multi_thread"))]
 async fn public_content_ingestion_matches_combined_for_both_arrival_orders() -> BoxedErrorResult<()>
 {
     let secret = RostraIdSecretKey::from_bytes([91; 32]);

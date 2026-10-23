@@ -4907,6 +4907,9 @@ dependencies = [
  "async-trait",
  "jotup",
  "rostra-core",
+ "serde",
+ "serde_json",
+ "url",
 ]
 
 [[package]]

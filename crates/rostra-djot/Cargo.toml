@@ -27,3 +27,8 @@ workspace = true
 async-trait = { workspace = true }
 jotup = { workspace = true }
 rostra-core = { workspace = true }
+serde = { workspace = true, features = ["derive"] }
+url = { workspace = true }
+
+[dev-dependencies]
+serde_json = { workspace = true }
