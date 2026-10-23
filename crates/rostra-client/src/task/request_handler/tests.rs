@@ -74,6 +74,7 @@ async fn request_handler_fixture() -> (
     RostraIdSecretKey,
     std::sync::Arc<Client>,
     iroh::Endpoint,
+    iroh::Endpoint,
     iroh::endpoint::Connection,
 ) {
     let secret = RostraIdSecretKey::from_bytes([73; 32]);
@@ -91,7 +92,7 @@ async fn request_handler_fixture() -> (
         .db(Database::new_in_memory(secret.id())
             .await
             .expect("in-memory database"))
-        .iroh_endpoint(server_endpoint)
+        .iroh_endpoint(server_endpoint.clone())
         .start_background_tasks(false)
         .build()
         .await
@@ -107,7 +108,7 @@ async fn request_handler_fixture() -> (
         .connect(server_id, ROSTRA_P2P_V0_ALPN)
         .await
         .expect("connect to server");
-    (secret, server, caller_endpoint, connection)
+    (secret, server, server_endpoint, caller_endpoint, connection)
 }
 
 async fn write_feed_event_header(send: &mut SendStream, request: &FeedEventRequest) {
@@ -131,7 +132,8 @@ async fn read_return_code(recv: &mut RecvStream) -> u8 {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn stalled_finite_rpc_times_out_and_connection_recovers() {
-    let (secret, _server, caller_endpoint, raw_connection) = request_handler_fixture().await;
+    let (secret, server, server_endpoint, caller_endpoint, raw_connection) =
+        request_handler_fixture().await;
     let event = Event::builder_raw_content()
         .author(secret.id())
         .kind(EventKind::NULL)
@@ -161,12 +163,15 @@ async fn stalled_finite_rpc_times_out_and_connection_recovers() {
             .expect("ping response"),
         41
     );
+    server.begin_shutdown().unwrap().join().await.unwrap();
+    server_endpoint.close().await;
     caller_endpoint.close().await;
 }
 
 #[tokio::test(flavor = "multi_thread")]
 async fn admitted_long_poll_survives_finite_deadline_and_allows_ordinary_rpc() {
-    let (secret, server, caller_endpoint, raw_connection) = request_handler_fixture().await;
+    let (secret, server, server_endpoint, caller_endpoint, raw_connection) =
+        request_handler_fixture().await;
     let content = EventContentRaw::new(vec![2]);
     let signed = Event::builder_raw_content()
         .author(secret.id())
@@ -199,10 +204,13 @@ async fn admitted_long_poll_survives_finite_deadline_and_allows_ordinary_rpc() {
         .expect("shutdown joins the active connection and long-poll RPC")
         .unwrap();
     assert!(database.upgrade().is_none());
+    // Injected transport is host-owned. Client shutdown above proves local
+    // task/DB teardown; explicit host close makes peer termination observable.
+    server_endpoint.close().await;
     assert!(
         tokio::time::timeout(Duration::from_secs(5), &mut wait)
             .await
-            .expect("cancelled long poll releases its stream")
+            .expect("host transport teardown terminates the peer's long poll")
             .is_err()
     );
     caller_endpoint.close().await;

@@ -511,18 +511,41 @@ async fn publish_social_post(
     if let Some(reply_to) = reply_to {
         body["reply_to"] = reply_to.into();
     }
-    let response = driver
-        .api_post_json(
-            &format!("/api/{author}/publish-social-post-managed"),
-            Some(&secret.to_string()),
-            &body,
-        )
-        .await;
-    assert_eq!(response.status(), 200);
-    response.json::<serde_json::Value>().await.unwrap()["event_id"]
-        .as_str()
-        .unwrap()
-        .to_owned()
+    for attempt in 0..4 {
+        let response = driver
+            .api_post_json(
+                &format!("/api/{author}/publish-social-post-managed"),
+                Some(&secret.to_string()),
+                &body,
+            )
+            .await;
+        if response.status() != reqwest::StatusCode::CONFLICT {
+            assert_eq!(response.status(), 200);
+            return response.json::<serde_json::Value>().await.unwrap()["event_id"]
+                .as_str()
+                .unwrap()
+                .to_owned();
+        }
+        // Background activation can advance heads after a fixture's GET.
+        // This exact managed-route refusal precedes unlock/sign/publication.
+        // Never retry network failures, ambiguous results, or other errors.
+        let error: serde_json::Value = response.json().await.unwrap();
+        assert_eq!(
+            error["error"].as_str(),
+            Some(
+                "parent_head_id is not among current heads. The post may have already been published, or the state is stale. Call GET /api/{id}/heads to verify."
+            )
+        );
+        assert!(
+            attempt < 3,
+            "fixture head remained stale after four attempts"
+        );
+        let response = driver.api_get(&format!("/api/{author}/heads")).await;
+        assert_eq!(response.status(), 200);
+        let heads: serde_json::Value = response.json().await.unwrap();
+        body["parent_head_id"] = heads["heads"][0].as_str().unwrap().into();
+    }
+    unreachable!("last failed attempt panics")
 }
 
 fn json_ld(document: &Html) -> serde_json::Value {
@@ -2569,19 +2592,15 @@ async fn post_page_og_meta_resolves_rostra_mentions() {
         ("full", a_id.clone()),
         ("short", author.to_short().to_string()),
     ] {
-        let resp = driver
-            .api_post_json(
-                &format!("/api/{a_id}/publish-social-post-managed"),
-                Some(&a_secret),
-                &json!({
-                    "parent_head_id": head,
-                    "content": format!("Hello <rostra:{mention_id}>, welcome!"),
-                }),
-            )
-            .await;
-        assert_eq!(resp.status(), 200);
-        let post: serde_json::Value = resp.json().await.unwrap();
-        let event_id = post["event_id"].as_str().unwrap().to_owned();
+        let event_id = publish_social_post(
+            &driver,
+            author,
+            &a_secret.parse().unwrap(),
+            &head,
+            &format!("Hello <rostra:{mention_id}>, welcome!"),
+            None,
+        )
+        .await;
         head = event_id.clone();
 
         let resp = driver
@@ -2641,19 +2660,15 @@ async fn post_page_keeps_unknown_short_rostra_mentions_unresolved() {
     let head = heads["heads"][0].as_str().unwrap();
     let unknown_short_id = unknown_id.to_short();
 
-    let resp = driver
-        .api_post_json(
-            &format!("/api/{author}/publish-social-post-managed"),
-            Some(&secret.to_string()),
-            &json!({
-                "parent_head_id": head,
-                "content": format!("Hello <rostra:{unknown_short_id}>"),
-            }),
-        )
-        .await;
-    assert_eq!(resp.status(), 200);
-    let post: serde_json::Value = resp.json().await.unwrap();
-    let event_id = post["event_id"].as_str().unwrap();
+    let event_id = publish_social_post(
+        &driver,
+        author,
+        &secret,
+        head,
+        &format!("Hello <rostra:{unknown_short_id}>"),
+        None,
+    )
+    .await;
 
     let resp = driver
         .get(&format!("/post/{}/{event_id}", author.to_short()))
@@ -2684,17 +2699,7 @@ async fn profile_search_emits_short_ids_for_shared_mention_autocomplete() {
     let resp = driver.api_get(&format!("/api/{author}/heads")).await;
     let heads: serde_json::Value = resp.json().await.unwrap();
     let head = heads["heads"][0].as_str().unwrap();
-    let resp = driver
-        .api_post_json(
-            &format!("/api/{author}/publish-social-post-managed"),
-            Some(&secret.to_string()),
-            &json!({
-                "parent_head_id": head,
-                "content": "index this identity",
-            }),
-        )
-        .await;
-    assert_eq!(resp.status(), 200);
+    publish_social_post(&driver, author, &secret, head, "index this identity", None).await;
 
     let resp = driver.get("/search/profiles?q=rs").await;
     assert_eq!(resp.status(), 200);

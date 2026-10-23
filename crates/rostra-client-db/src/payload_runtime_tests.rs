@@ -572,6 +572,10 @@ async fn runtime_cap_minus_one_prepares_preempts_reserves_and_ingests() -> anyho
     assert_eq!(db.payload_admission_usage(), Default::default());
     let usage = db.get_payload_usage().await?.unwrap();
     assert_eq!(usage.logical_current_bytes, bytes);
+    // Acquisition cancels its helper's worker as soon as reservation succeeds.
+    // Physical collection is a later phase, not an acquisition barrier.
+    settle(&db).await?;
+    let usage = db.get_payload_usage().await?.unwrap();
     // Quota-only collection removes the old unique value, not physical pages.
     assert_eq!(usage.unique_stored_bytes, bytes);
     Ok(())
