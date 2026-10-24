@@ -71,6 +71,11 @@ mod reaction_summary_ops;
 #[cfg(test)]
 mod reaction_tests;
 mod reception_order_ops;
+pub mod relationship;
+mod relationship_read;
+mod relationship_selector;
+#[cfg(test)]
+mod relationship_tests;
 mod retention;
 mod retention_index;
 #[cfg(test)]
@@ -342,6 +347,12 @@ pub type TableDumpResult<T> = std::result::Result<T, TableDumpError>;
 
 #[derive(Debug, Snafu)]
 pub enum DbError {
+    #[snafu(display("Relationship page bounds are outside the supported range"))]
+    RelationshipBounds,
+    #[snafu(display("Relationship cursor scope expired or mismatched; explicitly refresh"))]
+    RelationshipCursorStale,
+    #[snafu(display("Relationship projection has an invalid key or record"))]
+    RelationshipInvariant,
     #[snafu(display("Shoutbox request input mismatch"))]
     ShoutboxRequestMismatch,
     #[snafu(display("Shoutbox input must be trimmed and contain 1..=1000 UTF-8 bytes"))]
@@ -688,8 +699,8 @@ pub type DbResult<T> = std::result::Result<T, DbError>;
 #[derive(Debug)]
 pub struct Database {
     inner: redb_bincode::Database,
-    /// Invalidates ranked and shoutbox cursors across reopen, independent of
-    /// persistent state.
+    /// Invalidates ranked, shoutbox and relationship cursors across reopen,
+    /// independent of persistent state.
     news_instance: [u8; 16],
     self_id: RostraId,
     iroh_secret: iroh::SecretKey,
