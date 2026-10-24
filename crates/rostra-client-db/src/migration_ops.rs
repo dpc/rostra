@@ -89,7 +89,8 @@ pub(crate) struct LegacyEventReceivedRecord {
 // Version 34 adds non-replayable local social-post request receipts.
 // Version 35 adds an independent local text mutation receipt namespace.
 // Version 36 adds non-replayable independent reaction request receipts.
-const DB_VER: u64 = 36;
+// Version 37 adds permanent news/vote receipts and a ranked traversal epoch.
+const DB_VER: u64 = 37;
 
 /// Versions older than this require a total migration.
 ///
@@ -170,6 +171,9 @@ impl Database {
         tx.open_table(&crate::social_post_receipts::TABLE)?;
         tx.open_table(&crate::social_post_mutation_receipts::TABLE)?;
         tx.open_table(&crate::social_reaction_receipts::TABLE)?;
+        tx.open_table(&crate::social_news_receipts::TABLE)?;
+        tx.open_table(&crate::social_vote_receipts::TABLE)?;
+        tx.open_table(&crate::social_news_generation::TABLE)?;
         Self::init_dm_tables_tx(tx)?;
         tx.open_table(&crate::content_pressure_state::TABLE)?;
         tx.open_table(&crate::content_pressure_authors::TABLE)?;
@@ -311,6 +315,9 @@ impl Database {
             if cur_db_ver < 33 {
                 Self::rebuild_dm_history_index_tx(dbtx)?;
             }
+            if cur_db_ver < 37 {
+                Self::rebuild_news_score_index_tx(dbtx)?;
+            }
         }
 
         // Update version
@@ -318,6 +325,24 @@ impl Database {
         table_db_ver.insert(&(), &DB_VER)?;
         debug!(target: LOG_TARGET, db_ver = DB_VER, "Database version updated");
 
+        Ok(())
+    }
+
+    /// Replace the legacy zigzag-signed index without decoding its obsolete
+    /// keys. The unchanged per-post rank values are sufficient to
+    /// reconstruct it.
+    fn rebuild_news_score_index_tx(tx: &WriteTransactionCtx) -> DbResult<()> {
+        tx.as_raw()
+            .delete_table(redb::TableDefinition::<&[u8], &[u8]>::new(
+                "social_news_rank_by_score",
+            ))?;
+        let mut scores = tx.open_table(&crate::social_news_rank_by_score::TABLE)?;
+        let posts = tx.open_table(&crate::social_news_rank_by_post_id::TABLE)?;
+        for row in posts.range(..)? {
+            let (id, rank) = row?;
+            scores.insert(&(Self::news_score_key(rank.value().score), id.value()), &())?;
+        }
+        Self::advance_news_generation_tx(tx)?;
         Ok(())
     }
 
@@ -597,6 +622,8 @@ impl Database {
                 || name == "social_post_receipts"
                 || name == "social_post_mutation_receipts"
                 || name == "social_reaction_receipts"
+                || name == "social_news_receipts"
+                || name == "social_vote_receipts"
                 || !crate::extension::is_reserved_extension_table(name)
             {
                 continue;

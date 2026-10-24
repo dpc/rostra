@@ -161,6 +161,18 @@ def_table! {
     /// Permanent independent local reaction receipts, preserved through replay.
     social_reaction_receipts: [u8; 16] => crate::social_post_receipt::Receipt
 }
+def_table! {
+    /// Permanent local news-create receipts, preserved through replay.
+    social_news_receipts: [u8; 16] => crate::social_post_receipt::Receipt
+}
+def_table! {
+    /// Permanent local singleton-vote receipts, preserved through replay.
+    social_vote_receipts: [u8; 16] => crate::social_post_receipt::Receipt
+}
+def_table! {
+    /// Disposable rank ordering/membership epoch, paired with a per-open nonce.
+    social_news_generation: () => ([u8; 16], u64)
+}
 #[cfg(test)]
 pub(crate) use def_table;
 
@@ -736,7 +748,9 @@ def_table! {
 
 def_table! {
     /// News posts sorted by current rank score.
-    social_news_rank_by_score: (SocialVoteScore, ExternalEventId) => ()
+    // Sign-biased unsigned keys preserve numeric score ordering under the
+    // storage codec's lexicographic comparison; signed zigzag keys do not.
+    social_news_rank_by_score: ([u8; 8], ExternalEventId) => ()
 }
 
 def_table! {

@@ -1,6 +1,32 @@
 use super::{EventContentKind as _, SocialPost};
 
 #[test]
+fn supported_news_preserves_historical_fields_without_reclassifying_text() {
+    let historical = b"\xa3\x61n\xf5\x61p\x02\x61t\x80";
+    let post = SocialPost::decode_supported_news(historical).unwrap();
+    assert!(post.djot_content.is_none());
+    assert!(post.title.is_none());
+    let encoded = post.serialize_cbor().unwrap();
+    assert_eq!(
+        SocialPost::decode_supported_news(encoded.as_ref()),
+        Some(post)
+    );
+    assert!(SocialPost::decode_mutable_text(encoded.as_ref()).is_none());
+    assert!(SocialPost::decode_mutable_reaction(encoded.as_ref()).is_none());
+    for raw in [
+        &b"\xa1\x61n\xf4"[..],           // Not news.
+        &b"\xa2\x61n\xf5\x61n\xf5"[..],  // Duplicate flag.
+        &b"\xa2\x61n\xf5\x61h\x80"[..],  // Wrong title type.
+        &b"\xa2\x61n\xf5\x61e\x61x"[..], // Mixed reaction.
+        &b"\xa2\x61n\xf5\x61z\x80"[..],  // Unknown metadata.
+        &b"\xa1\x61n\xf5\x00"[..],       // Trailing object.
+        &b"\x81\xf5"[..],                // Non-map.
+    ] {
+        assert!(SocialPost::decode_supported_news(raw).is_none(), "{raw:?}");
+    }
+}
+
+#[test]
 fn strict_reaction_decoder_preserves_metadata_and_rejects_lossy_shapes() {
     let target = crate::ExternalEventId::new(
         crate::id::RostraId::from_bytes([1; 32]),

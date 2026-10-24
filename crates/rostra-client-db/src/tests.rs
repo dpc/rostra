@@ -3388,7 +3388,7 @@ async fn test_total_migration() -> BoxedErrorResult<()> {
         let db_ver_table = tx.open_table(&db_version::TABLE)?;
         let current_ver = db_ver_table.first()?.map(|g| g.1.value());
         info!("DB version after migration: {:?}", current_ver);
-        assert_eq!(current_ver, Some(36), "DB version should be updated");
+        assert_eq!(current_ver, Some(37), "DB version should be updated");
         assert_eq!(
             tx.open_table(&EXTENSION_TABLE)?
                 .get(&1)?
@@ -3941,7 +3941,7 @@ async fn too_new_version_precedes_identity_decode() -> BoxedErrorResult<()> {
     {
         let db = redb_bincode::Database::from(redb::Database::open(&db_path)?);
         let tx = db.begin_write()?;
-        tx.open_table(&db_version::TABLE)?.insert(&(), &37)?;
+        tx.open_table(&db_version::TABLE)?.insert(&(), &38)?;
         let mut ids_self_raw = tx.as_raw().open_table(ids_self::TABLE.as_raw())?;
         ids_self_raw.insert(&[][..], &[0xff][..])?;
         drop(ids_self_raw);
@@ -3951,8 +3951,8 @@ async fn too_new_version_precedes_identity_decode() -> BoxedErrorResult<()> {
     assert!(matches!(
         Database::open(&db_path, self_id).await,
         Err(DbError::DbVersionTooHigh {
-            db_ver: 37,
-            code_ver: 36,
+            db_ver: 38,
+            code_ver: 37,
             ..
         })
     ));
@@ -7148,7 +7148,7 @@ async fn test_expired_news_rank_removed_on_score_recalculation() -> BoxedErrorRe
         tx.open_table(&social_news_rank_by_post_id::TABLE)?
             .insert(&post_id, &SocialNewsRankRecord { creation_ts, score })?;
         tx.open_table(&social_news_rank_by_score::TABLE)?
-            .insert(&(score, post_id), &())?;
+            .insert(&(Database::news_score_key(score), post_id), &())?;
         tx.open_table(&social_news_rank_by_time::TABLE)?
             .insert(&(creation_ts, post_id), &())?;
 
@@ -7162,7 +7162,7 @@ async fn test_expired_news_rank_removed_on_score_recalculation() -> BoxedErrorRe
         );
         assert!(
             tx.open_table(&social_news_rank_by_score::TABLE)?
-                .get(&(score, post_id))?
+                .get(&(Database::news_score_key(score), post_id))?
                 .is_none()
         );
         assert!(
@@ -7198,7 +7198,7 @@ async fn test_news_rank_at_max_age_not_removed_on_score_recalculation() -> Boxed
         tx.open_table(&social_news_rank_by_post_id::TABLE)?
             .insert(&post_id, &SocialNewsRankRecord { creation_ts, score })?;
         tx.open_table(&social_news_rank_by_score::TABLE)?
-            .insert(&(score, post_id), &())?;
+            .insert(&(Database::news_score_key(score), post_id), &())?;
         tx.open_table(&social_news_rank_by_time::TABLE)?
             .insert(&(creation_ts, post_id), &())?;
 
@@ -7212,7 +7212,7 @@ async fn test_news_rank_at_max_age_not_removed_on_score_recalculation() -> Boxed
         );
         assert!(
             tx.open_table(&social_news_rank_by_score::TABLE)?
-                .get(&(score, post_id))?
+                .get(&(Database::news_score_key(score), post_id))?
                 .is_some()
         );
         assert!(

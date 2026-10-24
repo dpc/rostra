@@ -38,6 +38,9 @@ mod dm;
 mod dm_tests;
 mod follow_ordering;
 mod init;
+mod news_request;
+#[cfg(test)]
+mod news_request_tests;
 mod profile_ordering;
 mod reaction;
 #[cfg(test)]

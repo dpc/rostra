@@ -483,7 +483,12 @@ impl RollbackOracle for ReplacementRollbackOracle {
                 news_by_rank: tx
                     .open_table(&social_news_rank_by_score::TABLE)?
                     .range(..)?
-                    .map(|entry| entry.map(|(key, _)| key.value()))
+                    .map(|entry| {
+                        entry.map(|(key, _)| {
+                            let (score, id) = key.value();
+                            (Database::news_score_from_key(score), id)
+                        })
+                    })
                     .collect::<Result<_, _>>()?,
                 news_by_time: tx
                     .open_table(&social_news_rank_by_time::TABLE)?

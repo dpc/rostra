@@ -17,6 +17,9 @@ use crate::{
     social_vote_sums,
 };
 
+mod feed;
+pub use feed::{NewsFeedCursor, NewsFeedPage, NewsFeedRow, NewsFeedStop};
+
 pub(crate) const NEWS_MAX_AGE_SECS: u64 = 4 * 365 * 24 * 60 * 60;
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
@@ -41,6 +44,17 @@ pub struct NewsPostRecord<C> {
 }
 
 impl Database {
+    /// Preserve signed numeric order in a lexicographically encoded unsigned
+    /// key.
+    pub(crate) fn news_score_key(score: SocialVoteScore) -> [u8; 8] {
+        ((score as u64) ^ (1_u64 << 63)).to_be_bytes()
+    }
+
+    /// Recover the public signed score from its ordered storage key.
+    pub(crate) fn news_score_from_key(key: [u8; 8]) -> SocialVoteScore {
+        (u64::from_be_bytes(key) ^ (1_u64 << 63)) as i64
+    }
+
     pub(crate) fn notify_news_score_update_on_commit(
         &self,
         tx: &crate::WriteTransactionCtx,
@@ -174,18 +188,19 @@ impl Database {
         score: SocialVoteScore,
         tx: &crate::WriteTransactionCtx,
     ) -> DbResult<()> {
+        Self::advance_news_generation_tx(tx)?;
         let mut rank_by_post_id_table = tx.open_table(&social_news_rank_by_post_id::TABLE)?;
         let mut rank_by_score_table = tx.open_table(&social_news_rank_by_score::TABLE)?;
         let mut rank_by_time_table = tx.open_table(&social_news_rank_by_time::TABLE)?;
 
         if let Some(existing) = rank_by_post_id_table.get(&post_id)?.map(|g| g.value()) {
-            rank_by_score_table.remove(&(existing.score, post_id))?;
+            rank_by_score_table.remove(&(Self::news_score_key(existing.score), post_id))?;
             rank_by_time_table.remove(&(existing.creation_ts, post_id))?;
         }
 
         let record = SocialNewsRankRecord { creation_ts, score };
         rank_by_post_id_table.insert(&post_id, &record)?;
-        rank_by_score_table.insert(&(score, post_id), &())?;
+        rank_by_score_table.insert(&(Self::news_score_key(score), post_id), &())?;
         rank_by_time_table.insert(&(creation_ts, post_id), &())?;
         Ok(())
     }
@@ -198,10 +213,11 @@ impl Database {
         let Some(existing) = rank_by_post_id_table.remove(&post_id)?.map(|g| g.value()) else {
             return Ok(());
         };
+        Self::advance_news_generation_tx(tx)?;
 
         let mut rank_by_score_table = tx.open_table(&social_news_rank_by_score::TABLE)?;
         let mut rank_by_time_table = tx.open_table(&social_news_rank_by_time::TABLE)?;
-        rank_by_score_table.remove(&(existing.score, post_id))?;
+        rank_by_score_table.remove(&(Self::news_score_key(existing.score), post_id))?;
         rank_by_time_table.remove(&(existing.creation_ts, post_id))?;
         Ok(())
     }
@@ -224,10 +240,11 @@ impl Database {
         };
 
         if NEWS_MAX_AGE_SECS < now.secs_since(existing.creation_ts) {
+            Self::advance_news_generation_tx(tx)?;
             rank_by_post_id_table.remove(&post_id)?;
             let mut rank_by_score_table = tx.open_table(&social_news_rank_by_score::TABLE)?;
             let mut rank_by_time_table = tx.open_table(&social_news_rank_by_time::TABLE)?;
-            rank_by_score_table.remove(&(existing.score, post_id))?;
+            rank_by_score_table.remove(&(Self::news_score_key(existing.score), post_id))?;
             rank_by_time_table.remove(&(existing.creation_ts, post_id))?;
             return Ok(false);
         }
@@ -241,10 +258,11 @@ impl Database {
         if score == existing.score {
             return Ok(true);
         }
+        Self::advance_news_generation_tx(tx)?;
 
         let mut rank_by_score_table = tx.open_table(&social_news_rank_by_score::TABLE)?;
         let mut rank_by_time_table = tx.open_table(&social_news_rank_by_time::TABLE)?;
-        rank_by_score_table.remove(&(existing.score, post_id))?;
+        rank_by_score_table.remove(&(Self::news_score_key(existing.score), post_id))?;
         rank_by_time_table.remove(&(existing.creation_ts, post_id))?;
 
         let updated = SocialNewsRankRecord {
@@ -252,7 +270,7 @@ impl Database {
             score,
         };
         rank_by_post_id_table.insert(&post_id, &updated)?;
-        rank_by_score_table.insert(&(score, post_id), &())?;
+        rank_by_score_table.insert(&(Self::news_score_key(score), post_id), &())?;
         rank_by_time_table.insert(&(existing.creation_ts, post_id), &())?;
         Ok(true)
     }
@@ -353,7 +371,7 @@ impl Database {
 
             let (ret, cursor) = Self::paginate_table_rev(
                 &rank_by_score_table,
-                cursor.map(|c| (c.score, c.post_id)),
+                cursor.map(|c| (Self::news_score_key(c.score), c.post_id)),
                 limit,
                 move |(_score, post_id), _| {
                     Self::news_post_record_for_id_tx(
@@ -370,7 +388,10 @@ impl Database {
 
             Ok((
                 ret,
-                cursor.map(|(score, post_id)| NewsRankPaginationCursor { score, post_id }),
+                cursor.map(|(score, post_id)| NewsRankPaginationCursor {
+                    score: Self::news_score_from_key(score),
+                    post_id,
+                }),
             ))
         })
         .await

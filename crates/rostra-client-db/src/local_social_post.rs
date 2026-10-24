@@ -77,6 +77,17 @@ impl Database {
         {
             return Err(DbError::SocialPostCandidate);
         }
+        self.admit_local_candidate_tx(tx, content, allocation, buffer)
+    }
+
+    /// Admit an already validated local candidate and its payload atomically.
+    pub(crate) fn admit_local_candidate_tx(
+        &self,
+        tx: &WriteTransactionCtx,
+        content: &VerifiedEventContent,
+        allocation: &mut Option<PayloadAllocation>,
+        buffer: &mut Option<PayloadBuffer>,
+    ) -> DbResult<()> {
         let now = Timestamp::now();
         self.process_event_tx(&content.event, now, tx)?;
         match self.reserve_payload_tx(tx, &content.event)? {

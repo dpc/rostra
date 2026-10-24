@@ -138,6 +138,12 @@ pub enum PostError {
     /// No strictly greater profile timestamp can be represented.
     #[snafu(display("Profile timestamp ordering is exhausted"))]
     ProfileTimestampExhausted,
+    #[snafu(display("Vote ordering wait budget exhausted"))]
+    VoteOrderingBusy,
+    #[snafu(display("Vote clock behind retained winner: {now} < {latest}"))]
+    VoteClockBehind { latest: Timestamp, now: Timestamp },
+    #[snafu(display("Vote singleton timestamp is exhausted"))]
+    VoteTimestampExhausted,
     #[snafu(display("Direct messages require an unlocked full-account client"))]
     DirectMessageUnavailable,
     #[snafu(display("Direct-message encoding failed: {source}"))]

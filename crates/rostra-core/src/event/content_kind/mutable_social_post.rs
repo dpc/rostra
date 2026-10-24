@@ -39,18 +39,34 @@ impl SocialPost {
     /// Legacy persona and declared tags are preserved independently.
     pub fn decode_mutable_text(bytes: &[u8]) -> Option<Self> {
         let post = Self::decode_mutable_fields(bytes)?;
-        (post.djot_content.is_some() && post.reaction.is_none()).then_some(post)
+        (!post.news
+            && post.url.is_none()
+            && post.title.is_none()
+            && post.djot_content.is_some()
+            && post.reaction.is_none())
+        .then_some(post)
     }
 
     /// Decode only an exact, bounded, known reaction payload for local removal.
     /// This compatibility check is not Unicode emoji validation.
     pub fn decode_mutable_reaction(bytes: &[u8]) -> Option<Self> {
         let post = Self::decode_mutable_fields(bytes)?;
-        (post.djot_content.is_none()
+        (!post.news
+            && post.url.is_none()
+            && post.title.is_none()
+            && post.djot_content.is_none()
             && post.reaction.as_deref().is_some_and(|reaction| {
                 Self::is_reaction(&post.reply_to, reaction) == Some(reaction)
             }))
         .then_some(post)
+    }
+
+    /// Decode known bounded news content for native presentation and voting.
+    /// Historical optional titles, URLs, and persona tags remain supported;
+    /// replies, reactions, unknown fields and malformed CBOR do not.
+    pub fn decode_supported_news(bytes: &[u8]) -> Option<Self> {
+        let post = Self::decode_mutable_fields(bytes)?;
+        (post.news && post.reply_to.is_none() && post.reaction.is_none()).then_some(post)
     }
 
     fn decode_mutable_fields(bytes: &[u8]) -> Option<Self> {
@@ -65,7 +81,7 @@ impl SocialPost {
             cbor4ii::core::dec::Reference::Long(bytes)
             | cbor4ii::core::dec::Reference::Short(bytes) => !bytes.is_empty(),
         };
-        if remaining || post.u.is_some() || post.h.is_some() || post.n {
+        if remaining {
             return None;
         }
         Some(Self {
@@ -73,9 +89,9 @@ impl SocialPost {
             djot_content: post.c,
             reply_to: post.r,
             reaction: post.e,
-            url: None,
-            title: None,
-            news: false,
+            url: post.u,
+            title: post.h,
+            news: post.n,
             persona_tags: post.t,
         })
     }

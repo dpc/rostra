@@ -19,6 +19,12 @@ mod local_social_post_tests;
 mod migration_ops;
 mod models;
 pub mod news;
+#[cfg(test)]
+mod news_feed_tests;
+pub mod news_post_request;
+mod news_request_ops;
+#[cfg(test)]
+mod news_request_tests;
 mod paginate;
 mod payload_account;
 mod payload_accounting;
@@ -81,6 +87,7 @@ mod social_post_request_tests;
 mod table_ops;
 mod tables;
 mod tx_ops;
+pub mod vote_request;
 
 use std::borrow::Cow;
 use std::collections::{BTreeMap, HashMap, HashSet};
@@ -325,6 +332,32 @@ pub type TableDumpResult<T> = std::result::Result<T, TableDumpError>;
 
 #[derive(Debug, Snafu)]
 pub enum DbError {
+    #[snafu(display("News request input mismatch"))]
+    NewsRequestMismatch,
+    #[snafu(display("Vote request input mismatch"))]
+    VoteRequestMismatch,
+    #[snafu(display("News title or URL must be normalized and valid"))]
+    NewsInvalidInput,
+    #[snafu(display("News full target identity, author, or kind mismatch"))]
+    NewsTarget,
+    #[snafu(display("News target content is unavailable"))]
+    NewsUnavailable,
+    #[snafu(display("News target content is unsupported"))]
+    NewsUnsupported,
+    #[snafu(display("News request candidate or signing account mismatch"))]
+    NewsCandidate,
+    #[snafu(display("Vote timestamp does not strictly supersede the local winner"))]
+    VoteOrderingConflict,
+    #[snafu(display("Vote timestamp is ahead of wall time"))]
+    VoteFutureTimestamp,
+    #[snafu(display("Ranked news cursor is stale; explicitly refresh"))]
+    NewsCursorStale,
+    #[snafu(display("Ranked news page size must be between 1 and 100"))]
+    NewsPageLimit,
+    #[snafu(display("News encoded payload budget exceeded"))]
+    NewsPayloadLimit,
+    #[snafu(display("Ranked news generation exhausted"))]
+    NewsGenerationExhausted,
     /// A reaction request ID already committed different exact input.
     #[snafu(display("Reaction request input mismatch"))]
     ReactionMismatch,
@@ -623,6 +656,9 @@ pub type DbResult<T> = std::result::Result<T, DbError>;
 #[derive(Debug)]
 pub struct Database {
     inner: redb_bincode::Database,
+    /// Invalidates ranked cursors across reopen, independent of persistent
+    /// state.
+    news_instance: [u8; 16],
     self_id: RostraId,
     iroh_secret: iroh::SecretKey,
 
@@ -784,6 +820,7 @@ impl Database {
 
         let db = Self {
             inner,
+            news_instance: rand::random(),
             self_id,
             iroh_secret,
             db_init_time,
