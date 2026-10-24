@@ -1,5 +1,9 @@
 use std::collections::BTreeSet;
 #[cfg(feature = "serde")]
+pub mod discovered_tags;
+#[cfg(all(test, feature = "serde"))]
+mod discovered_tags_tests;
+#[cfg(feature = "serde")]
 mod mutable_social_post;
 #[cfg(all(test, feature = "serde"))]
 mod mutable_social_post_tests;

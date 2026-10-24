@@ -1,3 +1,7 @@
+pub mod author_tags;
+mod author_tags_read;
+#[cfg(test)]
+mod author_tags_tests;
 mod current_state;
 pub mod dm;
 mod dm_index;
@@ -347,6 +351,12 @@ pub type TableDumpResult<T> = std::result::Result<T, TableDumpError>;
 
 #[derive(Debug, Snafu)]
 pub enum DbError {
+    #[snafu(display("Author tag discovery bounds are outside the supported range"))]
+    AuthorTagBounds,
+    #[snafu(display("Author tag cursor expired or mismatched; explicitly refresh"))]
+    AuthorTagCursorStale,
+    #[snafu(display("Author tag discovery encountered corrupt retained storage"))]
+    AuthorTagInvariant,
     #[snafu(display("Relationship page bounds are outside the supported range"))]
     RelationshipBounds,
     #[snafu(display("Relationship cursor scope expired or mismatched; explicitly refresh"))]
