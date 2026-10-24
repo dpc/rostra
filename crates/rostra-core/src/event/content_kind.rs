@@ -4,6 +4,8 @@ mod mutable_social_post;
 #[cfg(all(test, feature = "serde"))]
 mod mutable_social_post_tests;
 #[cfg(feature = "serde")]
+mod supported_shoutbox;
+#[cfg(feature = "serde")]
 use std::str::FromStr as _;
 
 use snafu::Snafu;

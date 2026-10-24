@@ -78,6 +78,12 @@ mod retention_index_tests;
 #[cfg(test)]
 mod retention_tests;
 mod self_followee;
+pub mod shoutbox;
+pub mod shoutbox_request;
+mod shoutbox_request_ops;
+mod shoutbox_scan;
+#[cfg(test)]
+mod shoutbox_tests;
 pub mod social;
 mod social_post_materialization;
 pub mod social_post_mutation;
@@ -336,6 +342,18 @@ pub type TableDumpResult<T> = std::result::Result<T, TableDumpError>;
 
 #[derive(Debug, Snafu)]
 pub enum DbError {
+    #[snafu(display("Shoutbox request input mismatch"))]
+    ShoutboxRequestMismatch,
+    #[snafu(display("Shoutbox input must be trimmed and contain 1..=1000 UTF-8 bytes"))]
+    ShoutboxInvalidInput,
+    #[snafu(display("Shoutbox candidate or signing account mismatch"))]
+    ShoutboxCandidate,
+    #[snafu(display("Shoutbox scan bounds are outside the supported range"))]
+    ShoutboxBounds,
+    #[snafu(display("Shoutbox cursor is stale; explicitly refresh"))]
+    ShoutboxCursorStale,
+    #[snafu(display("Shoutbox index or envelope binding is inconsistent"))]
+    ShoutboxInvariant,
     #[snafu(display("News request input mismatch"))]
     NewsRequestMismatch,
     #[snafu(display("Vote request input mismatch"))]
@@ -670,8 +688,8 @@ pub type DbResult<T> = std::result::Result<T, DbError>;
 #[derive(Debug)]
 pub struct Database {
     inner: redb_bincode::Database,
-    /// Invalidates ranked cursors across reopen, independent of persistent
-    /// state.
+    /// Invalidates ranked and shoutbox cursors across reopen, independent of
+    /// persistent state.
     news_instance: [u8; 16],
     self_id: RostraId,
     iroh_secret: iroh::SecretKey,

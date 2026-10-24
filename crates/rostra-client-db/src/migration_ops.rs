@@ -92,7 +92,8 @@ pub(crate) struct LegacyEventReceivedRecord {
 // Version 37 adds permanent news/vote receipts and a ranked traversal epoch.
 // Version 38 adds a durable, total-replay-invalidated notification cursor
 // epoch.
-const DB_VER: u64 = 38;
+// Version 39 adds permanent, non-replayable shoutbox request receipts.
+const DB_VER: u64 = 39;
 
 /// Versions older than this require a total migration.
 ///
@@ -170,6 +171,7 @@ impl Database {
 
     /// Initialize all current schema tables.
     pub(crate) fn init_tables_tx(tx: &WriteTransactionCtx) -> DbResult<()> {
+        tx.open_table(&crate::shoutbox_request_receipts::TABLE)?;
         tx.open_table(&crate::social_post_receipts::TABLE)?;
         tx.open_table(&crate::social_post_mutation_receipts::TABLE)?;
         tx.open_table(&crate::social_reaction_receipts::TABLE)?;
@@ -632,6 +634,7 @@ impl Database {
                 || name == "social_reaction_receipts"
                 || name == "social_news_receipts"
                 || name == "social_vote_receipts"
+                || name == "shoutbox_request_receipts"
                 || !crate::extension::is_reserved_extension_table(name)
             {
                 continue;

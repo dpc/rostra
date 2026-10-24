@@ -781,6 +781,11 @@ def_table! {
 // ============================================================================
 
 def_table! {
+    /// Permanent local request digests and signed results, never replay-derived.
+    shoutbox_request_receipts: [u8; 16] => crate::social_post_receipt::Receipt
+}
+
+def_table! {
     /// Time-ordered index of shoutbox posts by effective notification time.
     ///
     /// Key: (effective_timestamp, reception_order)

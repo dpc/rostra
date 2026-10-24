@@ -45,6 +45,9 @@ mod profile_ordering;
 mod reaction;
 #[cfg(test)]
 mod reaction_tests;
+mod shoutbox_request;
+#[cfg(test)]
+mod shoutbox_request_tests;
 mod shutdown;
 mod social_post_head;
 #[cfg(test)]

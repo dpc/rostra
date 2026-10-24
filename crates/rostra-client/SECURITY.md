@@ -43,6 +43,13 @@ Persist immutable pending inputs through uncertainty. Bounded summary errors mea
 unavailable, not zero or partial counts; successful counts cover supported
 materialized rows, not all network reactions.
 
+`post_shoutbox_idempotent` follows the
+[durable shoutbox contract](../rostra-client-db/docs/shoutbox.md). Trim before
+persisting the immutable pending key/input; core rejects rather than normalizes
+nontrimmed or out-of-range text. Preserve the same key/input through ambiguous
+acceptance, cancellation and shutdown races. Receipt-only retries still require
+the matching signing account and an open client; success is not remote delivery.
+
 Direct-message publication requires a full active client and the matching
 account secret. That is not sufficient HTTP authority: each UI request must
 independently require its own unlocked full-account session. Do not use another

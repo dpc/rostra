@@ -41,6 +41,20 @@ replay. Nonzero request-derived nonsingleton auxiliary keys keep distinct
 same-head/same-second adds independent; they do not change singleton or replacement
 semantics. Exact materialized summaries fail closed at explicit work limits.
 
+Shoutbox publication and native reads follow the
+[durable shoutbox and bounded traversal contract](docs/shoutbox.md).
+Receipt reconciliation precedes validation; fresh candidates bind exact text,
+account, kind, nonsingleton nonce and allowed header shape before atomic admission
+and receipt insertion. Permanent digest/signed-header metadata survives payload
+deletion and replay, grows outside payload quotas, and permits dictionary guesses.
+The flat known-field decoder is a presentation policy, not a new protocol rule:
+oversized or unsupported historical content gets an explicit placeholder.
+Read bounds cover raw rows and encoded bytes before owned decode; cursor scope
+combines account, rebuild epoch, per-open incarnation and an exclusive allocation
+frontier. It is not a frozen cross-page membership snapshot. Re-audit bounded
+parsing, candidate binding, cursor progress and rebuild preservation when changing
+these APIs, codecs or the shared reception allocator.
+
 Direct-message source tables additionally contain plaintext history and live
 native age identities. Never debug-format these records or export epoch secrets.
 Schema32 migration must preserve all four authoritative tables through typed,
@@ -377,3 +391,6 @@ malformed authoritative keys or hostile encoded lengths are an accepted
 non-adversarial corruption risk: open may panic or exhaust memory while the
 committed stash remains on disk. Restore the pre-upgrade backup or use an
 offline audited repair tool; repeated normal opens are not a corruption scrub.
+The opt-in shoutbox reader bypasses that typed range guard using raw byte-order
+iteration and exact fallible decoding of its fixed-size index keys and values;
+do not replace it with the typed iterator while promising fallible read errors.
