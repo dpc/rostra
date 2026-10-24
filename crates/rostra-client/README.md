@@ -49,6 +49,22 @@ identity/device keys, stored plaintext, or OS caches, and cannot retract issued
 signatures. Clear UI credentials separately. Await public construction rather
 than cancelling it: this API does not certify cleanup after a cancelled build.
 
+## Native static-image publication
+
+Enable `native-media` for `Client::publish_media_idempotent`. Normalize selections
+with `rostra_core::static_media::normalize_static_media` off the UI executor, then
+durably persist the exact PNG bytes, MIME, policy version and a fresh random
+`MediaRequestId` before publication. Never normalize pending retries again.
+Permanent local receipts return the original full event ID even after deletion
+or pruning; success is local acceptance, not delivery. See the API documentation
+for shutdown, uncertain errors and permanent receipt privacy.
+
+Normalization rejects unsupported orientation/color metadata rather than
+silently changing visuals. ICC/EXIF (including benign defaults) and WebP XMP
+are unsupported; canonical sRGB PNG declarations are accepted. Limits are
+1,000,000 input/output bytes, 2048 per axis, 4,000,000 pixels, static PNG/WebP only.
+The existing historical image reader and web media policy are unchanged.
+
 ## License
 
 Licensed under MIT OR Apache-2.0 OR MPL-2.0. See

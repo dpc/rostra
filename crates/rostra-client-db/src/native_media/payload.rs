@@ -11,6 +11,17 @@ use super::{MAX_NATIVE_MEDIA_BODY_BYTES, NativeMediaRead};
 
 /// Complete shape validation precedes the only owned media allocation.
 pub(super) fn decode(body: &[u8]) -> Result<(&'static str, Vec<u8>), NativeMediaRead> {
+    let (mime, bytes, len) = preflight(body)?;
+    let mut input = Input { bytes };
+    let mut data = Vec::with_capacity(len);
+    for _ in 0..len {
+        data.push(input.byte()?);
+    }
+    Ok((mime, data))
+}
+
+/// Validate the complete CBOR subset while borrowing encoded image bytes.
+pub(super) fn preflight(body: &[u8]) -> Result<(&'static str, &[u8], usize), NativeMediaRead> {
     if body.len() > MAX_NATIVE_MEDIA_BODY_BYTES {
         return Err(NativeMediaRead::TooLarge);
     }
@@ -59,14 +70,18 @@ pub(super) fn decode(body: &[u8]) -> Result<(&'static str, Vec<u8>), NativeMedia
         _ => return Err(NativeMediaRead::Unsupported),
     };
     let (bytes, len) = data.ok_or(NativeMediaRead::Invalid)?;
-    let mut input = Input { bytes };
-    let mut data = Vec::with_capacity(len);
-    for _ in 0..len {
-        data.push(input.byte()?);
-    }
-    Ok((mime, data))
+    Ok((mime, bytes, len))
 }
 
+/// Copy at most thirty decoded bytes for unvalidated dimension hints.
+pub(super) fn prefix(bytes: &[u8], len: usize) -> Result<[u8; 30], NativeMediaRead> {
+    let mut result = [0; 30];
+    let mut input = Input { bytes };
+    for byte in result.iter_mut().take(len) {
+        *byte = input.byte()?;
+    }
+    Ok(result)
+}
 /// A forward-only cursor, with no recursive descent or owned strings.
 struct Input<'a> {
     /// Remaining borrowed bytes within the admitted body.

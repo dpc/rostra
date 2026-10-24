@@ -113,6 +113,12 @@ pub type IdSecretReadResult<T> = std::result::Result<T, IdSecretReadError>;
 #[derive(Debug, Snafu)]
 #[snafu(visibility(pub(crate)))]
 pub enum PostError {
+    /// Canonical input was rejected before any candidate signature.
+    #[cfg(feature = "native-media")]
+    #[snafu(display("Normalized media rejected: {source}"))]
+    StaticMedia {
+        source: rostra_core::static_media::StaticMediaError,
+    },
     /// Shutdown permanently prevents new signing operations.
     #[snafu(display("Client shutdown has started"))]
     ClientClosing,

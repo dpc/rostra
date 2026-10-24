@@ -25,6 +25,9 @@ include = [
 [lints]
 workspace = true
 
+[features]
+native-media = ["rostra-client-db/native-media", "rostra-core/raster-avatar"]
+
 [dependencies]
 rostra-dm = { workspace = true }
 anyhow = { workspace = true }

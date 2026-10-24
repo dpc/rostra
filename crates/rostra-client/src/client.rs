@@ -38,6 +38,10 @@ mod dm;
 mod dm_tests;
 mod follow_ordering;
 mod init;
+#[cfg(feature = "native-media")]
+mod media_request;
+#[cfg(all(test, feature = "native-media"))]
+mod media_request_tests;
 mod news_request;
 #[cfg(test)]
 mod news_request_tests;

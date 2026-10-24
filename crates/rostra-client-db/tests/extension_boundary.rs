@@ -17,6 +17,7 @@ async fn extension_tables_persist_without_exposing_builtin_mutation() -> anyhow:
         "db_",
         "events_",
         "ids_",
+        "media_",
         "reception_order_",
         "shoutbox_",
         "social_",

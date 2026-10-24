@@ -11,6 +11,7 @@ pub const EXTENSION_RESERVED_TABLE_PREFIXES: &[&str] = &[
     "db_",
     "events_",
     "ids_",
+    "media_",
     "reception_order_",
     "shoutbox_",
     "social_",

@@ -1,5 +1,50 @@
 # Agent-browser security boundaries
 
+## Native static-media upload and reuse
+
+`rostra-core::static_media` is an opt-in upload policy, not a change to historical
+image readers or the web's generic upload limits. V1 fully decodes static
+PNG/WebP, expands palettes/packed grayscale/transparency, preserves PNG 8/16-bit
+samples and alpha, and writes fresh noninterlaced PNG with only IHDR/IDAT/IEND.
+Input and output each have a 1,000,000-byte limit; dimensions are at most 2048 per
+axis and 4,000,000 pixels. The output writer refuses excess bytes before growing
+its vector. Decoded buffers are bounded at eight bytes per pixel. Codec scratch
+is not a hard RSS limit and no CPU deadline is promised; hosts bound concurrency
+and run normalization off the UI executor.
+
+Untagged samples are interpreted as sRGB. PNG sRGB intent 0, gAMA 45455, and
+cHRM `(31270,32900,64000,33000,30000,60000,15000,6000)` are accepted without
+sample conversion; other declarations are explicitly unsupported. All ICC and
+EXIF are unsupported, including benign/default profiles and orientation 1,
+rather than silently dropping a potentially meaningful transform. WebP XMP and
+unknown semantic chunks are also unsupported. PNG text, time, and physical
+resolution metadata are discarded. No source metadata is inherited. Normalized
+output is untagged sRGB by policy; downstream color management is not promised.
+
+`Client::publish_media_idempotent` validates the metadata-free V1 PNG subset
+before the first signature and uses a separate random non-singleton event nonce.
+Persist its exact normalized bytes, MIME, policy version and random 16-byte
+request ID before calling. Never normalize a pending retry: codec versions may
+produce different bytes. Permanent per-account schema-40 media receipts store
+only the exact-input digest and original signed envelope, atomically with payload
+admission. Exact retry lookup precedes current decoder/capacity/lifecycle checks,
+so deletion and pruning are not undone. Receipts survive total replay/reopen,
+never expire, lie outside payload quotas, and permit input dictionary guesses.
+Shutdown rejects new calls, but cancellation or lost acknowledgment of a started
+transaction does not imply rollback. Success means local acceptance, not delivery
+or deduplication across restored/independent databases.
+
+`Database::list_own_media` scans the own-event index with bounded raw rows and
+body reservations and returns metadata-only candidates with full event IDs.
+It verifies retained signatures, author/kind/short identity, lifecycle, body hash
+and strict CBOR shape without copying full image bytes or decoding pixels.
+Header dimensions are explicitly unvalidated hints, not safe-image eligibility.
+Always call `read_native_media` for the exact account/full ID before preview or
+reuse insertion, and re-read on later display. Empty pages may have continuation.
+Cursors are exclusive/live, account/open-instance/rebuild-bound, not durable
+snapshots; refresh to discover concurrent inserts before an already-scanned key.
+No network request, normalized rewrite, or new signature occurs during reuse.
+
 ## Native Djot presentation
 
 `rostra-djot::native::render` emits only bounded literal text segments and typed

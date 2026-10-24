@@ -20,6 +20,10 @@ mod ids_full;
 mod local_social_post;
 #[cfg(test)]
 mod local_social_post_tests;
+mod media_receipt;
+pub mod media_request;
+#[cfg(all(test, feature = "native-media"))]
+mod media_request_tests;
 mod migration_ops;
 mod models;
 #[cfg(feature = "native-media")]
@@ -485,6 +489,15 @@ pub enum DbError {
     /// A durable post request ID was reused for different canonical input.
     #[snafu(display("Social post request ID input mismatch"))]
     SocialPostRequestMismatch,
+    /// Reusing a media request ID with different exact pending input.
+    #[snafu(display("Media request ID already committed with different input"))]
+    MediaRequestMismatch,
+    /// Invalid normalized local media publication.
+    #[snafu(display("Invalid normalized media candidate"))]
+    MediaCandidate,
+    /// A retained media traversal belongs to a different database lifetime.
+    #[snafu(display("Media cursor is stale"))]
+    MediaCursorStale,
     /// The full reply target does not name a retained social-post envelope.
     #[snafu(display("Social post reply target is unavailable or mismatched"))]
     SocialPostReplyTarget,

@@ -16,7 +16,9 @@ use rostra_core::{ContentHash, EventId};
 
 use crate::{Database, DbResult, EventRecord};
 
+mod list;
 mod payload;
+pub use list::{OwnMediaCandidate, OwnMediaCursor, OwnMediaEligibility, OwnMediaPage};
 #[cfg(test)]
 mod tests;
 

@@ -29,6 +29,13 @@ bound concurrent work off the UI executor, and re-read on later presentation
 (including offline redisplay). Availability is a snapshot, not an enduring cache
 capability. No CPU deadline or process RSS bound is claimed.
 
+`Database::list_own_media` returns bounded pages of own-author retained candidate
+metadata without pixel decoding or full image allocation. Each candidate carries
+a full event ID and `RequiresReadValidation`, not a safe-image claim. Call
+`read_native_media` with the exact author/full ID before preview or reuse.
+An empty page can still have a continuation. Cursors are live, exclusive and
+bound to the current account/open/rebuild lifetime; do not persist them.
+
 Source and issue tracking: <https://github.com/dpc/rostra>
 
 ## License

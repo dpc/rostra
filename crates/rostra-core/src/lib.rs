@@ -8,6 +8,8 @@ pub mod bincode;
 pub mod event;
 pub mod media;
 pub mod retention;
+#[cfg(feature = "raster-avatar")]
+pub mod static_media;
 
 #[cfg(feature = "rand")]
 pub mod rand;
