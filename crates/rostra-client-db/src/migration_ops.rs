@@ -90,7 +90,9 @@ pub(crate) struct LegacyEventReceivedRecord {
 // Version 35 adds an independent local text mutation receipt namespace.
 // Version 36 adds non-replayable independent reaction request receipts.
 // Version 37 adds permanent news/vote receipts and a ranked traversal epoch.
-const DB_VER: u64 = 37;
+// Version 38 adds a durable, total-replay-invalidated notification cursor
+// epoch.
+const DB_VER: u64 = 38;
 
 /// Versions older than this require a total migration.
 ///
@@ -174,6 +176,12 @@ impl Database {
         tx.open_table(&crate::social_news_receipts::TABLE)?;
         tx.open_table(&crate::social_vote_receipts::TABLE)?;
         tx.open_table(&crate::social_news_generation::TABLE)?;
+        {
+            let mut epoch = tx.open_table(&crate::social_notification_epoch::TABLE)?;
+            if epoch.get(&())?.is_none() {
+                epoch.insert(&(), &rand::random::<[u8; 16]>())?;
+            }
+        }
         Self::init_dm_tables_tx(tx)?;
         tx.open_table(&crate::content_pressure_state::TABLE)?;
         tx.open_table(&crate::content_pressure_authors::TABLE)?;

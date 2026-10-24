@@ -25,6 +25,10 @@ pub mod news_post_request;
 mod news_request_ops;
 #[cfg(test)]
 mod news_request_tests;
+pub mod notification;
+mod notification_scan;
+#[cfg(test)]
+mod notification_tests;
 mod paginate;
 mod payload_account;
 mod payload_accounting;
@@ -358,6 +362,16 @@ pub enum DbError {
     NewsPayloadLimit,
     #[snafu(display("Ranked news generation exhausted"))]
     NewsGenerationExhausted,
+    #[snafu(display("Notification bounds are outside the supported range"))]
+    NotificationBounds,
+    #[snafu(display(
+        "Notification token belongs to another account, database epoch, or future frontier"
+    ))]
+    NotificationCursorStale,
+    #[snafu(display("Notification unread continuation does not match the supplied seen token"))]
+    NotificationCursorMismatch,
+    #[snafu(display("Notification index or envelope binding is inconsistent"))]
+    NotificationInvariant,
     /// A reaction request ID already committed different exact input.
     #[snafu(display("Reaction request input mismatch"))]
     ReactionMismatch,

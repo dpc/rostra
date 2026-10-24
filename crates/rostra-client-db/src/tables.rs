@@ -173,6 +173,10 @@ def_table! {
     /// Disposable rank ordering/membership epoch, paired with a per-open nonce.
     social_news_generation: () => ([u8; 16], u64)
 }
+def_table! {
+    /// Durable notification cursor scope; discarded with receipt indexes on total replay.
+    social_notification_epoch: () => [u8; 16]
+}
 #[cfg(test)]
 pub(crate) use def_table;
 

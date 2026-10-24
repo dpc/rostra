@@ -35,7 +35,9 @@ pub(crate) fn decode_stored_payload_after_length_guard<T>(
     Ok(decode_owned(content))
 }
 
-fn encode_content_hash_key(hash: rostra_core::ContentHash) -> [u8; CONTENT_HASH_ENCODED_LEN] {
+pub(crate) fn encode_content_hash_key(
+    hash: rostra_core::ContentHash,
+) -> [u8; CONTENT_HASH_ENCODED_LEN] {
     let mut encoded = [0; CONTENT_HASH_ENCODED_LEN];
     let written = bincode::encode_into_slice(hash, &mut encoded, redb_bincode::BINCODE_CONFIG)
         .expect("fixed-size content hash must fit its database key buffer");

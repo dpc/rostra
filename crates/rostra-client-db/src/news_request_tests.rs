@@ -427,7 +427,7 @@ async fn receipt_abort_postcommit_failure_upgrade_reopen_and_rebuild() -> anyhow
         Some(true)
     );
     db.write_with(|tx| {
-        tx.open_table(&crate::db_version::TABLE)?.insert(&(), &38)?;
+        tx.open_table(&crate::db_version::TABLE)?.insert(&(), &39)?;
         Ok(())
     })
     .await?;

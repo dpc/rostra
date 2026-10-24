@@ -345,7 +345,7 @@ async fn version_24_unmapped_receipt_is_rebuilt_before_open() -> BoxedErrorResul
                     .map(|entry| entry.value()))
             })
             .await?,
-        Some(37)
+        Some(38)
     );
 
     let delete_legacy = deletion(secret, &legacy, 302);
