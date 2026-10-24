@@ -13,6 +13,24 @@ unsupported structures flatten with warnings. No HTML, media loading, network
 requests, or event-reference routing is produced. Existing web rendering and
 signed content formats are unchanged.
 
+`native::render_with_media(&str)` opts into inert image records alongside spans,
+without reading any bytes. Each record has literal `alt`, `span_index` (insert
+before that span, or at the end), and a destination distinct from ordinary links:
+`Rostra { reference }`, `External { url }`, or `Invalid`. Records preserve source
+order, including empty alternatives and consecutive images sharing an anchor.
+This mode puts alternative text in image records rather than duplicating it in
+spans. At most 32 records are returned and their alt/destination bytes share the
+ordinary aggregate output budget. The text-only `render` behavior is unchanged.
+
+Rostra media references preserve full versus short event IDs, serialized as
+`{ "kind": "full" | "short", "id": "..." }`. They require a checked retained read
+bound to the actual source post author; labels supply no authority. A matching
+short prefix never proves a requested full ID. External image destinations remain
+inert and must not initiate third-party fetches or ordinary link navigation.
+`rostra-client-db`'s opt-in `native-media` reader supplies the bounded signed
+static PNG/WebP presentation path; no HTML/WebView or divergent Djot parser is
+needed.
+
 Hosts must show warnings, resolve short identities only through their retained
 identity index (unknown prefixes remain inert), and disclose actual destinations
 rather than trusting link labels. External navigation requires explicit user

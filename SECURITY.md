@@ -9,6 +9,45 @@ destinations before external navigation. A link label does not authenticate its
 destination. Short identity references stay unresolved until checked against the
 host's retained identity index; unknown references remain inert.
 
+The opt-in `render_with_media` uses that same parser and all its guards, adding
+at most 32 ordered image anchors with literal alternative text. A typed
+`rostra-media:` destination preserves short versus full event IDs; it does not
+authorize retrieval. Credential-free HTTP(S) image URLs remain distinct, inert
+external destinations, not navigation links or fetch instructions. Invalid
+schemes and unknown references remain inert. The ordinary text-only renderer
+continues to replace images with alternative text.
+
+`rostra-client-db`'s opt-in `native-media` feature reads only retained signed
+`SOCIAL_MEDIA` events. The caller must supply the actual retained source post's
+author; captions and UI-supplied identity strings are not authority. This matches
+the web's author-scoped media URLs: cross-author reuse is not accepted. A full
+ID must match the recomputed retained envelope, never just its short prefix.
+The reader rechecks the signature, author, kind, content length and hash, and
+honors Missing, Deleted, Pruned and Invalid states in one read snapshot. No
+network fetch, scheduling, signing, or write occurs.
+
+Before materializing payload bytes, the reader checks a 1024-byte stored envelope
+cap, a 2,000,128-byte signed CBOR body cap, and a body-plus-nine-byte raw storage
+cap. It borrows the stored body and preflights the complete native CBOR subset
+before allocating the at-most-1,000,000-byte media vector. This subset accepts
+definite maps with exactly `m` (at most 64 UTF-8 bytes) and `d` (a definite array
+of shortest-encoded unsigned bytes), in either order. Unknown fields, tags,
+indefinite containers and alternative/nonminimal encodings are Unsupported,
+not changes to protocol validity. Duplicates, trailing bytes and malformed data
+are rejected. Existing web serialization uses this integer-array form; the
+larger body cap accounts for its two encoded bytes per media byte.
+
+Native signed images then pass the same static PNG/WebP presentation validator
+as native avatars: 2048 per dimension, 4,000,000 pixels, no animation, complete
+decode, exact MIME. Original bytes and metadata are preserved, not normalized.
+Decode occurs after releasing the DB snapshot in a blocking section. Hosts must
+bound concurrency, avoid the UI executor, require explicit tap-to-load, and
+re-read lifecycle state on later/offline redisplay rather than treating cached
+bytes as enduring authority. A snapshot read cannot revoke bytes already
+returned before a concurrent deletion. Missing, unsupported, invalid, oversized
+and mismatched content must be presented honestly. There is no CPU deadline or
+process RSS bound, third-party fetch, or new persistent media cache.
+
 The native renderer checks input size and a conservative recursive-block-opener
 budget before constructing jotup's eager parser, then separately bounds event
 depth/count and owned output. The guard is tied to the exact pinned jotup 0.10.0

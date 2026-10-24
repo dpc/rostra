@@ -26,6 +26,10 @@ include = [
 [lints]
 workspace = true
 
+[features]
+default = []
+native-media = ["rostra-core/raster-avatar"]
+
 [dependencies]
 anyhow = { workspace = true }
 backon = { workspace = true }

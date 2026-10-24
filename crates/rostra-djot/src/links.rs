@@ -4,6 +4,7 @@ use std::str::FromStr;
 
 use rostra_core::ShortEventId;
 use rostra_core::id::{RostraId, ShortRostraId};
+use rostra_core::media::MediaEventReference;
 
 /// An identity reference accepted in a `rostra:` link.
 ///
@@ -48,4 +49,15 @@ pub fn extract_rostra_id_link_reference(s: &str) -> Option<RostraIdLink> {
 pub fn extract_rostra_media_link(s: &str) -> Option<ShortEventId> {
     s.strip_prefix("rostra-media:")
         .and_then(|s| ShortEventId::from_str(s).ok())
+}
+
+/// Extract a native media reference without resolving its author or full ID.
+///
+/// The web helper deliberately retains its existing short-only grammar.
+pub fn extract_rostra_media_reference(s: &str) -> Option<MediaEventReference> {
+    let id = s.strip_prefix("rostra-media:")?;
+    id.parse()
+        .map(MediaEventReference::Full)
+        .or_else(|_| id.parse().map(MediaEventReference::Short))
+        .ok()
 }

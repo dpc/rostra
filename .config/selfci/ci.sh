@@ -38,7 +38,7 @@ function job_cargo() {
 }
 
 function job_core_features() {
-    selfci step start "rostra-core feature combinations"
+    selfci step start "core features and native media"
     nix build -L .#ci.rostraCoreFeatures
 }
 

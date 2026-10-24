@@ -1,8 +1,8 @@
 use jotup::{Container, Event};
 
 use super::{
-    MAX_DEPTH, MAX_EVENTS, MAX_LINK_BYTES, MAX_OUTPUT_BYTES, MAX_SPANS, NativeDocument, NativeLink,
-    NativeRenderError, NativeSpan, NativeWarning,
+    MAX_DEPTH, MAX_EVENTS, MAX_IMAGES, MAX_LINK_BYTES, MAX_OUTPUT_BYTES, MAX_SPANS, NativeDocument,
+    NativeImage, NativeImageDestination, NativeLink, NativeRenderError, NativeSpan, NativeWarning,
 };
 use crate::links::extract_rostra_id_link_reference;
 
@@ -15,6 +15,8 @@ struct State {
     inert: bool,
     /// Link definitions are not visible content.
     hidden: bool,
+    /// Alternative text currently being collected for an opt-in image record.
+    image: Option<usize>,
 }
 
 /// Bounded output builder with deferred separators to avoid trailing newlines.
@@ -42,6 +44,14 @@ impl Builder {
         if text.is_empty() || state.hidden {
             return Ok(());
         }
+        if let Some(index) = state.image {
+            self.bytes += text.len();
+            if self.bytes > MAX_OUTPUT_BYTES {
+                return Err(NativeRenderError::OutputLimit);
+            }
+            self.document.images[index].alt.push_str(text);
+            return Ok(());
+        }
         self.prefix = false;
         if std::mem::take(&mut self.separator) && !self.document.spans.is_empty() {
             self.push("\n", &NativeSpan::default())?;
@@ -57,7 +67,12 @@ impl Builder {
 
     fn push(&mut self, text: &str, template: &NativeSpan) -> Result<(), NativeRenderError> {
         let merge = self.document.spans.last().is_some_and(|last| {
-            last.strong == template.strong
+            !self
+                .document
+                .images
+                .last()
+                .is_some_and(|image| image.span_index == self.document.spans.len())
+                && last.strong == template.strong
                 && last.emphasis == template.emphasis
                 && last.code == template.code
                 && last.link == template.link
@@ -94,9 +109,34 @@ impl Builder {
         self.bytes = bytes;
         Ok(())
     }
+
+    fn image(&mut self, destination: NativeImageDestination) -> Result<usize, NativeRenderError> {
+        if self.document.images.len() == MAX_IMAGES {
+            return Err(NativeRenderError::ImageLimit);
+        }
+        if std::mem::take(&mut self.separator) && !self.document.spans.is_empty() {
+            self.push("\n", &NativeSpan::default())?;
+        }
+        self.prefix = false;
+        self.bytes += match &destination {
+            NativeImageDestination::Rostra { .. } => 128,
+            NativeImageDestination::External { url } => url.len(),
+            NativeImageDestination::Invalid => 0,
+        };
+        if self.bytes > MAX_OUTPUT_BYTES {
+            return Err(NativeRenderError::OutputLimit);
+        }
+        let index = self.document.images.len();
+        self.document.images.push(NativeImage {
+            span_index: self.document.spans.len(),
+            alt: String::new(),
+            destination,
+        });
+        Ok(index)
+    }
 }
 
-pub(super) fn render(source: &str) -> Result<NativeDocument, NativeRenderError> {
+pub(super) fn render(source: &str, media: bool) -> Result<NativeDocument, NativeRenderError> {
     let mut output = Builder::default();
     let mut state = State::default();
     let mut stack = Vec::new();
@@ -145,11 +185,23 @@ pub(super) fn render(source: &str) -> Result<NativeDocument, NativeRenderError> 
                             }
                         }
                     }
-                    Container::Image(..) => {
-                        output.warn(NativeWarning::MediaOmitted);
+                    Container::Image(destination, kind) => {
                         state.span.link = None;
+                        if media && !state.hidden && state.image.is_none() && !state.inert {
+                            let destination = if matches!(kind, jotup::SpanLinkType::Unresolved) {
+                                NativeImageDestination::Invalid
+                            } else {
+                                image_destination(&destination)
+                            };
+                            if destination == NativeImageDestination::Invalid {
+                                output.warn(NativeWarning::InvalidLink);
+                            }
+                            state.image = Some(output.image(destination)?);
+                        } else {
+                            output.warn(NativeWarning::MediaOmitted);
+                            output.text("[image] ", &state)?;
+                        }
                         state.inert = true;
-                        output.text("[image] ", &state)?;
                     }
                     Container::LinkDefinition { .. } => state.hidden = true,
                     Container::Blockquote => output.prefix("> ", &state)?,
@@ -217,6 +269,19 @@ pub(super) fn render(source: &str) -> Result<NativeDocument, NativeRenderError> 
         }
     }
     Ok(output.document)
+}
+
+fn image_destination(destination: &str) -> NativeImageDestination {
+    if destination.len() <= MAX_LINK_BYTES
+        && let Some(reference) = crate::links::extract_rostra_media_reference(destination)
+    {
+        return NativeImageDestination::Rostra { reference };
+    }
+    if let Some(NativeLink::External { url }) = link(destination) {
+        NativeImageDestination::External { url }
+    } else {
+        NativeImageDestination::Invalid
+    }
 }
 
 fn link(destination: &str) -> Option<NativeLink> {

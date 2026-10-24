@@ -15,7 +15,9 @@ use serde::Serialize;
 
 use crate::links::RostraIdLink;
 
+mod image;
 mod renderer;
+pub use image::{NativeImage, NativeImageDestination};
 #[cfg(test)]
 mod tests;
 
@@ -33,13 +35,18 @@ pub const MAX_SPANS: usize = 4096;
 pub const MAX_OUTPUT_BYTES: usize = 128 * 1024;
 /// Maximum accepted link destination length in UTF-8 bytes.
 pub const MAX_LINK_BYTES: usize = 2048;
+/// Maximum image records in opt-in media presentation.
+pub const MAX_IMAGES: usize = 32;
 
-/// A native presentation containing text only, never HTML or media
-/// instructions.
+/// A native presentation containing literal text and optional inert image
+/// references, never HTML or fetch instructions.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
 pub struct NativeDocument {
     /// Ordered segments; separators are ordinary newline text, not offsets.
     pub spans: Vec<NativeSpan>,
+    /// Ordered image anchors, empty unless media presentation was requested.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub images: Vec<NativeImage>,
     /// Distinct lossy-conversion notices for visible host presentation.
     pub warnings: Vec<NativeWarning>,
 }
@@ -122,6 +129,8 @@ pub enum NativeRenderError {
     SpanLimit,
     /// Owned output bytes exceed the budget.
     OutputLimit,
+    /// Image record count exceeds the opt-in media budget.
+    ImageLimit,
 }
 
 impl fmt::Display for NativeRenderError {
@@ -142,5 +151,16 @@ impl std::error::Error for NativeRenderError {}
 /// navigation.
 pub fn render(source: &str) -> Result<NativeDocument, NativeRenderError> {
     crate::parse_guard::check(source)?;
-    renderer::render(source)
+    renderer::render(source, false)
+}
+
+/// Render image references and alternative text without reading any media.
+///
+/// Images are inserted before their span index, in record order, including
+/// empty alternatives. They are not navigation links. Only a checked local
+/// reader, bound to the actual source post author, can authorize presentation.
+/// External images remain inert. All ordinary parser and output guards apply.
+pub fn render_with_media(source: &str) -> Result<NativeDocument, NativeRenderError> {
+    crate::parse_guard::check(source)?;
+    renderer::render(source, true)
 }

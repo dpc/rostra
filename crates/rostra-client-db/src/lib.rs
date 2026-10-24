@@ -22,6 +22,8 @@ mod local_social_post;
 mod local_social_post_tests;
 mod migration_ops;
 mod models;
+#[cfg(feature = "native-media")]
+pub mod native_media;
 pub mod news;
 #[cfg(test)]
 mod news_feed_tests;

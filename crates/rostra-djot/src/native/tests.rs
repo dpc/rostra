@@ -1,6 +1,106 @@
 use rostra_core::id::{RostraId, ToShort as _};
+use rostra_core::media::MediaEventReference;
 
 use super::*;
+
+#[test]
+fn opt_in_images_preserve_order_alt_empty_anchors_and_destination_classes() {
+    let id = rostra_core::EventId::from_bytes([7; 32]);
+    let short = id.to_short();
+    let source = format!(
+        "before ![one *bold*](rostra-media:{short})![](rostra-media:{id}) after ![remote](https://example.com/a.png) ![bad](javascript:alert) ![unknown][missing]"
+    );
+    let doc = render_with_media(&source).unwrap();
+    assert_eq!(doc.images.len(), 5);
+    assert_eq!(doc.images[0].alt, "one bold");
+    assert_eq!(doc.images[1].alt, "");
+    assert_eq!(doc.images[0].span_index, doc.images[1].span_index);
+    assert_eq!(
+        doc.images[0].destination,
+        NativeImageDestination::Rostra {
+            reference: MediaEventReference::Short(short)
+        }
+    );
+    assert_eq!(
+        doc.images[1].destination,
+        NativeImageDestination::Rostra {
+            reference: MediaEventReference::Full(id)
+        }
+    );
+    assert!(matches!(
+        doc.images[2].destination,
+        NativeImageDestination::External { .. }
+    ));
+    assert_eq!(doc.images[3].destination, NativeImageDestination::Invalid);
+    assert_eq!(doc.images[4].destination, NativeImageDestination::Invalid);
+    assert!(doc.spans.iter().all(|s| s.link.is_none()));
+    assert!(!text(&doc).contains("one"));
+    assert_eq!(
+        text(&render(&source).unwrap()).matches("[image]").count(),
+        5
+    );
+    assert!(render(&source).unwrap().images.is_empty());
+    let mut combined = String::new();
+    for index in 0..=doc.spans.len() {
+        for image in doc.images.iter().filter(|image| image.span_index == index) {
+            combined.push_str(&format!("[{}]", image.alt));
+        }
+        if let Some(span) = doc.spans.get(index) {
+            combined.push_str(&span.text);
+        }
+    }
+    assert_eq!(
+        combined,
+        "before [one bold][] after [remote] [bad] [unknown]"
+    );
+    let json = serde_json::to_value(&doc).unwrap();
+    assert_eq!(
+        json["images"][0]["destination"]["reference"]["kind"],
+        "short"
+    );
+    assert_eq!(
+        json["images"][1]["destination"]["reference"]["kind"],
+        "full"
+    );
+}
+
+#[test]
+fn media_mode_keeps_guards_inert_markup_and_atomic_limits() {
+    assert_eq!(
+        render_with_media(&"x".repeat(MAX_INPUT_BYTES + 1)),
+        Err(NativeRenderError::InputLimit)
+    );
+    assert_eq!(
+        render_with_media(&"- x\n".repeat(MAX_BLOCK_OPENERS + 1)),
+        Err(NativeRenderError::ComplexityLimit)
+    );
+    assert_eq!(
+        render_with_media(&"![](https://example.com/x)".repeat(MAX_IMAGES + 1)),
+        Err(NativeRenderError::ImageLimit)
+    );
+    assert_eq!(
+        render_with_media(&"![](https://example.com/x)".repeat(MAX_IMAGES))
+            .unwrap()
+            .images
+            .len(),
+        MAX_IMAGES
+    );
+    for destination in [
+        "data:image/png,x",
+        "file:///tmp/a",
+        "https://user:pass@example.com/a",
+        "rostra-media:unknown",
+    ] {
+        let doc = render_with_media(&format!("![alt]({destination})")).unwrap();
+        assert_eq!(doc.images[0].destination, NativeImageDestination::Invalid);
+    }
+    for source in [
+        "`![alt](https://example.com/a)`",
+        "`<img src='https://example.com/a'>`{=html}",
+    ] {
+        assert!(render_with_media(source).unwrap().images.is_empty());
+    }
+}
 
 fn text(document: &NativeDocument) -> String {
     document

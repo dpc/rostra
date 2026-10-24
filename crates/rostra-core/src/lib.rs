@@ -6,6 +6,7 @@ pub mod avatar;
 #[cfg(feature = "bincode")]
 pub mod bincode;
 pub mod event;
+pub mod media;
 pub mod retention;
 
 #[cfg(feature = "rand")]

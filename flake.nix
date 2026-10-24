@@ -135,6 +135,8 @@
                       cargo check --profile $CARGO_PROFILE --package rostra-core $combo
                     done
                     cargo test --profile $CARGO_PROFILE --package rostra-core --features raster-avatar avatar::
+                    cargo test --profile $CARGO_PROFILE --package rostra-client-db --features native-media native_media::
+                    cargo clippy --profile $CARGO_PROFILE --package rostra-client-db --features native-media --all-targets -- -D warnings
                   '';
                 };
 
