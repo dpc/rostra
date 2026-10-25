@@ -74,6 +74,22 @@ pub(crate) fn get(tx: &ReadTransaction, prefix: ShortRostraId) -> DbResult<Optio
         .map(|entry| entry.value()))
 }
 
+/// Checked exact full-ID evidence without typed value decoding or prefix
+/// aliases.
+pub(crate) fn contains_exact(tx: &ReadTransaction, identity: RostraId) -> DbResult<bool> {
+    let (prefix, rest) = identity.split();
+    let key = bincode::encode_to_vec(prefix, redb_bincode::BINCODE_CONFIG)
+        .map_err(|_| DbError::KnownPeopleInvariant)?;
+    let table = tx.open_table(&TABLE)?;
+    let Some(raw) = table.as_raw().get(key.as_slice())? else {
+        return Ok(false);
+    };
+    if raw.value().len() != 16 {
+        return Err(DbError::KnownPeopleInvariant);
+    }
+    Ok(raw.value() == rest.as_slice())
+}
+
 /// Deliberately bypass the collision guard to build corruption fixtures.
 #[cfg(test)]
 pub(crate) fn set_for_test(

@@ -1,5 +1,34 @@
 # Agent-browser security boundaries
 
+## Native local known-person reads
+
+`Database::search_known_people` traverses only the account's self/direct/two-hop
+active follow keys. It never substitutes the retained short-identity index for
+that graph. Raw checked keys, bounded nested continuation, eight profile
+observations per call, 2 MiB borrowed profile preflight and 1024-byte copied names
+bound local work without collecting the whole graph or allocating avatars.
+The shared web subsequence scorer is unchanged; the native reader's unavailable
+profile fields can reduce ranking coverage and carry a cumulative warning.
+Exhaustion ends a live traversal, not a cross-call snapshot/global-ranking claim.
+
+`lookup_known_person` checks exact self/direct membership before bounded
+two-hop traversal. Incomplete is not unknown. Exact retained event-author
+evidence and profile availability are separate from graph membership; short
+prefix collisions do not authenticate a full ID. Projected profile source
+envelopes are size-bounded and checked for signature, full author, kind,
+timestamp and short event ID. Names remain local projection data, not newly
+authenticated signed body data. Oversized/corrupt names can retain independent
+source-validated timestamps. No profile body is fetched or hashed, and no bio or
+avatar is returned. Raw missing-source or mismatched profiles are not identity
+evidence.
+
+Opaque in-process search and lookup cursors bind the query/target, account,
+database open and projection epoch. They cannot be supplied through serialized
+untrusted fields; hosts keep a bounded session slot and discard it on reset or
+account changes. Concurrent mutations require explicit refresh, and repeated
+calls do not start network discovery or scheduling. Hosts must bound concurrency
+and avoid the UI executor; there is no hard CPU deadline or process RSS limit.
+
 ## Native static-media upload and reuse
 
 `rostra-core::static_media` is an opt-in upload policy, not a change to historical

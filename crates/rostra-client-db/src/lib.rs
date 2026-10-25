@@ -17,6 +17,7 @@ mod events_content_missing_ops;
 mod extension;
 mod id_nodes_ops;
 mod ids_full;
+pub mod known_people;
 mod local_social_post;
 #[cfg(test)]
 mod local_social_post_tests;
@@ -357,6 +358,12 @@ pub type TableDumpResult<T> = std::result::Result<T, TableDumpError>;
 
 #[derive(Debug, Snafu)]
 pub enum DbError {
+    #[snafu(display("Known-person query exceeds 256 UTF-8 bytes"))]
+    KnownPeopleQuery,
+    #[snafu(display("Known-person cursor expired or mismatched; refresh explicitly"))]
+    KnownPeopleCursorStale,
+    #[snafu(display("Known-person read encountered corrupt index storage"))]
+    KnownPeopleInvariant,
     #[snafu(display("Author tag discovery bounds are outside the supported range"))]
     AuthorTagBounds,
     #[snafu(display("Author tag cursor expired or mismatched; explicitly refresh"))]

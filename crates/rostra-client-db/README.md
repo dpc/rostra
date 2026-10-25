@@ -9,6 +9,39 @@ Most applications should start with
 [`rostra-client`](https://docs.rs/rostra-client), which composes storage,
 transport, discovery, and synchronization.
 
+## Bounded local people search
+
+`Database::search_known_people(query, cursor)` searches only self, direct
+followees, and their followees. It preserves the web's Unicode lowercase,
+subsequence name/full-ID score, full-ID tie break, and ten-result limit for
+supported profiles in an unchanged graph. Each call replaces the prior results
+with cumulative best-so-far rows; do not append them. Empty pages can continue.
+Queries are limited to 256 UTF-8 bytes, graph advances to 128 per call, and
+profile observations to eight. Profile inspection borrows at most 2 MiB per
+record, copies at most 1024 name bytes, and never copies a bio or avatar.
+
+`Exhausted` means graph traversal ended, not a consistent snapshot or an
+unqualified global top ten. `unscorable_profiles` preserves coverage warnings
+even for candidates omitted from the result list. Missing profiles use the
+ordinary web ID fallback; oversized, corrupt or source-mismatched profiles have
+explicit field issues. Names are local projected metadata, not a fresh
+verification against signed content; timestamps require a matching retained,
+verified source envelope.
+
+`Database::lookup_known_person(full_id, cursor)` separates candidate-graph
+membership (`Known`, `Unknown`, `Incomplete`), exact retained-author evidence,
+and profile availability. Self/direct follows do not need an author-index entry.
+An incomplete scan must not be presented as unknown; unknown never means the
+identity does not exist globally. A short-prefix match is not full-ID evidence.
+
+Both cursors are opaque in-process values, bound to account, query/target, open
+instance and projection rebuild. Keep at most one per bounded host search
+session, discard on reset, and refresh after stale-cursor errors. Traversal is
+live: changed names and edges can invalidate rankings, and inserts behind the
+cursor require refresh. These APIs perform no network requests or mutations.
+Run calls off the UI executor and bound concurrency; byte/step limits are not a
+CPU deadline or a process RSS guarantee.
+
 ## Native retained media
 
 The opt-in `native-media` feature exposes
