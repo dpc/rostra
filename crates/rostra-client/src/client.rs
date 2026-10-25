@@ -34,6 +34,9 @@ use tracing::{debug, info, trace, warn};
 
 mod child_task;
 mod dm;
+mod dm_device_request;
+#[cfg(test)]
+mod dm_device_request_tests;
 #[cfg(test)]
 mod dm_tests;
 mod follow_ordering;

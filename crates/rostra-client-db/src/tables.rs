@@ -186,6 +186,10 @@ def_table! {
 pub(crate) use def_table;
 
 def_table! {
+    /// Permanent exact-intent local message-device receipts.
+    ids_dm_device_receipts: [u8; 16] => crate::dm_device_receipt::DmDeviceReceipt
+}
+def_table! {
     /// Non-replayable local messaging installation identity.
     ids_dm_installation: () => crate::dm::Installation
 }

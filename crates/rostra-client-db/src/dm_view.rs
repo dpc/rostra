@@ -266,25 +266,55 @@ impl Database {
     /// Read at most 64 own-account device announcements in device-ID order.
     ///
     /// This includes permanent retirements and expired latest announcements;
-    /// it never exposes local private epoch material.
+    /// it never exposes local private epoch material. Each visited raw key and
+    /// fixed-size value is decoded fallibly; corrupt rows never become absence.
     pub async fn dm_own_devices(
         &self,
         after: Option<[u8; 16]>,
         limit: usize,
     ) -> DbResult<Vec<([u8; 16], DeviceState)>> {
         self.read_with(|tx| {
-            let lower = after.map_or(Bound::Included((self.self_id, [0; 16])), |device| {
-                Bound::Excluded((self.self_id, device))
+            let prefix = bincode::encode_to_vec(self.self_id, redb_bincode::BINCODE_CONFIG)
+                .expect("encoding a device owner cannot fail");
+            let mut upper = prefix.clone();
+            let upper = upper
+                .iter()
+                .rposition(|byte| *byte != u8::MAX)
+                .map(|index| {
+                    upper[index] += 1;
+                    upper.truncate(index + 1);
+                    upper
+                });
+            let cursor = after.map(|device| {
+                bincode::encode_to_vec((self.self_id, device), redb_bincode::BINCODE_CONFIG)
+                    .expect("encoding a device cursor cannot fail")
             });
-            tx.open_table(&crate::ids_dm_devices::TABLE)?
-                .range((lower, Bound::Included((self.self_id, [255; 16]))))?
+            let lower = cursor
+                .as_deref()
+                .map_or(Bound::Included(prefix.as_slice()), Bound::Excluded);
+            let devices = tx.open_table(&crate::ids_dm_devices::TABLE)?;
+            devices
+                .as_raw()
+                .range::<&[u8]>((
+                    lower,
+                    upper.as_deref().map_or(Bound::Unbounded, Bound::Excluded),
+                ))?
                 .take(limit.min(64))
                 .map(|row| {
                     let (key, state) = row?;
-                    Ok((key.value_try()?.1, state.value_try()?))
+                    let (_, device): (RostraId, [u8; 16]) = decode_device_record(key.value())?;
+                    Ok((device, decode_device_record(state.value())?))
                 })
                 .collect()
         })
         .await
     }
+}
+
+fn decode_device_record<T: bincode::Decode<()>>(bytes: &[u8]) -> DbResult<T> {
+    let (value, consumed) = bincode::decode_from_slice(bytes, redb_bincode::BINCODE_CONFIG)?;
+    if consumed != bytes.len() {
+        return Err(bincode::error::DecodeError::Other("Trailing device record bytes").into());
+    }
+    Ok(value)
 }

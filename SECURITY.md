@@ -1,5 +1,39 @@
 # Agent-browser security boundaries
 
+## Durable message-device lifecycle commands
+
+`Client::mutate_direct_message_device_idempotent` requires a matching caller
+secret and full active, open client before reading any receipt. Runtime activity
+is not UI authentication: web and native hosts must enforce their own requesting
+session boundary. The lower-level database signing method is a trusted
+integration primitive, not an authorization interface.
+
+Persist one random request ID with its exact public intention before calling.
+Retirement names one known nonretired own device ID, not a label or epoch key.
+Enrollment requires either no local installation or one exact retired local ID;
+it never revives that ID. Background auto-enrollment can make an absent
+expectation stale. Accepted retries resolve before lifecycle and capacity checks
+and return the original outcome, even after later retirement. Reusing an accepted
+ID with different intent is a typed mismatch. A new stale request is a typed
+conflict, not permission to retarget or silently refresh the expectation.
+
+Schema-41 receipts store only exact public intent, public announcement and signed
+envelope. Installation replacement, fresh independent epoch creation, signed
+announcement admission and receipt commit in one serialized transaction. Failure
+before commit rolls all of them back; cancellation or a lost acknowledgment does
+not establish rollback. No pending private key crosses an async boundary.
+Permanent receipts survive reopen and total rebuild outside payload quotas.
+They reveal public operations and their local correlation, never message history
+or secret keys. This does not add forensic erasure or storage encryption.
+
+Success means local acceptance, not distributed compare-and-swap, delivery,
+reachability or present eligibility. Retry protection is local to this database
+lineage, not independent/restored copies. Permanent retirement still dominates
+delayed active announcements; it does not retire another ID, erase history, or
+extend/delete the old receive epochs. Existing raw/web methods retain their
+previous behavior and do not acquire this new durable retry contract. Older
+schema-40 binaries reject a schema-41 database instead of downgrading it.
+
 ## Native local known-person reads
 
 `Database::search_known_people` traverses only the account's self/direct/two-hop

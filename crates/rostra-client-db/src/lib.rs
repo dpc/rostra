@@ -4,6 +4,10 @@ mod author_tags_read;
 mod author_tags_tests;
 mod current_state;
 pub mod dm;
+mod dm_device_receipt;
+pub mod dm_device_request;
+#[cfg(test)]
+mod dm_device_request_tests;
 mod dm_index;
 #[cfg(test)]
 mod dm_index_tests;
@@ -515,6 +519,15 @@ pub enum DbError {
     DmMigrationPending,
     #[snafu(display("No eligible direct-message device is known for the recipient"))]
     DmRecipientUnavailable,
+    /// An accepted lifecycle request ID was reused for a different intention.
+    #[snafu(display("Message-device request ID already committed with different intent"))]
+    DmDeviceRequestMismatch,
+    /// The exact local incarnation or own-device lifecycle no longer matches.
+    #[snafu(display("Message-device lifecycle state does not match the request"))]
+    DmDeviceStateConflict,
+    /// Invalid local signing authority, generated candidate, or receipt.
+    #[snafu(display("Invalid message-device candidate or receipt"))]
+    DmDeviceCandidate,
     #[snafu(display("Invalid direct-message state"))]
     DirectMessage { source: rostra_dm::Error },
     #[snafu(display(

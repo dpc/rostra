@@ -94,7 +94,8 @@ pub(crate) struct LegacyEventReceivedRecord {
 // epoch.
 // Version 39 adds permanent, non-replayable shoutbox request receipts.
 // Version 40 adds permanent normalized-media request receipts.
-const DB_VER: u64 = 40;
+// Version 41 adds permanent exact-intent message-device lifecycle receipts.
+const DB_VER: u64 = 41;
 
 /// Versions older than this require a total migration.
 ///
@@ -175,6 +176,7 @@ impl Database {
         tx.open_table(&crate::shoutbox_request_receipts::TABLE)?;
         tx.open_table(&crate::social_post_receipts::TABLE)?;
         tx.open_table(&crate::media_request_receipts::TABLE)?;
+        tx.open_table(&crate::ids_dm_device_receipts::TABLE)?;
         tx.open_table(&crate::social_post_mutation_receipts::TABLE)?;
         tx.open_table(&crate::social_reaction_receipts::TABLE)?;
         tx.open_table(&crate::social_news_receipts::TABLE)?;
@@ -633,6 +635,7 @@ impl Database {
                 // Keep it in place throughout stash/recovery, byte-for-byte.
                 || name == "social_post_receipts"
                 || name == "media_request_receipts"
+                || name == "ids_dm_device_receipts"
                 || name == "social_post_mutation_receipts"
                 || name == "social_reaction_receipts"
                 || name == "social_news_receipts"
