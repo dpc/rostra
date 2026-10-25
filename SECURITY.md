@@ -122,6 +122,16 @@ returned before a concurrent deletion. Missing, unsupported, invalid, oversized
 and mismatched content must be presented honestly. There is no CPU deadline or
 process RSS bound, third-party fetch, or new persistent media cache.
 
+The additive `read_native_media_opaque` shares those retained-envelope,
+signature, exact identity, lifecycle, signed/stored-length, hash and complete
+CBOR checks. It omits only the image MIME/raster policy for explicit opaque
+export. Original bytes remain bounded at 1,000,000; the original MIME is at most
+64 UTF-8 bytes of untrusted metadata, not validated syntax or a safe filename,
+extension or content-handler choice. Availability does not promise safe
+execution, opening or display, even when the declaration says PNG/WebP.
+Image presentation and own-image listing retain their existing policies.
+The same source-post-author and snapshot/re-read obligations apply.
+
 The native renderer checks input size and a conservative recursive-block-opener
 budget before constructing jotup's eager parser, then separately bounds event
 depth/count and owned output. The guard is tied to the exact pinned jotup 0.10.0

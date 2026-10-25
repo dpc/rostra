@@ -62,6 +62,23 @@ bound concurrent work off the UI executor, and re-read on later presentation
 (including offline redisplay). Availability is a snapshot, not an enduring cache
 capability. No CPU deadline or process RSS bound is claimed.
 
+For explicit opaque Save/export, the same feature also exposes
+`Database::read_native_media_opaque(author, MediaEventReference)`, returning
+`DbResult<OpaqueMediaRead>`. Its `Available { author, event_id, mime, data }`
+preserves exact original bytes and full identity under the same authentication,
+lifecycle, hash, storage and complete CBOR bounds. It omits raster validation:
+JPEG, video and arbitrary bytes may be available, without being safe to execute,
+open or display. The original `mime: String` is at most 64 UTF-8 bytes of
+untrusted metadata, not validated syntax or a filename/extension/dispatch policy.
+The 1,000,000-byte data limit and existing CBOR subset still apply; historical
+alternative encodings remain `Unsupported`. `Missing`, `Deleted`, `Pruned`,
+`Invalid`, `Unsupported`, `TooLarge` and `Mismatch` carry no bytes, while database
+operation failures remain outer `DbError`s. The same actual-source-author,
+explicit-load, bounded-concurrency and later-use lifecycle recheck obligations
+apply. No network, signing, writes or persistent cache are added. Rust clients
+can call this through `Client::db()`; bindings should preserve the distinction
+between media outcomes and database failures.
+
 `Database::list_own_media` returns bounded pages of own-author retained candidate
 metadata without pixel decoding or full image allocation. Each candidate carries
 a full event ID and `RequiresReadValidation`, not a safe-image claim. Call

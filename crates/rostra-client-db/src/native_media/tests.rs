@@ -10,6 +10,8 @@ use rostra_core::id::RostraIdSecretKey;
 use super::*;
 use crate::event::{ContentStoreRecord, EventContentState};
 
+mod opaque;
+
 // Complete grayscale 3x2 PNG, with no external fixture/package dependency.
 const PNG: &[u8] = &[
     137, 80, 78, 71, 13, 10, 26, 10, 0, 0, 0, 13, 73, 72, 68, 82, 0, 0, 0, 3, 0, 0, 0, 2, 8, 0, 0,
@@ -160,6 +162,10 @@ async fn lifecycle_is_checked_before_shared_content_and_reads_never_schedule_fet
                 db.read_native_media(secret.id(), reference).await?,
                 expected
             );
+            assert_eq!(
+                validate(db.read_native_media_opaque(secret.id(), reference).await?),
+                expected
+            );
         }
         db.read_with(|tx| {
             assert_eq!(
@@ -218,6 +224,10 @@ async fn corrupt_storage_cannot_substitute_media_or_force_unbounded_allocation()
             db.read_native_media(secret.id(), reference).await?,
             expected
         );
+        assert_eq!(
+            validate(db.read_native_media_opaque(secret.id(), reference).await?),
+            expected
+        );
     }
     // Correct envelope hash but corrupt signature cannot authorize the payload.
     let other = signed(
@@ -230,6 +240,10 @@ async fn corrupt_storage_cannot_substitute_media_or_force_unbounded_allocation()
     assert_eq!(
         db.read_native_media(secret.id(), reference).await?,
         NativeMediaRead::Invalid
+    );
+    assert_eq!(
+        db.read_native_media_opaque(secret.id(), reference).await?,
+        OpaqueMediaRead::Invalid
     );
     Ok(())
 }
@@ -338,12 +352,14 @@ async fn retained_metadata_survives_presentation_byte_for_byte() -> anyhow::Resu
 fn cbor_preflight_rejects_nested_duplicate_trailing_and_noncanonical_values() {
     let canonical = body("image/png", PNG);
     assert_eq!(
-        payload::decode(canonical.as_ref()).unwrap(),
+        payload::decode(canonical.as_ref(), true).unwrap(),
         ("image/png", PNG.to_vec())
     );
     // All truncated prefixes fail before image bytes are returned.
     for end in 0..canonical.len() {
-        assert!(payload::decode(&canonical.as_ref()[..end]).is_err());
+        for image_only in [false, true] {
+            assert!(payload::decode(&canonical.as_ref()[..end], image_only).is_err());
+        }
     }
     for bytes in [
         b"\xa2\x61m\x69image/png\x61m\x69image/png".as_slice(),
@@ -357,17 +373,19 @@ fn cbor_preflight_rejects_nested_duplicate_trailing_and_noncanonical_values() {
         b"\xa2\x61m\x69image/png\x61d\xc0\x80".as_slice(),
         b"\xa2\x61m\x69image/png\x61d\x80\x00".as_slice(),
     ] {
-        assert!(payload::decode(bytes).is_err(), "{bytes:?}");
+        for image_only in [false, true] {
+            assert!(payload::decode(bytes, image_only).is_err(), "{bytes:?}");
+        }
     }
     assert_eq!(
-        payload::decode(b"\xa2\x61d\x80\x61m\x69image/png").unwrap(),
+        payload::decode(b"\xa2\x61d\x80\x61m\x69image/png", true).unwrap(),
         ("image/png", vec![])
     );
     // The maximum canonical integer representation fits the body policy.
     let maximum = body("image/png", &vec![255; 1_000_000]);
     assert!(maximum.len() <= MAX_NATIVE_MEDIA_BODY_BYTES);
     assert_eq!(
-        payload::decode(maximum.as_ref()).unwrap().1.len(),
+        payload::decode(maximum.as_ref(), true).unwrap().1.len(),
         1_000_000
     );
 }
