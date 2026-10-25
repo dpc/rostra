@@ -511,4 +511,6 @@ fn content_is_terminal(content_state: Option<EventContentState>) -> bool {
 }
 
 #[cfg(test)]
+mod bootstrap_tests;
+#[cfg(test)]
 mod tests;

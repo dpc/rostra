@@ -3,6 +3,68 @@ use rostra_core::id::RostraIdSecretKey;
 use super::*;
 
 #[tokio::test(start_paused = true)]
+async fn ordinary_work_cannot_cancel_an_already_consumed_holder_wake() {
+    let mut sender = dedup_chan::Sender::new();
+    let mut receiver = sender.subscribe(1);
+    let hints = tokio::sync::Notify::new();
+    hints.notify_one();
+    assert_eq!(
+        wait_for_work(&mut receiver, None, &hints, None).await,
+        WakeReason::HolderNotified
+    );
+    let started = tokio::time::Instant::now();
+    let hint_deadline = Some(started + INITIAL_RETRY_DELAY);
+    let author = RostraIdSecretKey::from_bytes([46; 32]).id();
+    sender.send(author);
+    assert_eq!(
+        wait_for_work(&mut receiver, None, &hints, hint_deadline).await,
+        WakeReason::Notification(author)
+    );
+    assert_eq!(
+        wait_for_work(
+            &mut receiver,
+            Some(started + Duration::from_millis(500)),
+            &hints,
+            hint_deadline
+        )
+        .await,
+        WakeReason::RetryDeadline
+    );
+    assert_eq!(
+        wait_for_work(&mut receiver, None, &hints, hint_deadline).await,
+        WakeReason::HolderChanged
+    );
+    assert_eq!(started.elapsed(), INITIAL_RETRY_DELAY);
+}
+
+#[tokio::test(start_paused = true)]
+async fn active_holder_pass_keeps_only_one_coalesced_followup_wake() {
+    let sender = dedup_chan::Sender::<RostraId>::new();
+    let mut receiver = sender.subscribe(1);
+    let hints = tokio::sync::Notify::new();
+    for _ in 0..1000 {
+        hints.notify_one();
+    }
+    let deadline = Some(tokio::time::Instant::now() + INITIAL_RETRY_DELAY);
+    assert_eq!(
+        wait_for_work(&mut receiver, None, &hints, deadline).await,
+        WakeReason::HolderChanged
+    );
+    assert_eq!(
+        wait_for_work(&mut receiver, None, &hints, None).await,
+        WakeReason::HolderNotified
+    );
+    assert!(
+        tokio::time::timeout(
+            INITIAL_RETRY_DELAY,
+            wait_for_work(&mut receiver, None, &hints, None)
+        )
+        .await
+        .is_err()
+    );
+}
+
+#[tokio::test(start_paused = true)]
 async fn retry_deadline_wakes_without_another_notification() {
     let sender = dedup_chan::Sender::<RostraId>::new();
     let mut receiver = sender.subscribe(1);

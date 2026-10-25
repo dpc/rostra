@@ -13,7 +13,23 @@ use tokio::sync::{Mutex, OnceCell};
 use tracing::{debug, trace};
 
 use crate::error::ConnectResult;
+use crate::holder_hints::{HolderHint, HolderHints};
 use crate::net::ClientNetworking;
+
+/// A normal account route or one bounded, untrusted holder attempt.
+#[derive(Clone, Copy)]
+enum FetchPeer {
+    Account(RostraId),
+    Holder,
+}
+
+/// Keep an ordinary route first, including when payload capacity allows one
+/// read.
+fn fetch_peers(peers: &[RostraId]) -> Vec<FetchPeer> {
+    let mut result: Vec<_> = peers.iter().copied().map(FetchPeer::Account).collect();
+    result.insert(result.len().min(1), FetchPeer::Holder);
+    result
+}
 
 const LOG_TARGET: &str = "rostra-client::connection-cache";
 const CLEANUP_INTERVAL: u64 = 64;
@@ -58,6 +74,8 @@ pub struct ConnectionCache {
     connections: Arc<Mutex<HashMap<RostraId, LazySharedConnection>>>,
     access_count: Arc<AtomicU64>,
     peer_operation_deadline: Duration,
+    /// Untrusted content routes, separate from the account connection cache.
+    pub(crate) holders: Arc<HolderHints>,
 }
 
 impl Default for ConnectionCache {
@@ -72,6 +90,7 @@ impl ConnectionCache {
             connections: Arc::new(Mutex::new(HashMap::new())),
             access_count: Arc::new(AtomicU64::new(0)),
             peer_operation_deadline: crate::task::outbound_deadline::PEER_OPERATION_DEADLINE,
+            holders: Arc::new(HolderHints::new()),
         }
     }
 
@@ -187,6 +206,7 @@ impl ConnectionCache {
     /// Try to fetch an event from multiple peers with some parallelism.
     ///
     /// Returns `Some(event)` from the first peer that has it, or `None`.
+    #[cfg(test)]
     pub async fn get_event_from_peers(
         &self,
         networking: &ClientNetworking,
@@ -194,17 +214,53 @@ impl ConnectionCache {
         author_id: RostraId,
         event_id: ShortEventId,
     ) -> Option<VerifiedEvent> {
+        self.get_event_with_source(networking, peers, author_id, event_id)
+            .await
+            .map(|(event, _)| event)
+    }
+
+    /// Fetch a verified envelope and preserve a holder deadline for
+    /// post-admission propagation.
+    pub(crate) async fn get_event_with_source(
+        &self,
+        networking: &ClientNetworking,
+        peers: &[RostraId],
+        author_id: RostraId,
+        event_id: ShortEventId,
+    ) -> Option<(VerifiedEvent, Option<HolderHint>)> {
         let result = futures_lite::StreamExt::find_map(
-            &mut stream::iter(peers.iter().copied())
-                .map(|peer_id| {
+            &mut stream::iter(fetch_peers(peers))
+                .map(|peer| {
                     let cache = self.clone();
                     async move {
+                        let hint = if matches!(peer, FetchPeer::Holder) {
+                            let _permit = cache.holders.operations.try_acquire().ok()?;
+                            let attempt = cache.holders.attempt(author_id, event_id)?;
+                            let hint = attempt.hint;
+                            let event = tokio::time::timeout(
+                                hint.timeout().min(cache.peer_operation_deadline),
+                                async {
+                                    let conn = cache.connect_holder(networking, hint).await?;
+                                    conn.get_event(author_id, event_id).await.ok().flatten()
+                                },
+                            )
+                            .await
+                            .ok()
+                            .flatten()?;
+                            attempt.succeeded();
+                            return Some((event, Some(hint)));
+                        } else {
+                            None
+                        };
+                        let FetchPeer::Account(peer_id) = peer else {
+                            unreachable!()
+                        };
                         crate::task::outbound_deadline::within(
                             cache.peer_operation_deadline,
                             async move {
                                 let conn = cache.get_or_connect(networking, peer_id).await.ok()?;
                                 match conn.get_event(author_id, event_id).await {
-                                    Ok(Some(event)) => Some(event),
+                                    Ok(Some(event)) => Some((event, hint)),
                                     Ok(None) => {
                                         debug!(
                                             target: LOG_TARGET,
@@ -245,6 +301,24 @@ impl ConnectionCache {
         }
 
         result
+    }
+
+    /// Redial only an authenticated endpoint ID using configured
+    /// discovery/privacy policy.
+    async fn connect_holder(
+        &self,
+        networking: &ClientNetworking,
+        hint: HolderHint,
+    ) -> Option<Connection> {
+        if hint.endpoint == networking.endpoint.id() {
+            return None;
+        }
+        networking
+            .endpoint
+            .connect(hint.endpoint, rostra_p2p_api::ROSTRA_P2P_V0_ALPN)
+            .await
+            .ok()
+            .map(Connection::from)
     }
 
     /// Try to fetch event content from multiple peers with some parallelism.
@@ -303,6 +377,14 @@ impl ConnectionCache {
             peers.iter().copied(),
             preferred,
         );
+        // When only one read fits, every ordinary candidate gets its chance
+        // before a hinted peer can retain those buffers. With spare capacity,
+        // the hint still races within the same four slots.
+        let peers: Vec<_> = peers
+            .into_iter()
+            .map(FetchPeer::Account)
+            .chain([FetchPeer::Holder])
+            .collect();
         let result = crate::payload_read_race::race_payload_reads(
             &peers,
             || {
@@ -311,9 +393,37 @@ impl ConnectionCache {
                 let conversion = reservation.map(|r| r.try_acquire_buffer()).transpose()?;
                 Ok((buffer, conversion))
             },
-            |peer_id, (buffer, conversion)| {
+            |peer, (buffer, conversion)| {
                 let cache = self.clone();
                 async move {
+                    if matches!(peer, FetchPeer::Holder) {
+                        let _permit = cache.holders.operations.try_acquire().ok()?;
+                        let attempt = cache
+                            .holders
+                            .attempt(event.author(), event.event_id.to_short())?;
+                        let hint = attempt.hint;
+                        let payload = tokio::time::timeout(
+                            hint.timeout().min(cache.peer_operation_deadline),
+                            async {
+                                let conn = cache.connect_holder(networking, hint).await?;
+                                let (content, (buffer, conversion)) = conn
+                                    .get_event_content_with_guard(event, (buffer, conversion))
+                                    .await
+                                    .ok()
+                                    .flatten()?;
+                                drop(conversion);
+                                Some(crate::acquired_payload::AcquiredPayload { content, buffer })
+                            },
+                        )
+                        .await
+                        .ok()
+                        .flatten()?;
+                        attempt.succeeded();
+                        return Some(payload);
+                    }
+                    let FetchPeer::Account(peer_id) = peer else {
+                        unreachable!()
+                    };
                     crate::task::outbound_deadline::within(
                         crate::task::outbound_deadline::PEER_OPERATION_DEADLINE,
                         async move {

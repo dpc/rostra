@@ -25,6 +25,9 @@ enum PeerBehavior {
     HangEvent,
     Missing,
     Event(SignedEvent),
+    Content(EventContentRaw),
+    GatedContent(EventContentRaw, Arc<Notify>),
+    HangContent,
 }
 
 struct TestPeer {
@@ -45,12 +48,31 @@ async fn handle_test_peer_rpc(
         .await
         .expect("RPC request");
     match rpc_id {
+        RpcId::PING => {
+            let request =
+                PingRequest::decode_whole::<MAX_REQUEST_SIZE>(&request).expect("decode ping");
+            if matches!(behavior, PeerBehavior::HangPing) {
+                event_request_received.notify_one();
+                std::future::pending::<()>().await;
+            }
+            Connection::write_success_return_code(&mut send)
+                .await
+                .expect("ping success");
+            Connection::write_message(&mut send, &PingResponse(request.0))
+                .await
+                .expect("ping response");
+            send.finish().expect("finish ping response");
+        }
         RpcId::GET_EVENT => {
             GetEventRequest::decode_whole::<MAX_REQUEST_SIZE>(&request).expect("decode GET_EVENT");
             event_request_received.notify_one();
             match behavior {
                 PeerBehavior::HangEvent => std::future::pending::<()>().await,
-                PeerBehavior::Missing | PeerBehavior::HangPing => {
+                PeerBehavior::Missing
+                | PeerBehavior::HangPing
+                | PeerBehavior::Content(_)
+                | PeerBehavior::GatedContent(_, _)
+                | PeerBehavior::HangContent => {
                     Connection::write_success_return_code(&mut send)
                         .await
                         .expect("GET_EVENT success");
@@ -74,52 +96,64 @@ async fn handle_test_peer_rpc(
             GetEventContentRequest::decode_whole::<MAX_REQUEST_SIZE>(&request)
                 .expect("decode GET_EVENT_CONTENT");
             content_request_received.notify_one();
+            let content = match behavior {
+                PeerBehavior::Content(content) => Some(content),
+                PeerBehavior::GatedContent(content, gate) => {
+                    gate.notified().await;
+                    Some(content)
+                }
+                PeerBehavior::HangContent => std::future::pending().await,
+                _ => None,
+            };
             Connection::write_success_return_code(&mut send)
                 .await
                 .expect("GET_EVENT_CONTENT success");
-            Connection::write_message(&mut send, &GetEventContentResponse(false))
+            Connection::write_message(&mut send, &GetEventContentResponse(content.is_some()))
                 .await
                 .expect("missing content response");
+            if let Some(content) = content {
+                Connection::write_bao_content(
+                    &mut send,
+                    content.as_slice(),
+                    content.compute_content_hash(),
+                )
+                .await
+                .expect("content response");
+            }
             send.finish().expect("finish missing content response");
         }
         _ => panic!("unexpected RPC {rpc_id}"),
     }
 }
 
+mod holder_tests;
+
 async fn run_test_peer(peer: TestPeer) {
-    let incoming = peer.endpoint.accept().await.expect("incoming connection");
-    let connection = incoming
-        .accept()
-        .expect("accept connection")
-        .await
-        .expect("complete handshake");
-
-    let (mut send, mut recv) = connection.accept_bi().await.expect("ping stream");
-    let (rpc_id, request) = Connection::read_request_raw(&mut recv)
-        .await
-        .expect("ping request");
-    assert_eq!(rpc_id, RpcId::PING);
-    let request = PingRequest::decode_whole::<MAX_REQUEST_SIZE>(&request).expect("decode ping");
-    if matches!(peer.behavior, PeerBehavior::HangPing) {
-        peer.event_request_received.notify_one();
-        std::future::pending::<()>().await;
-    }
-    Connection::write_success_return_code(&mut send)
-        .await
-        .expect("ping success");
-    Connection::write_message(&mut send, &PingResponse(request.0))
-        .await
-        .expect("ping response");
-    send.finish().expect("finish ping response");
-
-    while let Ok((send, recv)) = connection.accept_bi().await {
-        tokio::spawn(handle_test_peer_rpc(
-            send,
-            recv,
-            peer.behavior.clone(),
-            Arc::clone(&peer.event_request_received),
-            Arc::clone(&peer.content_request_received),
-        ));
+    let mut connections = tokio::task::JoinSet::new();
+    loop {
+        tokio::select! {
+            incoming = peer.endpoint.accept() => {
+                let Some(incoming) = incoming else { break };
+                let behavior = peer.behavior.clone();
+                let events = peer.event_request_received.clone();
+                let contents = peer.content_request_received.clone();
+                connections.spawn(async move {
+                    let connection = incoming.accept().unwrap().await.unwrap();
+                    let mut requests = tokio::task::JoinSet::new();
+                    loop {
+                        tokio::select! {
+                            stream = connection.accept_bi() => {
+                                let Ok((send, recv)) = stream else { break };
+                                requests.spawn(handle_test_peer_rpc(send, recv, behavior.clone(), events.clone(), contents.clone()));
+                            },
+                            Some(result) = requests.join_next(), if !requests.is_empty() => { result.unwrap(); }
+                        }
+                    }
+                    requests.shutdown().await;
+                });
+            },
+            Some(result) = connections.join_next(), if !connections.is_empty() => { result.unwrap(); }
+        }
     }
 }
 
@@ -183,11 +217,30 @@ async fn make_test_network(
         .bind()
         .await
         .expect("local endpoint");
+    // No default DHT/relay traffic, even if a regression reaches discovery.
+    let relay = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let mut pkarr = pkarr::Client::builder();
+    pkarr
+        .no_default_network()
+        .request_timeout(Duration::from_millis(100))
+        .relays(&[format!("http://{}", relay.local_addr().unwrap())])
+        .unwrap()
+        .reqwest_client(
+            reqwest_13::Client::builder()
+                .no_proxy()
+                .tls_certs_only([])
+                .timeout(Duration::from_millis(100))
+                .build()
+                .unwrap(),
+        );
+    let pkarr =
+        crate::PkarrClient::build(pkarr, std::num::NonZeroUsize::new(32).unwrap(), 30, 30).unwrap();
     let local = Client::builder(local_secret.id())
         .db(Database::new_in_memory(local_secret.id())
             .await
             .expect("database"))
         .iroh_endpoint(local_endpoint)
+        .pkarr_client(Arc::new(pkarr))
         .start_request_handler(false)
         .start_background_tasks(false)
         .build()

@@ -99,6 +99,60 @@ of Trust. Event signatures authenticate Rostra authors. Unsigned routing fields,
 claimed identities, event IDs, and other response metadata remain
 peer-controlled until explicitly bound to verified signed data.
 
+Accepted `FEED_EVENT` headers can supply ephemeral **content-holder hints**.
+Admission still requires the existing author policy, signature and size checks,
+successful database header admission, and an exact retained full-envelope match.
+The authenticated Iroh remote endpoint is only a possible holder of that
+author/event and its signed direct parents, not the signing account's owner.
+Hints never change `ids_nodes`, account discovery or cached account connections,
+add traversal roots, or request plaintext or decryption outcomes. Fetched
+ancestors propagate a source only after ordinary response verification and
+database acceptance. Payload hash/length, lifecycle and buffer admission remain
+unchanged.
+
+Each runtime retains at most 1024 `(author, short event ID)` keys and two
+endpoints per key, without an auxiliary eviction queue. Observations expire
+after ten monotonic minutes; duplicates refresh neither expiry nor backoff,
+and ancestor propagation inherits the original expiry. New distinct sources
+can replace incumbents, so poisoned observations do not permanently exclude a
+later honest holder; this is bounded routing assistance, not Sybil resistance
+or guaranteed discovery. Each header or payload acquisition tries at most one
+hint. Failure/cancellation applies exponential 1–60-second cooldown, and every
+holder operation has at most five seconds, further limited by its inherited
+expiry and the caller's deadline. Four non-waiting runtime-wide permits bound
+holder operations, which also consume slots inside the existing four-way
+fetch race. Ordinary headers start first; all ordinary payload candidates
+precede the hint, so a sole available buffer pair cannot be monopolized by a
+hint before ordinary fallback gets its turn.
+
+Holder reads redial only the observed endpoint ID through the configured Iroh
+discovery and relay/privacy policy. They retain no supplied socket addresses,
+relay URLs, reverse-RPC assumption, connection cache, strong Client reference
+or detached worker. Existing tracked task cancellation drops reads, buffers and
+permits. Post-admission insertion coalesces a missing-header wakeup with a
+one-second delay, including duplicate retained heads and newly observed sources.
+The same worker follows already-retained intermediates through one frozen
+snapshot of at most 1024 keys/two observations each. It advances at most 32
+header reads (at most 1024 encoded bytes each) per turn, at least one second
+apart, finishing unchanged early batches before stopping. One Notify permit
+coalesces changes into a later pass; snapshots never queue. Every propagated
+source is rechecked for current membership and its original expiry under the
+insertion lock. Retained headers recheck signature, author, short key and full
+computed envelope; malformed storage is a local DB failure, not a missing peer.
+Ordinary header race winners and cached headers can extend already-observed
+provenance, but cannot invent a holder from their winning account route.
+Duplicate roots preserve their original deadline even when descendant keys
+were evicted. This scan creates routing candidates only; durable wanted-work
+paths still decide what to fetch. Missing-content retries keep their durable
+scheduling/backoff rather than resetting it on every hint.
+
+Restart discards all hints while durable missing-parent work remains. Restart
+before convergence can therefore lose the only useful route until another feed
+or ordinary discovery supplies it; this is not crash-resumable discovery.
+Normally ingested signed announcements persist independently. This limitation
+does not alter durable device-operation receipts or imply that synthetic local
+bootstrap success proves native/relay convergence.
+
 For `WAIT_FOLLOWERS_NEW_HEADS`, consumers must enforce this order:
 
 1. require the response's claimed author to equal the event author and verify

@@ -107,6 +107,14 @@ cryptographic audit. Caller extension tables are trusted in-process state
 outside core replay invariants and remain the extension owner's compatibility
 responsibility.
 
+`try_get_event` is the bounded, fallible envelope reader for retained routing
+checks. It looks up only the canonical encoded short key, admits at most 1024
+borrowed bytes before decoding, requires complete decoding and matches the
+recomputed short envelope ID. Storage/encoding failures remain errors, never
+absence. It does not authenticate signatures or authors; the client must
+reverify both before deriving holder routes. It reads no payload or private
+device state and changes no schema or existing compatibility read API.
+
 The SocialPost materialization feed stores event identities, not payload copies.
 A scan therefore trusts retained events, lifecycle tables, replacement metadata,
 and the content store as one coherent snapshot. Missing events, impossible

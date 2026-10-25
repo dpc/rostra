@@ -91,6 +91,8 @@ mod relationship_read;
 mod relationship_selector;
 #[cfg(test)]
 mod relationship_tests;
+#[cfg(test)]
+mod retained_event_read_tests;
 mod retention;
 mod retention_index;
 #[cfg(test)]
@@ -1272,6 +1274,42 @@ impl Database {
         })
         .await
         .expect("Database panic")
+    }
+
+    /// Read one retained envelope through its canonical short key.
+    ///
+    /// Reject more than 1024 encoded bytes, incomplete decoding and a
+    /// mismatched envelope key. This does not authenticate the signature;
+    /// callers using retained data as routing evidence must verify it
+    /// separately.
+    pub async fn try_get_event(
+        &self,
+        event_id: impl Into<ShortEventId>,
+    ) -> DbResult<Option<crate::event::EventRecord>> {
+        let event_id = event_id.into();
+        self.read_with(|tx| {
+            let events_table = tx.open_table(&events::TABLE)?;
+            let key = bincode::encode_to_vec(event_id, redb_bincode::BINCODE_CONFIG)
+                .map_err(|error| -> BoxedError { Box::new(error) })?;
+            let Some(row) = events_table.as_raw().get(key.as_slice())? else {
+                return Ok(None);
+            };
+            let raw = row.value();
+            if raw.len() > 1024 {
+                return Err(
+                    bincode::error::DecodeError::Other("Oversized retained envelope").into(),
+                );
+            }
+            let (event, used): (crate::event::EventRecord, usize) =
+                bincode::decode_from_slice(raw, redb_bincode::BINCODE_CONFIG)?;
+            if used != raw.len() || event.signed.compute_short_id() != event_id {
+                return Err(
+                    bincode::error::DecodeError::Other("Mismatched retained envelope").into(),
+                );
+            }
+            Ok(Some(event))
+        })
+        .await
     }
 
     pub async fn get_event(

@@ -309,12 +309,13 @@ impl RequestHandler {
                     // RPCs (WAIT_HEAD_UPDATE, WAIT_FOLLOWERS_NEW_HEADS) don't
                     // prevent other RPCs on the same connection from being accepted.
                     let handler = self.clone();
+                    let source = conn.remote_id();
                     let Some(task) = self.tasks.spawn_child(async move {
                         let request = async {
                             match rpc_id {
                                 RpcId::PING => handler.handle_ping_request(req_msg, send).await,
                                 RpcId::FEED_EVENT => {
-                                    handler.handle_feed_event(req_msg, send, recv).await
+                                    handler.handle_feed_event(req_msg, send, recv, source).await
                                 }
                                 RpcId::GET_EVENT => {
                                     handler.handle_get_event(req_msg, send, recv).await
@@ -379,6 +380,7 @@ impl RequestHandler {
         req_msg: Vec<u8>,
         mut send: iroh::endpoint::SendStream,
         mut read: iroh::endpoint::RecvStream,
+        source: iroh::EndpointId,
     ) -> Result<(), IncomingConnectionError> {
         let FeedEventRequest(event) =
             FeedEventRequest::decode_whole::<MAX_REQUEST_SIZE>(&req_msg).context(DecodingSnafu)?;
@@ -411,7 +413,26 @@ impl RequestHandler {
                 return Ok(());
             }
 
-            match client.db().prepare_payload_acquisition(&event).await? {
+            let (inserted, _) = client.db().try_process_event(&event).await?;
+            // Header admission has committed, including duplicate/empty heads.
+            // A transport is only a potential holder, never the event's author.
+            client
+                .connection_cache()
+                .holders
+                .observe_retained(client.db(), &event, source)
+                .await?;
+            if matches!(
+                inserted,
+                rostra_client_db::InsertEventOutcome::Inserted { .. }
+            ) {
+                client
+                    .connection_cache()
+                    .holders
+                    .inherit_known_retained(client.db(), &event, true)
+                    .await?;
+            }
+            let admission = client.db().prepare_payload_acquisition(&event).await?;
+            match admission {
                 rostra_client_db::PayloadReservationOutcome::Disabled => None,
                 rostra_client_db::PayloadReservationOutcome::Reserved(reservation) => {
                     Some(reservation)

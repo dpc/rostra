@@ -39,6 +39,7 @@ pub(crate) async fn get_event_content_from_followers(
         "Fetching event content from followers"
     );
 
+    let mut inserted = false;
     let event = if let Some(event_record) = db
         .get_event(event_id)
         .await
@@ -52,15 +53,26 @@ pub(crate) async fn get_event_content_from_followers(
             %event_id,
             "Event not in DB, fetching from peers first"
         );
-        let Some(event) = connections_cache
-            .get_event_from_peers(networking, &peers, author_id, event_id)
+        let Some((event, source)) = connections_cache
+            .get_event_with_source(networking, &peers, author_id, event_id)
             .await
         else {
             return Ok(false);
         };
-        db.try_process_event(&event).await?;
+        let (outcome, _) = db.try_process_event(&event).await?;
+        inserted = matches!(outcome, InsertEventOutcome::Inserted { .. });
+        if let Some(source) = source {
+            connections_cache
+                .holders
+                .inherit_retained(db, &event, source)
+                .await?;
+        }
         event
     };
+    connections_cache
+        .holders
+        .inherit_known_retained(db, &event, inserted)
+        .await?;
 
     connections_cache
         .fetch_event_content_from_peers(networking, &peers, event, db)
@@ -213,8 +225,8 @@ pub(crate) async fn download_events_from_child(
             );
 
             event_fetch_attempts += 1;
-            let Some(new_event) = connections
-                .get_event_from_peers(networking, peers, rostra_id, q_item_event_id)
+            let Some((new_event, source)) = connections
+                .get_event_with_source(networking, peers, rostra_id, q_item_event_id)
                 .await
             else {
                 debug!(
@@ -226,12 +238,26 @@ pub(crate) async fn download_events_from_child(
                 continue;
             };
             let (insert_outcome, process_state) = storage.try_process_event(&new_event).await?;
+            if let Some(source) = source {
+                connections
+                    .holders
+                    .inherit_retained(storage, &new_event, source)
+                    .await?;
+            }
             if matches!(insert_outcome, InsertEventOutcome::Inserted { .. }) {
                 downloaded_anything = true;
                 new_events += 1;
             }
             (new_event, process_state, insert_outcome)
         };
+        connections
+            .holders
+            .inherit_known_retained(
+                storage,
+                &event,
+                matches!(insert_outcome, InsertEventOutcome::Inserted { .. }),
+            )
+            .await?;
 
         let q_item_ts = q_item_data.child_timestamp.min(event.timestamp().as_u64());
 

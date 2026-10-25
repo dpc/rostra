@@ -1,12 +1,7 @@
 use std::sync::Arc;
 use std::time::Duration;
 
-use rostra_core::ShortEventId;
-use rostra_core::event::{EventExt as _, SignedEventExt as _, VerifiedEvent};
 use rostra_core::id::{RostraId, ToShort as _};
-use rostra_p2p::Connection;
-use rostra_util_error::{FmtCompact as _, WhateverResult};
-use snafu::ResultExt as _;
 use tracing::{debug, error, instrument, warn};
 
 use crate::LOG_TARGET;
@@ -26,6 +21,8 @@ enum WakeReason {
     RetryDeadline,
     Notification(RostraId),
     Lagging,
+    HolderNotified,
+    HolderChanged,
     Closed,
 }
 
@@ -118,6 +115,8 @@ impl MissingEventFetcher {
     pub async fn run(self) {
         let mut notifications = self.ids_with_missing_events_rx.clone();
         let mut retry = MissingRetryPolicy::new();
+        let mut hint_scan: Option<crate::holder_hints::RetainedHintScan> = None;
+        let mut next_hint_turn = None;
 
         let Ok(db) = self.client.db() else {
             return;
@@ -133,7 +132,34 @@ impl MissingEventFetcher {
         }
 
         loop {
-            match wait_for_retry_or_notification(&mut notifications, retry.deadline).await {
+            let reason = wait_for_work(
+                &mut notifications,
+                retry.deadline,
+                &self.connections.holders.changed,
+                next_hint_turn,
+            )
+            .await;
+            if reason == WakeReason::HolderChanged {
+                let scan =
+                    hint_scan.get_or_insert_with(|| self.connections.holders.retained_scan());
+                match scan.step(&self.connections.holders, &db).await {
+                    Ok(true) => {}
+                    Ok(false) => hint_scan = None,
+                    Err(err) => {
+                        error!(target: LOG_TARGET, err = %err, "Retained header read failed; stopping missing-event fetcher");
+                        return;
+                    }
+                }
+                next_hint_turn = hint_scan
+                    .as_ref()
+                    .map(|_| tokio::time::Instant::now() + INITIAL_RETRY_DELAY);
+            }
+            match reason {
+                WakeReason::HolderNotified => {
+                    // Persist the consumed wake before awaiting anything else.
+                    // Ordinary notifications/retries cannot cancel this deadline.
+                    next_hint_turn = Some(tokio::time::Instant::now() + INITIAL_RETRY_DELAY);
+                }
                 WakeReason::Notification(author) => {
                     let had_missing_events = !db.get_missing_events_for_id(author).await.is_empty();
                     if let Err(err) = self.fetch_missing_events(&db, author).await {
@@ -144,8 +170,10 @@ impl MissingEventFetcher {
                         retry.observe_notification_work();
                     }
                 }
-                WakeReason::Lagging => {
-                    warn!(target: LOG_TARGET, "Missing event fetcher missed notifications; reconciling durable work");
+                reason @ (WakeReason::Lagging | WakeReason::HolderChanged) => {
+                    if reason == WakeReason::Lagging {
+                        warn!(target: LOG_TARGET, "Missing event fetcher missed notifications; reconciling durable work");
+                    }
                     if let Err(err) = retry
                         .reconcile(MissingReconcileTrigger::Lag, || {
                             self.reconcile_missing_events(&db)
@@ -218,84 +246,59 @@ impl MissingEventFetcher {
             return Ok(());
         }
 
-        for follower_id in followers.iter().chain([author_id, self.self_id].iter()) {
-            debug!(
-                target: LOG_TARGET,
-                author_id = %author_id,
-                follower_id = %follower_id,
-                "Looking for missing events from peer"
-            );
-            let Ok(conn) = self
-                .connections
-                .get_or_connect(&self.networking, *follower_id)
-                .await
-            else {
-                debug!(
-                    target: LOG_TARGET,
-                    author_id = %author_id,
-                    follower_id = %follower_id,
-                    "Could not connect"
-                );
+        let peers: Vec<_> = followers
+            .into_iter()
+            .chain([author_id, self.self_id])
+            .collect();
+        for missing_event in missing_events {
+            if db.has_event(missing_event).await {
                 continue;
-            };
-
-            for missing_event in &missing_events {
-                if db.has_event(*missing_event).await {
-                    continue;
+            }
+            if let Some((event, source)) = self
+                .connections
+                .get_event_with_source(&self.networking, &peers, author_id, missing_event)
+                .await
+            {
+                let (inserted, _) = db.try_process_event(&event).await?;
+                if let Some(source) = source {
+                    self.connections
+                        .holders
+                        .inherit_retained(db, &event, source)
+                        .await?;
                 }
-                let event = match self.get_event(author_id, *missing_event, &conn).await {
-                    Ok(event) => event,
-                    Err(err) => {
-                        debug!(
-                            target: LOG_TARGET,
-                            author_id = %author_id,
-                            event_id = %missing_event,
-                            follower_id = %follower_id,
-                            err = %err.fmt_compact(),
-                            "Error getting event from a peer"
-                        );
-                        continue;
-                    }
-                };
-                let Some(event) = event else {
-                    continue;
-                };
-                if let Err(err) = db.try_process_event(&event).await {
-                    error!(
-                        target: LOG_TARGET,
-                        author_id = %author_id,
-                        event_id = %missing_event,
-                        follower_id = %follower_id,
-                        err = %err,
-                        "Failed to store a fetched missing event"
-                    );
-                    return Err(err);
-                }
+                self.connections
+                    .holders
+                    .inherit_known_retained(
+                        db,
+                        &event,
+                        matches!(
+                            inserted,
+                            rostra_client_db::InsertEventOutcome::Inserted { .. }
+                        ),
+                    )
+                    .await?;
             }
         }
 
         Ok(())
     }
+}
 
-    async fn get_event(
-        &self,
-        author_id: RostraId,
-        event_id: ShortEventId,
-        conn: &Connection,
-    ) -> WhateverResult<Option<VerifiedEvent>> {
-        let event = conn
-            .get_event(author_id, event_id)
-            .await
-            .whatever_context("Failed to query peer")?;
-
-        let Some(event) = event else {
-            return Ok(None);
-        };
-        let event =
-            VerifiedEvent::verify_response(author_id, event_id, *event.event(), event.sig())
-                .whatever_context("Invalid event received")?;
-
-        Ok(Some(event))
+async fn wait_for_work(
+    notifications: &mut dedup_chan::Receiver<RostraId>,
+    retry_deadline: Option<tokio::time::Instant>,
+    hints: &tokio::sync::Notify,
+    hint_deadline: Option<tokio::time::Instant>,
+) -> WakeReason {
+    tokio::select! {
+        reason = wait_for_retry_or_notification(notifications, retry_deadline) => reason,
+        () = hints.notified(), if hint_deadline.is_none() => WakeReason::HolderNotified,
+        () = async {
+            match hint_deadline {
+                Some(deadline) => tokio::time::sleep_until(deadline).await,
+                None => std::future::pending().await,
+            }
+        } => WakeReason::HolderChanged,
     }
 }
 
