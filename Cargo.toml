@@ -56,7 +56,7 @@ bao-tree = "0.13"
 bech32 = "0.11.0"
 bincode = { version = "2.0.0", features = ["derive"] }
 blake3 = "1.5.5"
-brotli = "*"
+brotli = "9.1"
 bon = "3.3.0"
 bip39 = "2.0.0"
 cbor4ii = "1.0.0"
