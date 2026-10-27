@@ -36,6 +36,10 @@ pub mod native_media;
 pub mod news;
 #[cfg(test)]
 mod news_feed_tests;
+pub mod news_post_mutation;
+mod news_post_mutation_ops;
+#[cfg(test)]
+mod news_post_mutation_tests;
 pub mod news_post_request;
 mod news_request_ops;
 #[cfg(test)]
@@ -466,6 +470,9 @@ pub enum DbError {
     /// The mutation request ID was already committed with other input.
     #[snafu(display("Social post mutation request input mismatch"))]
     SocialPostMutationMismatch,
+    /// The independent news mutation request ID already names another input.
+    #[snafu(display("News post mutation request input mismatch"))]
+    NewsPostMutationMismatch,
     /// No envelope is retained for this target prefix.
     #[snafu(display("Social post mutation target is missing"))]
     SocialPostMutationMissing,

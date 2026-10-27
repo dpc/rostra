@@ -35,6 +35,7 @@ impl Database {
         self.read_with(|tx| {
             self.prepare_social_post_mutation_tx(
                 expected_current,
+                SocialPost::decode_mutable_text,
                 &tx.open_table(&crate::events::TABLE)?,
                 &tx.open_table(&crate::events_content_state::TABLE)?,
                 &tx.open_table(&crate::content_store::TABLE)?,
@@ -45,9 +46,12 @@ impl Database {
         .await
     }
 
-    fn prepare_social_post_mutation_tx(
+    // Keep the shared table-snapshot validation identical across receipt policies.
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn prepare_social_post_mutation_tx(
         &self,
         expected: EventId,
+        decode: fn(&[u8]) -> Option<SocialPost>,
         events: &impl crate::events::ReadableTable,
         states: &impl crate::events_content_state::ReadableTable,
         store: &impl crate::content_store::ReadableTable,
@@ -113,8 +117,7 @@ impl Database {
             .get(&event.content_hash())?
             .ok_or(DbError::SocialPostMutationUnavailable)?
             .value();
-        let post = SocialPost::decode_mutable_text(raw.0.as_ref().as_ref())
-            .ok_or(DbError::SocialPostMutationUnsupported)?;
+        let post = decode(raw.0.as_ref().as_ref()).ok_or(DbError::SocialPostMutationUnsupported)?;
         if event.is_delete_parent_aux_content_set()
             && post
                 .djot_content
@@ -188,6 +191,7 @@ impl Database {
             request.validate()?;
             let mut post = self.prepare_social_post_mutation_tx(
                 request.expected_current,
+                SocialPost::decode_mutable_text,
                 &tx.open_table(&crate::events::TABLE)?,
                 &tx.open_table(&crate::events_content_state::TABLE)?,
                 &tx.open_table(&crate::content_store::TABLE)?,

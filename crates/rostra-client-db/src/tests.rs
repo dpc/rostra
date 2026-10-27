@@ -3388,7 +3388,7 @@ async fn test_total_migration() -> BoxedErrorResult<()> {
         let db_ver_table = tx.open_table(&db_version::TABLE)?;
         let current_ver = db_ver_table.first()?.map(|g| g.1.value());
         info!("DB version after migration: {:?}", current_ver);
-        assert_eq!(current_ver, Some(41), "DB version should be updated");
+        assert_eq!(current_ver, Some(42), "DB version should be updated");
         assert_eq!(
             tx.open_table(&EXTENSION_TABLE)?
                 .get(&1)?

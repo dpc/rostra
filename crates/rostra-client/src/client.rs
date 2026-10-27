@@ -45,6 +45,9 @@ mod init;
 mod media_request;
 #[cfg(all(test, feature = "native-media"))]
 mod media_request_tests;
+mod news_post_mutation;
+#[cfg(test)]
+mod news_post_mutation_tests;
 mod news_request;
 #[cfg(test)]
 mod news_request_tests;

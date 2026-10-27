@@ -1,5 +1,23 @@
 # Agent-browser security boundaries
 
+## Durable own-news body corrections
+
+`Client::mutate_news_post_idempotent` uses the separate schema-42 news-mutation
+namespace; persisted legacy text intentions must not be rerouted based on
+mutable target state. Known news metadata, including optional reply references,
+is preserved by nonblank body edits. Explicit deletion emits metadata-free blank
+text. Empty-body news replacements are not supported: existing wire reducers
+interpret them as deletion regardless of title/URL fields.
+
+Full retained identity, ownership and canonical lineage are checked atomically
+with admission and receipt insertion. Receipts resolve before later payload,
+parser and admission checks, return the original signed event and never reingest
+it. Old text APIs and receipts are unchanged. Votes remain exact-event scoped.
+Hosts enforce their own requesting session boundary; cancellation may follow
+commit, and later remote events can supersede local acceptance. See
+[`news-post-mutations.md`](crates/rostra-client-db/docs/news-post-mutations.md)
+for supported fields, retry obligations and permanent receipt retention.
+
 ## Durable message-device lifecycle commands
 
 `Client::mutate_direct_message_device_idempotent` requires a matching caller

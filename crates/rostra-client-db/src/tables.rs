@@ -163,6 +163,10 @@ def_table! {
     social_post_mutation_receipts: [u8; 16] => crate::social_post_receipt::Receipt
 }
 def_table! {
+    /// Permanent independent own-news edit/delete receipts, never replayed.
+    social_news_mutation_receipts: [u8; 16] => crate::social_post_receipt::Receipt
+}
+def_table! {
     /// Permanent independent local reaction receipts, preserved through replay.
     social_reaction_receipts: [u8; 16] => crate::social_post_receipt::Receipt
 }

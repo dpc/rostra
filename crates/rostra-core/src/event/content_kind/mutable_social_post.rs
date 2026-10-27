@@ -69,6 +69,15 @@ impl SocialPost {
         (post.news && post.reply_to.is_none() && post.reaction.is_none()).then_some(post)
     }
 
+    /// Decode known news metadata for body correction, including news replies.
+    ///
+    /// Unlike voting eligibility, an existing reply reference is preserved.
+    /// Unknown fields and reactions cannot be silently discarded by mutation.
+    pub fn decode_mutable_news(bytes: &[u8]) -> Option<Self> {
+        let post = Self::decode_mutable_fields(bytes)?;
+        (post.news && post.reaction.is_none()).then_some(post)
+    }
+
     fn decode_mutable_fields(bytes: &[u8]) -> Option<Self> {
         if bytes.len() > 1_000_000 || bytes.first()? >> 5 != 5 {
             return None;
