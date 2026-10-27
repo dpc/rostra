@@ -10,6 +10,7 @@ use rostra_core::id::RostraIdSecretKey;
 use super::*;
 use crate::event::{ContentStoreRecord, EventContentState};
 
+mod export;
 mod opaque;
 
 // Complete grayscale 3x2 PNG, with no external fixture/package dependency.
@@ -166,6 +167,13 @@ async fn lifecycle_is_checked_before_shared_content_and_reads_never_schedule_fet
                 validate(db.read_native_media_opaque(secret.id(), reference).await?),
                 expected
             );
+            assert_eq!(
+                validate(
+                    db.read_native_media_opaque_export(secret.id(), reference)
+                        .await?
+                ),
+                expected
+            );
         }
         db.read_with(|tx| {
             assert_eq!(
@@ -228,6 +236,15 @@ async fn corrupt_storage_cannot_substitute_media_or_force_unbounded_allocation()
             validate(db.read_native_media_opaque(secret.id(), reference).await?),
             expected
         );
+        if expected != NativeMediaRead::TooLarge {
+            assert_eq!(
+                validate(
+                    db.read_native_media_opaque_export(secret.id(), reference)
+                        .await?
+                ),
+                expected
+            );
+        }
     }
     // Correct envelope hash but corrupt signature cannot authorize the payload.
     let other = signed(
@@ -243,6 +260,11 @@ async fn corrupt_storage_cannot_substitute_media_or_force_unbounded_allocation()
     );
     assert_eq!(
         db.read_native_media_opaque(secret.id(), reference).await?,
+        OpaqueMediaRead::Invalid
+    );
+    assert_eq!(
+        db.read_native_media_opaque_export(secret.id(), reference)
+            .await?,
         OpaqueMediaRead::Invalid
     );
     Ok(())

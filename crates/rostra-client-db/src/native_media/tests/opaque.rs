@@ -2,6 +2,20 @@
 
 use super::*;
 
+async fn read_both(
+    db: &Database,
+    author: RostraId,
+    reference: MediaEventReference,
+) -> DbResult<OpaqueMediaRead> {
+    let default = db.read_native_media_opaque(author, reference).await?;
+    assert_eq!(
+        db.read_native_media_opaque_export(author, reference)
+            .await?,
+        default
+    );
+    Ok(default)
+}
+
 #[tokio::test(flavor = "multi_thread")]
 async fn opaque_bytes_and_untrusted_mime_survive_while_images_stay_restricted() -> anyhow::Result<()>
 {
@@ -43,7 +57,7 @@ async fn opaque_bytes_and_untrusted_mime_survive_while_images_stay_restricted() 
             MediaEventReference::Full(event.compute_id()),
         ] {
             assert_eq!(
-                db.read_native_media_opaque(secret.id(), reference).await?,
+                read_both(&db, secret.id(), reference).await?,
                 OpaqueMediaRead::Available {
                     author: secret.id(),
                     event_id: event.compute_id(),
@@ -68,13 +82,12 @@ async fn opaque_reads_require_exact_identity_and_kind() -> anyhow::Result<()> {
     let event = signed(secret, &raw, EventKind::SOCIAL_MEDIA);
     let reference = MediaEventReference::Full(event.compute_id());
     assert_eq!(
-        db.read_native_media_opaque(secret.id(), reference).await?,
+        read_both(&db, secret.id(), reference).await?,
         OpaqueMediaRead::Missing
     );
     retain(&db, event, raw.clone()).await?;
     assert_eq!(
-        db.read_native_media_opaque(RostraIdSecretKey::generate().id(), reference)
-            .await?,
+        read_both(&db, RostraIdSecretKey::generate().id(), reference).await?,
         OpaqueMediaRead::Mismatch
     );
     let mut collision: [u8; 32] = event.compute_id().into();
@@ -82,13 +95,14 @@ async fn opaque_reads_require_exact_identity_and_kind() -> anyhow::Result<()> {
     let collision = MediaEventReference::Full(EventId::from(blake3::Hash::from(collision)));
     assert_eq!(collision.short_id(), reference.short_id());
     assert_eq!(
-        db.read_native_media_opaque(secret.id(), collision).await?,
+        read_both(&db, secret.id(), collision).await?,
         OpaqueMediaRead::Mismatch
     );
     let other_kind = signed(secret, &raw, EventKind::SOCIAL_POST);
     retain(&db, other_kind, raw).await?;
     assert_eq!(
-        db.read_native_media_opaque(
+        read_both(
+            &db,
             secret.id(),
             MediaEventReference::Full(other_kind.compute_id())
         )
@@ -187,7 +201,7 @@ async fn opaque_envelope_and_lifecycle_corruption_fail_closed() -> anyhow::Resul
         })
         .await?;
         assert_eq!(
-            db.read_native_media_opaque(secret.id(), reference).await?,
+            read_both(&db, secret.id(), reference).await?,
             OpaqueMediaRead::Invalid
         );
     }
@@ -200,7 +214,7 @@ async fn opaque_envelope_and_lifecycle_corruption_fail_closed() -> anyhow::Resul
     })
     .await?;
     assert_eq!(
-        db.read_native_media_opaque(secret.id(), reference).await?,
+        read_both(&db, secret.id(), reference).await?,
         OpaqueMediaRead::Invalid
     );
     Ok(())
@@ -222,6 +236,14 @@ async fn opaque_database_errors_are_not_media_unavailability() -> anyhow::Result
     assert!(matches!(
         db.read_native_media_opaque(secret.id(), MediaEventReference::Full(event.compute_id()))
             .await,
+        Err(crate::DbError::Table { .. })
+    ));
+    assert!(matches!(
+        db.read_native_media_opaque_export(
+            secret.id(),
+            MediaEventReference::Full(event.compute_id())
+        )
+        .await,
         Err(crate::DbError::Table { .. })
     ));
     Ok(())

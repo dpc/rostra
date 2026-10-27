@@ -31,6 +31,42 @@ mod tests;
 /// invalid protocol data. This is a native read policy, not a protocol limit.
 pub const MAX_NATIVE_MEDIA_BODY_BYTES: usize = 2_000_128;
 
+/// Maximum original byte count for explicit opaque export, not image display.
+pub const MAX_NATIVE_MEDIA_EXPORT_BYTES: usize = 4_000_000;
+
+/// Signed CBOR body budget for explicit opaque export.
+///
+/// The largest accepted shortest-encoded body is 8,000,076 bytes: one map
+/// header, four key bytes, 66 MIME bytes including its header, five array
+/// header bytes and 8,000,000 integer bytes. The remaining space is headroom,
+/// not permission to accept other encodings.
+pub const MAX_NATIVE_MEDIA_EXPORT_BODY_BYTES: usize = 8_000_128;
+
+/// Closed internal policies; callers cannot supply arbitrary allocation limits.
+#[derive(Clone, Copy)]
+enum ReadPolicy {
+    /// Existing image presentation and opaque reads.
+    Default,
+    /// Explicit larger opaque export only.
+    Export,
+}
+
+impl ReadPolicy {
+    fn body_bytes(self) -> usize {
+        match self {
+            Self::Default => MAX_NATIVE_MEDIA_BODY_BYTES,
+            Self::Export => MAX_NATIVE_MEDIA_EXPORT_BODY_BYTES,
+        }
+    }
+
+    fn media_bytes(self) -> usize {
+        match self {
+            Self::Default => rostra_core::avatar::MAX_AVATAR_BYTES,
+            Self::Export => MAX_NATIVE_MEDIA_EXPORT_BYTES,
+        }
+    }
+}
+
 /// A local read outcome; no unavailable variant contains media bytes.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum NativeMediaRead {
@@ -82,7 +118,7 @@ impl Database {
         reference: MediaEventReference,
     ) -> DbResult<NativeMediaRead> {
         let result = self
-            .read_native_media_checked(author, reference, true)
+            .read_native_media_checked(author, reference, true, ReadPolicy::Default)
             .await?;
         Ok(tokio::task::block_in_place(|| validate(result)))
     }
@@ -106,7 +142,31 @@ impl Database {
         author: RostraId,
         reference: MediaEventReference,
     ) -> DbResult<OpaqueMediaRead> {
-        self.read_native_media_checked(author, reference, false)
+        self.read_native_media_checked(author, reference, false, ReadPolicy::Default)
+            .await
+    }
+
+    /// Read at most 4,000,000 original bytes for explicit local opaque export.
+    ///
+    /// This is the larger, opt-in counterpart of `read_native_media_opaque`;
+    /// all its author, lifecycle, MIME distrust and no-auto-open obligations
+    /// apply. It does not expand image display, listing, upload or retention
+    /// policy. No network fetch, scheduling, signing or write occurs.
+    ///
+    /// Signed bodies are capped at 8,000,128 bytes and raw stored wrappers at
+    /// 8,000,137 bytes before borrowing the body. Authentication, length, hash
+    /// and complete CBOR validation precede the single media-vector allocation
+    /// (requested capacity at most 4,000,000) and MIME copy (at most 64 bytes).
+    /// The body is not copied. This is whole-buffer export, not streaming.
+    /// Hosts must bound concurrency and avoid the UI executor; these bounds
+    /// are not process RSS limits or CPU deadlines. Re-read before later use;
+    /// a later deletion cannot revoke bytes already returned.
+    pub async fn read_native_media_opaque_export(
+        &self,
+        author: RostraId,
+        reference: MediaEventReference,
+    ) -> DbResult<OpaqueMediaRead> {
+        self.read_native_media_checked(author, reference, false, ReadPolicy::Export)
             .await
     }
 
@@ -115,6 +175,7 @@ impl Database {
         author: RostraId,
         reference: MediaEventReference,
         image_only: bool,
+        policy: ReadPolicy,
     ) -> DbResult<OpaqueMediaRead> {
         self.read_with(|tx| {
             let key = bincode::encode_to_vec(reference.short_id(), redb_bincode::BINCODE_CONFIG)
@@ -149,7 +210,7 @@ impl Database {
                     Some(EventContentState::Invalid) | None => OpaqueMediaRead::Invalid,
                 });
             }
-            if event.content_len() as usize > MAX_NATIVE_MEDIA_BODY_BYTES {
+            if event.content_len() as usize > policy.body_bytes() {
                 return Ok(OpaqueMediaRead::TooLarge);
             }
             let store = tx.open_table(&crate::content_store::TABLE)?;
@@ -158,7 +219,7 @@ impl Database {
             let Some(raw) = store.as_raw().get(key.as_slice())? else {
                 return Ok(OpaqueMediaRead::Missing);
             };
-            if raw.value().len() > MAX_NATIVE_MEDIA_BODY_BYTES + 9 {
+            if raw.value().len() > policy.body_bytes() + 9 {
                 return Ok(OpaqueMediaRead::TooLarge);
             }
             // Borrow rather than materializing ContentStoreRecord's owned Vec.
@@ -173,7 +234,7 @@ impl Database {
             {
                 return Ok(OpaqueMediaRead::Invalid);
             }
-            let (mime, data) = match payload::decode(body, image_only) {
+            let (mime, data) = match payload::decode_with_policy(body, image_only, policy) {
                 Ok(value) => value,
                 Err(issue) => return Ok(issue),
             };

@@ -5,16 +5,24 @@
 //! nonminimal/indefinite encoding, tags and alternative representations are
 //! unsupported. No recursive skip or general-purpose deserializer is used.
 
-use rostra_core::avatar::MAX_AVATAR_BYTES;
-
-use super::{MAX_NATIVE_MEDIA_BODY_BYTES, OpaqueMediaRead};
+use super::{OpaqueMediaRead, ReadPolicy};
 
 /// Complete shape validation precedes the only owned media allocation.
+#[cfg(test)]
 pub(super) fn decode(body: &[u8], image_only: bool) -> Result<(&str, Vec<u8>), OpaqueMediaRead> {
+    decode_with_policy(body, image_only, ReadPolicy::Default)
+}
+
+/// Complete shape validation precedes the only owned media allocation.
+pub(super) fn decode_with_policy(
+    body: &[u8],
+    image_only: bool,
+    policy: ReadPolicy,
+) -> Result<(&str, Vec<u8>), OpaqueMediaRead> {
     let (mime, bytes, len) = if image_only {
         preflight(body)?
     } else {
-        preflight_opaque(body)?
+        preflight_opaque(body, policy)?
     };
     let mut input = Input { bytes };
     let mut data = Vec::with_capacity(len);
@@ -26,7 +34,7 @@ pub(super) fn decode(body: &[u8], image_only: bool) -> Result<(&str, Vec<u8>), O
 
 /// Validate the complete CBOR subset while borrowing encoded image bytes.
 pub(super) fn preflight(body: &[u8]) -> Result<(&'static str, &[u8], usize), OpaqueMediaRead> {
-    let (mime, bytes, len) = preflight_opaque(body)?;
+    let (mime, bytes, len) = preflight_opaque(body, ReadPolicy::Default)?;
     let mime = match mime {
         "image/png" => "image/png",
         "image/webp" => "image/webp",
@@ -36,8 +44,11 @@ pub(super) fn preflight(body: &[u8]) -> Result<(&'static str, &[u8], usize), Opa
 }
 
 /// Validate structure without treating the declared MIME as a content policy.
-fn preflight_opaque(body: &[u8]) -> Result<(&str, &[u8], usize), OpaqueMediaRead> {
-    if body.len() > MAX_NATIVE_MEDIA_BODY_BYTES {
+fn preflight_opaque(
+    body: &[u8],
+    policy: ReadPolicy,
+) -> Result<(&str, &[u8], usize), OpaqueMediaRead> {
+    if body.len() > policy.body_bytes() {
         return Err(OpaqueMediaRead::TooLarge);
     }
     let mut input = Input { bytes: body };
@@ -64,7 +75,7 @@ fn preflight_opaque(body: &[u8]) -> Result<(&str, &[u8], usize), OpaqueMediaRead
                 if major != 4 {
                     return Err(OpaqueMediaRead::Unsupported);
                 }
-                if len > MAX_AVATAR_BYTES as u64 {
+                if len > policy.media_bytes() as u64 {
                     return Err(OpaqueMediaRead::TooLarge);
                 }
                 let start = input.bytes;

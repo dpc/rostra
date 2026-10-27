@@ -17,7 +17,8 @@ pub enum OpaqueMediaRead {
         event_id: EventId,
         /// Original untrusted declaration, at most 64 UTF-8 bytes.
         mime: String,
-        /// Original opaque bytes, at most 1,000,000 bytes, never rewritten.
+        /// Original bytes, never rewritten: at most 1,000,000 for the default
+        /// reader or 4,000,000 for the explicit opaque-export reader.
         data: Vec<u8>,
     },
     /// No retained envelope or currently processed payload.

@@ -166,6 +166,19 @@ execution, opening or display, even when the declaration says PNG/WebP.
 Image presentation and own-image listing retain their existing policies.
 The same source-post-author and snapshot/re-read obligations apply.
 
+The separate `read_native_media_opaque_export` opts into 4,000,000 original
+bytes for explicit local Save only. Its signed-body cap is 8,000,128 and raw
+stored-wrapper cap is 8,000,137 bytes. The exact largest accepted shortest CBOR
+body is 8,000,076 bytes, including a 64-byte MIME declaration. These remain
+below existing ingestion limits without changing retention or protocol policy.
+The same shared checks finish before requesting the single media vector's
+capacity (at most 4,000,000) and copying at most 64 MIME bytes; the stored body
+is borrowed, not copied. This is whole-buffer acquisition, not streaming or a
+hard allocator/RSS/CPU bound. Hosts must account for their own copies, bound
+concurrency and keep work off the UI executor. Existing opaque reads, image
+display, avatars, normalization and own-image listing keep their old limits.
+Export availability never authorizes automatic opening, decoding or execution.
+
 The native renderer checks input size and a conservative recursive-block-opener
 budget before constructing jotup's eager parser, then separately bounds event
 depth/count and owned output. The guard is tied to the exact pinned jotup 0.10.0
