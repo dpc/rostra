@@ -1,0 +1,227 @@
+diff -ruN pristine/jpeg-decoder-0.3.2/src/completion.rs experiment/src/completion.rs
+--- pristine/jpeg-decoder-0.3.2/src/completion.rs	1969-12-31 16:00:00.000000000 -0800
++++ experiment/src/completion.rs	2026-10-28 06:26:06.918289860 -0700
+@@ -0,0 +1,24 @@
++/// Temporary-only instrumentation, not a production validation API.
++#[derive(Clone, Debug, Default)]
++pub struct Completion {
++    /// Actual entropy consumption, including any synthetic suffix consumed.
++    pub consumed_bits: u64,
++    /// Unstuffed bytes fetched before the first marker.
++    pub real_bytes: u64,
++    /// Synthetic zero bytes inserted after a marker.
++    pub synthetic_bytes: u64,
++    /// Peeks that extend into the synthetic suffix.
++    pub synthetic_peeks: u64,
++    /// Completed blocks in scan component order.
++    pub blocks: [u64; 4],
++    /// Completed MCUs.
++    pub mcus: u64,
++    /// Completed scans.
++    pub scans: u64,
++    /// Successful AC fast-path decodes.
++    pub fast_ac: u64,
++    /// Successful Huffman decodes with codes longer than eight bits.
++    pub slow_codes: u64,
++    /// Whether the scan's terminal marker was EOI.
++    pub eoi: bool,
++}
+diff -ruN pristine/jpeg-decoder-0.3.2/src/decoder.rs experiment/src/decoder.rs
+--- pristine/jpeg-decoder-0.3.2/src/decoder.rs	2006-07-23 18:21:28.000000000 -0700
++++ experiment/src/decoder.rs	2026-10-28 06:26:28.156253516 -0700
+@@ -100,6 +100,7 @@
+ /// JPEG decoder
+ pub struct Decoder<R> {
+     reader: R,
++    completion: crate::Completion,
+ 
+     frame: Option<FrameInfo>,
+     dc_huffman_tables: Vec<Option<HuffmanTable>>,
+@@ -130,10 +131,16 @@
+ }
+ 
+ impl<R: Read> Decoder<R> {
++    /// Returns temporary-only scan accounting; meaningful only after successful decode.
++    pub fn experimental_completion(&self) -> &crate::Completion {
++        &self.completion
++    }
++
+     /// Creates a new `Decoder` using the reader `reader`.
+     pub fn new(reader: R) -> Decoder<R> {
+         Decoder {
+             reader,
++            completion: crate::Completion::default(),
+             frame: None,
+             dc_huffman_tables: vec![None, None, None, None],
+             ac_huffman_tables: vec![None, None, None, None],
+@@ -455,7 +462,7 @@
+                         }
+ 
+                         let preference =
+-                            Self::select_worker(&frame, PreferWorkerKind::Multithreaded);
++                            Self::select_worker(&frame, PreferWorkerKind::Immediate);
+ 
+                         let (marker, data) = worker_scope
+                             .get_or_init_worker(preference, |worker| {
+@@ -607,7 +614,7 @@
+         }
+ 
+         let frame = self.frame.as_ref().unwrap();
+-        let preference = Self::select_worker(frame, PreferWorkerKind::Multithreaded);
++        let preference = Self::select_worker(frame, PreferWorkerKind::Immediate);
+ 
+         worker_scope.get_or_init_worker(preference, |worker| {
+             self.decode_planes(worker, planes, planes_u16)
+@@ -864,6 +871,7 @@
+         let is_interleaved = components.len() > 1;
+         let mut dummy_block = [0i16; 64];
+         let mut huffman = HuffmanDecoder::new();
++        huffman.strict_baseline = !is_progressive;
+         let mut dc_predictors = [0i16; MAX_COMPONENTS];
+         let mut mcus_left_until_restart = self.restart_interval;
+         let mut expected_rst_num = 0;
+@@ -1010,9 +1018,11 @@
+                                     &mut eob_run,
+                                 )?;
+                             }
++                            huffman.completion.blocks[i] += 1;
+                         }
+                     }
+                 }
++                huffman.completion.mcus += 1;
+             }
+ 
+             // Send the coefficients from this MCU row to the worker thread for dequantization and idct.
+@@ -1061,6 +1071,9 @@
+         }
+ 
+         let mut marker = huffman.take_marker(&mut self.reader)?;
++        huffman.completion.eoi = marker == Some(Marker::EOI);
++        huffman.completion.scans = self.completion.scans + 1;
++        self.completion = huffman.completion.clone();
+         while let Some(Marker::RST(_)) = marker {
+             marker = self.read_marker().ok();
+         }
+@@ -1131,6 +1144,9 @@
+             index += run;
+ 
+             if index >= spectral_selection.end {
++                if huffman.strict_baseline {
++                    return Err(Error::Format("baseline fast AC run overshoot".to_owned()));
++                }
+                 break;
+             }
+ 
+@@ -1143,8 +1159,16 @@
+ 
+             if s == 0 {
+                 match r {
+-                    15 => index += 16, // Run length of 16 zero coefficients.
++                    15 => {
++                        index += 16;
++                        if huffman.strict_baseline && index > spectral_selection.end {
++                            return Err(Error::Format("baseline ZRL overshoot".to_owned()));
++                        }
++                    }
+                     _ => {
++                        if huffman.strict_baseline && r != 0 {
++                            return Err(Error::Format("baseline EOB run".to_owned()));
++                        }
+                         *eob_run = (1 << r) - 1;
+ 
+                         if r > 0 {
+@@ -1158,6 +1182,9 @@
+                 index += r;
+ 
+                 if index >= spectral_selection.end {
++                    if huffman.strict_baseline {
++                        return Err(Error::Format("baseline slow AC run overshoot".to_owned()));
++                    }
+                     break;
+                 }
+ 
+diff -ruN pristine/jpeg-decoder-0.3.2/src/huffman.rs experiment/src/huffman.rs
+--- pristine/jpeg-decoder-0.3.2/src/huffman.rs	2006-07-23 18:21:28.000000000 -0700
++++ experiment/src/huffman.rs	2026-10-28 06:26:06.929289841 -0700
+@@ -15,6 +15,8 @@
+     bits: u64,
+     num_bits: u8,
+     marker: Option<Marker>,
++    pub completion: crate::Completion,
++    pub strict_baseline: bool,
+ }
+ 
+ impl HuffmanDecoder {
+@@ -23,6 +25,8 @@
+             bits: 0,
+             num_bits: 0,
+             marker: None,
++            completion: crate::Completion::default(),
++            strict_baseline: false,
+         }
+     }
+ 
+@@ -46,6 +50,7 @@
+                 let code = (bits >> (15 - i)) as i32;
+ 
+                 if code <= table.maxcode[i as usize] {
++                    self.completion.slow_codes += 1;
+                     self.consume_bits(i + 1);
+ 
+                     let index = (code + table.delta[i as usize]) as usize;
+@@ -66,6 +71,7 @@
+             let (value, run_size) = ac_lut[self.peek_bits(LUT_BITS) as usize];
+ 
+             if run_size != 0 {
++                self.completion.fast_ac += 1;
+                 let run = run_size >> 4;
+                 let size = run_size & 0x0f;
+ 
+@@ -108,6 +114,9 @@
+     fn peek_bits(&mut self, count: u8) -> u16 {
+         debug_assert!(count <= 16);
+         debug_assert!(self.num_bits >= count);
++        if self.completion.consumed_bits + u64::from(count) > self.completion.real_bytes * 8 {
++            self.completion.synthetic_peeks += 1;
++        }
+ 
+         ((self.bits >> (64 - count)) & ((1 << count) - 1)) as u16
+     }
+@@ -115,6 +124,7 @@
+     #[inline]
+     fn consume_bits(&mut self, count: u8) {
+         debug_assert!(self.num_bits >= count);
++        self.completion.consumed_bits += u64::from(count);
+ 
+         self.bits <<= count as usize;
+         self.num_bits -= count;
+@@ -152,6 +162,11 @@
+                 }
+             }
+ 
++            if self.marker.is_some() {
++                self.completion.synthetic_bytes += 1;
++            } else {
++                self.completion.real_bytes += 1;
++            }
+             self.bits |= (byte as u64) << (56 - self.num_bits);
+             self.num_bits += 8;
+         }
+diff -ruN pristine/jpeg-decoder-0.3.2/src/lib.rs experiment/src/lib.rs
+--- pristine/jpeg-decoder-0.3.2/src/lib.rs	2006-07-23 18:21:28.000000000 -0700
++++ experiment/src/lib.rs	2026-10-28 06:26:06.924289850 -0700
+@@ -39,12 +39,14 @@
+ pub use decoder::{ColorTransform, Decoder, ImageInfo, PixelFormat};
+ pub use error::{Error, UnsupportedFeature};
+ pub use parser::CodingProcess;
++pub use completion::Completion;
+ 
+ use std::io;
+ 
+ #[cfg(not(feature = "platform_independent"))]
+ mod arch;
+ mod decoder;
++mod completion;
+ mod error;
+ mod huffman;
+ mod idct;

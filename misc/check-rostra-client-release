@@ -6,6 +6,7 @@ readonly packages=(
   rostra-util-error
   rostra-util-fmt
   rostra-util-dedup-chan
+  rostra-jpeg-validate
   rostra-core
   rostra-p2p-api
   rostra-djot
@@ -19,6 +20,7 @@ readonly registry_dry_run_packages=(
   rostra-util-error
   rostra-util-fmt
   rostra-util-dedup-chan
+  rostra-jpeg-validate
   rostra-core
   rostra-p2p-api
 )
@@ -85,7 +87,7 @@ readonly cargo_target_dir version
 package_dir() {
   case "$1" in
     rostra-util | rostra-util-error | rostra-util-fmt | rostra-util-dedup-chan | \
-      rostra-core | rostra-p2p-api | rostra-djot | rostra-p2p | \
+      rostra-jpeg-validate | rostra-core | rostra-p2p-api | rostra-djot | rostra-p2p | \
       rostra-dm | rostra-client-db | rostra-client)
       printf 'crates/%s\n' "$1"
       ;;
@@ -98,6 +100,9 @@ package_dir() {
 
 content_roots() {
   case "$1" in
+    rostra-jpeg-validate)
+      printf '%s\n' src tests provenance
+      ;;
     rostra-core | rostra-dm)
       printf '%s\n' benches src
       ;;
@@ -124,10 +129,10 @@ unpublished_dependencies() {
     rostra-client-db)
       printf '%s\n' \
         rostra-util rostra-util-error rostra-util-fmt \
-        rostra-util-dedup-chan rostra-core rostra-p2p-api rostra-djot rostra-p2p rostra-dm
+        rostra-util-dedup-chan rostra-jpeg-validate rostra-core rostra-p2p-api rostra-djot rostra-p2p rostra-dm
       ;;
     rostra-client)
-      printf '%s\n' "${packages[@]:0:10}"
+      printf '%s\n' "${packages[@]:0:11}"
       ;;
   esac
 }
@@ -147,7 +152,10 @@ validate_archive_contents() {
 
   {
     printf '%s\n' .cargo_vcs_info.json Cargo.lock Cargo.toml Cargo.toml.orig
-    printf '%s\n' LICENSE-APACHE LICENSE-MIT LICENSE-MPL README.md
+    printf '%s\n' LICENSE-APACHE LICENSE-MIT README.md
+    if [[ "$package" != rostra-jpeg-validate ]]; then
+      printf '%s\n' LICENSE-MPL
+    fi
     while IFS= read -r root; do
       git ls-files "$crate_dir/$root" |
         sed "s|^$crate_dir/||"
@@ -255,6 +263,7 @@ publish = false
 
 [dependencies]
 rostra-client = "=$version"
+rostra-client-db = { version = "=$version", features = ["native-media-jpeg"] }
 
 [patch.crates-io]
 EOF
@@ -302,7 +311,7 @@ for package in "${registry_dry_run_packages[@]}"; do
 done
 
 cat <<'EOF'
-Validated all eleven local package artifacts, standalone rostra-p2p, and the
+Validated all twelve local package artifacts, standalone rostra-p2p, and the
 isolated rostra-client consumer.
 Registry dry-runs for the four remaining packages require publishing their
 internal Rostra dependencies first; see docs/releasing-rostra-client.md.

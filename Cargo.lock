@@ -4815,6 +4815,7 @@ dependencies = [
  "rostra-core",
  "rostra-djot",
  "rostra-dm",
+ "rostra-jpeg-validate",
  "rostra-p2p",
  "rostra-p2p-api",
  "rostra-util",
@@ -4890,6 +4891,10 @@ dependencies = [
  "x25519-dalek",
  "zeroize",
 ]
+
+[[package]]
+name = "rostra-jpeg-validate"
+version = "0.1.3"
 
 [[package]]
 name = "rostra-p2p"

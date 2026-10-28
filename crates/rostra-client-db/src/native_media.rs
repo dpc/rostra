@@ -16,6 +16,8 @@ use rostra_core::{ContentHash, EventId};
 
 use crate::{Database, DbResult, EventRecord};
 
+#[cfg(feature = "native-media-jpeg")]
+mod jpeg_header;
 mod list;
 mod list_public_attachments;
 mod opaque;
@@ -54,6 +56,16 @@ enum ReadPolicy {
     Default,
     /// Explicit larger opaque export only.
     Export,
+}
+
+/// Explicit image admission; Cargo feature unification never changes Default.
+#[derive(Clone, Copy)]
+enum ImagePolicy {
+    /// Original PNG/WebP presentation policy.
+    Default,
+    /// Fixed retained-only JPEG subset in addition to PNG/WebP.
+    #[cfg(feature = "native-media-jpeg")]
+    Jpeg,
 }
 
 impl ReadPolicy {
@@ -98,7 +110,7 @@ pub enum NativeMediaRead {
     Pruned,
     /// Corrupt storage, failed authentication, malformed payload or image.
     Invalid,
-    /// Valid historical encodings/formats outside the native subset.
+    /// Encoding/metadata outside the subset; this does not certify validity.
     Unsupported,
     /// Encoded body, media bytes, dimensions or pixel count exceed policy.
     TooLarge,
@@ -123,9 +135,52 @@ impl Database {
         reference: MediaEventReference,
     ) -> DbResult<NativeMediaRead> {
         let result = self
-            .read_native_media_checked(author, reference, true, ReadPolicy::Default)
+            .read_native_media_checked(
+                author,
+                reference,
+                Some(ImagePolicy::Default),
+                ReadPolicy::Default,
+            )
             .await?;
-        Ok(tokio::task::block_in_place(|| validate(result)))
+        Ok(tokio::task::block_in_place(|| {
+            validate(result, ImagePolicy::Default)
+        }))
+    }
+
+    /// Read retained PNG/WebP or the explicitly opted-in restricted JPEG
+    /// subset.
+    ///
+    /// All identity, signature, lifecycle, hash and preallocation checks from
+    /// `read_native_media` apply. Original bytes return only after validation
+    /// pixels are dropped; no upload, normalization, fetch or write occurs.
+    ///
+    /// Hosts MUST acquire one process-wide retained-validation permit BEFORE
+    /// invoking this reader/materializing media and hold it through actual
+    /// completion, including after view dismissal. Reject/coalesce stale
+    /// pending requests instead of queuing copied payloads. Viewer and
+    /// reuse paths across accounts share that permit. This future does not
+    /// spawn detached work: validation is inline in `block_in_place`, not
+    /// an isolated worker. A current-thread/UI host must dispatch through
+    /// its own appropriate worker. There is no RSS, deadline, cancellation
+    /// or panic-recovery guarantee. See `docs/retained-jpeg.md`; Android
+    /// agreement is a separate host gate.
+    #[cfg(feature = "native-media-jpeg")]
+    pub async fn read_native_media_with_jpeg(
+        &self,
+        author: RostraId,
+        reference: MediaEventReference,
+    ) -> DbResult<NativeMediaRead> {
+        let result = self
+            .read_native_media_checked(
+                author,
+                reference,
+                Some(ImagePolicy::Jpeg),
+                ReadPolicy::Default,
+            )
+            .await?;
+        Ok(tokio::task::block_in_place(|| {
+            validate(result, ImagePolicy::Jpeg)
+        }))
     }
 
     /// Read authenticated original retained media for explicit opaque export.
@@ -147,7 +202,7 @@ impl Database {
         author: RostraId,
         reference: MediaEventReference,
     ) -> DbResult<OpaqueMediaRead> {
-        self.read_native_media_checked(author, reference, false, ReadPolicy::Default)
+        self.read_native_media_checked(author, reference, None, ReadPolicy::Default)
             .await
     }
 
@@ -171,7 +226,7 @@ impl Database {
         author: RostraId,
         reference: MediaEventReference,
     ) -> DbResult<OpaqueMediaRead> {
-        self.read_native_media_checked(author, reference, false, ReadPolicy::Export)
+        self.read_native_media_checked(author, reference, None, ReadPolicy::Export)
             .await
     }
 
@@ -179,7 +234,7 @@ impl Database {
         &self,
         author: RostraId,
         reference: MediaEventReference,
-        image_only: bool,
+        image_policy: Option<ImagePolicy>,
         policy: ReadPolicy,
     ) -> DbResult<OpaqueMediaRead> {
         self.read_with(|tx| {
@@ -239,7 +294,7 @@ impl Database {
             {
                 return Ok(OpaqueMediaRead::Invalid);
             }
-            let (mime, data) = match payload::decode_with_policy(body, image_only, policy) {
+            let (mime, data) = match payload::decode_with_policy(body, image_policy, policy) {
                 Ok(value) => value,
                 Err(issue) => return Ok(issue),
             };
@@ -262,7 +317,7 @@ fn decode<T: bincode::Decode<()>>(bytes: &[u8], cap: usize) -> Option<T> {
     (consumed == bytes.len()).then_some(value)
 }
 
-fn validate(result: OpaqueMediaRead) -> NativeMediaRead {
+fn validate(result: OpaqueMediaRead, policy: ImagePolicy) -> NativeMediaRead {
     let (author, event_id, mime, data) = match result {
         OpaqueMediaRead::Available {
             author,
@@ -278,6 +333,23 @@ fn validate(result: OpaqueMediaRead) -> NativeMediaRead {
         OpaqueMediaRead::TooLarge => return NativeMediaRead::TooLarge,
         OpaqueMediaRead::Mismatch => return NativeMediaRead::Mismatch,
     };
+    #[cfg(feature = "native-media-jpeg")]
+    if matches!(policy, ImagePolicy::Jpeg) && mime == "image/jpeg" {
+        return match rostra_jpeg_validate::validate(&data) {
+            Ok(info) => NativeMediaRead::Available {
+                author,
+                event_id,
+                mime: "image/jpeg",
+                width: info.width,
+                height: info.height,
+                data,
+            },
+            Err(rostra_jpeg_validate::Rejection::TooLarge) => NativeMediaRead::TooLarge,
+            Err(rostra_jpeg_validate::Rejection::Invalid(_)) => NativeMediaRead::Invalid,
+            Err(rostra_jpeg_validate::Rejection::Unsupported(_)) => NativeMediaRead::Unsupported,
+        };
+    }
+    let _ = policy;
     match validate_raster_avatar(&mime, &data) {
         Ok(info) => NativeMediaRead::Available {
             author,

@@ -7,7 +7,7 @@ use rostra_core::event::{EventExt as _, EventKind, VerifiedEvent};
 use rostra_core::id::RostraId;
 use rostra_core::{ContentHash, EventId, ShortEventId};
 
-use super::{MAX_NATIVE_MEDIA_BODY_BYTES, decode, payload};
+use super::{ImagePolicy, MAX_NATIVE_MEDIA_BODY_BYTES, decode, payload};
 use crate::{Database, DbError, DbResult, EventRecord};
 
 /// Exclusive live traversal position, invalidated by reopen/projection rebuild.
@@ -23,6 +23,8 @@ pub struct OwnMediaCursor {
     epoch: [u8; 16],
     /// Last examined self-index key.
     position: ShortEventId,
+    /// Admission policy that created this traversal.
+    jpeg: bool,
 }
 
 /// Explicitly unvalidated pixel eligibility for a retained image candidate.
@@ -39,7 +41,7 @@ pub enum OwnMediaEligibility {
 pub struct OwnMediaCandidate {
     /// Exact full signed event identity.
     pub event_id: EventId,
-    /// Exact PNG/WebP MIME declaration matched to an encoded header.
+    /// Exact policy-admitted MIME declaration matched to an encoded header.
     pub mime: &'static str,
     /// Unvalidated encoded header width.
     pub width: u32,
@@ -75,6 +77,33 @@ impl Database {
     /// they cannot be represented by a safe continuation. Storage errors
     /// propagate. No full payload vector, codec or whole-collection scan.
     pub async fn list_own_media(&self, cursor: Option<&OwnMediaCursor>) -> DbResult<OwnMediaPage> {
+        self.list_own_media_with_policy(cursor, ImagePolicy::Default)
+            .await
+    }
+
+    /// List metadata-only PNG/WebP and restricted JPEG candidates.
+    ///
+    /// Same row/body budgets and authentication as `list_own_media`; JPEG uses
+    /// a bounded borrowed CBOR/header walk, never pixel decoding or a payload
+    /// copy. Eligibility remains RequiresReadValidation: preview/insertion must
+    /// call `read_native_media_with_jpeg` with the exact account and full ID.
+    /// Listing itself needs no retained-validation permit. Cursors cannot be
+    /// exchanged with the default policy.
+    #[cfg(feature = "native-media-jpeg")]
+    pub async fn list_own_media_with_jpeg(
+        &self,
+        cursor: Option<&OwnMediaCursor>,
+    ) -> DbResult<OwnMediaPage> {
+        self.list_own_media_with_policy(cursor, ImagePolicy::Jpeg)
+            .await
+    }
+
+    async fn list_own_media_with_policy(
+        &self,
+        cursor: Option<&OwnMediaCursor>,
+        policy: ImagePolicy,
+    ) -> DbResult<OwnMediaPage> {
+        let jpeg = !matches!(policy, ImagePolicy::Default);
         self.read_with(|tx| {
             let epoch = tx
                 .open_table(&crate::social_notification_epoch::TABLE)?
@@ -84,7 +113,8 @@ impl Database {
             if let Some(cursor) = cursor
                 && (cursor.account != self.self_id
                     || cursor.instance != self.news_instance
-                    || cursor.epoch != epoch)
+                    || cursor.epoch != epoch
+                    || cursor.jpeg != jpeg)
             {
                 return Err(DbError::MediaCursorStale);
             }
@@ -117,6 +147,7 @@ impl Database {
                         instance: self.news_instance,
                         epoch,
                         position,
+                        jpeg,
                     });
                     break;
                 }
@@ -170,13 +201,11 @@ impl Database {
                 {
                     continue;
                 }
-                let Ok((mime, encoded, bytes)) = payload::preflight(body) else {
+                let Ok((mime, encoded, bytes)) = payload::preflight_with_policy(body, policy)
+                else {
                     continue;
                 };
-                let Ok(prefix) = payload::prefix(encoded, bytes) else {
-                    continue;
-                };
-                let Some((width, height)) = dimensions(mime, &prefix, bytes) else {
+                let Some((width, height)) = candidate_dimensions(mime, encoded, bytes) else {
                     continue;
                 };
                 if width == 0
@@ -200,6 +229,15 @@ impl Database {
         })
         .await
     }
+}
+
+fn candidate_dimensions(mime: &str, encoded: &[u8], bytes: usize) -> Option<(u32, u32)> {
+    #[cfg(feature = "native-media-jpeg")]
+    if mime == "image/jpeg" {
+        return super::jpeg_header::dimensions(encoded, bytes);
+    }
+    let prefix = payload::prefix(encoded, bytes).ok()?;
+    dimensions(mime, &prefix, bytes)
 }
 
 fn dimensions(mime: &str, bytes: &[u8; 30], len: usize) -> Option<(u32, u32)> {

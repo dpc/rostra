@@ -1,0 +1,13 @@
+[package]
+name = "rostra-jpeg-validate"
+description = "Rostra's restricted retained JPEG validation contract"
+version = { workspace = true }
+edition = "2021"
+rust-version = { workspace = true }
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/dpc/rostra"
+readme = "README.md"
+include = ["Cargo.toml", "README.md", "LICENSE-APACHE", "LICENSE-MIT", "src/**", "tests/**", "provenance/**"]
+
+# No features or dependencies: scalar code and Immediate workers cannot be
+# disabled by a consuming workspace's Cargo feature unification.

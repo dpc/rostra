@@ -11,8 +11,14 @@ use super::*;
 use crate::event::{ContentStoreRecord, EventContentState};
 
 mod export;
+#[cfg(feature = "native-media-jpeg")]
+mod jpeg;
 mod opaque;
 mod public_attachments;
+
+fn validate(result: OpaqueMediaRead) -> NativeMediaRead {
+    super::validate(result, ImagePolicy::Default)
+}
 
 // Complete grayscale 3x2 PNG, with no external fixture/package dependency.
 const PNG: &[u8] = &[

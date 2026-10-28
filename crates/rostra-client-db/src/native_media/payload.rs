@@ -5,22 +5,26 @@
 //! nonminimal/indefinite encoding, tags and alternative representations are
 //! unsupported. No recursive skip or general-purpose deserializer is used.
 
-use super::{OpaqueMediaRead, ReadPolicy};
+use super::{ImagePolicy, OpaqueMediaRead, ReadPolicy};
 
 /// Complete shape validation precedes the only owned media allocation.
 #[cfg(test)]
 pub(super) fn decode(body: &[u8], image_only: bool) -> Result<(&str, Vec<u8>), OpaqueMediaRead> {
-    decode_with_policy(body, image_only, ReadPolicy::Default)
+    decode_with_policy(
+        body,
+        image_only.then_some(ImagePolicy::Default),
+        ReadPolicy::Default,
+    )
 }
 
 /// Complete shape validation precedes the only owned media allocation.
 pub(super) fn decode_with_policy(
     body: &[u8],
-    image_only: bool,
+    image_policy: Option<ImagePolicy>,
     policy: ReadPolicy,
 ) -> Result<(&str, Vec<u8>), OpaqueMediaRead> {
-    let (mime, bytes, len) = if image_only {
-        preflight(body)?
+    let (mime, bytes, len) = if let Some(image_policy) = image_policy {
+        preflight_with_policy(body, image_policy)?
     } else {
         preflight_opaque(body, policy)?
     };
@@ -32,12 +36,18 @@ pub(super) fn decode_with_policy(
     Ok((mime, data))
 }
 
-/// Validate the complete CBOR subset while borrowing encoded image bytes.
-pub(super) fn preflight(body: &[u8]) -> Result<(&'static str, &[u8], usize), OpaqueMediaRead> {
+/// Complete borrowed shape validation with explicit retained image policy.
+pub(super) fn preflight_with_policy(
+    body: &[u8],
+    policy: ImagePolicy,
+) -> Result<(&'static str, &[u8], usize), OpaqueMediaRead> {
+    let _ = policy;
     let (mime, bytes, len) = preflight_opaque(body, ReadPolicy::Default)?;
     let mime = match mime {
         "image/png" => "image/png",
         "image/webp" => "image/webp",
+        #[cfg(feature = "native-media-jpeg")]
+        "image/jpeg" if matches!(policy, ImagePolicy::Jpeg) => "image/jpeg",
         _ => return Err(OpaqueMediaRead::Unsupported),
     };
     Ok((mime, bytes, len))
@@ -105,9 +115,9 @@ pub(super) fn prefix(bytes: &[u8], len: usize) -> Result<[u8; 30], OpaqueMediaRe
     Ok(result)
 }
 /// A forward-only cursor, with no recursive descent or owned strings.
-struct Input<'a> {
+pub(super) struct Input<'a> {
     /// Remaining borrowed bytes within the admitted body.
-    bytes: &'a [u8],
+    pub(super) bytes: &'a [u8],
 }
 
 impl<'a> Input<'a> {
@@ -159,7 +169,7 @@ impl<'a> Input<'a> {
         std::str::from_utf8(self.take(len as usize)?).map_err(|_| OpaqueMediaRead::Invalid)
     }
 
-    fn byte(&mut self) -> Result<u8, OpaqueMediaRead> {
+    pub(super) fn byte(&mut self) -> Result<u8, OpaqueMediaRead> {
         let (major, value) = self.head()?;
         if major != 0 || value > 255 {
             return Err(OpaqueMediaRead::Unsupported);

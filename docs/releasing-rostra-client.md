@@ -13,10 +13,12 @@ rostra-util
 rostra-util-error
 rostra-util-fmt
 rostra-util-dedup-chan
+rostra-jpeg-validate
 rostra-core
 rostra-p2p-api
 rostra-djot
 rostra-p2p
+rostra-dm
 rostra-client-db
 rostra-client
 ```
@@ -29,7 +31,7 @@ This preserves the file-selection behavior of a live publish while preventing
 temporary dependency resolution from rewriting the live `Cargo.lock` during
 parallel CI jobs. While generating downstream archives, temporary Cargo
 configuration patches use already generated internal dependencies because their
-versions do not exist in the crates.io index yet. The check then extracts all ten
+versions do not exist in the crates.io index yet. The check then extracts all twelve
 archives into a temporary directory and creates an unrelated binary crate outside
 the workspace. A narrowly scoped `[patch.crates-io]` table points each Rostra
 dependency at one extracted archive. `cargo check` compiles that consumer in a
@@ -41,8 +43,15 @@ artifacts form a compilable `rostra-client` closure before their versions exist
 on crates.io. It also compiles the extracted `rostra-p2p` artifact against the
 extracted `rostra-core` artifact, so a synchronized version bump does not depend
 on that version already existing in the registry. The check runs real
-`cargo publish --dry-run` verification for the first six packages, which have no
+`cargo publish --dry-run` verification for the first seven packages, which have no
 unpublished Rostra dependencies.
+
+The extracted consumer explicitly enables `rostra-client-db/native-media-jpeg`,
+so the separately named, dependency-free JPEG validator must be packaged before
+the database. Its curated closure includes both upstream licenses, provenance,
+private source and regression fixtures; it does not claim the project's MPL
+license for upstream code. This is local validation only, not authorization to
+publish. There is no workspace-root decoder override required by consumers.
 
 
 ## Final registry validation and publication

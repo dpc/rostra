@@ -29,8 +29,10 @@ workspace = true
 [features]
 default = []
 native-media = ["rostra-core/raster-avatar"]
+native-media-jpeg = ["native-media", "dep:rostra-jpeg-validate"]
 
 [dependencies]
+rostra-jpeg-validate = { workspace = true, optional = true }
 anyhow = { workspace = true }
 backon = { workspace = true }
 bincode = { workspace = true }

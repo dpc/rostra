@@ -137,6 +137,10 @@
                     cargo test --profile $CARGO_PROFILE --package rostra-core --features raster-avatar avatar::
                     cargo test --profile $CARGO_PROFILE --package rostra-core --features raster-avatar static_media::
                     cargo test --profile $CARGO_PROFILE --package rostra-client-db --features native-media native_media::
+                    cargo test --profile $CARGO_PROFILE --package rostra-client-db --features native-media-jpeg native_media::
+                    cargo test --profile $CARGO_PROFILE --package rostra-jpeg-validate
+                    cargo clippy --profile $CARGO_PROFILE --package rostra-jpeg-validate --all-targets -- -D warnings
+                    cargo clippy --profile $CARGO_PROFILE --package rostra-client-db --features native-media-jpeg --all-targets -- -D warnings
                     cargo test --profile $CARGO_PROFILE --package rostra-client-db --features native-media media_request_tests::
                     cargo test --profile $CARGO_PROFILE --package rostra-client --features native-media media_request_tests::
                     cargo clippy --profile $CARGO_PROFILE --package rostra-client --features native-media --all-targets -- -D warnings

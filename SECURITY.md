@@ -213,6 +213,19 @@ returned before a concurrent deletion. Missing, unsupported, invalid, oversized
 and mismatched content must be presented honestly. There is no CPU deadline or
 process RSS bound, third-party fetch, or new persistent media cache.
 
+The separate `native-media-jpeg` feature and explicit
+`read_native_media_with_jpeg`/`list_own_media_with_jpeg` APIs additionally admit a
+fixed restricted JFIF baseline subset. Default reader/listing, avatar, external
+and normalization policies remain PNG/WebP even when Cargo features unify.
+The privately composed vendored validator checks real consumed entropy,
+independent span/geometry, strict baseline runs and canonical final padding;
+unpatched decoder success is not admission. Listing remains metadata-only.
+Hosts acquire one process-wide retained-validation permit before materializing
+media and hold through actual completion/pixel drop, including after dismissal;
+no queues of copied payloads. Existing inline `block_in_place` is not isolation.
+See [the retained JPEG contract](crates/rostra-client-db/docs/retained-jpeg.md)
+for ownership, exact subset, typed failures and remaining host gates.
+
 The additive `read_native_media_opaque` shares those retained-envelope,
 signature, exact identity, lifecycle, signed/stored-length, hash and complete
 CBOR checks. It omits only the image MIME/raster policy for explicit opaque
