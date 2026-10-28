@@ -6,12 +6,34 @@ links and recognizes Rostra mentions from Djot content.
 ## Native presentation
 
 `native::render(&str)` returns owned text segments with strong/emphasis/code
-flags and typed full/short identity or credential-free HTTP(S) destinations.
+flags and typed full/short identity, exact root-relative post, or credential-free
+HTTP(S) destinations.
 Segments avoid byte/UTF-16 offset translation. Raw markup is literal code,
 attributes are discarded, images become labelled alternative text, and other
 unsupported structures flatten with warnings. No HTML, media loading, network
-requests, or event-reference routing is produced. Existing web rendering and
+requests, or automatic routing is produced. Existing web rendering and
 signed content formats are unchanged.
+
+`NativeLink::Post { reference }` preserves the exact requested author and event
+components using `rostra_core::post::PostReference`. Only canonical
+`/post/{author}/{event}` is accepted, with full or short components independently.
+There is no URL decoding or normalization: aliases, query/fragment, trailing
+slash, action suffixes, and encoded paths remain inert. Absolute HTTP(S) links
+remain external even when their path has this shape.
+
+Before navigation, call `Database::resolve_post_reference`. It authenticates a
+bounded retained envelope and checks the exact full ID, author and social-post
+kind without loading payloads, scanning, fetching, or signing. Unknown short
+authors remain inert. Unknown full events cannot be shortened; an unknown short
+event with a full/resolved author may open an explicitly unavailable conversation
+with no automatic fetch. The result's lifecycle belongs to the **requested**
+event, not its latest replacement or supported display content. Only after this
+validation may a conversation reader canonicalize the requested ID to its latest
+display version. Re-resolve on use rather than treating a snapshot as permanent.
+Disclose the exact requested path separately from the resolved full author and
+event target; never derive either from a displayed label. Serialized post
+references have `author` and `event` objects, each with `kind: "full" | "short"`
+and canonical `id` text.
 
 `native::render_with_media(&str)` opts into inert image records alongside spans,
 without reading any bytes. Each record has literal `alt`, `span_index` (insert
@@ -40,7 +62,8 @@ inherit the renderer's validation.
 Limits are 64 KiB source, 64 potential recursive block openers, 64 emitted
 container depth, 65,536 events, 4096 spans, 2048 bytes per destination, and
 128 KiB aggregate output text plus repeated destinations. Identity destinations
-are charged a conservative 128 bytes each. Oversized destinations become inert;
+are charged a conservative 128 bytes each, post destinations 256 bytes.
+Oversized destinations become inert;
 document limits return an error, never partial/truncated output. Hosts may show
 explicitly labelled source-only text without clickable annotations on failure.
 Source-only presentation needs its own display/paging bound for oversized input.

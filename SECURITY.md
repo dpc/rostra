@@ -156,11 +156,23 @@ No network request, normalized rewrite, or new signature occurs during reuse.
 ## Native Djot presentation
 
 `rostra-djot::native::render` emits only bounded literal text segments and typed
-identity or credential-free HTTP(S) destinations, never HTML or media fetch
+identity, exact root-relative post, or credential-free HTTP(S) destinations,
+never HTML or media fetch
 instructions. Hosts must display lossy-conversion warnings and disclose actual
 destinations before external navigation. A link label does not authenticate its
 destination. Short identity references stay unresolved until checked against the
 host's retained identity index; unknown references remain inert.
+
+Post links accept only canonical `/post/{author}/{event}` full/short components;
+absolute HTTP(S) lookalikes remain external. Hosts must use the bounded
+`Database::resolve_post_reference` before navigation. It authenticates the
+requested envelope, exact full event ID, author and kind without reading payloads
+or inferring an origin. Unknown full events cannot be shortened; unknown short
+authors remain inert. Requested lifecycle is not a latest-version or display
+availability claim. Disclose the exact requested components separately from any
+resolved target, then let the conversation reader canonicalize display versions.
+See the [native post-reference contract](crates/rostra-djot/README.md#native-presentation)
+for unknown short events, snapshot lifetime and destination disclosure.
 
 The opt-in `render_with_media` uses that same parser and all its guards, adding
 at most 32 ordered image anchors with literal alternative text. A typed

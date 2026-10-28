@@ -115,6 +115,19 @@ absence. It does not authenticate signatures or authors; the client must
 reverify both before deriving holder routes. It reads no payload or private
 device state and changes no schema or existing compatibility read API.
 
+`resolve_post_reference` instead authenticates the retained envelope and checks
+its exact full event ID before shortening, claimed full/resolved author, and
+`SOCIAL_POST` kind. It uses bounded raw point reads in one snapshot, with no
+payload, replacement-lineage scan, private-state probe, fetch, signing or write.
+Its lifecycle belongs only to the requested event; only a subsequent conversation
+read may canonicalize a validated reference to a later display version. Unknown
+short authors and unknown full events remain inert; only unknown short events
+with a full/resolved author may open an explicitly unavailable conversation.
+`try_get_known_identity` exposes the fallible bounded collision-protected index
+lookup, not peer discovery. See the
+[native presentation contract](../rostra-djot/README.md#native-presentation) for
+requested-versus-resolved disclosure and rechecking on use.
+
 The SocialPost materialization feed stores event identities, not payload copies.
 A scan therefore trusts retained events, lifecycle tables, replacement metadata,
 and the content store as one coherent snapshot. Missing events, impossible

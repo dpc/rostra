@@ -4,6 +4,73 @@ use rostra_core::media::MediaEventReference;
 use super::*;
 
 #[test]
+fn post_links_preserve_exact_destinations_and_existing_inert_boundaries() {
+    use rostra_core::post::{PostAuthorReference, PostEventReference, PostReference};
+
+    let author = RostraId::from_bytes([7; 32]);
+    let event = rostra_core::EventId::from_bytes([9; 32]);
+    for author in [
+        PostAuthorReference::Full(author),
+        PostAuthorReference::Short(author.to_short()),
+    ] {
+        for event in [
+            PostEventReference::Full(event),
+            PostEventReference::Short(event.to_short()),
+        ] {
+            let reference = PostReference { author, event };
+            let path = reference.to_string();
+            let doc = render(&format!(
+                "[not the author]({path}) and [ref][p]\n\n[p]: {path}"
+            ))
+            .unwrap();
+            assert_eq!(text(&doc), "not the author and ref");
+            assert_eq!(doc.spans.iter().filter(|s| s.link.is_some()).count(), 2);
+            assert!(
+                doc.spans
+                    .iter()
+                    .filter_map(|s| s.link.as_ref())
+                    .all(|link| *link == NativeLink::Post { reference })
+            );
+            let json = serde_json::to_value(&doc).unwrap();
+            assert_eq!(json["spans"][0]["link"]["kind"], "post");
+            assert_eq!(
+                json["spans"][0]["link"]["reference"]["event"]["id"],
+                event.to_string()
+            );
+            for source in [
+                format!("`[code]({path})`"),
+                format!("```html\n<a href=\"{path}\">raw</a>\n```"),
+                format!("```=html\n<a href=\"{path}\">raw</a>\n```"),
+                format!("[undefined][{path}]"),
+                format!("[query]({path}?raw=true)"),
+                format!("[fragment]({path}#x)"),
+                format!("[suffix]({path}/edit)"),
+                format!("[encoded]({})", path.replace("/post/", "/%70ost/")),
+            ] {
+                let doc = render(&source).unwrap();
+                assert!(doc.spans.iter().all(|s| s.link.is_none()), "{source}");
+            }
+            let external = render(&format!("[label](https://example.org{path})")).unwrap();
+            assert!(matches!(
+                external.spans[0].link,
+                Some(NativeLink::External { .. })
+            ));
+            let image = render_with_media(&format!("![alt]({path})")).unwrap();
+            assert_eq!(image.images[0].destination, NativeImageDestination::Invalid);
+        }
+    }
+}
+
+#[test]
+fn repeated_post_destinations_share_the_atomic_output_budget() {
+    let author = RostraId::from_bytes([7; 32]).to_short();
+    let event = rostra_core::ShortEventId::from_bytes([9; 16]);
+    let source = format!("[x](/post/{author}/{event}) ").repeat(600);
+    assert!(source.len() < MAX_INPUT_BYTES);
+    assert_eq!(render(&source), Err(NativeRenderError::OutputLimit));
+}
+
+#[test]
 fn opt_in_images_preserve_order_alt_empty_anchors_and_destination_classes() {
     let id = rostra_core::EventId::from_bytes([7; 32]);
     let short = id.to_short();

@@ -84,6 +84,8 @@ impl Builder {
                 Some(NativeLink::External { url }) => url.len(),
                 // A conservative bound on either canonical identity encoding.
                 Some(NativeLink::Profile { .. }) => 128,
+                // Two components and their serialized full/short tags.
+                Some(NativeLink::Post { .. }) => 256,
                 None => 0,
             }
         };
@@ -295,6 +297,9 @@ fn link(destination: &str) -> Option<NativeLink> {
     }
     if let Some(reference) = extract_rostra_id_link_reference(destination) {
         return Some(NativeLink::Profile { reference });
+    }
+    if let Ok(reference) = destination.parse() {
+        return Some(NativeLink::Post { reference });
     }
     // Require an explicit authority, not URL-parser recovery of `https:foo`.
     let (scheme, _) = destination.split_once("://")?;

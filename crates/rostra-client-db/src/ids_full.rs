@@ -74,6 +74,27 @@ pub(crate) fn get(tx: &ReadTransaction, prefix: ShortRostraId) -> DbResult<Optio
         .map(|entry| entry.value()))
 }
 
+/// Read one exact canonical key and fixed-width identity suffix without panics.
+pub(crate) fn get_checked(
+    tx: &ReadTransaction,
+    prefix: ShortRostraId,
+) -> DbResult<Option<RostraId>> {
+    let key = bincode::encode_to_vec(prefix, redb_bincode::BINCODE_CONFIG)
+        .map_err(|_| DbError::KnownPeopleInvariant)?;
+    let table = tx.open_table(&TABLE)?;
+    let Some(raw) = table.as_raw().get(key.as_slice())? else {
+        return Ok(None);
+    };
+    let rest: [u8; 16] = raw
+        .value()
+        .try_into()
+        .map_err(|_| DbError::KnownPeopleInvariant)?;
+    Ok(Some(RostraId::assemble(
+        prefix,
+        RestRostraId::from_bytes(rest),
+    )))
+}
+
 /// Checked exact full-ID evidence without typed value decoding or prefix
 /// aliases.
 pub(crate) fn contains_exact(tx: &ReadTransaction, identity: RostraId) -> DbResult<bool> {

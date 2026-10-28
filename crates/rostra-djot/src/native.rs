@@ -11,6 +11,7 @@
 
 use std::fmt;
 
+use rostra_core::post::PostReference;
 use serde::Serialize;
 
 use crate::links::RostraIdLink;
@@ -67,10 +68,16 @@ pub struct NativeSpan {
     pub link: Option<NativeLink>,
 }
 
-/// The only supported navigation classes; no media or event routing capability.
+/// Syntactic navigation classes, never retrieval or signing authority.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum NativeLink {
+    /// An exact root-relative post path requiring retained DB resolution.
+    Post {
+        /// Preserve the requested components for destination disclosure.
+        #[serde(serialize_with = "serialize_post_reference")]
+        reference: PostReference,
+    },
     /// A syntactically valid identity, not proof of an author or known
     /// identity.
     Profile {
@@ -84,6 +91,44 @@ pub enum NativeLink {
         /// Actual destination to disclose, including host and path.
         url: String,
     },
+}
+
+fn serialize_post_reference<S: serde::Serializer>(
+    reference: &PostReference,
+    serializer: S,
+) -> Result<S::Ok, S::Error> {
+    use rostra_core::post::{PostAuthorReference, PostEventReference};
+    use serde::ser::SerializeStruct as _;
+
+    #[derive(Serialize)]
+    struct Component {
+        /// Exact full or short form.
+        kind: &'static str,
+        /// Canonical component bytes.
+        id: String,
+    }
+    let mut value = serializer.serialize_struct("PostReference", 2)?;
+    value.serialize_field(
+        "author",
+        &Component {
+            kind: match reference.author {
+                PostAuthorReference::Full(_) => "full",
+                PostAuthorReference::Short(_) => "short",
+            },
+            id: reference.author.to_string(),
+        },
+    )?;
+    value.serialize_field(
+        "event",
+        &Component {
+            kind: match reference.event {
+                PostEventReference::Full(_) => "full",
+                PostEventReference::Short(_) => "short",
+            },
+            id: reference.event.to_string(),
+        },
+    )?;
+    value.end()
 }
 
 fn serialize_reference<S: serde::Serializer>(

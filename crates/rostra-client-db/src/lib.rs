@@ -77,6 +77,7 @@ mod payload_runtime;
 mod payload_runtime_tests;
 #[cfg(test)]
 mod payload_startup_tests;
+pub mod post_reference;
 mod process_event_content_ops;
 mod process_event_ops;
 pub mod public_attachment_content;
