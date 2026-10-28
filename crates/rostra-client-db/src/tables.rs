@@ -159,6 +159,10 @@ def_table! {
     media_request_receipts: [u8; 16] => crate::media_receipt::MediaReceipt
 }
 def_table! {
+    /// Permanent exact-byte public attachment receipts, separate from images.
+    media_public_attachment_receipts: [u8; 16] => crate::public_attachment_receipt::PublicAttachmentReceipt
+}
+def_table! {
     /// Independent non-replayable namespace for local edit/delete receipts.
     social_post_mutation_receipts: [u8; 16] => crate::social_post_receipt::Receipt
 }

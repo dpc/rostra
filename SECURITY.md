@@ -1,5 +1,32 @@
 # Agent-browser security boundaries
 
+## Durable public opaque attachments
+
+`Client::publish_public_attachment_idempotent` is independent of normalized image
+publication. It accepts 1..=1,000,000 exact original bytes, always declared
+`application/octet-stream`; it does not decode, normalize, infer MIME or transmit
+filenames. These are public bytes, not private-message attachments or safe-to-open
+content. Existing native opaque reads can retrieve them; image presentation and
+`publish_media_idempotent` retain their prior policies.
+
+Open-client and matching-owner signing checks precede receipt lookup, exactly as
+for normalized media; no active-client or DM authority requirement is added.
+Hosts still enforce their own requesting session boundary. Persist one random
+request ID with exact immutable bytes before calling. A separate versioned,
+account-scoped digest includes the fixed MIME and original bytes. Exact accepted
+retries resolve before current payload/admission checks and never resurrect
+deleted or pruned content. Different request IDs derive independent opaque
+nonsingleton auxiliary keys from their account and operation domain.
+
+Schema-43 admission, event insertion and digest/envelope receipt commit atomically.
+Permanent receipts survive total rebuild/reopen outside payload quotas; they
+contain no source bytes, filename or secret but expose public operation metadata
+and permit dictionary guesses of input. Older schema-42 binaries reject the
+database rather than downgrade it. Success is local acceptance, not delivery or
+cross-copy deduplication. Cancellation/lost acknowledgment can follow commit.
+See [`public-attachments.md`](crates/rostra-client-db/docs/public-attachments.md)
+for the durable caller contract and allocation bounds.
+
 ## Durable own-news body corrections
 
 `Client::mutate_news_post_idempotent` uses the separate schema-42 news-mutation

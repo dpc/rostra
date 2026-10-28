@@ -52,6 +52,9 @@ mod news_request;
 #[cfg(test)]
 mod news_request_tests;
 mod profile_ordering;
+mod public_attachment_request;
+#[cfg(test)]
+mod public_attachment_request_tests;
 mod reaction;
 #[cfg(test)]
 mod reaction_tests;

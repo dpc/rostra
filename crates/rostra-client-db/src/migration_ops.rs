@@ -96,7 +96,8 @@ pub(crate) struct LegacyEventReceivedRecord {
 // Version 40 adds permanent normalized-media request receipts.
 // Version 41 adds permanent exact-intent message-device lifecycle receipts.
 // Version 42 adds independent exact-target own-news mutation receipts.
-const DB_VER: u64 = 42;
+// Version 43 adds independent exact-byte public attachment receipts.
+const DB_VER: u64 = 43;
 
 /// Versions older than this require a total migration.
 ///
@@ -177,6 +178,7 @@ impl Database {
         tx.open_table(&crate::shoutbox_request_receipts::TABLE)?;
         tx.open_table(&crate::social_post_receipts::TABLE)?;
         tx.open_table(&crate::media_request_receipts::TABLE)?;
+        tx.open_table(&crate::media_public_attachment_receipts::TABLE)?;
         tx.open_table(&crate::ids_dm_device_receipts::TABLE)?;
         tx.open_table(&crate::social_post_mutation_receipts::TABLE)?;
         tx.open_table(&crate::social_news_mutation_receipts::TABLE)?;
@@ -637,6 +639,7 @@ impl Database {
                 // Keep it in place throughout stash/recovery, byte-for-byte.
                 || name == "social_post_receipts"
                 || name == "media_request_receipts"
+                || name == "media_public_attachment_receipts"
                 || name == "ids_dm_device_receipts"
                 || name == "social_post_mutation_receipts"
                 || name == "social_news_mutation_receipts"

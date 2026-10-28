@@ -79,6 +79,11 @@ mod payload_runtime_tests;
 mod payload_startup_tests;
 mod process_event_content_ops;
 mod process_event_ops;
+pub mod public_attachment_content;
+mod public_attachment_receipt;
+pub mod public_attachment_request;
+#[cfg(test)]
+mod public_attachment_tests;
 mod quota_pruning;
 #[cfg(test)]
 mod quota_pruning_tests;
@@ -515,6 +520,15 @@ pub enum DbError {
     /// Invalid normalized local media publication.
     #[snafu(display("Invalid normalized media candidate"))]
     MediaCandidate,
+    /// A public attachment request ID already committed different exact bytes.
+    #[snafu(display("Public attachment request ID already committed with different input"))]
+    PublicAttachmentRequestMismatch,
+    /// Public attachment inputs must be nonempty and at most one million bytes.
+    #[snafu(display("Public attachment must contain 1 to 1,000,000 bytes"))]
+    PublicAttachmentInput,
+    /// Invalid public attachment signing authority, candidate or receipt.
+    #[snafu(display("Invalid public attachment candidate or receipt"))]
+    PublicAttachmentCandidate,
     /// A retained media traversal belongs to a different database lifetime.
     #[snafu(display("Media cursor is stale"))]
     MediaCursorStale,
