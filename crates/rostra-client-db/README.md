@@ -86,6 +86,24 @@ a full event ID and `RequiresReadValidation`, not a safe-image claim. Call
 An empty page can still have a continuation. Cursors are live, exclusive and
 bound to the current account/open/rebuild lifetime; do not persist them.
 
+`Database::list_own_public_attachments` separately lists metadata for retained
+own-author `application/octet-stream` payloads containing 1..=1,000,000 original
+bytes. It verifies signed ownership/full identity, lifecycle, length/hash and the
+complete borrowed default-policy CBOR subset without copying payloads. It does
+not imply safe-to-open content or relax image listing. Before reuse insertion,
+call `read_native_media_opaque` with the owner and exact full ID and recheck
+Available, author/ID, exact MIME and nonempty size; do not republish the bytes.
+The list charges a full 2,000,128-byte body reservation per raw own-index row,
+including other kinds, and stops after eight reservations (16,001,024 body bytes,
+plus at most nine wrapper bytes per row). This is tighter than its 128-row and
+twenty-item ceilings. `skipped_rows` includes unavailable, unsupported, oversized
+and corrupt candidates, not only corruption; database errors still propagate.
+Its separate opaque cursor has the same live account/open/rebuild binding.
+`BudgetReached` always carries continuation, even for an empty page; only
+`Exhausted` ends traversal. Reaching a budget at the last row may require a final
+empty call. No uncharged lookahead, global scan, network work or list cache is
+introduced.
+
 Source and issue tracking: <https://github.com/dpc/rostra>
 
 ## License

@@ -211,6 +211,24 @@ execution, opening or display, even when the declaration says PNG/WebP.
 Image presentation and own-image listing retain their existing policies.
 The same source-post-author and snapshot/re-read obligations apply.
 
+`list_own_public_attachments` is a separate metadata-only own-index traversal
+for exact `application/octet-stream` and 1..=1,000,000 original bytes. It shares
+the default borrowed complete CBOR preflight, verifies retained signed ownership
+and full identity, body hash/length and current lifecycle, and never allocates
+the payload vector. Eight conservative maximum-body reservations bound each
+call to 16,001,024 signed body bytes, plus at most nine raw-wrapper bytes per
+row; even nonmedia/unavailable own rows consume reservations. No global scan,
+new index, normalization, write, signature or fetch is involved.
+Candidate metadata is neither safe-open nor enduring reuse authority. Hosts
+must call the default `read_native_media_opaque` for the exact owner/full ID
+before insertion and require Available, matching author/ID, exact octet-stream
+MIME and nonempty data no larger than 1,000,000 bytes. Reuse references the
+existing event; it does not republish. Later use still requires lifecycle
+revalidation. Separate opaque cursors bind account/open instance/rebuild epoch;
+empty budget-stopped pages carry progress, and a final empty exhaustion call is
+possible. Skip totals aggregate unavailable/unsupported/corrupt candidates;
+structural index and backend errors fail rather than pretending to be exhaustion.
+
 The separate `read_native_media_opaque_export` opts into 4,000,000 original
 bytes for explicit local Save only. Its signed-body cap is 8,000,128 and raw
 stored-wrapper cap is 8,000,137 bytes. The exact largest accepted shortest CBOR

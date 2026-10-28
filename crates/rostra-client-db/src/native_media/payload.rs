@@ -44,7 +44,7 @@ pub(super) fn preflight(body: &[u8]) -> Result<(&'static str, &[u8], usize), Opa
 }
 
 /// Validate structure without treating the declared MIME as a content policy.
-fn preflight_opaque(
+pub(super) fn preflight_opaque(
     body: &[u8],
     policy: ReadPolicy,
 ) -> Result<(&str, &[u8], usize), OpaqueMediaRead> {

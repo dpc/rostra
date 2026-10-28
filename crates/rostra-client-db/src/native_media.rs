@@ -17,9 +17,14 @@ use rostra_core::{ContentHash, EventId};
 use crate::{Database, DbResult, EventRecord};
 
 mod list;
+mod list_public_attachments;
 mod opaque;
 mod payload;
 pub use list::{OwnMediaCandidate, OwnMediaCursor, OwnMediaEligibility, OwnMediaPage};
+pub use list_public_attachments::{
+    OwnPublicAttachmentCandidate, OwnPublicAttachmentCursor, OwnPublicAttachmentPage,
+    OwnPublicAttachmentStop,
+};
 pub use opaque::OpaqueMediaRead;
 #[cfg(test)]
 mod tests;

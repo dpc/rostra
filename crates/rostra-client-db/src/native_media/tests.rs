@@ -12,6 +12,7 @@ use crate::event::{ContentStoreRecord, EventContentState};
 
 mod export;
 mod opaque;
+mod public_attachments;
 
 // Complete grayscale 3x2 PNG, with no external fixture/package dependency.
 const PNG: &[u8] = &[
