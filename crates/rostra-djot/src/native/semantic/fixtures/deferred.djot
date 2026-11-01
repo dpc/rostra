@@ -1,0 +1,22 @@
+Math $`x^2` and $$`y = z`.
+
+Footnote[^note].
+
+[^note]: Definition with [inert link](https://example.org/).
+
+: Term
+
+  Description.
+
+```=html
+<script>alert("no")</script>
+```
+
+Inline `<b>literal</b>`{=html}.
+
+::: ignored-class
+Division with *text*.
+:::
+
+{#ignored .class onclick="bad"}
+Attributed paragraph.

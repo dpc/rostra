@@ -1,0 +1,590 @@
+{
+  "version": 1,
+  "nodes": [
+    {
+      "kind": "heading",
+      "level": 1,
+      "children": [
+        {
+          "kind": "text",
+          "text": "Heading",
+          "children": []
+        }
+      ]
+    },
+    {
+      "kind": "heading",
+      "level": 2,
+      "children": [
+        {
+          "kind": "text",
+          "text": "Subheading",
+          "children": []
+        }
+      ]
+    },
+    {
+      "kind": "paragraph",
+      "children": [
+        {
+          "kind": "text",
+          "text": "One ",
+          "children": []
+        },
+        {
+          "kind": "mark",
+          "mark": "strong",
+          "children": [
+            {
+              "kind": "text",
+              "text": "strong ",
+              "children": []
+            },
+            {
+              "kind": "mark",
+              "mark": "emphasis",
+              "children": [
+                {
+                  "kind": "text",
+                  "text": "nested",
+                  "children": []
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "kind": "text",
+          "text": " word, ",
+          "children": []
+        },
+        {
+          "kind": "mark",
+          "mark": "code",
+          "children": [
+            {
+              "kind": "text",
+              "text": "a < b",
+              "children": []
+            }
+          ]
+        },
+        {
+          "kind": "text",
+          "text": ", ",
+          "children": []
+        },
+        {
+          "kind": "mark",
+          "mark": "highlight",
+          "children": [
+            {
+              "kind": "text",
+              "text": "mark",
+              "children": []
+            }
+          ]
+        },
+        {
+          "kind": "text",
+          "text": ", ",
+          "children": []
+        },
+        {
+          "kind": "mark",
+          "mark": "delete",
+          "children": [
+            {
+              "kind": "text",
+              "text": "removed",
+              "children": []
+            }
+          ]
+        },
+        {
+          "kind": "text",
+          "text": ",",
+          "children": []
+        },
+        {
+          "kind": "soft_break",
+          "children": []
+        },
+        {
+          "kind": "mark",
+          "mark": "insert",
+          "children": [
+            {
+              "kind": "text",
+              "text": "added",
+              "children": []
+            }
+          ]
+        },
+        {
+          "kind": "text",
+          "text": ", H",
+          "children": []
+        },
+        {
+          "kind": "mark",
+          "mark": "subscript",
+          "children": [
+            {
+              "kind": "text",
+              "text": "2",
+              "children": []
+            }
+          ]
+        },
+        {
+          "kind": "text",
+          "text": "O, x",
+          "children": []
+        },
+        {
+          "kind": "mark",
+          "mark": "superscript",
+          "children": [
+            {
+              "kind": "text",
+              "text": "2",
+              "children": []
+            }
+          ]
+        },
+        {
+          "kind": "text",
+          "text": ".",
+          "children": []
+        },
+        {
+          "kind": "soft_break",
+          "children": []
+        },
+        {
+          "kind": "text",
+          "text": "Soft line",
+          "children": []
+        },
+        {
+          "kind": "hard_break",
+          "children": []
+        },
+        {
+          "kind": "text",
+          "text": "hard line.",
+          "children": []
+        }
+      ]
+    },
+    {
+      "kind": "quote",
+      "children": [
+        {
+          "kind": "paragraph",
+          "children": [
+            {
+              "kind": "text",
+              "text": "First quoted paragraph.",
+              "children": []
+            }
+          ]
+        },
+        {
+          "kind": "paragraph",
+          "children": [
+            {
+              "kind": "text",
+              "text": "Second quoted paragraph.",
+              "children": []
+            }
+          ]
+        },
+        {
+          "kind": "quote",
+          "children": [
+            {
+              "kind": "paragraph",
+              "children": [
+                {
+                  "kind": "text",
+                  "text": "Nested quote.",
+                  "children": []
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "kind": "list",
+      "list_kind": {
+        "kind": "ordered",
+        "start": 3,
+        "numbering": "decimal",
+        "style": "period"
+      },
+      "tight": true,
+      "children": [
+        {
+          "kind": "list_item",
+          "checked": null,
+          "children": [
+            {
+              "kind": "paragraph",
+              "children": [
+                {
+                  "kind": "text",
+                  "text": "Third",
+                  "children": []
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "kind": "list_item",
+          "checked": null,
+          "children": [
+            {
+              "kind": "paragraph",
+              "children": [
+                {
+                  "kind": "text",
+                  "text": "Fourth",
+                  "children": []
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "kind": "list",
+      "list_kind": {
+        "kind": "ordered",
+        "start": 1,
+        "numbering": "alpha_lower",
+        "style": "paren_paren"
+      },
+      "tight": true,
+      "children": [
+        {
+          "kind": "list_item",
+          "checked": null,
+          "children": [
+            {
+              "kind": "paragraph",
+              "children": [
+                {
+                  "kind": "text",
+                  "text": "Alpha",
+                  "children": []
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "kind": "list_item",
+          "checked": null,
+          "children": [
+            {
+              "kind": "paragraph",
+              "children": [
+                {
+                  "kind": "text",
+                  "text": "Beta",
+                  "children": []
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "kind": "list",
+      "list_kind": {
+        "kind": "unordered"
+      },
+      "tight": true,
+      "children": [
+        {
+          "kind": "list_item",
+          "checked": null,
+          "children": [
+            {
+              "kind": "paragraph",
+              "children": [
+                {
+                  "kind": "text",
+                  "text": "outer",
+                  "children": []
+                }
+              ]
+            },
+            {
+              "kind": "list",
+              "list_kind": {
+                "kind": "unordered"
+              },
+              "tight": true,
+              "children": [
+                {
+                  "kind": "list_item",
+                  "checked": null,
+                  "children": [
+                    {
+                      "kind": "paragraph",
+                      "children": [
+                        {
+                          "kind": "text",
+                          "text": "inner",
+                          "children": []
+                        }
+                      ]
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "kind": "list_item",
+          "checked": null,
+          "children": [
+            {
+              "kind": "paragraph",
+              "children": [
+                {
+                  "kind": "text",
+                  "text": "sibling",
+                  "children": []
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "kind": "list",
+      "list_kind": {
+        "kind": "task"
+      },
+      "tight": true,
+      "children": [
+        {
+          "kind": "list_item",
+          "checked": false,
+          "children": [
+            {
+              "kind": "paragraph",
+              "children": [
+                {
+                  "kind": "text",
+                  "text": "Pending",
+                  "children": []
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "kind": "list_item",
+          "checked": true,
+          "children": [
+            {
+              "kind": "paragraph",
+              "children": [
+                {
+                  "kind": "text",
+                  "text": "Done",
+                  "children": []
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "kind": "code_block",
+      "language": "rust",
+      "children": [
+        {
+          "kind": "text",
+          "text": "fn main() {\n    println!(\"literal <tag>\");\n}\n",
+          "children": []
+        }
+      ]
+    },
+    {
+      "kind": "rule",
+      "children": []
+    },
+    {
+      "kind": "table",
+      "children": [
+        {
+          "kind": "caption",
+          "children": [
+            {
+              "kind": "text",
+              "text": "A ",
+              "children": []
+            },
+            {
+              "kind": "mark",
+              "mark": "strong",
+              "children": [
+                {
+                  "kind": "text",
+                  "text": "table",
+                  "children": []
+                }
+              ]
+            },
+            {
+              "kind": "text",
+              "text": " caption",
+              "children": []
+            }
+          ]
+        },
+        {
+          "kind": "table_row",
+          "head": true,
+          "children": [
+            {
+              "kind": "table_cell",
+              "head": true,
+              "alignment": "left",
+              "children": [
+                {
+                  "kind": "text",
+                  "text": "Left",
+                  "children": []
+                }
+              ]
+            },
+            {
+              "kind": "table_cell",
+              "head": true,
+              "alignment": "center",
+              "children": [
+                {
+                  "kind": "text",
+                  "text": "Center",
+                  "children": []
+                }
+              ]
+            },
+            {
+              "kind": "table_cell",
+              "head": true,
+              "alignment": "right",
+              "children": [
+                {
+                  "kind": "text",
+                  "text": "Right",
+                  "children": []
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "kind": "table_row",
+          "head": false,
+          "children": [
+            {
+              "kind": "table_cell",
+              "head": false,
+              "alignment": "left",
+              "children": [
+                {
+                  "kind": "text",
+                  "text": "one",
+                  "children": []
+                }
+              ]
+            },
+            {
+              "kind": "table_cell",
+              "head": false,
+              "alignment": "center",
+              "children": [
+                {
+                  "kind": "text",
+                  "text": "two",
+                  "children": []
+                }
+              ]
+            },
+            {
+              "kind": "table_cell",
+              "head": false,
+              "alignment": "right",
+              "children": [
+                {
+                  "kind": "text",
+                  "text": "three",
+                  "children": []
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "kind": "table_row",
+          "head": false,
+          "children": [
+            {
+              "kind": "table_cell",
+              "head": false,
+              "alignment": "left",
+              "children": [
+                {
+                  "kind": "text",
+                  "text": "four",
+                  "children": []
+                }
+              ]
+            },
+            {
+              "kind": "table_cell",
+              "head": false,
+              "alignment": "center",
+              "children": [
+                {
+                  "kind": "text",
+                  "text": "five",
+                  "children": []
+                }
+              ]
+            },
+            {
+              "kind": "table_cell",
+              "head": false,
+              "alignment": "right",
+              "children": [
+                {
+                  "kind": "text",
+                  "text": "six",
+                  "children": []
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "warnings": []
+}

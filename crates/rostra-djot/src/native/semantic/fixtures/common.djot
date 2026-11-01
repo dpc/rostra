@@ -1,0 +1,44 @@
+# Heading
+
+## Subheading
+
+One *strong _nested_* word, `a < b`, {=mark=}, {-removed-},
+{+added+}, H~2~O, x^2^.
+Soft line\
+hard line.
+
+> First quoted paragraph.
+>
+> Second quoted paragraph.
+>
+> > Nested quote.
+
+3. Third
+4. Fourth
+
+(a) Alpha
+(b) Beta
+
+- outer
+
+  - inner
+
+- sibling
+
+- [ ] Pending
+- [x] Done
+
+```rust
+fn main() {
+    println!("literal <tag>");
+}
+```
+
+---
+
+| Left | Center | Right |
+|:-----|:------:|------:|
+| one  | two    | three |
+| four | five   | six   |
+
+^ A *table* caption

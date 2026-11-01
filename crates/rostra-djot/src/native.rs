@@ -1,6 +1,7 @@
 //! Bounded, non-HTML presentation for native hosts.
 //!
-//! This is a deliberately lossy Djot subset, independent of the web renderer.
+//! The legacy span APIs are deliberately lossy; [`render_semantic`] preserves
+//! common block and inline structure. Both are independent of the web renderer.
 //! Hosts must display warnings, and show source (without link annotations) when
 //! rendering fails. No partial document is returned. Run off the UI executor
 //! and bound concurrency: these limits are not a CPU deadline or an RSS
@@ -18,7 +19,13 @@ use crate::links::RostraIdLink;
 
 mod image;
 mod renderer;
+mod semantic;
 pub use image::{NativeImage, NativeImageDestination};
+pub use semantic::{
+    DeferredKind, LinkOrigin, ListNumbering, ListStyle, MAX_NODES, MAX_TABLE_CELLS, MAX_TABLE_ROWS,
+    SemanticAlignment, SemanticDocument, SemanticKind, SemanticListKind, SemanticMark,
+    SemanticNode, render_semantic,
+};
 #[cfg(test)]
 mod tests;
 
@@ -176,6 +183,10 @@ pub enum NativeRenderError {
     OutputLimit,
     /// Image record count exceeds the opt-in media budget.
     ImageLimit,
+    /// Semantic tree node count exceeds the budget.
+    NodeLimit,
+    /// Aggregate semantic table row or cell count exceeds the budget.
+    TableLimit,
 }
 
 impl fmt::Display for NativeRenderError {

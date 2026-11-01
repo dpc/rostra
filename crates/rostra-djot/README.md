@@ -5,18 +5,23 @@ links and recognizes Rostra mentions from Djot content.
 
 ## Native presentation
 
+Use `native::render_semantic(&str)` for structured native rich rendering.
+See the [semantic document contract](docs/native-semantic.md) for its
+versioned wire shape, fixtures, budgets, deferred features and host obligations.
+The legacy span APIs below retain their existing behavior.
+
 `native::render(&str)` returns owned text segments with strong/emphasis/code
 flags and typed full/short identity, exact root-relative post, or credential-free
 HTTP(S) destinations.
-Segments avoid byte/UTF-16 offset translation. Raw markup is literal code,
-attributes are discarded, images become labelled alternative text, and other
-unsupported structures flatten with warnings. No HTML, media loading, network
-requests, or automatic routing is produced. Existing web rendering and
-signed content formats are unchanged.
+Segments avoid byte/UTF-16 offset translation. The renderer preserves raw markup
+as literal code, discards attributes, replaces images with labelled alternative
+text, and flattens other unsupported structures with warnings. It produces no
+HTML and performs no media loading, network requests or automatic routing.
+Existing web rendering and signed content formats are unchanged.
 
 `NativeLink::Post { reference }` preserves the exact requested author and event
-components using `rostra_core::post::PostReference`. Only canonical
-`/post/{author}/{event}` is accepted, with full or short components independently.
+components using `rostra_core::post::PostReference`. The renderer accepts only
+canonical `/post/{author}/{event}` paths; each component may be full or short.
 There is no URL decoding or normalization: aliases, query/fragment, trailing
 slash, action suffixes, and encoded paths remain inert. Absolute HTTP(S) links
 remain external even when their path has this shape.
@@ -41,8 +46,8 @@ before that span, or at the end), and a destination distinct from ordinary links
 `Rostra { reference }`, `External { url }`, or `Invalid`. Records preserve source
 order, including empty alternatives and consecutive images sharing an anchor.
 This mode puts alternative text in image records rather than duplicating it in
-spans. At most 32 records are returned and their alt/destination bytes share the
-ordinary aggregate output budget. The text-only `render` behavior is unchanged.
+spans. The renderer returns at most 32 records, whose alt/destination bytes share
+the ordinary aggregate output budget. The text-only `render` behavior is unchanged.
 
 Rostra media references preserve full versus short event IDs, serialized as
 `{ "kind": "full" | "short", "id": "..." }`. They require a checked retained read
@@ -63,9 +68,9 @@ Limits are 64 KiB source, 64 potential recursive block openers, 64 emitted
 container depth, 65,536 events, 4096 spans, 2048 bytes per destination, and
 128 KiB aggregate output text plus repeated destinations. Identity destinations
 are charged a conservative 128 bytes each, post destinations 256 bytes.
-Oversized destinations become inert;
-document limits return an error, never partial/truncated output. Hosts may show
-explicitly labelled source-only text without clickable annotations on failure.
+Oversized destinations become inert. Exceeding a document limit returns an error,
+never partial/truncated output. Hosts may show explicitly labelled source-only
+text without clickable annotations on failure.
 Source-only presentation needs its own display/paging bound for oversized input.
 
 The **pre-parser block-opener budget is not a nesting-only limit**. It counts
@@ -86,7 +91,7 @@ its mention index/notification may be omitted, even for a flat list exceeding
 64 items. In-budget full/short mention matching is unchanged. This guard does not
 cover the separate excerpt helpers or the web renderer.
 
-It is an implementation crate in the Rostra publication set. Applications that
+This is an implementation crate in the Rostra publication set. Applications that
 need a networked Rostra client should use
 [`rostra-client`](https://docs.rs/rostra-client).
 

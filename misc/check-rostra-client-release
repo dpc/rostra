@@ -109,6 +109,9 @@ content_roots() {
     rostra-client-db)
       printf '%s\n' docs proptest-regressions src tests
       ;;
+    rostra-djot)
+      printf '%s\n' docs src
+      ;;
     rostra-client)
       printf '%s\n' examples src tests
       ;;

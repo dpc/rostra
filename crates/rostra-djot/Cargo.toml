@@ -18,6 +18,7 @@ include = [
   "LICENSE-MIT",
   "LICENSE-MPL",
   "src/**",
+  "docs/**",
 ]
 
 [lints]

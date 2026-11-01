@@ -1,0 +1,227 @@
+{
+  "version": 1,
+  "nodes": [
+    {
+      "kind": "paragraph",
+      "children": [
+        {
+          "kind": "text",
+          "text": "Math ",
+          "children": []
+        },
+        {
+          "kind": "deferred",
+          "feature": {
+            "kind": "math",
+            "display": false
+          },
+          "children": [
+            {
+              "kind": "text",
+              "text": "x^2",
+              "children": []
+            }
+          ]
+        },
+        {
+          "kind": "text",
+          "text": " and ",
+          "children": []
+        },
+        {
+          "kind": "deferred",
+          "feature": {
+            "kind": "math",
+            "display": true
+          },
+          "children": [
+            {
+              "kind": "text",
+              "text": "y = z",
+              "children": []
+            }
+          ]
+        },
+        {
+          "kind": "text",
+          "text": ".",
+          "children": []
+        }
+      ]
+    },
+    {
+      "kind": "paragraph",
+      "children": [
+        {
+          "kind": "text",
+          "text": "Footnote",
+          "children": []
+        },
+        {
+          "kind": "deferred",
+          "feature": {
+            "kind": "footnote_reference",
+            "label": "note"
+          },
+          "children": []
+        },
+        {
+          "kind": "text",
+          "text": ".",
+          "children": []
+        }
+      ]
+    },
+    {
+      "kind": "deferred",
+      "feature": {
+        "kind": "footnote_definition",
+        "label": "note"
+      },
+      "children": [
+        {
+          "kind": "paragraph",
+          "children": [
+            {
+              "kind": "text",
+              "text": "Definition with ",
+              "children": []
+            },
+            {
+              "kind": "text",
+              "text": "inert link.",
+              "children": []
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "kind": "deferred",
+      "feature": {
+        "kind": "description_list"
+      },
+      "children": [
+        {
+          "kind": "deferred",
+          "feature": {
+            "kind": "description_term"
+          },
+          "children": [
+            {
+              "kind": "text",
+              "text": "Term",
+              "children": []
+            }
+          ]
+        },
+        {
+          "kind": "deferred",
+          "feature": {
+            "kind": "description_details"
+          },
+          "children": [
+            {
+              "kind": "paragraph",
+              "children": [
+                {
+                  "kind": "text",
+                  "text": "Description.",
+                  "children": []
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "kind": "raw",
+      "block": true,
+      "format": "html",
+      "children": [
+        {
+          "kind": "text",
+          "text": "<script>alert(\"no\")</script>",
+          "children": []
+        }
+      ]
+    },
+    {
+      "kind": "paragraph",
+      "children": [
+        {
+          "kind": "text",
+          "text": "Inline ",
+          "children": []
+        },
+        {
+          "kind": "raw",
+          "block": false,
+          "format": "html",
+          "children": [
+            {
+              "kind": "text",
+              "text": "<b>literal</b>",
+              "children": []
+            }
+          ]
+        },
+        {
+          "kind": "text",
+          "text": ".",
+          "children": []
+        }
+      ]
+    },
+    {
+      "kind": "deferred",
+      "feature": {
+        "kind": "division"
+      },
+      "children": [
+        {
+          "kind": "paragraph",
+          "children": [
+            {
+              "kind": "text",
+              "text": "Division with ",
+              "children": []
+            },
+            {
+              "kind": "mark",
+              "mark": "strong",
+              "children": [
+                {
+                  "kind": "text",
+                  "text": "text",
+                  "children": []
+                }
+              ]
+            },
+            {
+              "kind": "text",
+              "text": ".",
+              "children": []
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "kind": "paragraph",
+      "children": [
+        {
+          "kind": "text",
+          "text": "Attributed paragraph.",
+          "children": []
+        }
+      ]
+    }
+  ],
+  "warnings": [
+    "unsupported_markup",
+    "raw_markup",
+    "attributes_ignored"
+  ]
+}

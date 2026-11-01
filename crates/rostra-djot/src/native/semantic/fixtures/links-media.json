@@ -1,0 +1,274 @@
+{
+  "version": 1,
+  "nodes": [
+    {
+      "kind": "paragraph",
+      "children": [
+        {
+          "kind": "text",
+          "text": "Before ",
+          "children": []
+        },
+        {
+          "kind": "link",
+          "destination": {
+            "kind": "external",
+            "url": "https://example.org/path?q=1"
+          },
+          "origin": "authored",
+          "children": [
+            {
+              "kind": "text",
+              "text": "authored ",
+              "children": []
+            },
+            {
+              "kind": "mark",
+              "mark": "strong",
+              "children": [
+                {
+                  "kind": "text",
+                  "text": "label",
+                  "children": []
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "kind": "text",
+          "text": " and ",
+          "children": []
+        },
+        {
+          "kind": "link",
+          "destination": {
+            "kind": "external",
+            "url": "https://example.org/"
+          },
+          "origin": "autolink",
+          "children": [
+            {
+              "kind": "text",
+              "text": "https://example.org/",
+              "children": []
+            }
+          ]
+        },
+        {
+          "kind": "text",
+          "text": ".",
+          "children": []
+        }
+      ]
+    },
+    {
+      "kind": "paragraph",
+      "children": [
+        {
+          "kind": "image",
+          "destination": {
+            "kind": "external",
+            "url": "https://example.org/one.png"
+          },
+          "children": [
+            {
+              "kind": "mark",
+              "mark": "strong",
+              "children": [
+                {
+                  "kind": "text",
+                  "text": "first",
+                  "children": []
+                }
+              ]
+            },
+            {
+              "kind": "text",
+              "text": " alt",
+              "children": []
+            }
+          ]
+        },
+        {
+          "kind": "text",
+          "text": " middle ",
+          "children": []
+        },
+        {
+          "kind": "image",
+          "destination": {
+            "kind": "external",
+            "url": "https://example.org/two.png"
+          },
+          "children": []
+        },
+        {
+          "kind": "text",
+          "text": " after.",
+          "children": []
+        }
+      ]
+    },
+    {
+      "kind": "paragraph",
+      "children": [
+        {
+          "kind": "link",
+          "destination": null,
+          "origin": "authored",
+          "children": [
+            {
+              "kind": "text",
+              "text": "bad",
+              "children": []
+            }
+          ]
+        },
+        {
+          "kind": "text",
+          "text": ") ",
+          "children": []
+        },
+        {
+          "kind": "link",
+          "destination": null,
+          "origin": "authored",
+          "children": [
+            {
+              "kind": "text",
+              "text": "credentials",
+              "children": []
+            }
+          ]
+        },
+        {
+          "kind": "text",
+          "text": " ",
+          "children": []
+        },
+        {
+          "kind": "link",
+          "destination": null,
+          "origin": "authored",
+          "children": [
+            {
+              "kind": "text",
+              "text": "missing",
+              "children": []
+            }
+          ]
+        },
+        {
+          "kind": "text",
+          "text": ".",
+          "children": []
+        }
+      ]
+    },
+    {
+      "kind": "paragraph",
+      "children": [
+        {
+          "kind": "image",
+          "destination": {
+            "kind": "invalid"
+          },
+          "children": [
+            {
+              "kind": "text",
+              "text": "invalid",
+              "children": []
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "kind": "paragraph",
+      "children": [
+        {
+          "kind": "mark",
+          "mark": "code",
+          "children": [
+            {
+              "kind": "text",
+              "text": "<https://example.org/code>",
+              "children": []
+            }
+          ]
+        },
+        {
+          "kind": "text",
+          "text": " ",
+          "children": []
+        },
+        {
+          "kind": "link",
+          "destination": {
+            "kind": "external",
+            "url": "https://example.org/label"
+          },
+          "origin": "authored",
+          "children": [
+            {
+              "kind": "mark",
+              "mark": "strong",
+              "children": [
+                {
+                  "kind": "text",
+                  "text": "marked",
+                  "children": []
+                }
+              ]
+            },
+            {
+              "kind": "text",
+              "text": " ",
+              "children": []
+            },
+            {
+              "kind": "mark",
+              "mark": "code",
+              "children": [
+                {
+                  "kind": "text",
+                  "text": "code",
+                  "children": []
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "kind": "text",
+          "text": ".",
+          "children": []
+        }
+      ]
+    },
+    {
+      "kind": "paragraph",
+      "children": [
+        {
+          "kind": "link",
+          "destination": {
+            "kind": "external",
+            "url": "https://example.org/reference"
+          },
+          "origin": "authored",
+          "children": [
+            {
+              "kind": "text",
+              "text": "reference",
+              "children": []
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "warnings": [
+    "invalid_link"
+  ]
+}

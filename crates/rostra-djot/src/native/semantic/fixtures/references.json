@@ -1,0 +1,226 @@
+{
+  "version": 1,
+  "nodes": [
+    {
+      "kind": "paragraph",
+      "children": [
+        {
+          "kind": "link",
+          "destination": {
+            "kind": "profile",
+            "reference": "rsyhdoqba8yhdoqba8yhdoqba8yhdoqba8yhdoqba8yhdoqba8yhdo"
+          },
+          "origin": "autolink",
+          "children": [
+            {
+              "kind": "text",
+              "text": "rostra:rsyhdoqba8yhdoqba8yhdoqba8yhdoqba8yhdoqba8yhdoqba8yhdo",
+              "children": []
+            }
+          ]
+        },
+        {
+          "kind": "text",
+          "text": " and ",
+          "children": []
+        },
+        {
+          "kind": "link",
+          "destination": {
+            "kind": "profile",
+            "reference": "rsyhdoqba8yhdoqba8yhdoqba8yhdoqba8yhdoqba8yhdoqba8yhdo"
+          },
+          "origin": "authored",
+          "children": [
+            {
+              "kind": "text",
+              "text": "authored name",
+              "children": []
+            }
+          ]
+        },
+        {
+          "kind": "text",
+          "text": " and ",
+          "children": []
+        },
+        {
+          "kind": "link",
+          "destination": {
+            "kind": "profile",
+            "reference": "rsyhdoqba8yhdoqba8yhdoqba8yh"
+          },
+          "origin": "autolink",
+          "children": [
+            {
+              "kind": "text",
+              "text": "rostra:rsyhdoqba8yhdoqba8yhdoqba8yh",
+              "children": []
+            }
+          ]
+        },
+        {
+          "kind": "text",
+          "text": ".",
+          "children": []
+        }
+      ]
+    },
+    {
+      "kind": "paragraph",
+      "children": [
+        {
+          "kind": "link",
+          "destination": {
+            "kind": "post",
+            "reference": {
+              "author": {
+                "kind": "full",
+                "id": "rsyhdoqba8yhdoqba8yhdoqba8yhdoqba8yhdoqba8yhdoqba8yhdo"
+              },
+              "event": {
+                "kind": "full",
+                "id": "BEEQSCIJBEEQSCIJBEEQSCIJBEEQSCIJBEEQSCIJBEEQSCIJBEEQ"
+              }
+            }
+          },
+          "origin": "authored",
+          "children": [
+            {
+              "kind": "text",
+              "text": "post",
+              "children": []
+            }
+          ]
+        },
+        {
+          "kind": "text",
+          "text": " ",
+          "children": []
+        },
+        {
+          "kind": "link",
+          "destination": {
+            "kind": "post",
+            "reference": {
+              "author": {
+                "kind": "short",
+                "id": "rsyhdoqba8yhdoqba8yhdoqba8yh"
+              },
+              "event": {
+                "kind": "short",
+                "id": "BEEQSCIJBEEQSCIJBEEQSCIJBE"
+              }
+            }
+          },
+          "origin": "authored",
+          "children": [
+            {
+              "kind": "text",
+              "text": "short post",
+              "children": []
+            }
+          ]
+        },
+        {
+          "kind": "text",
+          "text": " ",
+          "children": []
+        },
+        {
+          "kind": "link",
+          "destination": {
+            "kind": "external",
+            "url": "https://example.org/post/rsyhdoqba8yhdoqba8yhdoqba8yhdoqba8yhdoqba8yhdoqba8yhdo/BEEQSCIJBEEQSCIJBEEQSCIJBEEQSCIJBEEQSCIJBEEQSCIJBEEQ"
+          },
+          "origin": "authored",
+          "children": [
+            {
+              "kind": "text",
+              "text": "absolute",
+              "children": []
+            }
+          ]
+        },
+        {
+          "kind": "text",
+          "text": ".",
+          "children": []
+        }
+      ]
+    },
+    {
+      "kind": "paragraph",
+      "children": [
+        {
+          "kind": "image",
+          "destination": {
+            "kind": "rostra",
+            "reference": {
+              "kind": "short",
+              "id": "BEEQSCIJBEEQSCIJBEEQSCIJBE"
+            }
+          },
+          "children": [
+            {
+              "kind": "text",
+              "text": "short",
+              "children": []
+            }
+          ]
+        },
+        {
+          "kind": "image",
+          "destination": {
+            "kind": "rostra",
+            "reference": {
+              "kind": "full",
+              "id": "BEEQSCIJBEEQSCIJBEEQSCIJBEEQSCIJBEEQSCIJBEEQSCIJBEEQ"
+            }
+          },
+          "children": []
+        }
+      ]
+    },
+    {
+      "kind": "paragraph",
+      "children": [
+        {
+          "kind": "link",
+          "destination": {
+            "kind": "external",
+            "url": "https://example.org/outer"
+          },
+          "origin": "authored",
+          "children": [
+            {
+              "kind": "text",
+              "text": "outer ",
+              "children": []
+            },
+            {
+              "kind": "image",
+              "destination": {
+                "kind": "external",
+                "url": "https://example.org/image"
+              },
+              "children": [
+                {
+                  "kind": "text",
+                  "text": "image with ",
+                  "children": []
+                },
+                {
+                  "kind": "text",
+                  "text": "link",
+                  "children": []
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "warnings": []
+}

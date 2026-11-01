@@ -273,7 +273,7 @@ pub(super) fn render(source: &str, media: bool) -> Result<NativeDocument, Native
     Ok(output.document)
 }
 
-fn image_destination(destination: &str) -> NativeImageDestination {
+pub(super) fn image_destination(destination: &str) -> NativeImageDestination {
     if destination.len() <= MAX_LINK_BYTES
         && let Some(reference) = crate::links::extract_rostra_media_reference(destination)
     {
@@ -286,7 +286,7 @@ fn image_destination(destination: &str) -> NativeImageDestination {
     }
 }
 
-fn link(destination: &str) -> Option<NativeLink> {
+pub(super) fn link(destination: &str) -> Option<NativeLink> {
     if destination.len() > MAX_LINK_BYTES
         || destination
             .chars()
