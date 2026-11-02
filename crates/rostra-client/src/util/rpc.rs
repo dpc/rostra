@@ -1,7 +1,8 @@
 use std::cmp::Reverse;
 use std::collections::{BTreeMap, BTreeSet};
 
-use rostra_client_db::{DbResult, InsertEventOutcome, ProcessEventState};
+use futures::stream::{self, StreamExt as _};
+use rostra_client_db::{DbError, DbResult, InsertEventOutcome, ProcessEventState};
 use rostra_core::ShortEventId;
 use rostra_core::event::{EventExt as _, VerifiedEvent};
 use rostra_core::id::{RostraId, ToShort as _};
@@ -11,6 +12,54 @@ use tracing::debug;
 use crate::LOG_TARGET;
 use crate::connection_cache::ConnectionCache;
 use crate::net::ClientNetworking;
+
+// Bound each traversal independently of optional account admission. Each event
+// can race four peers, each with a read and conversion buffer: a normal batch
+// therefore accounts for at most 32 MiB of declared payload allocations.
+const PAYLOAD_BATCH_EVENTS: usize = 4;
+const PAYLOAD_BATCH_BYTES: u64 = 4 * 1024 * 1024;
+
+/// Fetch a bounded, priority-ordered batch, materializing whichever read is
+/// ready.
+async fn fetch_payload_batch(
+    batch: &[VerifiedEvent],
+    networking: &ClientNetworking,
+    connections: &ConnectionCache,
+    peers: &[RostraId],
+    storage: &rostra_client_db::Database,
+) -> DbResult<usize> {
+    let mut active = stream::iter(batch.iter().copied().map(|event| async move {
+        (
+            event,
+            connections
+                .fetch_event_content_from_peers_detailed(networking, peers, event, storage)
+                .await,
+        )
+    }))
+    .buffer_unordered(PAYLOAD_BATCH_EVENTS);
+    let mut deferred = Vec::new();
+    let mut materialized = 0;
+    while let Some((event, result)) = active.next().await {
+        match result {
+            Ok(outcome) => materialized += usize::from(outcome.materialized),
+            Err(DbError::PayloadAdmissionPaused { .. }) => deferred.push(event),
+            Err(err) => return Err(err),
+        }
+    }
+    // Sibling acquisitions may have consumed all capacity. Drain them before
+    // retrying refusals once, serially; persistent external pressure still
+    // propagates the ordinary temporary pause instead of spinning or skipping
+    // peers.
+    for event in deferred {
+        materialized += usize::from(
+            connections
+                .fetch_event_content_from_peers_detailed(networking, peers, event, storage)
+                .await?
+                .materialized,
+        );
+    }
+    Ok(materialized)
+}
 
 pub(crate) async fn get_event_content_from_followers(
     networking: &ClientNetworking,
@@ -83,15 +132,16 @@ pub(crate) async fn get_event_content_from_followers(
 /// history.
 ///
 /// Uses an ordered queue sorted by (timestamp, depth, event_id) to
-/// prioritize payload download and processing from oldest to newest. A child's
-/// envelope must be fetched first to discover its parent IDs, but its payload
-/// is deferred while ancestors are traversed. Equal effective timestamps prefer
-/// deeper ancestors; unfetched sibling envelopes are discovered by event ID, so
-/// this is depth-biased rather than a strict depth-first search. It
-/// opportunistically approximates production order, not a guaranteed receipt or
-/// canonical order. The traversal can also establish a "cutoff" timestamp
-/// beyond which we don't need to fetch more events (because we already have
-/// processed content for those).
+/// prioritize payload launches from oldest to newest. Bounded batches overlap
+/// reads and process ready payloads without waiting for older slow reads. A
+/// child's envelope must be fetched first to discover its parent IDs, but its
+/// payload is deferred while ancestors are traversed. Equal effective
+/// timestamps prefer deeper ancestors; unfetched sibling envelopes are
+/// discovered by event ID, so this is depth-biased rather than a strict
+/// depth-first search. It opportunistically approximates production order, not
+/// a guaranteed receipt or canonical order. The traversal can also establish a
+/// "cutoff" timestamp beyond which we don't need to fetch more events (because
+/// we already have processed content for those).
 ///
 /// Depth starts at 0 for the head and increments for each parent traversal.
 /// Higher depth (deeper into the DAG) is processed first via `Reverse`.
@@ -141,6 +191,8 @@ pub(crate) async fn download_events_from_child(
     let mut content_fetch_attempts: usize = 0;
     let mut new_events: usize = 0;
     let mut new_contents: usize = 0;
+    let mut payload_batch = Vec::with_capacity(PAYLOAD_BATCH_EVENTS);
+    let mut payload_batch_bytes = 0_u64;
 
     // Start with head at "far future" timestamp and depth 0
     let far_future_ts = u64::MAX;
@@ -182,14 +234,26 @@ pub(crate) async fn download_events_from_child(
                 );
 
                 content_fetch_attempts += 1;
-                if connections
-                    .fetch_event_content_from_peers_detailed(networking, peers, event, storage)
-                    .await?
-                    .materialized
+                let bytes = u64::from(event.content_len());
+                if !payload_batch.is_empty()
+                    && (payload_batch.len() == PAYLOAD_BATCH_EVENTS
+                        || payload_batch_bytes + bytes > PAYLOAD_BATCH_BYTES)
                 {
-                    new_contents += 1;
-                    downloaded_anything = true;
+                    new_contents += fetch_payload_batch(
+                        &payload_batch,
+                        networking,
+                        connections,
+                        peers,
+                        storage,
+                    )
+                    .await?;
+                    payload_batch.clear();
+                    payload_batch_bytes = 0;
                 }
+                // A payload above the batch byte target runs alone, under the
+                // existing per-event size and admission limits.
+                payload_batch.push(event);
+                payload_batch_bytes += bytes;
             }
             continue;
         }
@@ -321,6 +385,10 @@ pub(crate) async fn download_events_from_child(
             );
         }
     }
+
+    new_contents +=
+        fetch_payload_batch(&payload_batch, networking, connections, peers, storage).await?;
+    downloaded_anything |= new_contents != 0;
 
     debug!(
         target: LOG_TARGET,

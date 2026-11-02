@@ -17,11 +17,13 @@ use rostra_p2p::connection::{
 use rostra_p2p_api::ROSTRA_P2P_V0_ALPN;
 use rostra_util_error::BoxedErrorResult;
 use snafu::ResultExt as _;
+use tokio::sync::{Notify, Semaphore};
 
 #[derive(Clone, Debug, Default)]
 struct RecordedRequests {
     events: Arc<Mutex<Vec<ShortEventId>>>,
     contents: Arc<Mutex<Vec<ShortEventId>>>,
+    changed: Arc<Notify>,
 }
 
 impl RecordedRequests {
@@ -31,6 +33,20 @@ impl RecordedRequests {
 
     fn contents(&self) -> Vec<ShortEventId> {
         self.contents.lock().expect("content request lock").clone()
+    }
+
+    async fn wait_for_contents(&self, count: usize) {
+        tokio::time::timeout(Duration::from_secs(10), async {
+            loop {
+                let changed = self.changed.notified();
+                if self.contents().len() >= count {
+                    return;
+                }
+                changed.await;
+            }
+        })
+        .await
+        .expect("content requests made progress");
     }
 }
 
@@ -44,6 +60,14 @@ impl RecordedPeer {
     async fn start(
         lookup: iroh::address_lookup::memory::MemoryLookup,
         contents: impl IntoIterator<Item = VerifiedEventContent>,
+    ) -> Self {
+        Self::start_gated(lookup, contents, HashMap::new()).await
+    }
+
+    async fn start_gated(
+        lookup: iroh::address_lookup::memory::MemoryLookup,
+        contents: impl IntoIterator<Item = VerifiedEventContent>,
+        gates: HashMap<ShortEventId, Arc<Semaphore>>,
     ) -> Self {
         let endpoint = iroh::Endpoint::builder(iroh::endpoint::presets::Minimal)
             .relay_mode(iroh::RelayMode::Disabled)
@@ -63,6 +87,8 @@ impl RecordedPeer {
         let requests = RecordedRequests::default();
         let task_requests = requests.clone();
         let task = tokio::spawn(async move {
+            let gates = Arc::new(gates);
+            let mut connections = tokio::task::JoinSet::new();
             loop {
                 let Some(incoming) = endpoint.accept().await else {
                     return;
@@ -74,7 +100,9 @@ impl RecordedPeer {
                     .expect("recording peer connection");
                 let contents = contents.clone();
                 let requests = task_requests.clone();
-                tokio::spawn(async move {
+                let gates = gates.clone();
+                connections.spawn(async move {
+                    let mut handlers = tokio::task::JoinSet::new();
                     loop {
                         let Ok((mut send, mut recv)) = connection.accept_bi().await else {
                             return;
@@ -82,69 +110,78 @@ impl RecordedPeer {
                         let (rpc_id, request) = Connection::read_request_raw(&mut recv)
                             .await
                             .expect("recording peer request");
-                        Connection::write_success_return_code(&mut send)
-                            .await
-                            .expect("recording peer return code");
-                        match rpc_id {
-                            RpcId::PING => {
-                                let request =
-                                    PingRequest::decode_whole::<MAX_REQUEST_SIZE>(&request)
-                                        .expect("decode ping");
-                                Connection::write_message(&mut send, &PingResponse(request.0))
-                                    .await
-                                    .expect("write ping response");
-                            }
-                            RpcId::GET_EVENT => {
-                                let event_id =
-                                    GetEventRequest::decode_whole::<MAX_REQUEST_SIZE>(&request)
-                                        .expect("decode event request")
-                                        .0;
-                                requests
-                                    .events
-                                    .lock()
-                                    .expect("event request lock")
-                                    .push(event_id);
-                                let event = contents.get(&event_id).map(|content| {
-                                    rostra_core::event::SignedEvent::from(content.event)
-                                });
-                                Connection::write_message(&mut send, &GetEventResponse(event))
-                                    .await
-                                    .expect("write event response");
-                            }
-                            RpcId::GET_EVENT_CONTENT => {
-                                let event_id = GetEventContentRequest::decode_whole::<
-                                    MAX_REQUEST_SIZE,
-                                >(&request)
-                                .expect("decode content request")
-                                .0;
-                                requests
-                                    .contents
-                                    .lock()
-                                    .expect("content request lock")
-                                    .push(event_id);
-                                let content = contents
-                                    .get(&event_id)
-                                    .and_then(|content| content.content.as_ref());
-                                Connection::write_message(
-                                    &mut send,
-                                    &GetEventContentResponse(content.is_some()),
-                                )
+                        let contents = contents.clone();
+                        let requests = requests.clone();
+                        let gates = gates.clone();
+                        handlers.spawn(async move {
+                            Connection::write_success_return_code(&mut send)
                                 .await
-                                .expect("write content response");
-                                if let Some(content) = content {
-                                    let event =
-                                        &contents.get(&event_id).expect("matching event").event;
-                                    Connection::write_bao_content(
+                                .expect("recording peer return code");
+                            match rpc_id {
+                                RpcId::PING => {
+                                    let request =
+                                        PingRequest::decode_whole::<MAX_REQUEST_SIZE>(&request)
+                                            .expect("decode ping");
+                                    Connection::write_message(&mut send, &PingResponse(request.0))
+                                        .await
+                                        .expect("write ping response");
+                                }
+                                RpcId::GET_EVENT => {
+                                    let event_id =
+                                        GetEventRequest::decode_whole::<MAX_REQUEST_SIZE>(&request)
+                                            .expect("decode event request")
+                                            .0;
+                                    requests
+                                        .events
+                                        .lock()
+                                        .expect("event request lock")
+                                        .push(event_id);
+                                    let event = contents.get(&event_id).map(|content| {
+                                        rostra_core::event::SignedEvent::from(content.event)
+                                    });
+                                    Connection::write_message(&mut send, &GetEventResponse(event))
+                                        .await
+                                        .expect("write event response");
+                                }
+                                RpcId::GET_EVENT_CONTENT => {
+                                    let event_id = GetEventContentRequest::decode_whole::<
+                                        MAX_REQUEST_SIZE,
+                                    >(&request)
+                                    .expect("decode content request")
+                                    .0;
+                                    requests
+                                        .contents
+                                        .lock()
+                                        .expect("content request lock")
+                                        .push(event_id);
+                                    requests.changed.notify_one();
+                                    if let Some(gate) = gates.get(&event_id) {
+                                        gate.acquire().await.expect("content gate").forget();
+                                    }
+                                    let content = contents
+                                        .get(&event_id)
+                                        .and_then(|content| content.content.as_ref());
+                                    Connection::write_message(
                                         &mut send,
-                                        content.as_ref(),
-                                        event.content_hash(),
+                                        &GetEventContentResponse(content.is_some()),
                                     )
                                     .await
-                                    .expect("write event content");
+                                    .expect("write content response");
+                                    if let Some(content) = content {
+                                        let event =
+                                            &contents.get(&event_id).expect("matching event").event;
+                                        Connection::write_bao_content(
+                                            &mut send,
+                                            content.as_ref(),
+                                            event.content_hash(),
+                                        )
+                                        .await
+                                        .expect("write event content");
+                                    }
                                 }
+                                _ => panic!("unexpected RPC {rpc_id}"),
                             }
-                            _ => panic!("unexpected RPC {rpc_id}"),
-                        }
+                        });
                     }
                 });
             }
@@ -212,6 +249,16 @@ async fn build_recorded_client(
     peer_id: RostraId,
     peer_endpoint_id: iroh::PublicKey,
 ) -> Arc<Client> {
+    build_recorded_client_with_account(client_id, lookup, peer_id, peer_endpoint_id, None).await
+}
+
+async fn build_recorded_client_with_account(
+    client_id: RostraId,
+    lookup: iroh::address_lookup::memory::MemoryLookup,
+    peer_id: RostraId,
+    peer_endpoint_id: iroh::PublicKey,
+    account: Option<rostra_client_db::PayloadAccount>,
+) -> Arc<Client> {
     let endpoint = iroh::Endpoint::builder(iroh::endpoint::presets::Minimal)
         .relay_mode(iroh::RelayMode::Disabled)
         .alpns(vec![ROSTRA_P2P_V0_ALPN.to_vec()])
@@ -219,9 +266,18 @@ async fn build_recorded_client(
         .bind()
         .await
         .expect("recorded client endpoint");
-    let db = Database::new_in_memory(client_id)
+    let mut db = Database::new_in_memory(client_id)
         .await
         .expect("recorded client database");
+    if let Some(account) = account {
+        db.attach_payload_account(&account).unwrap();
+        while !db
+            .rebuild_payload_accounting(std::num::NonZeroUsize::new(100).unwrap())
+            .await
+            .unwrap()
+            .ready
+        {}
+    }
     db.insert_id_node(
         peer_id,
         IrohNodeId::from_bytes(*peer_endpoint_id.as_bytes()),
@@ -695,10 +751,348 @@ async fn retained_same_author_head_still_traverses_remote_parent() -> BoxedError
 
     assert!(client.sync_event_from_peers(id_a, head_id, &[id_a]).await?);
     assert_eq!(peer.requests.events(), vec![parent_id]);
-    assert_eq!(peer.requests.contents(), vec![parent_id, head_id]);
+    let mut requested = peer.requests.contents();
+    requested.sort();
+    let mut expected = vec![parent_id, head_id];
+    expected.sort();
+    assert_eq!(requested, expected);
     assert!(client.db().get_event_content(head_id).await.is_some());
     assert!(client.db().get_event_content(parent_id).await.is_some());
 
+    Ok(())
+}
+
+fn gated_history(
+    secret: RostraIdSecretKey,
+    count: usize,
+    text_len: usize,
+) -> (
+    Vec<VerifiedEventContent>,
+    Vec<ShortEventId>,
+    HashMap<ShortEventId, Arc<Semaphore>>,
+) {
+    let mut history = Vec::new();
+    let mut ids = Vec::new();
+    let mut gates = HashMap::new();
+    for n in 0..count {
+        let (event, content) = build_test_event_with_text(
+            secret,
+            ids.last().copied(),
+            &format!("{n}:{}", "x".repeat(text_len)),
+        );
+        let id = event.event_id.to_short();
+        ids.push(id);
+        history.push(content);
+        gates.insert(id, Arc::new(Semaphore::new(0)));
+    }
+    (history, ids, gates)
+}
+
+async fn wait_for_materialized(client: &Client, id: ShortEventId) {
+    let mut changed = client.db().new_content_subscribe();
+    tokio::time::timeout(Duration::from_secs(10), async {
+        while client.db().get_event_content(id).await.is_none() {
+            match changed.recv().await {
+                Ok(_) | Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => {}
+                Err(tokio::sync::broadcast::error::RecvError::Closed) => {
+                    panic!("content notifications closed before materialization");
+                }
+            }
+        }
+    })
+    .await
+    .expect("released payload materialized");
+}
+
+fn limited_payload_account(id: RostraId, buffers: usize) -> rostra_client_db::PayloadAccount {
+    use std::num::{NonZeroU64, NonZeroUsize};
+
+    use rostra_client_db::{
+        PayloadAccount, PayloadAdmissionConfig, PayloadAdmissionLimits, PayloadRetentionConfig,
+        PayloadRuntimeLimits,
+    };
+
+    PayloadAccount::configured(
+        id,
+        PayloadRetentionConfig::Enforce {
+            policy: rostra_core::retention::RetentionPolicy::new(1, 1, 0, 0, 1, 0).unwrap(),
+            admission: PayloadAdmissionConfig::new(PayloadAdmissionLimits {
+                database_bytes: NonZeroU64::new(100_000_000).unwrap(),
+                author_bytes: NonZeroU64::new(100_000_000).unwrap(),
+                overrides: Default::default(),
+                in_flight_count: NonZeroUsize::new(buffers).unwrap(),
+                in_flight_bytes: NonZeroU64::new(100_000_000).unwrap(),
+            })
+            .unwrap(),
+            limits: PayloadRuntimeLimits {
+                operations: NonZeroUsize::new(32).unwrap(),
+                bytes: 100_000_000,
+                gc_bytes: 100_000_000,
+                time: Duration::from_millis(20),
+            },
+        },
+    )
+    .unwrap()
+}
+
+#[test_log::test(tokio::test(flavor = "multi_thread"))]
+async fn history_overlaps_four_payloads_and_materializes_ready_younger_events()
+-> BoxedErrorResult<()> {
+    let secret = RostraIdSecretKey::generate();
+    let (history, ids, gates) = gated_history(secret, 8, 32);
+    let lookup = iroh::address_lookup::memory::MemoryLookup::new();
+    let peer = RecordedPeer::start_gated(lookup.clone(), history, gates.clone()).await;
+    let client = build_recorded_client(
+        RostraIdSecretKey::generate().id(),
+        lookup,
+        secret.id(),
+        peer.endpoint_id,
+    )
+    .await;
+    let sync = {
+        let client = client.clone();
+        let head = *ids.last().unwrap();
+        tokio::spawn(async move {
+            client
+                .sync_event_from_peers(secret.id(), head, &[secret.id()])
+                .await
+        })
+    };
+
+    // The serial implementation cannot reach this barrier. No payload response
+    // is available, yet four independent iroh streams have arrived.
+    peer.requests.wait_for_contents(4).await;
+    assert_eq!(peer.requests.events().len(), 8);
+    let mut first_wave = peer.requests.contents();
+    first_wave.sort();
+    let mut oldest = ids[..4].to_vec();
+    oldest.sort();
+    assert_eq!(first_wave, oldest, "oldest candidates launch first");
+    for id in ids[1..4].iter().rev() {
+        gates[id].add_permits(1);
+        wait_for_materialized(&client, *id).await;
+    }
+    assert!(client.db().get_event_content(ids[0]).await.is_none());
+    assert_eq!(peer.requests.contents().len(), 4);
+    gates[&ids[0]].add_permits(1);
+    peer.requests.wait_for_contents(8).await;
+    for id in ids[4..].iter().rev() {
+        gates[id].add_permits(1);
+    }
+    assert!(tokio::time::timeout(Duration::from_secs(10), sync).await???);
+    for id in &ids {
+        assert!(client.db().get_event_content(*id).await.is_some());
+    }
+    assert_eq!(peer.requests.contents().len(), 8);
+    assert!(
+        client
+            .db()
+            .get_missing_events_for_id(secret.id())
+            .await
+            .is_empty()
+    );
+    Ok(())
+}
+
+#[test_log::test(tokio::test(flavor = "multi_thread"))]
+async fn history_byte_budget_serializes_large_payloads_without_admission() -> BoxedErrorResult<()> {
+    let secret = RostraIdSecretKey::generate();
+    let (history, ids, gates) = gated_history(secret, 3, 2 * 1024 * 1024 + 1);
+    let lookup = iroh::address_lookup::memory::MemoryLookup::new();
+    let peer = RecordedPeer::start_gated(lookup.clone(), history, gates.clone()).await;
+    let client = build_recorded_client(
+        RostraIdSecretKey::generate().id(),
+        lookup,
+        secret.id(),
+        peer.endpoint_id,
+    )
+    .await;
+    let sync = {
+        let client = client.clone();
+        let head = *ids.last().unwrap();
+        tokio::spawn(async move {
+            client
+                .sync_event_from_peers(secret.id(), head, &[secret.id()])
+                .await
+        })
+    };
+    for (n, id) in ids.iter().enumerate() {
+        peer.requests.wait_for_contents(n + 1).await;
+        assert_eq!(peer.requests.contents(), ids[..=n]);
+        assert!(
+            tokio::time::timeout(
+                Duration::from_millis(100),
+                peer.requests.wait_for_contents(n + 2)
+            )
+            .await
+            .is_err(),
+            "byte budget must prevent a second large in-flight payload"
+        );
+        gates[id].add_permits(1);
+        wait_for_materialized(&client, *id).await;
+    }
+    assert!(tokio::time::timeout(Duration::from_secs(10), sync).await???);
+    Ok(())
+}
+
+#[test_log::test(tokio::test(flavor = "multi_thread"))]
+async fn history_retries_sibling_capacity_refusals_and_releases_guards_on_cancel()
+-> BoxedErrorResult<()> {
+    let secret = RostraIdSecretKey::generate();
+    let (history, ids, gates) = gated_history(secret, 4, 32);
+    let lookup = iroh::address_lookup::memory::MemoryLookup::new();
+    let peer = RecordedPeer::start_gated(lookup.clone(), history, gates.clone()).await;
+    let client_id = RostraIdSecretKey::generate().id();
+    let client = build_recorded_client_with_account(
+        client_id,
+        lookup,
+        secret.id(),
+        peer.endpoint_id,
+        Some(limited_payload_account(client_id, 2)),
+    )
+    .await;
+    let head = *ids.last().unwrap();
+    let sync = {
+        let client = client.clone();
+        tokio::spawn(async move {
+            client
+                .sync_event_from_peers(secret.id(), head, &[secret.id()])
+                .await
+        })
+    };
+    peer.requests.wait_for_contents(1).await;
+    assert_eq!(client.db().payload_admission_usage().buffers, 2);
+    sync.abort();
+    assert!(sync.await.unwrap_err().is_cancelled());
+    assert_eq!(client.db().payload_admission_usage().buffers, 0);
+    assert_eq!(client.db().payload_admission_usage().acquisitions, 0);
+
+    // Retry the same durable Missing work with only enough capacity for one
+    // read/conversion pair. Refused siblings must not be treated as peer misses.
+    for gate in gates.values() {
+        gate.add_permits(2);
+    }
+    assert!(
+        tokio::time::timeout(
+            Duration::from_secs(10),
+            client.sync_event_from_peers(secret.id(), head, &[secret.id()]),
+        )
+        .await??
+    );
+    for id in ids {
+        assert!(client.db().get_event_content(id).await.is_some());
+    }
+    assert_eq!(client.db().payload_admission_usage().buffers, 0);
+    assert_eq!(client.db().payload_admission_usage().acquisitions, 0);
+    Ok(())
+}
+
+#[test_log::test(tokio::test(flavor = "multi_thread"))]
+async fn history_missing_payload_does_not_discard_ready_siblings() -> BoxedErrorResult<()> {
+    let secret = RostraIdSecretKey::generate();
+    let (mut history, ids, _) = gated_history(secret, 4, 32);
+    history[0].content = None;
+    let lookup = iroh::address_lookup::memory::MemoryLookup::new();
+    let peer = RecordedPeer::start(lookup.clone(), history.clone()).await;
+    let client = build_recorded_client(
+        RostraIdSecretKey::generate().id(),
+        lookup,
+        secret.id(),
+        peer.endpoint_id,
+    )
+    .await;
+    for content in &history {
+        client.db().try_process_event(&content.event).await?;
+    }
+    assert!(
+        client
+            .sync_event_from_peers(secret.id(), ids[3], &[secret.id()])
+            .await?
+    );
+    assert!(client.db().get_event_content(ids[0]).await.is_none());
+    for id in &ids[1..] {
+        assert!(client.db().get_event_content(*id).await.is_some());
+    }
+    assert_eq!(peer.requests.contents().len(), 4);
+    assert!(peer.requests.events().is_empty());
+    Ok(())
+}
+
+#[test_log::test(tokio::test(flavor = "multi_thread"))]
+async fn history_persistent_capacity_pause_returns_without_network_reads() -> BoxedErrorResult<()> {
+    let secret = RostraIdSecretKey::generate();
+    let (history, ids, _) = gated_history(secret, 4, 32);
+    let lookup = iroh::address_lookup::memory::MemoryLookup::new();
+    let peer = RecordedPeer::start(lookup.clone(), history).await;
+    let client_id = RostraIdSecretKey::generate().id();
+    // A read requires two buffers. No sibling completion can make this
+    // configuration fit, and retry must not spin or bypass admission.
+    let client = build_recorded_client_with_account(
+        client_id,
+        lookup,
+        secret.id(),
+        peer.endpoint_id,
+        Some(limited_payload_account(client_id, 1)),
+    )
+    .await;
+    // Enforced shared-store preparation has its own existing 30-second
+    // pressure wait. Allow that wait plus the single post-drain retry.
+    let result = tokio::time::timeout(
+        Duration::from_secs(70),
+        client.sync_event_from_peers(secret.id(), ids[3], &[secret.id()]),
+    )
+    .await?;
+    assert!(matches!(
+        result,
+        Err(rostra_client_db::DbError::PayloadAdmissionPaused { .. })
+    ));
+    assert!(peer.requests.contents().is_empty());
+    for id in ids {
+        assert!(client.db().has_event(id).await);
+        assert!(client.db().get_event_content(id).await.is_none());
+    }
+    assert_eq!(client.db().payload_admission_usage().buffers, 0);
+    assert_eq!(client.db().payload_admission_usage().acquisitions, 0);
+    Ok(())
+}
+
+#[test_log::test(tokio::test(flavor = "multi_thread"))]
+async fn history_inflight_duplicate_materialization_does_not_report_false_progress()
+-> BoxedErrorResult<()> {
+    let secret = RostraIdSecretKey::generate();
+    let (history, ids, gates) = gated_history(secret, 4, 32);
+    let lookup = iroh::address_lookup::memory::MemoryLookup::new();
+    let peer = RecordedPeer::start_gated(lookup.clone(), history.clone(), gates.clone()).await;
+    let client = build_recorded_client(
+        RostraIdSecretKey::generate().id(),
+        lookup,
+        secret.id(),
+        peer.endpoint_id,
+    )
+    .await;
+    for content in &history {
+        client.db().try_process_event(&content.event).await?;
+    }
+    let sync = {
+        let client = client.clone();
+        let head = ids[3];
+        tokio::spawn(async move {
+            client
+                .sync_event_from_peers(secret.id(), head, &[secret.id()])
+                .await
+        })
+    };
+    peer.requests.wait_for_contents(4).await;
+    // Simulate another replication path winning after admission but before
+    // these reads complete. Transactional ingestion must recheck lifecycle.
+    for content in &history {
+        client.db().try_process_event_content(content).await?;
+    }
+    for gate in gates.values() {
+        gate.add_permits(1);
+    }
+    assert!(!tokio::time::timeout(Duration::from_secs(10), sync).await???);
+    assert!(peer.requests.events().is_empty());
     Ok(())
 }
 

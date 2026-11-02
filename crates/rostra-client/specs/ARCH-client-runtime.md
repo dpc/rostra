@@ -165,14 +165,17 @@ checking the queue and also wake for maintenance. It holds no strong client
 reference across idle waits. Client activation is not UI authorization: each
 private-message request separately requires its own unlocked session secret.
 
-Head synchronization discovers the graph backward: it must fetch a newer
-event's envelope before it can learn that event's parents. It then defers that
-event's payload, traverses backward toward older ancestors, and prioritizes
+Head synchronization discovers the graph backward: it must fetch an event's
+envelope before it can learn that event's parents. It defers that event's
+payload, traverses toward older ancestors, and prioritizes
 queued payloads by effective timestamp, with deeper ancestors first when
-timestamps tie. This older-first, depth-biased traversal deliberately makes
-payload processing order opportunistically approximate author production order.
-Envelope insertion still proceeds from each discovered child toward its parents,
-and sibling-envelope discovery is ordered by event ID rather than strict
+timestamps tie. After discovery, bounded batches overlap payload reads and
+ingest ready results without waiting for slower reads of older payloads. Older-first
+launch priority is a best-effort UX preference, not a delivery-order constraint.
+Batch count and declared-byte limits apply even when account admission is
+disabled; admission guards still cover each racing read through ingestion.
+Envelope insertion proceeds from each discovered child toward its parents,
+and sibling-envelope discovery follows event ID order rather than strict
 depth-first search. Missing data, concurrent branches, peer availability, retries,
 and previously stored events can change the observed processing order, so this
 is neither a canonical ordering nor a convergence guarantee. Reception order
