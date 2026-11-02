@@ -19,8 +19,12 @@ use rostra_util_error::BoxedErrorResult;
 use snafu::ResultExt as _;
 use tokio::sync::{Notify, Semaphore};
 
+#[path = "download_events/ancestor_pages.rs"]
+mod ancestor_pages;
+
 #[derive(Clone, Debug, Default)]
 struct RecordedRequests {
+    ancestors: Arc<Mutex<Vec<ShortEventId>>>,
     events: Arc<Mutex<Vec<ShortEventId>>>,
     contents: Arc<Mutex<Vec<ShortEventId>>>,
     changed: Arc<Notify>,
@@ -69,6 +73,16 @@ impl RecordedPeer {
         contents: impl IntoIterator<Item = VerifiedEventContent>,
         gates: HashMap<ShortEventId, Arc<Semaphore>>,
     ) -> Self {
+        Self::start_config(lookup, contents, gates, None).await
+    }
+
+    async fn start_config(
+        lookup: iroh::address_lookup::memory::MemoryLookup,
+        contents: impl IntoIterator<Item = VerifiedEventContent>,
+        gates: HashMap<ShortEventId, Arc<Semaphore>>,
+        pages: Option<HashMap<ShortEventId, rostra_p2p::connection::GetAncestorsResponse>>,
+    ) -> Self {
+        let pages = Arc::new(pages);
         let endpoint = iroh::Endpoint::builder(iroh::endpoint::presets::Minimal)
             .relay_mode(iroh::RelayMode::Disabled)
             .alpns(vec![ROSTRA_P2P_V0_ALPN.to_vec()])
@@ -101,6 +115,7 @@ impl RecordedPeer {
                 let contents = contents.clone();
                 let requests = task_requests.clone();
                 let gates = gates.clone();
+                let pages = pages.clone();
                 connections.spawn(async move {
                     let mut handlers = tokio::task::JoinSet::new();
                     loop {
@@ -113,7 +128,32 @@ impl RecordedPeer {
                         let contents = contents.clone();
                         let requests = requests.clone();
                         let gates = gates.clone();
+                        let pages = pages.clone();
                         handlers.spawn(async move {
+                            if rpc_id == RpcId::GET_ANCESTORS {
+                                let req =
+                                    rostra_p2p::connection::GetAncestorsRequest::decode_whole::<
+                                        MAX_REQUEST_SIZE,
+                                    >(&request)
+                                    .expect("ancestor request");
+                                requests.ancestors.lock().unwrap().push(req.root);
+                                // Match production old-server behavior: drop unknown streams
+                                // without writing a response code.
+                                let Some(pages) = pages.as_ref() else { return };
+                                Connection::write_success_return_code(&mut send)
+                                    .await
+                                    .unwrap();
+                                let empty = rostra_p2p::connection::GetAncestorsResponse(
+                                    [None; rostra_p2p::connection::ANCESTOR_PAGE_EVENTS],
+                                );
+                                Connection::write_message(
+                                    &mut send,
+                                    pages.get(&req.root).unwrap_or(&empty),
+                                )
+                                .await
+                                .unwrap();
+                                return;
+                            }
                             Connection::write_success_return_code(&mut send)
                                 .await
                                 .expect("recording peer return code");

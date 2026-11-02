@@ -122,6 +122,9 @@ async fn handle_test_peer_rpc(
             }
             send.finish().expect("finish missing content response");
         }
+        // Model an old server: unknown ancestor requests close their streams
+        // without a response code, leaving the connection available to fallback.
+        RpcId::GET_ANCESTORS => {}
         _ => panic!("unexpected RPC {rpc_id}"),
     }
 }

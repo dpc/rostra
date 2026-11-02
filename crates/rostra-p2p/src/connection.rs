@@ -1,6 +1,8 @@
 use std::fmt;
 use std::future::Future;
 use std::pin::Pin;
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use bao_tree::io::outboard::{EmptyOutboard, PreOrderMemOutboard};
 use bao_tree::io::round_up_to_chunks;
@@ -26,7 +28,7 @@ use crate::{
 };
 
 #[derive(Debug, Clone)]
-pub struct Connection(iroh::endpoint::Connection);
+pub struct Connection(iroh::endpoint::Connection, Arc<AtomicBool>);
 
 impl Connection {
     pub fn remote_id(&self) -> iroh::PublicKey {
@@ -45,9 +47,68 @@ pub const MAX_REQUEST_SIZE: u32 = 4 * 1024;
 /// Max response message size
 pub const MAX_RESPONSE_SIZE: u32 = 32 * 1024 * 1024;
 
+/// Maximum headers and database lookups in one ancestor page.
+pub const ANCESTOR_PAGE_EVENTS: usize = 64;
+/// Maximum framed ancestor response bytes, checked before allocation.
+pub const ANCESTOR_PAGE_BYTES: u32 = 32 * 1024;
+
+/// Request header lookahead rooted at one event belonging to the full author.
+#[derive(Encode, Decode, Clone, Debug)]
+pub struct GetAncestorsRequest {
+    /// Expected full signing identity.
+    pub author: RostraId,
+    /// Root whose ancestors may be returned.
+    pub root: ShortEventId,
+}
+
+/// Child-before-parent header prefix followed by empty slots.
+///
+/// A fixed array bounds decoding independently of hostile collection lengths.
+/// Missing parents and work-limit truncation are both allowed. This is
+/// lookahead, not a completeness claim or a payload availability advertisement.
+#[derive(Encode, Decode, Clone, Debug)]
+pub struct GetAncestorsResponse(pub [Option<SignedEvent>; ANCESTOR_PAGE_EVENTS]);
+
+impl RpcMessage for GetAncestorsRequest {}
+impl RpcRequest for GetAncestorsRequest {}
+impl RpcMessage for GetAncestorsResponse {}
+impl RpcResponse for GetAncestorsResponse {}
+impl Rpc for GetAncestorsRequest {
+    const RPC_ID: RpcId = RpcId::GET_ANCESTORS;
+    type Response = GetAncestorsResponse;
+}
+
+impl GetAncestorsResponse {
+    /// Authenticate the entire page before exposing any header to the caller.
+    pub fn verify(self, author: RostraId, root: ShortEventId) -> RpcResult<Vec<VerifiedEvent>> {
+        let mut reachable = std::collections::BTreeSet::from([root]);
+        let mut seen = std::collections::BTreeSet::new();
+        let mut result = Vec::new();
+        let mut ended = false;
+        for signed in self.0 {
+            let Some(signed) = signed else {
+                ended = true;
+                continue;
+            };
+            let id = signed.event.compute_id().to_short();
+            if ended || !reachable.remove(&id) || !seen.insert(id) {
+                return Err(bincode::error::DecodeError::Other(
+                    "Disconnected, duplicate or non-prefix ancestor page",
+                ))
+                .context(DecodingSnafu);
+            }
+            let verified = VerifiedEvent::verify_response(author, id, signed.event, signed.sig)
+                .context(EventVerificationSnafu)?;
+            reachable.extend(verified.all_parents());
+            result.push(verified);
+        }
+        Ok(result)
+    }
+}
+
 impl From<iroh::endpoint::Connection> for Connection {
     fn from(iroh_conn: iroh::endpoint::Connection) -> Self {
-        Self(iroh_conn)
+        Self(iroh_conn, Arc::new(AtomicBool::new(true)))
     }
 }
 
@@ -82,6 +143,7 @@ impl fmt::Display for RpcId {
             Self::WAIT_HEAD_UPDATE => f.write_str("WAIT_HEAD_UPDATE"),
             Self::GET_HEAD => f.write_str("GET_HEAD"),
             Self::WAIT_FOLLOWERS_NEW_HEADS => f.write_str("WAIT_FOLLOWERS_NEW_HEADS"),
+            Self::GET_ANCESTORS => f.write_str("GET_ANCESTORS"),
             _ => write!(f, "UNKNOWN({})", self.0),
         }
     }
@@ -95,6 +157,8 @@ impl RpcId {
     pub const WAIT_HEAD_UPDATE: Self = Self(4);
     pub const GET_HEAD: Self = Self(5);
     pub const WAIT_FOLLOWERS_NEW_HEADS: Self = Self(6);
+    /// Bounded, header-only ancestor lookahead.
+    pub const GET_ANCESTORS: Self = Self(7);
     pub const fn const_from(value: u16) -> Self {
         Self(value)
     }
@@ -286,6 +350,37 @@ fn rpc_request_to_bytes_test() {
 }
 
 impl Connection {
+    /// Fetch bounded lookahead, falling back after any failed or cancelled
+    /// probe.
+    ///
+    /// Clones share capability state. While a page is outstanding other callers
+    /// use legacy requests; no waiter owns a capability lock across network
+    /// I/O. Old servers drop unknown RPC streams without a return code. A
+    /// stalled implementation gets at most two seconds, once per
+    /// connection.
+    pub async fn get_ancestors(
+        &self,
+        author: RostraId,
+        root: ShortEventId,
+    ) -> Option<Vec<VerifiedEvent>> {
+        if !self.1.swap(false, Ordering::AcqRel) {
+            return None;
+        }
+        let result = tokio::time::timeout(std::time::Duration::from_secs(2), async {
+            let (mut send, mut recv) = self.0.open_bi().await.context(StreamConnectionSnafu)?;
+            Self::write_rpc_request(&mut send, &GetAncestorsRequest { author, root }).await?;
+            Self::read_success_error_code(&mut recv).await?;
+            let response =
+                Self::read_message::<ANCESTOR_PAGE_BYTES, GetAncestorsResponse>(&mut recv).await?;
+            response.verify(author, root)
+        })
+        .await
+        .ok()?
+        .ok()?;
+        self.1.store(true, Ordering::Release);
+        Some(result)
+    }
+
     async fn make_rpc<R: Rpc>(&self, request: &R) -> RpcResult<<R as Rpc>::Response> {
         let (mut send, mut recv) = self.0.open_bi().await.context(StreamConnectionSnafu)?;
 

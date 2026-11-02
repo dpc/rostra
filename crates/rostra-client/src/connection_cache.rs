@@ -36,6 +36,18 @@ const CLEANUP_INTERVAL: u64 = 64;
 
 type LazySharedConnection = Arc<OnceCell<Connection>>;
 
+async fn fetch_headers(
+    conn: &Connection,
+    author: RostraId,
+    root: ShortEventId,
+    ancestors: bool,
+) -> Result<Option<Vec<VerifiedEvent>>, rostra_p2p::RpcError> {
+    if ancestors && let Some(page) = conn.get_ancestors(author, root).await {
+        return Ok((!page.is_empty()).then_some(page));
+    }
+    Ok(conn.get_event(author, root).await?.map(|event| vec![event]))
+}
+
 /// Detailed content acquisition result for storage-progress accounting.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct ContentFetchOutcome {
@@ -228,6 +240,21 @@ impl ConnectionCache {
         author_id: RostraId,
         event_id: ShortEventId,
     ) -> Option<(VerifiedEvent, Option<HolderHint>)> {
+        self.get_headers_with_source(networking, peers, author_id, event_id, false)
+            .await
+            .map(|(events, source)| (events[0], source))
+    }
+
+    /// Race bounded header lookahead, preserving only the actual winning
+    /// source.
+    pub(crate) async fn get_headers_with_source(
+        &self,
+        networking: &ClientNetworking,
+        peers: &[RostraId],
+        author_id: RostraId,
+        event_id: ShortEventId,
+        ancestors: bool,
+    ) -> Option<(Vec<VerifiedEvent>, Option<HolderHint>)> {
         let result = futures_lite::StreamExt::find_map(
             &mut stream::iter(fetch_peers(peers))
                 .map(|peer| {
@@ -241,7 +268,13 @@ impl ConnectionCache {
                                 hint.timeout().min(cache.peer_operation_deadline),
                                 async {
                                     let conn = cache.connect_holder(networking, hint).await?;
-                                    conn.get_event(author_id, event_id).await.ok().flatten()
+                                    // Holder connections are short-lived, not capability-cached.
+                                    // Keep their existing single-header path rather than probing
+                                    // an old holder again for every generation.
+                                    fetch_headers(&conn, author_id, event_id, false)
+                                        .await
+                                        .ok()
+                                        .flatten()
                                 },
                             )
                             .await
@@ -259,7 +292,7 @@ impl ConnectionCache {
                             cache.peer_operation_deadline,
                             async move {
                                 let conn = cache.get_or_connect(networking, peer_id).await.ok()?;
-                                match conn.get_event(author_id, event_id).await {
+                                match fetch_headers(&conn, author_id, event_id, ancestors).await {
                                     Ok(Some(event)) => Some((event, hint)),
                                     Ok(None) => {
                                         debug!(

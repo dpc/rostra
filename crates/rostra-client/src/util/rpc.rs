@@ -193,6 +193,10 @@ pub(crate) async fn download_events_from_child(
     let mut new_contents: usize = 0;
     let mut payload_batch = Vec::with_capacity(PAYLOAD_BATCH_EVENTS);
     let mut payload_batch_bytes = 0_u64;
+    // At most one validated page. Do not replace unconsumed lookahead with
+    // another overlapping page: unrelated frontier misses use single headers.
+    // These are not retained/admitted events until their ordinary queue turn.
+    let mut lookahead = BTreeMap::new();
 
     // Start with head at "far future" timestamp and depth 0
     let far_future_ts = u64::MAX;
@@ -268,6 +272,7 @@ pub(crate) async fn download_events_from_child(
             .await
             .filter(|event| event.author() == rostra_id)
         {
+            lookahead.remove(&q_item_event_id);
             debug!(
                 target: LOG_TARGET,
                 depth = %q_item_depth,
@@ -289,10 +294,26 @@ pub(crate) async fn download_events_from_child(
             );
 
             event_fetch_attempts += 1;
-            let Some((new_event, source)) = connections
-                .get_event_with_source(networking, peers, rostra_id, q_item_event_id)
+            let fetched = if let Some(cached) = lookahead.remove(&q_item_event_id) {
+                Some(cached)
+            } else if let Some((page, source)) = connections
+                .get_headers_with_source(
+                    networking,
+                    peers,
+                    rostra_id,
+                    q_item_event_id,
+                    lookahead.is_empty(),
+                )
                 .await
-            else {
+            {
+                let mut page = page.into_iter();
+                let root = page.next().expect("Header fetch returns a nonempty page");
+                lookahead.extend(page.map(|event| (event.event_id.to_short(), (event, source))));
+                Some((root, source))
+            } else {
+                None
+            };
+            let Some((new_event, source)) = fetched else {
                 debug!(
                     target: LOG_TARGET,
                     depth = %q_item_depth,

@@ -166,12 +166,20 @@ reference across idle waits. Client activation is not UI authorization: each
 private-message request separately requires its own unlocked session secret.
 
 Head synchronization discovers the graph backward: it must fetch an event's
-envelope before it can learn that event's parents. It defers that event's
-payload, traverses toward older ancestors, and prioritizes
-queued payloads by effective timestamp, with deeper ancestors first when
-timestamps tie. After discovery, bounded batches overlap payload reads and
-ingest ready results without waiting for slower reads of older payloads. Older-first
-launch priority is a best-effort UX preference, not a delivery-order constraint.
+envelope before it can learn that event's parents. Bounded header-only ancestor
+pages let a serving peer follow those links without one client round trip per
+generation. The client authenticates the whole page, including the full author
+identity and connectivity to the requested root, before consuming bounded
+lookahead through the ordinary local-known and cutoff path. Missing or truncated
+pages do not establish graph or head-set completeness. Connections that fail the
+bounded page probe fall back to single-header requests; payload admission is
+unchanged.
+The client defers each event's payload, traverses toward older ancestors, and
+prioritizes queued payloads by effective timestamp, with deeper ancestors first
+when timestamps tie. After discovery, bounded batches overlap payload reads and
+ingest ready results without waiting for slower reads of older payloads.
+Older-first launch priority is a best-effort UX preference, not a delivery-order
+constraint.
 Batch count and declared-byte limits apply even when account admission is
 disabled; admission guards still cover each racing read through ingestion.
 Envelope insertion proceeds from each discovered child toward its parents,

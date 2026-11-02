@@ -11,11 +11,11 @@ use rostra_core::event::{EventContentRaw, EventExt as _, VerifiedEvent, Verified
 use rostra_core::id::RostraId;
 use rostra_p2p::RpcError;
 use rostra_p2p::connection::{
-    Connection, FeedEventRequest, FeedEventResponse, GetEventContentRequest,
-    GetEventContentResponse, GetEventRequest, GetEventResponse, GetHeadRequest, GetHeadResponse,
-    MAX_REQUEST_SIZE, PingRequest, PingResponse, RpcId, RpcMessage as _,
-    WaitFollowersNewHeadsRequest, WaitFollowersNewHeadsResponse, WaitHeadUpdateRequest,
-    WaitHeadUpdateResponse,
+    ANCESTOR_PAGE_EVENTS, Connection, FeedEventRequest, FeedEventResponse, GetAncestorsRequest,
+    GetAncestorsResponse, GetEventContentRequest, GetEventContentResponse, GetEventRequest,
+    GetEventResponse, GetHeadRequest, GetHeadResponse, MAX_REQUEST_SIZE, PingRequest, PingResponse,
+    RpcId, RpcMessage as _, WaitFollowersNewHeadsRequest, WaitFollowersNewHeadsResponse,
+    WaitHeadUpdateRequest, WaitHeadUpdateResponse,
 };
 use rostra_p2p::util::ToShort as _;
 use rostra_util_error::{BoxedError, FmtCompact as _};
@@ -320,6 +320,9 @@ impl RequestHandler {
                                 RpcId::GET_EVENT => {
                                     handler.handle_get_event(req_msg, send, recv).await
                                 }
+                                RpcId::GET_ANCESTORS => {
+                                    handler.handle_get_ancestors(req_msg, send, recv).await
+                                }
                                 RpcId::GET_EVENT_CONTENT => {
                                     handler.handle_get_event_content(req_msg, send, recv).await
                                 }
@@ -521,6 +524,52 @@ impl RequestHandler {
             .await
             .context(RpcSnafu)?;
 
+        Ok(())
+    }
+
+    async fn handle_get_ancestors(
+        &self,
+        req_msg: Vec<u8>,
+        mut send: iroh::endpoint::SendStream,
+        _read: iroh::endpoint::RecvStream,
+    ) -> Result<(), IncomingConnectionError> {
+        let req = GetAncestorsRequest::decode_whole::<MAX_REQUEST_SIZE>(&req_msg)
+            .context(DecodingSnafu)?;
+        let client = self.client.client_ref()?;
+        let mut page = GetAncestorsResponse([None; ANCESTOR_PAGE_EVENTS]);
+        let mut pending = vec![req.root];
+        let mut seen = std::collections::BTreeSet::from([req.root]);
+        let mut returned = 0;
+        // Count attempts, not successes. Each read can add at most two distinct
+        // IDs: <=129 seen entries and <=65 pending entries even with missing
+        // parents, shared branches or adversarial graph shape.
+        for _ in 0..ANCESTOR_PAGE_EVENTS {
+            let Some(id) = pending.pop() else { break };
+            let Some(event) = client.db().get_event(id).await else {
+                continue;
+            };
+            if event.author() != req.author {
+                continue;
+            }
+            page.0[returned] = Some(event.signed);
+            returned += 1;
+            for parent in event
+                .signed
+                .parent_prev()
+                .into_iter()
+                .chain(event.signed.parent_aux())
+            {
+                if seen.insert(parent) {
+                    pending.push(parent);
+                }
+            }
+        }
+        Connection::write_success_return_code(&mut send)
+            .await
+            .context(RpcSnafu)?;
+        Connection::write_message(&mut send, &page)
+            .await
+            .context(RpcSnafu)?;
         Ok(())
     }
 

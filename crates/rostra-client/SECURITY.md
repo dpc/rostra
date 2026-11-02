@@ -99,6 +99,40 @@ of Trust. Event signatures authenticate Rostra authors. Unsigned routing fields,
 claimed identities, event IDs, and other response metadata remain
 peer-controlled until explicitly bound to verified signed data.
 
+Historical discovery can request header-only `GET_ANCESTORS` pages rooted at one
+event and full author identity. The client checks every signature, computed
+event ID, full author identity, and child-before-parent connectivity to the
+requested root before exposing any header for ordinary database admission.
+It discards duplicate, disconnected, non-prefix, malformed, and oversized pages
+in full. A page never advertises payload availability or establishes complete
+history or head-set discovery; omitted parents remain ordinary frontier and
+durable missing work.
+
+Each page has 64 fixed header slots. The client checks the 32 KiB response-frame
+limit before allocation. The server attempts at most 64 database reads, including
+misses and cross-author rows, and retains at most 129 deduplication IDs and 65
+pending IDs. No caller-controlled limit can raise these bounds. Each traversal
+holds at most one page of lookahead, consumes locally retained headers without
+reinsertion, and uses single-header requests for frontier misses while that
+lookahead remains occupied. Existing cutoff, payload admission and bounded
+payload concurrency remain unchanged. These per-page bounds do not bound the
+complete traversal's existing queue or all concurrent callers.
+
+Connection clones share page-probe eligibility. While a page probe is outstanding,
+or after it fails or is cancelled, concurrent and subsequent requests use
+verified legacy `GET_EVENT`; a successful probe re-enables pages. The page
+operation has a two-second deadline and drops its streams on cancellation.
+Old servers drop unknown RPC streams without a response, so the client falls
+back without repeating the failed probe on that connection. A new connection
+may probe again. Short-lived holder routes use single-header requests rather
+than probing again on every redial. An account-route page cannot invent a holder
+hint. The loopback tests in
+`tests/download_events/ancestor_pages.rs` exercise production server bounds,
+shared/missing/cross-author ancestors, three pages for a 130-event chain,
+whole-page rejection before ingestion, durable missing work, legacy fallback,
+concurrent/cancelled probes, oversized frames, deadlines and receive-stream
+cancellation.
+
 Accepted `FEED_EVENT` headers can supply ephemeral **content-holder hints**.
 Admission still requires the existing author policy, signature and size checks,
 successful database header admission, and an exact retained full-envelope match.
