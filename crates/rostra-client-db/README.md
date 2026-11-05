@@ -42,6 +42,38 @@ cursor require refresh. These APIs perform no network requests or mutations.
 Run calls off the UI executor and bound concurrency; byte/step limits are not a
 CPU deadline or a process RSS guarantee.
 
+## Bounded local profile avatars
+
+`Database::read_local_profile(full_id)` (also through `Client::db()`) reads one
+retained public profile in one local snapshot. It does not traverse follows,
+fetch remote data, change Network timeline semantics, or change the avatar-free
+people-search/lookup APIs. `local_profile::LocalProfileRead` returns
+`Available(LocalProfile)` or `Unavailable(known_people::ProfileIssue)`;
+database failures remain outer errors.
+
+Before deserializing, hashing or copying, it checks the raw stored profile's
+2 MiB limit. It validates the complete borrowed shape without copying the bio or
+allocating from hostile embedded lengths. It caps the source envelope at 1024
+bytes before deserializing, verifies its signature, and checks the exact full
+author, kind, timestamp and short event ID. These checks verify the source
+envelope, not the returned projection fields against the signed body.
+The API copies at most 1024 name bytes, 64 declared-MIME bytes and 1,000,000 avatar
+bytes. Name and avatar limits produce independent `ProfileField::Unavailable`
+outcomes; `ProfileField::Available(None)` means no avatar.
+
+Available results include the full source `event_id`, `timestamp` and a 32-byte
+`revision` digest of the entire raw projection, including absent-avatar states
+and same-source repairs. Cache by account/database context, exact full identity,
+event ID and revision. Re-read on later presentation and replace cached state
+when absent, changed or unavailable; an event ID alone cannot detect projection
+repairs. The API provides no persistent cache or invalidation subscription.
+
+`LocalProfileAvatar::{declared_mime,data}` contains the bounded original declared
+MIME and avatar bytes. Both remain untrusted: this API does not validate MIME
+syntax, decode images, or establish image safety. Hosts must apply their own
+bounded raster policy before display, bound concurrency, and run calls off the
+UI executor. Byte bounds are not a CPU deadline or process RSS guarantee.
+
 ## Native retained media
 
 The opt-in `native-media` feature exposes

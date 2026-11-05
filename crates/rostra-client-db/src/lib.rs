@@ -22,6 +22,7 @@ mod extension;
 mod id_nodes_ops;
 mod ids_full;
 pub mod known_people;
+pub mod local_profile;
 mod local_social_post;
 #[cfg(test)]
 mod local_social_post_tests;

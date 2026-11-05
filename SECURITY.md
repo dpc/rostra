@@ -81,6 +81,23 @@ schema-40 binaries reject a schema-41 database instead of downgrading it.
 
 ## Native local known-person reads
 
+`Database::read_local_profile` reads a local public-avatar projection by exact
+full ID. It checks a 2 MiB raw stored profile cap before deserializing, hashing or
+copying, then validates the entire borrowed shape and a separately capped
+retained source envelope. It verifies the envelope's signature and checks the
+full author, kind, timestamp and short event ID. It copies at most 1024 name
+bytes, 64 declared-MIME bytes and 1,000,000 avatar bytes; it never copies a bio or
+performs remote reads, graph traversal or pixel decoding. These checks verify
+the source envelope, not the projected fields against the signed body. Names,
+declared MIME and avatar bytes remain untrusted projection data.
+Hosts must validate raster content before display, bound concurrency and run
+calls off the UI executor. The API reports missing, malformed, source-mismatched
+and limited reads explicitly. Re-read on later display and invalidate cached
+state on unavailable results. Cache keys must include database/account context,
+full author, full event ID and the raw-projection revision, which covers
+same-event repairs and avatar removal. Existing avatar-free people lookup/search
+remain unchanged.
+
 `Database::search_known_people` traverses only the account's self/direct/two-hop
 active follow keys. It never substitutes the retained short-identity index for
 that graph. Raw checked keys, bounded nested continuation, eight profile
