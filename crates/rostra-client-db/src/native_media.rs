@@ -66,6 +66,9 @@ enum ImagePolicy {
     /// Fixed retained-only JPEG subset in addition to PNG/WebP.
     #[cfg(feature = "native-media-jpeg")]
     Jpeg,
+    /// Larger noninterlaced PNG sources for host downsampling only.
+    #[cfg(feature = "native-media-jpeg")]
+    Display,
 }
 
 impl ReadPolicy {
@@ -180,6 +183,40 @@ impl Database {
             .await?;
         Ok(tokio::task::block_in_place(|| {
             validate(result, ImagePolicy::Jpeg)
+        }))
+    }
+
+    /// Read retained display sources for host downsampling, never reuse.
+    ///
+    /// Like `read_native_media_with_jpeg`, including its process-wide permit,
+    /// actual source-post author, snapshot and host-worker obligations. Only
+    /// PNG source geometry expands: <=8192 per axis and <=32,000,000 pixels,
+    /// with interlace prohibited above the old 2048/4,000,000 bounds. PNG is
+    /// fully decoded row by row, not into a source-sized bitmap. JPEG/WebP
+    /// keep their old limits; encoded bytes remain <=1,000,000 for all formats.
+    ///
+    /// Original bytes and source dimensions return unchanged. Hosts must check
+    /// MIME, dimensions and large-PNG noninterlace agreement, sample before
+    /// bitmap allocation, and enforce <=2048 per axis and <=4,000,000 displayed
+    /// pixels. Availability does not authorize reuse insertion. Existing
+    /// listing, upload, avatar and external policies remain unchanged. See
+    /// `docs/retained-display.md` for bounds and remaining host obligations.
+    #[cfg(feature = "native-media-jpeg")]
+    pub async fn read_native_media_for_display(
+        &self,
+        author: RostraId,
+        reference: MediaEventReference,
+    ) -> DbResult<NativeMediaRead> {
+        let result = self
+            .read_native_media_checked(
+                author,
+                reference,
+                Some(ImagePolicy::Display),
+                ReadPolicy::Default,
+            )
+            .await?;
+        Ok(tokio::task::block_in_place(|| {
+            validate(result, ImagePolicy::Display)
         }))
     }
 
@@ -334,7 +371,7 @@ fn validate(result: OpaqueMediaRead, policy: ImagePolicy) -> NativeMediaRead {
         OpaqueMediaRead::Mismatch => return NativeMediaRead::Mismatch,
     };
     #[cfg(feature = "native-media-jpeg")]
-    if matches!(policy, ImagePolicy::Jpeg) && mime == "image/jpeg" {
+    if matches!(policy, ImagePolicy::Jpeg | ImagePolicy::Display) && mime == "image/jpeg" {
         return match rostra_jpeg_validate::validate(&data) {
             Ok(info) => NativeMediaRead::Available {
                 author,
@@ -347,6 +384,24 @@ fn validate(result: OpaqueMediaRead, policy: ImagePolicy) -> NativeMediaRead {
             Err(rostra_jpeg_validate::Rejection::TooLarge) => NativeMediaRead::TooLarge,
             Err(rostra_jpeg_validate::Rejection::Invalid(_)) => NativeMediaRead::Invalid,
             Err(rostra_jpeg_validate::Rejection::Unsupported(_)) => NativeMediaRead::Unsupported,
+        };
+    }
+    #[cfg(feature = "native-media-jpeg")]
+    if matches!(policy, ImagePolicy::Display) && mime == "image/png" {
+        use rostra_core::retained_display::{RetainedPngError, validate_retained_png_for_display};
+
+        return match validate_retained_png_for_display(&data) {
+            Ok(info) => NativeMediaRead::Available {
+                author,
+                event_id,
+                mime: info.mime_type,
+                width: info.width,
+                height: info.height,
+                data,
+            },
+            Err(RetainedPngError::TooLarge) => NativeMediaRead::TooLarge,
+            Err(RetainedPngError::Invalid) => NativeMediaRead::Invalid,
+            Err(RetainedPngError::Unsupported) => NativeMediaRead::Unsupported,
         };
     }
     let _ = policy;

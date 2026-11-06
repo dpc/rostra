@@ -47,7 +47,7 @@ pub(super) fn preflight_with_policy(
         "image/png" => "image/png",
         "image/webp" => "image/webp",
         #[cfg(feature = "native-media-jpeg")]
-        "image/jpeg" if matches!(policy, ImagePolicy::Jpeg) => "image/jpeg",
+        "image/jpeg" if matches!(policy, ImagePolicy::Jpeg | ImagePolicy::Display) => "image/jpeg",
         _ => return Err(OpaqueMediaRead::Unsupported),
     };
     Ok((mime, bytes, len))

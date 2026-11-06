@@ -127,6 +127,19 @@ and avoid the UI executor; there is no hard CPU deadline or process RSS limit.
 
 ## Native static-media upload and reuse
 
+The opt-in `Database::read_native_media_for_display` reader accepts retained
+noninterlaced PNG sources up to 8192 per axis and 32,000,000 pixels. It retains
+the 1,000,000 encoded-byte cap and all existing retained authentication,
+lifecycle and CBOR preallocation checks. The PNG validator streams complete rows
+without allocating a full source raster. It rejects large interlaced PNG because
+host sampling can still allocate the full source; JPEG/WebP keep their old geometry.
+Hosts must independently agree on MIME, source dimensions and large-PNG
+noninterlace, sample before bitmap allocation, and enforce 2048 per axis and
+4,000,000 displayed pixels. Reuse, avatars, external media, uploads and old
+read/list APIs remain unchanged. The same process-wide permit and off-UI
+execution obligations apply, with no RSS guarantee or CPU deadline. See
+[`retained-display.md`](crates/rostra-client-db/docs/retained-display.md).
+
 `rostra-core::static_media` is an opt-in upload policy, not a change to historical
 image readers or the web's generic upload limits. V1 fully decodes static
 PNG/WebP, expands palettes/packed grayscale/transparency, preserves PNG 8/16-bit

@@ -8,6 +8,8 @@ pub mod bincode;
 pub mod event;
 pub mod media;
 pub mod post;
+#[cfg(feature = "raster-avatar")]
+pub mod retained_display;
 pub mod retention;
 #[cfg(feature = "raster-avatar")]
 pub mod static_media;

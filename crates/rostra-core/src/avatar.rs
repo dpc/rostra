@@ -88,7 +88,7 @@ pub fn validate_raster_avatar(
         return Err(RasterAvatarError::MimeMismatch);
     }
     let (width, height) = match mime_type {
-        "image/png" => png(data)?,
+        "image/png" => png(data, false)?,
         _ => webp(data)?,
     };
     Ok(RasterAvatarInfo {
@@ -117,7 +117,7 @@ fn output(size: Option<usize>) -> Result<Vec<u8>, RasterAvatarError> {
     Ok(vec![0; size])
 }
 
-fn png(data: &[u8]) -> Result<(u32, u32), RasterAvatarError> {
+pub(crate) fn png(data: &[u8], retained_display: bool) -> Result<(u32, u32), RasterAvatarError> {
     // Walk complete chunks before decoding: no hidden animation or missing IEND.
     let mut rest = &data[8..];
     let mut compressed = Vec::new();
@@ -155,15 +155,33 @@ fn png(data: &[u8]) -> Result<(u32, u32), RasterAvatarError> {
     let header = decoder
         .read_header_info()
         .map_err(|_| RasterAvatarError::InvalidImage)?;
-    let size = dimensions(header.width, header.height)?;
-    validate_png_zlib(&compressed)?;
+    let size = if retained_display {
+        crate::retained_display::dimensions(header.width, header.height)?
+    } else {
+        dimensions(header.width, header.height)?
+    };
+    let inflate_limit = if retained_display {
+        // Eight sample bytes per pixel and a filter byte per Adam7 pass row.
+        8 * u64::from(size.0) * u64::from(size.1) + 7 * u64::from(size.1)
+    } else {
+        MAX_OUTPUT_BYTES as u64 + MAX_AVATAR_PIXELS
+    };
+    validate_png_zlib(&compressed, inflate_limit)?;
     let mut reader = decoder
         .read_info()
         .map_err(|_| RasterAvatarError::InvalidImage)?;
-    let mut buffer = output(reader.output_buffer_size())?;
-    reader
-        .next_frame(&mut buffer)
-        .map_err(|_| RasterAvatarError::InvalidImage)?;
+    if retained_display {
+        while reader
+            .next_row()
+            .map_err(|_| RasterAvatarError::InvalidImage)?
+            .is_some()
+        {}
+    } else {
+        let mut buffer = output(reader.output_buffer_size())?;
+        reader
+            .next_frame(&mut buffer)
+            .map_err(|_| RasterAvatarError::InvalidImage)?;
+    }
     reader
         .finish()
         .map_err(|_| RasterAvatarError::InvalidImage)?;
@@ -173,7 +191,7 @@ fn png(data: &[u8]) -> Result<(u32, u32), RasterAvatarError> {
 /// PNG's pixel decoder tolerates missing zlib checksums after sufficient
 /// pixels. Require complete decompression separately, with bounded scratch and
 /// a cap covering sixteen-bit RGBA plus one filter byte per nonempty row.
-fn validate_png_zlib(compressed: &[u8]) -> Result<(), RasterAvatarError> {
+fn validate_png_zlib(compressed: &[u8], limit: u64) -> Result<(), RasterAvatarError> {
     let mut decoder = flate2::Decompress::new(true);
     let mut scratch = [0; 8192];
     loop {
@@ -185,7 +203,7 @@ fn validate_png_zlib(compressed: &[u8]) -> Result<(), RasterAvatarError> {
                 flate2::FlushDecompress::None,
             )
             .map_err(|_| RasterAvatarError::InvalidImage)?;
-        if MAX_OUTPUT_BYTES as u64 + MAX_AVATAR_PIXELS < decoder.total_out() {
+        if limit < decoder.total_out() {
             return Err(RasterAvatarError::DimensionsExceeded);
         }
         if status == flate2::Status::StreamEnd {

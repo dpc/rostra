@@ -10,6 +10,8 @@ use rostra_core::id::RostraIdSecretKey;
 use super::*;
 use crate::event::{ContentStoreRecord, EventContentState};
 
+#[cfg(feature = "native-media-jpeg")]
+mod display;
 mod export;
 #[cfg(feature = "native-media-jpeg")]
 mod jpeg;
