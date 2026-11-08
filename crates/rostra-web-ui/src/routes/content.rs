@@ -266,6 +266,28 @@ pub(super) fn youtube_video_id(url: &Url) -> Option<Cow<'_, str>> {
     }
 }
 
+/// Parse seconds or ordered hour/minute/second components from a YouTube
+/// timestamp.
+fn youtube_timestamp_seconds(mut timestamp: &str) -> Option<u64> {
+    if !timestamp.is_empty() && timestamp.bytes().all(|c| c.is_ascii_digit()) {
+        return timestamp.parse().ok();
+    }
+
+    let mut seconds = 0u64;
+    let mut found = false;
+    for (unit, multiplier) in [('h', 3600), ('m', 60), ('s', 1)] {
+        if let Some((value, rest)) = timestamp.split_once(unit) {
+            if value.is_empty() || !value.bytes().all(|c| c.is_ascii_digit()) {
+                return None;
+            }
+            seconds = seconds.checked_add(value.parse::<u64>().ok()?.checked_mul(multiplier)?)?;
+            timestamp = rest;
+            found = true;
+        }
+    }
+    (found && timestamp.is_empty()).then_some(seconds)
+}
+
 fn maybe_embed_media_html(s: &str) -> Option<Markup> {
     let Ok(url) = Url::parse(s) else {
         return None;
@@ -279,6 +301,15 @@ fn maybe_embed_media_html(s: &str) -> Option<Markup> {
                 .expect("base URL")
                 .pop_if_empty()
                 .push(&vid);
+            if let Some(seconds) = url
+                .query_pairs()
+                .find(|(key, _)| key == "t")
+                .and_then(|(_, value)| youtube_timestamp_seconds(&value))
+            {
+                embed
+                    .query_pairs_mut()
+                    .append_pair("start", &seconds.to_string());
+            }
             // YouTube requires client identification; disclose only our origin
             // when this frame is explicitly loaded, never the post path.
             Some(maud::html! {

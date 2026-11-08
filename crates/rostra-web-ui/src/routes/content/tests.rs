@@ -8,6 +8,59 @@ use crate::UiState;
 mod url_sanitization;
 mod xss_sanitization;
 
+#[test]
+fn youtube_embeds_respect_timestamp_queries() {
+    use scraper::{Html, Selector};
+
+    for base in [
+        "https://youtu.be/op51SyyPJmw?si=phkScKSwOcjKeK-e",
+        "https://www.youtube.com/watch?v=op51SyyPJmw",
+        "https://youtube.com/watch?v=op51SyyPJmw",
+    ] {
+        for (suffix, expected) in [
+            ("&t=3058", Some("3058")),
+            ("&t=90", Some("90")),
+            ("&t=1m30s", Some("90")),
+            ("&t=1h2m3s", Some("3723")),
+            ("&t=2m", Some("120")),
+            ("&t=30s", Some("30")),
+            ("&t=0", Some("0")),
+            ("&t=%31m30s", Some("90")),
+            ("", None),
+            ("&t=", None),
+            ("&t=-90", None),
+            ("&t=1.5", None),
+            ("&t=garbage", None),
+            ("&t=30s1m", None),
+            ("&t=1m2m", None),
+            ("&t=1m30", None),
+            ("&t=18446744073709551616", None),
+            ("&t=18446744073709551615h", None),
+            ("&t=5124095576030431h1m", None),
+            ("&t=90%22%20onload%3Devil", None),
+        ] {
+            let input = format!("{base}{suffix}");
+            let markup = super::maybe_embed_media_html(&input).unwrap();
+            let document = Html::parse_fragment(&markup.into_string());
+            let frame = document
+                .select(&Selector::parse("iframe").unwrap())
+                .next()
+                .unwrap();
+            let embed = url::Url::parse(frame.value().attr("data-src").unwrap()).unwrap();
+            assert_eq!(embed.host_str(), Some("www.youtube.com"));
+            assert_eq!(embed.path(), "/embed/op51SyyPJmw");
+            let parameters = embed.query_pairs().collect::<Vec<_>>();
+            let expected = expected
+                .map(|seconds| vec![("start".into(), seconds.into())])
+                .unwrap_or_default();
+            assert_eq!(parameters, expected, "{input}");
+            assert_eq!(frame.value().attr("src"), None);
+            assert_eq!(frame.value().attr("referrerpolicy"), Some("strict-origin"));
+            assert!(frame.value().attr("hidden").is_some());
+        }
+    }
+}
+
 #[tokio::test(flavor = "multi_thread")]
 async fn production_hosted_images_keep_explicit_author_links() {
     use rostra_core::event::content_kind;
